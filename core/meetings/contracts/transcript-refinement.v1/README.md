@@ -82,3 +82,12 @@ Only ASR failures offer manual retry; missing/unsafe audio requires a new refine
 after resolving the recording issue. Legacy jobs without a backend hash need a new
 start. Unattempted pending items from an interrupted/cancelled job are skipped by retry,
 not resumed. There is no automatic retry, crash resume, alternate-model fallback or auto-Apply.
+
+## Schema seal and line endings
+
+Schema files use LF line endings, as required by `.gitattributes`. The contract seal
+hashes exact schema bytes, so generators and editors on Windows must also write LF
+before running `pnpm seal:contracts`. Check `git ls-files --eol` for the schema:
+both the index and working copy should report `lf`. Validate with `pnpm gate:schema`
+and `pnpm gate:contract-version`; back-compatible contract updates still require
+the existing contract review.
