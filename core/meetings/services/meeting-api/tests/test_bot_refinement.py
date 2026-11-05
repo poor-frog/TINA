@@ -13,6 +13,45 @@ from meeting_api.collector.refinement import BotRefiner, RefinementOptions
 from meeting_api.collector.transcript_document import document
 from meeting_api.recordings.fakes import InMemoryRecordingRepo, InMemoryStorage
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode,amplitude,expected_calls,state", [
+    ("check", 1000, 0, "checked"), ("flagged", 1000, 0, "checked"),
+    ("flagged", 10, 1, "ready"), ("all", 1000, 1, "ready"),
+])
+async def test_quality_modes_preserve_original(monkeypatch, mode, amplitude, expected_calls, state):
+    client, store, _, worker, calls = await fixture(monkeypatch)
+    async def clip(*args):
+        return audio(amplitude)
+    monkeypatch.setattr(worker, "clip", clip)
+    if mode == "check":
+        async def unavailable_backend(user):
+            raise AssertionError("Audio checks must not resolve ASR credentials")
+        monkeypatch.setattr(worker, "backend", unavailable_backend)
+    async with client:
+        assert (await client.post("/transcripts/by-id/1/refinement/start", json={"mode": mode})).status_code == 202
+        await worker.task
+        job = await worker.current(7, 1)
+        assert job["status"] == "completed", job
+        item = job["items"][0]
+        assert item["state"] == state
+        assert item["quality"]["needs_review"] == (amplitude == 10)
+        assert len(calls) == expected_calls
+        assert (await store.get_transcript_document(7, 1))["segments"][0]["revision"] == 0
+        if state == "checked":
+            result = await client.post("/transcripts/by-id/1/refinement/apply", json={"job_id": job["id"], "segment_id": "s/1", "expected_revision": 0})
+            assert result.status_code == 409
+
+
+def test_quality_is_advisory_and_preserves_vietnamese_accents():
+    from meeting_api.collector.audio_quality import assess_audio
+    assert assess_audio(audio(0), "hello")["reasons"] == ["low_volume", "mostly_quiet"]
+    assert not assess_audio(audio(), "ma má mà mạ")["needs_review"]
+    assert "repetition" in assess_audio(audio(), "má má má má")["reasons"]
+    assert "clipping" in assess_audio(audio(32767), "speech")["reasons"]
+    with pytest.raises((ValueError, EOFError, wave.Error)):
+        assess_audio(b"not audio", "")
+
 ORIGIN = 1792522376000
 HEADERS = {"x-user-id": "7"}
 

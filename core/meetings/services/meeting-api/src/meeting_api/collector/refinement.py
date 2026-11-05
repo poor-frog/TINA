@@ -11,11 +11,13 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 from uuid import uuid4
+from typing import Literal
 import wave
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
+from .audio_quality import assess_audio
 from .transcript_document import Correction, CorrectionConflict, normalize
 
 ACTIVE = ("running", "paused", "cancelling")
@@ -23,6 +25,7 @@ TERMINAL = ("completed", "failed")
 
 
 class RefinementOptions(BaseModel):
+    mode: Literal["all", "check", "flagged"] = "all"
     glossary: list[str] = Field(default_factory=list, max_length=40)
     model_config = ConfigDict(extra="forbid")
 
@@ -156,21 +159,22 @@ class BotRefiner:
                 raise ValueError("No confirmed transcript to refine")
             if len(doc["segments"]) > 2000:
                 raise ValueError("Refinement is limited to 2000 segments per meeting")
-            config = await self.backend(user)
-            if not config.get("url"):
+            config = {"model": "", "label": "audio-check", "url": "", "token": ""} if options.mode == "check" else await self.backend(user)
+            if options.mode != "check" and not config.get("url"):
                 raise ValueError("No transcription backend configured")
             await self.current(user, mid)
             job = {"version": "transcript-refinement.v1", "id": str(uuid4()), "meeting": str(mid), "status": "running",
                    "model": config["model"], "backend": config["label"], "created_at": datetime.now(timezone.utc).isoformat(),
-                   "glossary": options.glossary,
+                   "glossary": options.glossary, "mode": options.mode,
                    "items": [{"segment_id": s["segment_id"], "expected_revision": s["revision"], "state": "pending"} for s in doc["segments"]]}
+            source_texts = {s["segment_id"]: s["text"] for s in doc["segments"]}
             previous_job = await self.store.get_refinement(user, mid)
             await self.store.save_refinement(user, mid, job, expected_job_id=previous_job["id"] if previous_job else None)
             self.active = (user, mid, job)
-            self.task = asyncio.create_task(self.run(user, mid, job, config))
+            self.task = asyncio.create_task(self.run(user, mid, job, config, source_texts))
             return copy.deepcopy(job)
 
-    async def run(self, user, mid, job, config):
+    async def run(self, user, mid, job, config, source_texts=None):
         try:
             url = config["url"].rstrip("/")
             if not url.endswith("/audio/transcriptions"):
@@ -188,9 +192,15 @@ class BotRefiner:
                         job["status"] = "running"
                         try:
                             audio = await self.clip(user, mid, item["segment_id"], cache)
+                            item["quality"] = await asyncio.to_thread(assess_audio, audio, (source_texts or {}).get(item["segment_id"], ""))
+                            item["audio_sha256"] = hashlib.sha256(audio).hexdigest()
                         except (ValueError, FileNotFoundError, KeyError):
                             item.update(state="skipped", reason="Audio is missing, ambiguous, unclocked, beyond the recording, longer than 30 seconds or exceeds size limits.")
                         else:
+                            if job.get("mode") == "check" or (job.get("mode") == "flagged" and not item["quality"]["needs_review"]):
+                                item.update(state="checked", reason="Audio checked; no ASR requested." if job.get("mode") == "check" else "No configured review flags; ASR skipped.")
+                                await self.store.save_refinement(user, mid, job)
+                                continue
                             try:
                                 # Preparing saved audio can outlast a cancel or the start of a live meeting.
                                 while await self.store.refinement_live() and job["status"] != "cancelling":
@@ -213,7 +223,7 @@ class BotRefiner:
                             except Exception:
                                 item.update(state="failed", reason="ASR failed or returned empty text; original transcript is unchanged.")
                         await self.store.save_refinement(user, mid, job)
-            job["status"] = "cancelled" if job["status"] == "cancelling" else "completed" if any(i["state"] == "ready" for i in job["items"]) else "failed"
+            job["status"] = "cancelled" if job["status"] == "cancelling" else "completed" if any(i["state"] in ("ready", "checked") for i in job["items"]) else "failed"
         except asyncio.CancelledError:
             job["status"] = "interrupted"
         except Exception:

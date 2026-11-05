@@ -18,3 +18,6 @@ keybinding service that attaches before the dialog handler.
 
 `meetingHeaderControls.test.tsx` also checks recap metadata: a cached live-only time label
 is removed after the meeting ends, or replaced with the recorded start time when available.
+
+Transcript review tests also verify the check-only request, visible advisory reason,
+quality filtering and absence of Apply for checked items.

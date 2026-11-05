@@ -132,3 +132,13 @@ the isolated agent worker uses CompletionPort and returns candidates. Only appro
 enter `data.processed.views` and the public proc stream. Edit/restore/speaker rename revokes the
 affected leases in the same mutation transaction. The revision outbox publishes current approved
 or stale state, and readers compare publication revisions when merging REST and SSE.
+
+## Audio quality review
+
+`audio_quality.py` measures bounded saved PCM16 clips on an owner-triggered refinement job.
+Low RMS, clipping, mostly quiet 20 ms frames and exact repeated phrases are advisory flags,
+not calibrated confidence or a speech/noise classifier. Vietnamese diacritics are retained.
+`RefinementOptions.mode` accepts `all` (existing default), `check` (no ASR/backend lookup)
+and `flagged` (measure every eligible clip and decode only flagged ones). All modes use
+the existing source clock, ownership, pause/cancel, revision and audio-hash protections.
+No raw text/audio is changed; only ready ASR proposals can be explicitly applied.

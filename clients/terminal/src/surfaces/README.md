@@ -83,3 +83,7 @@ Ended meetings show a compact end status in the metadata row. `meetingWhenLabel`
 cached live-only labels with the saved start time when available, and otherwise omits that
 placeholder; it does not invent a timestamp. The existing recap badge and lifecycle actions
 remain available, with recording playback presented in the canvas toolbar.
+
+TranscriptReview adds owner-triggered Check audio and Refine flagged segments for
+bot recordings, with a current-revision quality filter and readable advisory reasons.
+Checks have no ASR cost; selective refinement retains explicit audio comparison/Apply.

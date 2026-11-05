@@ -320,3 +320,21 @@ describe("aligned word playback", () => {
     expect(play).toHaveBeenCalledTimes(1);
   });
 });
+
+
+it("checks audio without ASR and filters quality flags by current revision", async () => {
+  const doc = { status: "completed", segments: [{ ...segment, audio: [{ kind: "recording-span" }] }] };
+  const job = { id: "quality", status: "completed", model: "", backend: "audio-check", items: [{ segment_id: "s/1", expected_revision: 0, state: "checked", quality: { needs_review: true, reasons: ["low_volume"] } }] };
+  fetchMock.mockImplementation(async (url: string, init?: RequestInit) => ({ ok: true, json: async () => {
+    if (url.endsWith("/refinement/start")) { expect(JSON.parse(init!.body as string).mode).toBe("check"); return job; }
+    return url.endsWith("/document") ? doc : url.endsWith("/alignment") ? { available: false, job: null } : null;
+  } }));
+  render(<TranscriptReview meetingId="42" />);
+  fireEvent.click(screen.getByRole("button", { name: "Review transcript" }));
+  await screen.findByLabelText(/Corrected transcript/);
+  fireEvent.click(screen.getByRole("button", { name: "Check audio" }));
+  await screen.findByText("Needs review: Low volume");
+  fireEvent.click(screen.getByLabelText("Only segments needing review"));
+  expect(screen.getByRole("option", { name: /Review/ })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Apply refinement" })).toBeNull();
+});

@@ -75,7 +75,8 @@
               "ready",
               "skipped",
               "failed",
-              "applied"
+              "applied",
+              "checked"
             ]
           },
           "text": {
@@ -89,6 +90,49 @@
           },
           "reason": {
             "type": "string"
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "needs_review",
+              "reasons",
+              "rms",
+              "clipping_ratio",
+              "quiet_ratio"
+            ],
+            "properties": {
+              "needs_review": {
+                "type": "boolean"
+              },
+              "reasons": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "low_volume",
+                    "clipping",
+                    "mostly_quiet",
+                    "repetition"
+                  ]
+                }
+              },
+              "rms": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "clipping_ratio": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "quiet_ratio": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
           }
         },
         "allOf": [
@@ -133,6 +177,14 @@
         "maxLength": 80
       },
       "description": "Optional fixed vocabulary hints, not reference transcript. Combined terms limited to 700 characters by both services."
+    },
+    "mode": {
+      "enum": [
+        "all",
+        "check",
+        "flagged"
+      ],
+      "description": "Bot recording review only: all decodes every eligible clip; check measures audio without ASR; flagged decodes only clips with advisory quality flags. Desktop keeps its existing start options."
     }
   },
   "$defs": {
@@ -149,6 +201,14 @@
             "maxLength": 80
           },
           "description": "Optional fixed vocabulary hints, not reference transcript. Combined terms limited to 700 characters by both services."
+        },
+        "mode": {
+          "enum": [
+            "all",
+            "check",
+            "flagged"
+          ],
+          "description": "Bot recording review only: all decodes every eligible clip; check measures audio without ASR; flagged decodes only clips with advisory quality flags. Desktop keeps its existing start options."
         }
       }
     },

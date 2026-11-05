@@ -42,3 +42,23 @@ and recording bytes are never overwritten. Ordinary shared/list/webhook response
 The review clients highlight added/deleted whitespace tokens, offer a changed-only filter, and put
 source playback next to each proposal. For very long legacy text, diff falls back to whole-text
 replacement to bound browser memory. These are textual differences, not word-aligned audio marks.
+
+## Advisory audio checks for bot recordings
+
+Bot `/by-id/{id}/refinement/start` additionally accepts `mode`: `all` (default),
+`check`, or `flagged`. Desktop start options remain unchanged. `check` requires no
+ASR credentials and does not invoke inference; `flagged` recomputes diagnostics on
+each eligible saved clip and decodes only flagged clips. Analysis uses the same
+30-second/recording limits, live-meeting scheduling and explicit cancellation.
+Jobs optionally return `mode`; items optionally return `quality` containing
+`needs_review`, reason codes (`low_volume`, `clipping`, `mostly_quiet`, `repetition`),
+normalized RMS, clipping ratio and quiet-frame ratio. Thresholds: RMS <0.003,
+absolute PCM16 >=32700 for >=1% of samples, >=80% of 20ms frames below RMS 0.001,
+or an exact phrase of 1-10 whitespace tokens repeated at least four times.
+These heuristics do not establish transcription accuracy, SNR, speech presence or
+model confidence. Text comparison retains Vietnamese accents. No text is deleted.
+`checked` items contain diagnostics and audio hash but no proposal, and cannot be
+applied. Completed jobs may contain only checked items. UI warnings/filters are
+valid only at their expected text revision. New checks replace the latest job view
+just like an ordinary refinement start; previously accepted revisions remain intact.
+Source audio and the original transcript remain immutable.
