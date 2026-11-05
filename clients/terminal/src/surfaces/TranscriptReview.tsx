@@ -19,8 +19,8 @@ export function reconcileReviewDraft(current: Draft | null, segments: Segment[],
 }
 const qualityLabels: Record<string, string> = { low_volume: "Low volume", clipping: "Audio clipping", mostly_quiet: "Mostly quiet audio", repetition: "Repeated words - listen to verify" };
 interface Job {
-  id: string; status: string; model: string; backend: string; error?: string;
-  items: Array<{ segment_id: string; state: string; expected_revision: number; text?: string; reason?: string; quality?: { needs_review: boolean; reasons: string[] } }>;
+  id: string; status: string; model: string; backend: string; error?: string; backend_sha256?: string;
+  items: Array<{ segment_id: string; state: string; expected_revision: number; text?: string; reason?: string; error_code?: string; retryable?: boolean; attempts?: number; quality?: { needs_review: boolean; reasons: string[] } }>;
 }
 interface AlignedWord { index: number; text: string; start_ms: number | null; end_ms: number | null; aligned: boolean; speaker_id?: string | null; speaker_name?: string; speaker_source?: string }
 interface AlignmentItem { segment_id: string; state: string; expected_revision: number; audio_sha256?: string; words?: AlignedWord[]; phrases?: Array<{ speaker_id: string | null; speaker_name: string; text: string; start_ms: number | null; end_ms: number | null; word_indices: number[] }>; reason?: string }
@@ -142,11 +142,11 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
     catch (e) { setError(e instanceof Error ? e.message : "Could not save correction"); }
     finally { setMutating(false); }
   }
-  async function refine(action: "start" | "cancel" | "apply", mode: "all" | "check" | "flagged" = "all") {
+  async function refine(action: "start" | "cancel" | "apply" | "retry", mode: "all" | "check" | "flagged" = "all") {
     setMutating(true); setError("");
     try {
-      const payload = action === "start" ? { ...(mode === "all" ? {} : { mode }), glossary: glossary.split(",").map(s => s.trim()).filter(Boolean) } : action === "apply" && segment && job ? { job_id: job.id, segment_id: selected, expected_revision: segment.revision } : undefined;
-      const data = await request<ReviewDocument | Job | null>(`/refinement/${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload ? JSON.stringify(payload) : undefined });
+      const payload = action === "retry" && job ? { retry_job_id: job.id } : action === "start" ? { ...(mode === "all" ? {} : { mode }), glossary: glossary.split(",").map(s => s.trim()).filter(Boolean) } : action === "apply" && segment && job ? { job_id: job.id, segment_id: selected, expected_revision: segment.revision } : undefined;
+      const data = await request<ReviewDocument | Job | null>(`/refinement/${action === "retry" ? "start" : action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload ? JSON.stringify(payload) : undefined });
       if (action === "apply") { accept(data as ReviewDocument, true); setJob(await request<Job | null>("/refinement")); saved(); }
       else setJob(data as Job | null);
     } catch (e) { setError(e instanceof Error ? e.message : "Refinement unavailable"); }
@@ -182,10 +182,12 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
       <button className={styles.primary} disabled={busy || active || !editable || !doc?.segments.some(s => s.audio?.length === 1)} onClick={() => void refine("start")}>Refine after meeting</button>
       <button disabled={busy || active || activeAlignment(alignmentJob) || !editable || !doc?.segments.some(s => s.audio?.length === 1)} onClick={() => void refine("start", "check")}>Check audio</button>
       <button disabled={busy || active || activeAlignment(alignmentJob) || !editable || !doc?.segments.some(s => s.audio?.length === 1)} onClick={() => void refine("start", "flagged")}>Refine flagged segments</button>
+      {job?.backend_sha256 && job.items.some(i => i.state === "failed" && i.retryable) && <button disabled={busy || active || activeAlignment(alignmentJob) || !editable} onClick={() => void refine("retry")}>Retry failed segments</button>}
       {active && <button disabled={busy || job?.status === "cancelling"} onClick={() => void refine("cancel")}>Cancel refinement</button>}
         <button disabled={busy || active || activeAlignment(alignmentJob) || !editable || !alignment?.available || !doc?.segments.some(s => s.audio?.length === 1)} onClick={() => void align("start")}>Align words & speakers</button>
         {activeAlignment(alignmentJob) && <button disabled={busy || alignmentJob?.status === "cancelling"} onClick={() => void align("cancel")}>Cancel alignment</button>}
     </div>
+    {job && job.items.some(i => i.state === "failed") && <p role="status">{job.items.filter(i => i.state === "failed").length} segment(s) failed. Successful suggestions are kept; retry processes failed ASR segments only.</p>}
     <p role="status">{job ? `${job.status} · ${job.items.filter(i => i.state !== "pending").length}/${job.items.length} segments · ${job.backend} / ${job.model}${job.error ? " · " + job.error : ""}` : "Available after the meeting, with saved audio and capture timing."}</p>
       <p role="status">{alignmentJob ? `${alignmentJob.status} · ${alignmentJob.items.filter(i => i.state !== "pending").length}/${alignmentJob.items.length} segments · ${alignmentJob.model}${alignmentJob.error ? " · " + alignmentJob.error : ""}` : alignment?.available ? "Word timestamps are optional and use the immutable raw ASR text." : "Configure the self-hosted MFA Vietnamese alignment worker to enable word playback."}</p>
     <label><input type="checkbox" checked={changedOnly} disabled={busy} onChange={e => { setChangedOnly(e.target.checked); if (e.target.checked && segment && !changed(segment)) pick(doc?.segments.find(changed)); }} /> Only changed segments</label>
@@ -194,7 +196,7 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
     <p>{visible.length} / {doc?.segments.length ?? 0} segments</p>
     {doc && visible.length === 0 && <p>{flaggedOnly ? "No current segments flagged. Run Check audio to assess saved clips." : changedOnly ? "No changed segments." : "No confirmed transcript yet."}</p>}
     {visible.length > 0 && <label>Segment<select value={visible.some(s => s.segment_id === selected) ? selected : ""} disabled={busy} onChange={e => pick(doc?.segments.find(s => s.segment_id === e.target.value))}>
-      <option value="" disabled>Choose a segment</option>{visible.map(s => <option key={s.segment_id} value={s.segment_id}>{flagged(s) ? "[Review] " : ""}{s.speaker || "Speaker"} · {s.text.slice(0, 90)}</option>)}
+      <option value="" disabled>Choose a segment</option>{visible.map(s => <option key={s.segment_id} value={s.segment_id}>{job?.items.some(i => i.segment_id === s.segment_id && i.state === "failed") ? "[Failed] " : flagged(s) ? "[Review] " : ""}{s.speaker || "Speaker"} · {s.text.slice(0, 90)}</option>)}
     </select></label>}
     {segment && visible.some(s => s.segment_id === selected) && <>
       <section aria-label="Refinement suggestion" className={styles.card}>

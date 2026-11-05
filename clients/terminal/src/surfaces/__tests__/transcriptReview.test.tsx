@@ -338,3 +338,27 @@ it("checks audio without ASR and filters quality flags by current revision", asy
   expect(screen.getByRole("option", { name: /Review/ })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Apply refinement" })).toBeNull();
 });
+
+it("retries the saved job without replacing vocabulary or successful suggestions", async () => {
+  const doc = { status: "completed", segments: [{ ...segment, audio: [{ kind: "recording-span" }] }, { ...segment, segment_id:"failed", audio:[{kind:"recording-span"}] }] };
+  const kept = { segment_id:"s/1", expected_revision:0, state:"ready", text:"API thứ Sáu." };
+  const job = { id:"failed-job", status:"completed", model:"custom", backend:"viegem", backend_sha256:"a".repeat(64), items:[kept, {segment_id:"failed",expected_revision:0,state:"failed",retryable:true,error_code:"asr_busy",reason:"ASR is busy. Wait briefly, then retry."}] };
+  let requests = 0;
+  fetchMock.mockImplementation(async (url:string, init?:RequestInit) => ({ ok:true, json:async () => {
+    if (url.endsWith("/refinement/start")) {
+      requests++;
+      expect(JSON.parse(init!.body as string)).toEqual({retry_job_id:"failed-job"});
+      return {...job,id:"retried",status:"running",items:[kept,{segment_id:"failed",expected_revision:0,state:"pending"}]};
+    }
+    return url.endsWith("/document") ? doc : url.endsWith("/alignment") ? {available:false,job:null} : job;
+  }}));
+  render(<TranscriptReview meetingId="42" />);
+  fireEvent.click(screen.getByRole("button",{name:"Review transcript"}));
+  await screen.findByLabelText(/Corrected transcript/);
+  expect(screen.getByText(/1 segment\(s\) failed/)).toBeTruthy();
+  const retry=screen.getByRole("button",{name:"Retry failed segments"});
+  fireEvent.click(retry);
+  await screen.findByText(/running · 1\/2 segments/);
+  expect(requests).toBe(1);
+  expect(screen.getByLabelText("Suggested changes").textContent).toContain("API thứ Sáu.");
+});

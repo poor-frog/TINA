@@ -15,6 +15,175 @@ from meeting_api.recordings.fakes import InMemoryRecordingRepo, InMemoryStorage
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure,code", [
+    (401, "asr_auth"), (403, "asr_auth"), (429, "asr_busy"), (503, "asr_busy"),
+    (500, "asr_unavailable"), (400, "asr_rejected"), ("timeout", "asr_timeout"),
+    ("connection", "asr_unavailable"), ("invalid", "asr_invalid_response"),
+])
+async def test_safe_failure_reason_and_manual_retry(monkeypatch, failure, code):
+    client, store, _, worker, _ = await fixture(monkeypatch)
+    async def clip(*args):
+        return audio()
+    monkeypatch.setattr(worker, "clip", clip)
+    attempts = []
+    def infer(request):
+        attempts.append(request)
+        if len(attempts) > 1:
+            return httpx.Response(200, json={"text": "API thứ Sáu."})
+        if failure == "timeout":
+            raise httpx.ReadTimeout("private-token in upstream URL", request=request)
+        if failure == "connection":
+            raise httpx.ConnectError("private-token in upstream URL", request=request)
+        if failure == "invalid":
+            return httpx.Response(200, json={"text": {"credential": "private-token"}})
+        return httpx.Response(failure, text="private-token in provider response")
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(transport=httpx.MockTransport(infer), **kw))
+    async with client:
+        path = "/transcripts/by-id/1/refinement/start"
+        await client.post(path, json={})
+        await worker.task
+        job = await worker.current(7, 1)
+        assert job["items"][0]["error_code"] == code
+        assert job["items"][0]["retryable"] is True
+        assert "private-token" not in str(job)
+        assert len(attempts) == 1  # No automatic retry.
+        if failure == 401:
+            async def refreshed_backend(user):
+                return {"url":"http://asr.test","model":"custom","label":"funasr","token":"refreshed-private-token"}
+            monkeypatch.setattr(worker, "backend", refreshed_backend)
+        assert (await client.post(path, json={"retry_job_id": job["id"]}, headers={"x-user-id":"8"})).status_code == 404
+        result = await client.post(path, json={"retry_job_id": job["id"]})
+        assert result.status_code == 202, result.text
+        await worker.task
+        retried = await worker.current(7, 1)
+        assert retried["id"] != job["id"] and retried["retry_of"] == job["id"]
+        item = retried["items"][0]
+        assert item["state"] == "ready" and item["attempts"] == 2
+        assert "error_code" not in item and len(attempts) == 2
+        if failure == 401:
+            assert attempts[-1].headers["authorization"] == "Bearer refreshed-private-token"
+            assert "refreshed-private-token" not in str(retried)
+        assert (await store.get_transcript_document(7, 1))["segments"][0]["revision"] == 0
+
+
+@pytest.mark.asyncio
+async def test_retry_keeps_ready_applied_and_checked_items(monkeypatch):
+    import copy
+    client, store, _, worker, _ = await fixture(monkeypatch)
+    segments = store._meetings[1]["segments"]
+    segments["s/1"]["text"] = "má má má má"
+    for sid in ("ready", "applied", "checked"):
+        segments[sid] = {**segments["s/1"], "segment_id": sid, "text": "normal speech" if sid == "checked" else "má má má má"}
+    async def clip(*args):
+        return audio()
+    monkeypatch.setattr(worker, "clip", clip)
+    attempts = []
+    def infer(request):
+        attempts.append(request)
+        return httpx.Response(503) if len(attempts) == 1 else httpx.Response(200, json={"text":"proposal"})
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(transport=httpx.MockTransport(infer), **kw))
+    async with client:
+        base = "/transcripts/by-id/1/refinement"
+        await client.post(base + "/start", json={"mode":"flagged"})
+        await worker.task
+        job = await worker.current(7, 1)
+        assert (await client.post(base + "/apply", json={"job_id":job["id"],"segment_id":"applied","expected_revision":0})).status_code == 200
+        job = await worker.current(7, 1)
+        kept = copy.deepcopy(job["items"][1:])
+        assert [i["state"] for i in kept] == ["ready","applied","checked"]
+        assert (await client.post(base + "/start", json={"retry_job_id":job["id"]})).status_code == 202
+        await worker.task
+        retried = await worker.current(7, 1)
+        assert retried["items"][1:] == kept
+        assert retried["items"][0]["state"] == "ready" and len(attempts) == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["revision", "audio", "backend", "job", "live", "options"])
+async def test_retry_refuses_stale_source_or_changed_configuration(monkeypatch, change):
+    client, store, _, worker, _ = await fixture(monkeypatch)
+    sample = audio()
+    async def clip(*args):
+        return sample
+    monkeypatch.setattr(worker, "clip", clip)
+    calls = []
+    def infer(request):
+        calls.append(request)
+        return httpx.Response(503)
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(transport=httpx.MockTransport(infer), **kw))
+    async with client:
+        path = "/transcripts/by-id/1/refinement/start"
+        await client.post(path, json={})
+        await worker.task
+        job = await worker.current(7, 1)
+        payload = {"retry_job_id": job["id"]}
+        if change == "revision":
+            await client.patch("/transcripts/by-id/1/segments/s%2F1", json={"expected_revision":0,"text":"manual edit"})
+        elif change == "audio":
+            sample = audio(20)
+        elif change == "backend":
+            async def backend(user):
+                return {"url":"http://different.test","model":"custom","label":"funasr","token":"private"}
+            monkeypatch.setattr(worker, "backend", backend)
+        elif change == "job":
+            payload["retry_job_id"] = "outdated-job"
+        elif change == "live":
+            store.seed_meeting(user_id=8,platform="google_meet",native_meeting_id="live",meeting_id=2,status="active")
+        elif change == "options":
+            payload["glossary"] = ["override"]
+        result = await client.post(path, json=payload)
+        if change in ("revision", "audio"):
+            assert result.status_code == 202
+            await worker.task
+            item = (await worker.current(7, 1))["items"][0]
+            assert item["state"] == "skipped" and item["error_code"] == "source_changed" and not item["retryable"]
+        else:
+            assert result.status_code == (422 if change == "options" else 409), result.text
+        assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_does_not_resume_unattempted_items_and_rejects_duplicate_click(monkeypatch):
+    client, store, _, worker, _ = await fixture(monkeypatch)
+    async def clip(*args):
+        return audio()
+    monkeypatch.setattr(worker, "clip", clip)
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls = []
+    async def infer(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(503)
+        entered.set()
+        await release.wait()
+        return httpx.Response(200, json={"text":"recovered"})
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(transport=httpx.MockTransport(infer), **kw))
+    async with client:
+        path = "/transcripts/by-id/1/refinement/start"
+        await client.post(path, json={})
+        await worker.task
+        job = await worker.current(7, 1)
+        # A cancelled/crashed job can have items that were never submitted.
+        job["status"] = "interrupted"
+        job["items"].append({"segment_id":"unattempted","expected_revision":0,"state":"pending"})
+        store._meetings[1]["data"]["transcript_refinement"] = job
+        payload = {"retry_job_id":job["id"]}
+        assert (await client.post(path, json=payload)).status_code == 202
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            assert (await client.post(path, json=payload)).status_code == 409
+        finally:
+            release.set()
+            await worker.task
+        retried = await worker.current(7, 1)
+        assert len(calls) == 2 and retried["items"][1]["state"] == "skipped"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode,amplitude,expected_calls,state", [
     ("check", 1000, 0, "checked"), ("flagged", 1000, 0, "checked"),
     ("flagged", 10, 1, "ready"), ("all", 1000, 1, "ready"),

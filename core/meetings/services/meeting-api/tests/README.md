@@ -28,3 +28,15 @@ original. The browser filter showed three of four items, source audio played, an
 explicit Apply then Restore produced revisions 1/2 with immutable raw text.
 The source meeting's JSONB/transcription snapshot hash was unchanged; the temporary
 meeting and its independently stored recording were removed after verification.
+
+Manual retry tests inject authentication, busy, timeout, connection, server/rejection
+and invalid-response failures; verify sanitized reasons, credential refresh, owner
+checks, preserved ready/applied/checked items, and refusal on source/config/job drift.
+
+Failed-only retry Docker smoke, 2026-11-05: with no active meeting or ASR request,
+the local VieGem worker was briefly stopped for an isolated four-clip verification
+meeting. Flagged refinement retained one checked item and returned three sanitized
+`asr_unavailable` failures. After restarting VieGem and waiting for readiness, the
+browser's Retry failed segments action produced exactly three successful ASR requests,
+retained the checked item unchanged, and exposed ready proposals with two attempts each.
+The original source meeting snapshot was unchanged; the test meeting/audio were removed.

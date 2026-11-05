@@ -27,6 +27,7 @@ TERMINAL = ("completed", "failed")
 class RefinementOptions(BaseModel):
     mode: Literal["all", "check", "flagged"] = "all"
     glossary: list[str] = Field(default_factory=list, max_length=40)
+    retry_job_id: str | None = Field(default=None, min_length=1, max_length=128)
     model_config = ConfigDict(extra="forbid")
 
     @field_validator("glossary")
@@ -43,6 +44,28 @@ class RefinementApply(BaseModel):
     segment_id: str = Field(min_length=1, max_length=512)
     expected_revision: StrictInt = Field(ge=0)
     model_config = ConfigDict(extra="forbid")
+
+
+def backend_hash(config):
+    # Credentials can be corrected between attempts. Never persist them or the endpoint URL.
+    return hashlib.sha256(str((config["url"].rstrip("/"), config["model"], config["label"])).encode()).hexdigest()
+
+
+def asr_failure(exc):
+    if isinstance(exc, httpx.TimeoutException):
+        return "asr_timeout", "ASR timed out. Try this segment again."
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status in (401, 403):
+            return "asr_auth", "ASR access was denied. Check the transcription credential and permissions in Settings, then retry."
+        if status in (429, 503):
+            return "asr_busy", "ASR is busy or temporarily unavailable. Wait briefly, then retry."
+        if status >= 500:
+            return "asr_unavailable", "ASR returned a server error. Try again after the service recovers."
+        return "asr_rejected", "ASR rejected this request. Check the selected transcription model and service settings."
+    if isinstance(exc, httpx.RequestError):
+        return "asr_unavailable", "Cannot reach ASR. Check that the transcription service is running, then retry."
+    return "asr_invalid_response", "ASR returned empty or invalid text. Listen to the source audio before retrying."
 
 
 def apply_proposal(data, job, sid, correction):
@@ -148,6 +171,10 @@ class BotRefiner:
             return await asyncio.to_thread(_decode, path, span["start_ms"] / 1000, duration)
 
     async def start(self, user, mid, options):
+        if options.retry_job_id:
+            if options.glossary or options.mode != "all":
+                raise ValueError("Retry keeps the original job's mode and vocabulary")
+            return await self.retry(user, mid, options.retry_job_id)
         async with self.lock:
             if (self.active or getattr(getattr(self, "diarizer", None), "active", None)
                     or getattr(getattr(self, "aligner", None), "active", None) or await self.store.refinement_live()):
@@ -165,12 +192,44 @@ class BotRefiner:
             await self.current(user, mid)
             job = {"version": "transcript-refinement.v1", "id": str(uuid4()), "meeting": str(mid), "status": "running",
                    "model": config["model"], "backend": config["label"], "created_at": datetime.now(timezone.utc).isoformat(),
-                   "glossary": options.glossary, "mode": options.mode,
+                   "glossary": options.glossary, "mode": options.mode, "backend_sha256": backend_hash(config),
                    "items": [{"segment_id": s["segment_id"], "expected_revision": s["revision"], "state": "pending"} for s in doc["segments"]]}
             source_texts = {s["segment_id"]: s["text"] for s in doc["segments"]}
             previous_job = await self.store.get_refinement(user, mid)
             await self.store.save_refinement(user, mid, job, expected_job_id=previous_job["id"] if previous_job else None)
             self.active = (user, mid, job)
+            self.task = asyncio.create_task(self.run(user, mid, job, config, source_texts))
+            return copy.deepcopy(job)
+
+    async def retry(self, user, mid, job_id):
+        async with self.lock:
+            if (self.active or getattr(getattr(self, "diarizer", None), "active", None)
+                    or getattr(getattr(self, "aligner", None), "active", None) or await self.store.refinement_live()):
+                raise CorrectionConflict("Wait for live meetings and the current refinement to stop")
+            previous = await self.current(user, mid)
+            doc = await self.store.get_transcript_document(user, mid)
+            if not previous or previous["id"] != job_id or not doc or doc["status"] not in TERMINAL:
+                raise CorrectionConflict("Refinement changed; reload before retrying")
+            failed = [i for i in previous["items"] if i["state"] == "failed" and i.get("retryable") and i.get("audio_sha256")]
+            if not failed or not previous.get("backend_sha256"):
+                raise CorrectionConflict("No failed ASR segments available to retry; start a new refinement if needed")
+            config = await self.backend(user)
+            if backend_hash(config) != previous["backend_sha256"]:
+                raise CorrectionConflict("Transcription backend or model changed; start a new refinement")
+            job = copy.deepcopy(previous)
+            job.update(id=str(uuid4()), retry_of=previous["id"], status="running", created_at=datetime.now(timezone.utc).isoformat())
+            job.pop("error", None)
+            for item in job["items"]:
+                if item["state"] == "failed" and item.get("retryable") and item.get("audio_sha256"):
+                    item["state"] = "pending"
+                    for key in ("reason", "error_code", "retryable"):
+                        item.pop(key, None)
+                elif item["state"] == "pending":
+                    item.update(state="skipped", retryable=False,
+                                reason="Not attempted in the previous job. Start a new refinement to process this segment.")
+            await self.store.save_refinement(user, mid, job, expected_job_id=previous["id"])
+            self.active = (user, mid, job)
+            source_texts = {s["segment_id"]: s["text"] for s in doc["segments"]}
             self.task = asyncio.create_task(self.run(user, mid, job, config, source_texts))
             return copy.deepcopy(job)
 
@@ -184,6 +243,8 @@ class BotRefiner:
                 cache = {"directory": directory}
                 async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
                     for item in job["items"]:
+                        if item["state"] != "pending":
+                            continue
                         while await self.store.refinement_live() and job["status"] != "cancelling":
                             job["status"] = "paused"; await self.store.save_refinement(user, mid, job)
                             await asyncio.sleep(.5)
@@ -192,10 +253,19 @@ class BotRefiner:
                         job["status"] = "running"
                         try:
                             audio = await self.clip(user, mid, item["segment_id"], cache)
+                            if job.get("retry_of"):
+                                doc = await self.store.get_transcript_document(user, mid)
+                                current = next((s for s in (doc or {}).get("segments", []) if s["segment_id"] == item["segment_id"]), None)
+                                if not current or current["revision"] != item["expected_revision"] or hashlib.sha256(audio).hexdigest() != item["audio_sha256"]:
+                                    item.update(state="skipped", error_code="source_changed", retryable=False,
+                                                reason="Transcript or source audio changed. Start a new refinement for this segment.")
+                                    await self.store.save_refinement(user, mid, job)
+                                    continue
                             item["quality"] = await asyncio.to_thread(assess_audio, audio, (source_texts or {}).get(item["segment_id"], ""))
                             item["audio_sha256"] = hashlib.sha256(audio).hexdigest()
-                        except (ValueError, FileNotFoundError, KeyError):
-                            item.update(state="skipped", reason="Audio is missing, ambiguous, unclocked, beyond the recording, longer than 30 seconds or exceeds size limits.")
+                        except (ValueError, OSError, KeyError, wave.Error, EOFError):
+                            item.update(state="skipped", error_code="audio_unavailable", retryable=False,
+                                        reason="Saved audio is missing or cannot be safely mapped to this segment (timing, duration or size limits).")
                         else:
                             if job.get("mode") == "check" or (job.get("mode") == "flagged" and not item["quality"]["needs_review"]):
                                 item.update(state="checked", reason="Audio checked; no ASR requested." if job.get("mode") == "check" else "No configured review flags; ASR skipped.")
@@ -208,20 +278,33 @@ class BotRefiner:
                                     await asyncio.sleep(.5)
                                 if job["status"] == "cancelling":
                                     break
+                                if job.get("retry_of"):
+                                    doc = await self.store.get_transcript_document(user, mid)
+                                    current = next((s for s in (doc or {}).get("segments", []) if s["segment_id"] == item["segment_id"]), None)
+                                    if not current or current["revision"] != item["expected_revision"]:
+                                        item.update(state="skipped", error_code="source_changed", retryable=False,
+                                                    reason="Transcript changed while waiting. Start a new refinement for this segment.")
+                                        await self.store.save_refinement(user, mid, job)
+                                        continue
                                 job["status"] = "running"
                                 fields = {"model": config["model"], "response_format": "json"}
                                 if job["glossary"]:
                                     fields["prompt"] = "Vocabulary: " + ", ".join(job["glossary"])
+                                item["attempts"] = item.get("attempts", 0) + 1
                                 response = await client.post(url, headers=headers, data=fields, files={"file": ("segment.wav", audio, "audio/wav")})
                                 response.raise_for_status()
-                                text = normalize(response.json().get("text") or "")
+                                data = response.json()
+                                if not isinstance(data, dict) or not isinstance(data.get("text"), str):
+                                    raise ValueError("Invalid ASR response")
+                                text = normalize(data["text"])
                                 if not text or len(text) > 10000:
                                     raise ValueError("Invalid ASR result")
                                 if job["status"] == "cancelling":
                                     break
                                 item.update(state="ready", text=text, audio_sha256=hashlib.sha256(audio).hexdigest())
-                            except Exception:
-                                item.update(state="failed", reason="ASR failed or returned empty text; original transcript is unchanged.")
+                            except Exception as exc:
+                                code, reason = asr_failure(exc)
+                                item.update(state="failed", error_code=code, retryable=True, reason=reason)
                         await self.store.save_refinement(user, mid, job)
             job["status"] = "cancelled" if job["status"] == "cancelling" else "completed" if any(i["state"] in ("ready", "checked") for i in job["items"]) else "failed"
         except asyncio.CancelledError:

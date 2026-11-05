@@ -1,0 +1,22 @@
+{
+  "version": "transcript-refinement.v1",
+  "id": "failed-job",
+  "meeting": "1",
+  "status": "failed",
+  "model": "custom",
+  "backend": "viegem",
+  "backend_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "created_at": "2026-11-05T00:00:00Z",
+  "items": [
+    {
+      "segment_id": "s1",
+      "expected_revision": 0,
+      "state": "failed",
+      "audio_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "attempts": 1,
+      "error_code": "asr_busy",
+      "retryable": true,
+      "reason": "ASR is busy or temporarily unavailable. Wait briefly, then retry."
+    }
+  ]
+}

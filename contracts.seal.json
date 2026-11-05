@@ -33,7 +33,7 @@
   "core/meetings/contracts/stt-metrics.v1": "23cfc2d8d92bbb55f6d3fafcd3c83c2acd703a9aead9d5fe492738669120ea6f",
   "core/meetings/contracts/transcript-alignment.v1": "d88dd346d036d84e1b35f13fd2e2beca0c1f5b1788c4d8a756ce61df43c89209",
   "core/meetings/contracts/transcript-document.v1": "b076382bf8ad55c4c0a231a8f95575be8fdc0797936530a4bc84487475713e15",
-  "core/meetings/contracts/transcript-refinement.v1": "755cbe0e2e9ec70fb9e16c89a3978ae2e8a0a84ce9aaf67c588e8c96a9241ddd",
+  "core/meetings/contracts/transcript-refinement.v1": "54500d14d0c3283422cbbd10cb20def8e1385150c9d6454d2f26228d5e246e83",
   "core/meetings/contracts/transcript-revision.v1": "adaf19c8c99bb21019726a206fdca34fc8cee0aaac5328c21a4c8024c5a3b7ba",
   "core/meetings/contracts/transcript.v1": "2a351b86af66849531dfd5e6d9bb3f24d3b513c4d99e36ac24a4abda75efaefd",
   "core/meetings/contracts/webhook.v1": "e6b1fe19dbb4ecf71c86948452d0a1fbf3febcb9fcc9df52c8cde26951642d32",

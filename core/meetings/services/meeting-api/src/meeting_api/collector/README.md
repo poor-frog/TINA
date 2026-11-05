@@ -142,3 +142,9 @@ not calibrated confidence or a speech/noise classifier. Vietnamese diacritics ar
 and `flagged` (measure every eligible clip and decode only flagged ones). All modes use
 the existing source clock, ownership, pause/cancel, revision and audio-hash protections.
 No raw text/audio is changed; only ready ASR proposals can be explicitly applied.
+
+Refinement start also accepts `retry_job_id` for explicit failed-only retry. A new
+CAS-admitted job preserves settled proposals, mode and vocabulary, refreshes credentials
+for the same endpoint/model/backend hash, and checks failed clips against their original
+text revision and audio hash before inference. Safe error codes/reasons distinguish ASR
+auth, busy, timeout, network/server and response failures; provider payloads stay private.

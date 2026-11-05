@@ -21,3 +21,6 @@ is removed after the meeting ends, or replaced with the recorded start time when
 
 Transcript review tests also verify the check-only request, visible advisory reason,
 quality filtering and absence of Apply for checked items.
+
+The failed-refinement retry test verifies job-ID-only submission, preserved successful
+suggestions and in-flight job progress without replacing mode/vocabulary.

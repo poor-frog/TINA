@@ -133,6 +133,25 @@
                 "maximum": 1
               }
             }
+          },
+          "error_code": {
+            "enum": [
+              "asr_timeout",
+              "asr_busy",
+              "asr_auth",
+              "asr_unavailable",
+              "asr_invalid_response",
+              "asr_rejected",
+              "audio_unavailable",
+              "source_changed"
+            ]
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 1
           }
         },
         "allOf": [
@@ -185,6 +204,16 @@
         "flagged"
       ],
       "description": "Bot recording review only: all decodes every eligible clip; check measures audio without ASR; flagged decodes only clips with advisory quality flags. Desktop keeps its existing start options."
+    },
+    "backend_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Hash of endpoint/model/backend, excluding credentials. Used to reject retry against a different backend."
+    },
+    "retry_of": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
     }
   },
   "$defs": {
@@ -209,6 +238,15 @@
             "flagged"
           ],
           "description": "Bot recording review only: all decodes every eligible clip; check measures audio without ASR; flagged decodes only clips with advisory quality flags. Desktop keeps its existing start options."
+        },
+        "retry_job_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Bot-only manual retry of failed ASR items from the latest job. Cannot override mode/vocabulary. Preserves ready/applied/checked items; rechecks source and backend."
         }
       }
     },

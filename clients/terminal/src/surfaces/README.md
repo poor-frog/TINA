@@ -87,3 +87,7 @@ remain available, with recording playback presented in the canvas toolbar.
 TranscriptReview adds owner-triggered Check audio and Refine flagged segments for
 bot recordings, with a current-revision quality filter and readable advisory reasons.
 Checks have no ASR cost; selective refinement retains explicit audio comparison/Apply.
+
+Failed bot refinement items show safe service-specific reasons. Retry failed segments
+submits the latest job ID, keeps saved vocabulary and successful proposals, and is
+disabled during active work. No automatic retry or model selection is added.

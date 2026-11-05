@@ -62,3 +62,23 @@ applied. Completed jobs may contain only checked items. UI warnings/filters are
 valid only at their expected text revision. New checks replace the latest job view
 just like an ordinary refinement start; previously accepted revisions remain intact.
 Source audio and the original transcript remain immutable.
+
+## Manual retry of failed bot ASR segments
+
+POST `/by-id/{id}/refinement/start` with `{"retry_job_id":"latest-job-id"}`
+creates a new job (202) carrying settled ready/applied/checked/skipped items unchanged.
+Only failed items marked retryable with a saved audio hash are queued. The original
+mode and vocabulary stay fixed; overrides are rejected (422). Wrong/stale jobs, active
+work/live meetings, no retryable work, or a changed backend/model return 409.
+The backend SHA-256 covers endpoint/model/backend and excludes credentials: correcting
+a token on the same backend is allowed. URLs and credentials never enter the job.
+Retry clips must still match expected text revision and audio SHA-256 before ASR;
+changed input is skipped with `source_changed`. Apply retains its existing CAS/hash checks.
+`retry_of` records the prior job ID; per-item `attempts` counts actual HTTP submissions.
+Item error codes distinguish `asr_timeout`, `asr_busy` (429/503), `asr_auth` (401/403),
+`asr_unavailable`, `asr_rejected`, `asr_invalid_response`, `audio_unavailable`, and
+`source_changed`. Safe fixed reasons never echo upstream bodies, URLs or credentials.
+Only ASR failures offer manual retry; missing/unsafe audio requires a new refinement
+after resolving the recording issue. Legacy jobs without a backend hash need a new
+start. Unattempted pending items from an interrupted/cancelled job are skipped by retry,
+not resumed. There is no automatic retry, crash resume, alternate-model fallback or auto-Apply.
