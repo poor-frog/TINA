@@ -977,7 +977,8 @@ def create_app(
         @app.api_route("/agent/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
         async def agent_proxy(path: str, request: Request):
             # Isolated model jobs have a server-side deadline; preserve JSON/errors past cold start.
-            if request.method == 'POST' and re.fullmatch(r'workspace/meeting-knowledge/[1-9]\d*/ask', path):
+            if request.method == 'POST' and (re.fullmatch(r'workspace/meeting-knowledge/[1-9]\d*/ask', path)
+                                             or re.fullmatch(r'discussion-reviews/[1-9]\d*', path)):
                 return await _forward_stream_verbatim('POST', _agent(path), request)
             return await _forward(request.method, _agent(path), request)
 

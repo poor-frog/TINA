@@ -11,6 +11,7 @@ import { MeetingDetailsRail } from "./MeetingDetailsRail";
 import dossierStyles from "./MeetingDetailsRail.module.css";
 import transcriptStyles from "./MeetingTranscript.module.css";
 import { MeetingMemory } from "../surfaces/MeetingMemory";
+import { DiscussionReview } from "../surfaces/DiscussionReview";
 import { SpeakerRegistry } from "../surfaces/SpeakerRegistry";
 import { TranscriptReview } from "../surfaces/TranscriptReview";
 import { MeetingAudioPlayer, type MeetingAudioFragment, type MeetingAudioPlayerHandle, type MeetingAudioPosition } from "./MeetingAudioPlayer";
@@ -157,6 +158,7 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
   const memoryOpen = useRef<(() => void) | null>(null);
   const speakersOpen = useRef<(() => void) | null>(null);
   const reviewOpen = useRef<(() => void) | null>(null);
+  const discussionOpen = useRef<(() => void) | null>(null);
   const dialogMeetingId = meetingRecord?.id ?? meetingId ?? "";
   const [language, setLanguage] = useState<TranscriptLanguage>("bilingual");
   const translation = useMeetingTranslation(dialogMeetingId, language,
@@ -331,6 +333,7 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
         <MeetingMemory hideTrigger meetingId={dialogMeetingId} openRef={memoryOpen} />
         <SpeakerRegistry hideTrigger meetingId={dialogMeetingId} openRef={speakersOpen} />
         <TranscriptReview hideTrigger meetingId={dialogMeetingId} openRef={reviewOpen} />
+        {durableTerminal && <DiscussionReview key={dialogMeetingId} meetingId={dialogMeetingId} openRef={discussionOpen} />}
       </>}
       <MeetingHealthBanner hideEnded={!!meetingRecord && meetingPhase(meetingRecord) === "post"} />
       <section className={dossierStyles.transcriptPanel}>
@@ -363,6 +366,7 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
           </div>}
           </div>
           {durableTerminal && dialogMeetingId && <div id={toolsId} className={transcriptStyles.recapTools} role="group" aria-label="Meeting tools" hidden={!toolsOpen}>
+            <button type="button" className={transcriptStyles.tool} onClick={() => discussionOpen.current?.()}>Discussion review</button>
             <button type="button" className={transcriptStyles.tool} onClick={() => memoryOpen.current?.()}>Meeting memory</button>
             <button type="button" className={transcriptStyles.tool} onClick={() => speakersOpen.current?.()}>Speaker identities</button>
             <button type="button" className={transcriptStyles.tool} onClick={() => reviewOpen.current?.()}>Review transcript</button>

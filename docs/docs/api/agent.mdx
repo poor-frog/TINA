@@ -51,6 +51,23 @@ or an external provider.
 { "text": "So um, I need to, actually let's email the client first." }
 ```
 
+## Post-meeting discussion review
+
+`GET /api/discussion-reviews/{meeting_id}` returns `{report, stale, can_generate}` for an owned meeting.
+`POST /api/discussion-reviews/{meeting_id}` accepts an agenda/objective and the previous report ID:
+
+```json
+{ "agenda": "Chọn phương án retry cho payment service", "expected_id": null }
+```
+
+The isolated worker requests Vietnamese-first relevance, interaction and progress classifications
+through the configured CompletionPort. Exact canonical quotes and revisions accompany each result.
+Interaction is multi-label (`[]` = no listed signal; `uncertain` is exclusive). Completed meetings only;
+the first version accepts up to 200 segments, 24000 transcript characters and 20 windows without
+silently truncating. Identical input reuses the saved report. Replacing a report requires its ID;
+changed source/workspace or a concurrent replacement returns 409. Other invalid inputs return 422.
+Both web clients expose **Discussion review** on the completed meeting transcript.
+
 ## Dispatch a unit
 
 `POST /invocations` — the sink every trigger funnels through. Body is a conformant `unit.v1` Invocation

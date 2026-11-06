@@ -45,3 +45,5 @@ flowchart LR
   agent_worker ==>|"transcript -> external-saas"| completion_provider
   transcription["transcription"]
   discord_connector ==>|"audio -> tenant-hosted"| transcription
+  completion_provider["configured completion provider"]
+  agent_worker ==>|"transcript -> external-saas"| completion_provider

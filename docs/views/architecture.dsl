@@ -80,6 +80,8 @@ system agent  # the execution domain: a trigger becomes one governed agent turn 
   contract meeting-translation.v1
   database meeting-translation-cache [writers: agent-api]
   contract meeting-translation.v2
+  data-asset discussion-review.v1
+  data-asset discussion-reviews
 
 system gateway-system  # the one public edge (api.v1, ws.v1)
   service conformance
@@ -223,9 +225,13 @@ edges:
   meeting-api -read-> canonical-notes-results  # Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view.
   meeting-api -write-> canonical-notes-approved  # Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view.
   agent-api -read-> canonical-notes-approved  # Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view.
-  agent-api -req-> meeting-api  # Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A across an anchor meeting and up to four explicitly selected meetings; each source is reauthorized, and there are no transcript writes.
+  agent-api -req-> meeting-api  # Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A and manual post-meeting discussion reviews; each source is reauthorized, and there are no transcript writes.
   agent-api -write-> meeting-knowledge-pages  # Persist private answer/source snapshots and explicitly reviewed create-only Wiki pages; no overwrites.
   terminal -read-> meeting-knowledge-pages  # Through existing authenticated Gateway workspace proxy: related docs, bounded multi-meeting answers, source-meeting quotes/audio, freshness warnings and revision-guarded fact reviews.
+  agent-api -write-> discussion-reviews  # Manual owner request -> private read-only unit.v1 worker -> validated classification -> canonical recheck -> locked compare-and-swap report publication.
+  terminal -read-> discussion-reviews  # Authenticated Gateway proxy: agenda form, exact quoted evidence, classifications and stale-state display; no client classification.
+  dashboard -read-> discussion-reviews  # Dashboard adapts the same owner-only review protocol through its authenticated Gateway proxy.
+  agent-worker -call-> completion-provider  # One tool-less CompletionPort call per chronological window, with explicit agenda, target-window VI/EN text and earlier transcript context only; optional native JSON Schema output where supported, followed by worker/API validation and source-checked evidence. Records actual model identity; sends no audio or unrelated files.
   agent-api -write-> workspace-human-documents  # Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane.
   bot -call-> tts-sidecar  # Existing owner-authorized Speak commands make the voice-enabled browser bot send text to TTS_SERVICE_URL/v1/audio/speech with X-API-Key. PCM is resampled by the optional sidecar to 24 kHz and played by the unchanged PulseAudio virtual microphone path; speak_stop aborts request and playback.
   speech-client -req-> speech-coordinator  # Participant-authenticated bounded WAV and turn status; no shared service secrets on clients. Authenticated speech-room.v1 occupancy polling plus epoch/revision capture fencing; all hosts pause wake dispatch during a shared turn.

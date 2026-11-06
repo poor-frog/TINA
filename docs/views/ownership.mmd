@@ -34,6 +34,8 @@ flowchart LR
   canonical_notes_results[("canonical_notes_results")]
   canonical_notes_approved[("proc:meeting:{id} (canonical approved notes)")]
   meeting_knowledge_pages[("Reviewed meeting answers and Wiki pages")]
+  discussion_review_v1[("discussion-review.v1")]
+  discussion_reviews[("Private discussion review snapshots")]
   workspace_human_documents[("Explicit private Markdown document edits")]
   speech_v1[("speech.v1 protocol")]
   speech_playback[("Ephemeral playback receipts")]
@@ -83,6 +85,9 @@ flowchart LR
   agent_api -.->|read| canonical_notes_approved
   agent_api -->|write| meeting_knowledge_pages
   terminal -.->|read| meeting_knowledge_pages
+  agent_api -->|write| discussion_reviews
+  terminal -.->|read| discussion_reviews
+  dashboard -.->|read| discussion_reviews
   agent_api -->|write| workspace_human_documents
   meeting_api -->|write| speech_playback
   agent_api -->|write| meeting_translation_cache

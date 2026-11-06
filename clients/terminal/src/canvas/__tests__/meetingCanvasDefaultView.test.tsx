@@ -122,11 +122,29 @@ describe("MeetingCanvasView — default view + toggle semantics", () => {
     await act(async () => { tools.click(); });
     expect(group.hidden).toBe(false);
     expect(tools.getAttribute("aria-expanded")).toBe("true");
-    expect([...group.querySelectorAll("button")].map(button => button.textContent)).toEqual(["Meeting memory", "Speaker identities", "Review transcript"]);
+    expect([...group.querySelectorAll("button")].map(button => button.textContent)).toEqual(["Discussion review", "Meeting memory", "Speaker identities", "Review transcript"]);
     await act(async () => { tools.click(); });
     expect(group.hidden).toBe(true);
     expect(container.textContent).toContain(LINE.text);
     expect(processCalls()).toBe(0);
+  });
+  it("opens discussion review from recap tools with the dialog outside the collapsible group", async () => {
+    meetingsState = [meetingRow(false)]; durableState.lines = [LINE]; durableState.notes = [];
+    const showModal = HTMLDialogElement.prototype.showModal;
+    HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) { this.setAttribute("open", ""); };
+    try {
+      await renderCanvas();
+      const tools = container.querySelector<HTMLButtonElement>('button[aria-label="Meeting tools"]')!;
+      const group = document.getElementById(tools.getAttribute("aria-controls")!)!;
+      await act(async () => { tools.click(); });
+      const review = [...group.querySelectorAll("button")].find(button => button.textContent === "Discussion review")!;
+      await act(async () => { review.click(); });
+      const dialog = container.querySelector<HTMLDialogElement>('dialog[aria-label="Đánh giá thảo luận"]')!;
+      expect(dialog.open).toBe(true);
+      expect(group.contains(dialog)).toBe(false);
+      expect(fetchMock.mock.calls.some(([url]) => url === "/api/discussion-reviews/6")).toBe(true);
+      expect(processCalls()).toBe(0);
+    } finally { HTMLDialogElement.prototype.showModal = showModal; }
   });
   it('generates AI notes for an existing completed transcript only after the explicit action', async () => {
     meetingsState = [meetingRow(false)]; durableState.lines = [LINE]; durableState.notes = [];

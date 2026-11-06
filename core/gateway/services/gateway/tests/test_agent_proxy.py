@@ -31,6 +31,14 @@ def test_meeting_knowledge_long_job_preserves_json_errors_and_owner():
     assert downstream.last['url'] == 'http://agent-api/api/workspace/meeting-knowledge/42/ask'
 
 
+def test_discussion_review_long_job_preserves_json_errors_and_owner():
+    client, downstream = _client(FakeDownstream(status_code=409, stream_chunks=[b'{"detail":"Transcript changed"}']))
+    response = client.post('/agent/discussion-reviews/42', headers={**AUTH, 'x-user-id': '999'}, json={'agenda': 'Retry'})
+    assert response.status_code == 409 and response.json() == {'detail': 'Transcript changed'}
+    assert downstream.last['headers']['x-user-id'] == '7'
+    assert downstream.last['url'] == 'http://agent-api/api/discussion-reviews/42'
+
+
 def _client(downstream=None):
     downstream = downstream or FakeDownstream(status_code=200, body={"sessions": []})
     app = create_app(FakeAuthorizer(), downstream, FakeRedis(), agent_api_url="http://agent-api")

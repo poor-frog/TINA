@@ -1785,6 +1785,19 @@
    "description": "Private .meeting-knowledge/{meeting_id}/{answer_id}.json snapshots and create-only wiki/meetings/{meeting_id}/{answer_id}.md pages. An answer may include up to four additional individually authorized meetings with namespaced sources and source-meeting audio. Retrieval ranks within each meeting and allocates excerpt/character budgets in rounds across meetings with evidence. Related documents resolve aliased, encoded and relative wikilinks after reviewed moves. When a saved Wiki page moves, frontmatter identity locates it in the same visible workspace; locked Apply reuses that page, preserves edited content and refuses ambiguous copies instead of recreating the old path. Missing or revoked meetings redact stored claims and quotes. Source fingerprints are rechecked after inference, on answer review, Apply and Wiki opening; this is cross-store freshness checking, not a distributed transaction. Source-bound fact reviews live in reviews/{fact_id}.json with explicit approved/discarded/pending state, edited display text and review CAS; canonical facts and raw audio/text are unchanged."
   },
   {
+   "unique-id": "discussion-review.v1",
+   "node-type": "data-asset",
+   "name": "discussion-review.v1",
+   "description": "Vietnamese-first post-meeting relevance, multi-label interaction and progress classifications with exact canonical evidence and model/rubric provenance.",
+   "metadata": [{ "path": "core/agent/contracts/discussion-review.v1" }]
+  },
+  {
+   "unique-id": "discussion-reviews",
+   "node-type": "data-asset",
+   "name": "Private discussion review snapshots",
+   "description": "Agent API alone writes .discussion-reviews/{meeting_id}.json in the current private writable workspace. Manual completed-meeting reviews include agenda and the full bounded canonical source, processed chronologically with one isolated tool-less CompletionPort call per window and earlier context only. Each call returns schema-validated labels and source IDs; API derives exact quotes and reauthorizes/rechecks source before atomic locked expected_id publication. Reads mark source changes stale; identical input reuses results. Clients render only. Private snapshots are unavailable through this API when source access is removed. No transcript writes or automatic/live classification."
+  },
+  {
    "unique-id": "workspace-human-documents",
    "node-type": "data-asset",
    "name": "Explicit private Markdown document edits",
@@ -1971,7 +1984,9 @@
       "workspace-human-documents",
       "meeting-translation.v1",
       "meeting-translation-cache",
-      "meeting-translation.v2"
+      "meeting-translation.v2",
+      "discussion-review.v1",
+      "discussion-reviews"
      ]
     }
    }
@@ -4013,7 +4028,7 @@
     }
    },
    "protocol": "HTTP",
-   "description": "Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A across an anchor meeting and up to four explicitly selected meetings; each source is reauthorized, and there are no transcript writes."
+    "description": "Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A and manual post-meeting discussion reviews; each source is reauthorized, and there are no transcript writes."
   },
   {
    "unique-id": "agent-api-writes-meeting-knowledge",
@@ -4052,6 +4067,37 @@
     }
    ],
    "description": "Through existing authenticated Gateway workspace proxy: related docs, bounded multi-meeting answers, source-meeting quotes/audio, freshness warnings and revision-guarded fact reviews."
+  },
+  {
+   "unique-id": "agent-api-writes-discussion-reviews",
+   "relationship-type": { "connects": { "source": { "node": "agent-api" }, "destination": { "node": "discussion-reviews" } } },
+   "metadata": [{ "access": "write" }],
+   "description": "Manual owner request -> private read-only unit.v1 worker -> validated classification -> canonical recheck -> locked compare-and-swap report publication."
+  },
+  {
+   "unique-id": "terminal-reads-discussion-reviews",
+   "relationship-type": { "connects": { "source": { "node": "terminal" }, "destination": { "node": "discussion-reviews" } } },
+   "metadata": [{ "access": "read" }],
+   "description": "Authenticated Gateway proxy: agenda form, exact quoted evidence, classifications and stale-state display; no client classification."
+  },
+  {
+   "unique-id": "dashboard-reads-discussion-reviews",
+   "relationship-type": { "connects": { "source": { "node": "dashboard" }, "destination": { "node": "discussion-reviews" } } },
+   "metadata": [{ "access": "read" }],
+   "description": "Dashboard adapts the same owner-only review protocol through its authenticated Gateway proxy."
+  },
+  {
+   "unique-id": "agent-worker-discussion-review-completion",
+   "relationship-type": { "connects": { "source": { "node": "agent-worker" }, "destination": { "node": "completion-provider", "interface": "completion-provider-api" } } },
+   "protocol": "HTTP",
+   "metadata": [{ "access": "call" }],
+   "description": "One tool-less CompletionPort call per chronological window, with explicit agenda, target-window VI/EN text and earlier transcript context only; optional native JSON Schema output where supported, followed by worker/API validation and source-checked evidence. Records actual model identity; sends no audio or unrelated files.",
+   "controls": {
+    "data-egress": {
+     "description": "Agenda and transcript text follow the caller's configured CompletionPort, which may be tenant-hosted or external.",
+     "requirements": [{ "requirement-url": "urn:tina:calm:controls:no-egress", "config": { "dataClass": "transcript", "destination": "external-saas", "egressApproved": true } }]
+    }
+   }
   },
   {
    "unique-id": "agent-api-writes-private-documents",
