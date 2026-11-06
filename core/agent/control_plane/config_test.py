@@ -141,7 +141,7 @@ def test_custom_endpoint(base_url: str, api_key: str, model: str = "",
     """A REAL 1-token completion against the configured endpoint. Anthropic-style first
     (``/v1/messages``), OpenAI-compat fallback (``/v1/chat/completions``) on 404/405 — the two
     dialects the dispatch overlay brokers (ANTHROPIC_* vs TINA_LLM_*)."""
-    base = base_url.rstrip("/")
+    base = base_url.rstrip("/").removesuffix("/v1")
     if not base:
         return _result(False, "Custom mode but no Base URL set.")
     model = model or "claude-haiku-4-5-20251001"

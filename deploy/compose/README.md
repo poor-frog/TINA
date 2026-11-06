@@ -189,6 +189,57 @@ in the [upgrade guide](../../docs/docs/upgrade-from-minio.mdx).
 `REDIS_URL`, `ADMIN_TOKEN`, `INTERNAL_API_SECRET`, `MINIO_*`, `BROWSER_IMAGE`/`AGENT_IMAGE`,
 `DOCKER_GID`, `*_HOST_PORT`).
 
+## Option A: real-model browser smoke test
+
+The Discussion Review overlay runs local Qwen 2.5 7B Instruct inference through Ollama. It requires
+Docker Compose with NVIDIA GPU access (8 GB VRAM is sufficient), Node.js >=22.13, pnpm 11.7, and
+Chrome installed where Node can launch it. On Windows, run the setup from WSL2 with Docker Desktop's
+GPU integration enabled. The model download is several GB and happens on first start.
+
+For a fresh isolated local installation, run these commands from the repository root in WSL2/Linux.
+The private config lives outside the checkout, and `tina setup` refuses to overwrite an existing
+config or project:
+
+```bash
+make cli-install
+export PATH="$HOME/.local/bin:$PATH"
+mkdir -p "$HOME/.config/tina"
+export ENV_FILE="$HOME/.config/tina/discussion-review.env"
+tina setup --dry-run --project tina-local
+tina setup --project tina-local
+```
+
+Layer in the local model overlay, install workspace dependencies if needed, and run the real UI test:
+
+```bash
+docker compose --env-file "$ENV_FILE" \
+  -f deploy/compose/docker-compose.yml \
+  -f deploy/compose/docker-compose.discussion-local.yml \
+  -p tina-local up -d --build --wait --wait-timeout 180
+
+pnpm install --frozen-lockfile
+TINA_REVIEW_TEST_ENV_FILE="$ENV_FILE" node clients/terminal/tests/discussion-review.docker.mjs
+```
+
+The smoke test logs in as `reviewer@example.test`, creates a synthetic completed meeting, and checks
+the report through the Terminal UI against the configured local model. It also checks schema validity,
+exact source quotes, unchanged canonical transcript, cached reuse, owner isolation, and reload
+persistence. Each run leaves its synthetic meeting in the local database; screenshots and JSON reports
+are written under the ignored `output/discussion-review-docker/` directory. Review output for one
+synthetic fixture does not establish general classification accuracy.
+
+The test defaults to `deploy/compose/.env.local`, `tina-local`, and `http://localhost:13000`; override
+the private config path with `TINA_REVIEW_TEST_ENV_FILE`, the Compose project with
+`TINA_REVIEW_TEST_PROJECT`, or the loopback URL with `TINA_REVIEW_TEST_URL`. Stop the stack without
+deleting its model or data volumes by running the same Compose command with `down` instead of `up`:
+
+```bash
+docker compose --env-file "$ENV_FILE" \
+  -f deploy/compose/docker-compose.yml \
+  -f deploy/compose/docker-compose.discussion-local.yml \
+  -p tina-local down
+```
+
 ## Smoke probe — "is this install actually working?"
 
 ### Existing OrbStack production instance
