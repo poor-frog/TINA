@@ -1,4 +1,5 @@
 {
+  "core/agent/contracts/discussion-review.v1": "3d3d203bcd480bf600ce1d34d24b50687c09b0ab54bf3af29ef82c137766ab6b",
   "core/agent/contracts/event.v1": "eb4cc5584de33c7dcd26e495463d9b2a02d22ed1ce7783ddff04070457f12913",
   "core/agent/contracts/invoke.v1": "10addba687c61f31ef3254e22f8a19492dad25a5e52bb2b8205d898310f0fb46",
   "core/agent/contracts/meeting-translation.v1": "3dccb46230399170de8e037bdd2dcc34c85f7d8db054944d287e6a890eff51fd",

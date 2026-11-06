@@ -14,6 +14,12 @@ selects an offline profile for untrusted/read-only turns; keep the managed `enab
 See [Codex networking](../llm/README.md#codex-web-and-command-networking) for the separate hosted
 web-search grant, credential boundaries and verification scope.
 
+`discussion_review.py` runs private, read-only CompletionPort calls for a bounded completed meeting
+and agenda: one call per chronological window, with at most one correction retry when validation
+fails. It requests schema-shaped VI/EN classifications, validates class/evidence/window coverage,
+and returns model provenance over the short-lived private output stream. Agent API owns freshness
+checking and report publication; the worker has no tools or transcript write access.
+
 Terminal dictation polish is a one-shot, read-only `CompletionPort` job in the worker. It has no
 harness tools and does not write chat history or workspace files.
 

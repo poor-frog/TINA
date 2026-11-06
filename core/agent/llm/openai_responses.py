@@ -30,7 +30,7 @@ class OpenAIResponsesCompletion:
         self._client = httpx.Client(timeout=timeout, transport=transport)
 
     def complete(self, prompt: str, *, system: Optional[str] = None,
-                 model: Optional[str] = None) -> CompletionResult:
+                  model: Optional[str] = None, response_schema: Optional[dict] = None) -> CompletionResult:
         target = (model or "").strip() or self._model
         if not self._key:
             raise LLMConfigError("OpenAI Responses credential is missing")
@@ -45,6 +45,9 @@ class OpenAIResponsesCompletion:
         }
         if system:
             payload["instructions"] = system
+        if response_schema is not None:
+            payload['text'] = {'format': {'type': 'json_schema', 'name': 'structured_completion',
+                                         'strict': True, 'schema': response_schema}}
         try:
             text_parts: list[str] = []
             with self._client.stream(

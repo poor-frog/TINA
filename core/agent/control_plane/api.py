@@ -1149,10 +1149,10 @@ def create_app(
         request: Request,
         *,
         text: str,
-        task: Literal["polish", "translate", "knowledge"],
+        task: Literal["polish", "translate", "knowledge", "discussion"],
         target_language: str | None = None,
     ) -> str:
-        label = {'polish': 'Text polish', 'translate': 'Live translation', 'knowledge': 'Meeting answer'}[task]
+        label = {'polish': 'Text polish', 'translate': 'Live translation', 'knowledge': 'Meeting answer', 'discussion': 'Discussion review'}[task]
         if dispatcher is None or stream_reader is None:
             raise HTTPException(status_code=503, detail=f"{label} is not configured")
         subject = subject_of(request)
@@ -1161,6 +1161,8 @@ def create_app(
             prefix, session = units.DICTATION_POLISH_PREFIX, "dictation-polish"
         elif task == 'knowledge':
             prefix, session = units.MEETING_KNOWLEDGE_PREFIX, 'meeting-knowledge'
+        elif task == 'discussion':
+            prefix, session = units.DISCUSSION_REVIEW_PREFIX, 'discussion-review'
         else:
             prefix, session = units.DICTATION_TRANSLATE_PREFIX, "dictation-translate"
         payload = {"request_id": request_id, "text": text}
@@ -1181,7 +1183,14 @@ def create_app(
             raise HTTPException(status_code=503, detail=f"{label} is unavailable") from exc
 
         output_parts: list[str] = []
-        deadline = time.monotonic() + 60.0
+        deadline_seconds = 60.0
+        if task == 'discussion':
+            try:
+                window_count = max(1, len(json.loads(text).get('windows', [])))
+            except (ValueError, TypeError):
+                window_count = 1
+            deadline_seconds = min(900.0, 90.0 + window_count * 40.0)
+        deadline = time.monotonic() + deadline_seconds
         try:
             for item in stream_reader.read(unit_id, resume="0-0"):
                 if item is None:
@@ -1828,6 +1837,10 @@ def create_app(
 
     from control_plane.workspace_documents import register as register_workspace_documents
     register_workspace_documents(app, subject_of, _read_target, _private_write_target, wsr)
+
+    from control_plane.discussion_review import register as register_discussion_review
+    register_discussion_review(app, subject_of, _private_write_target, wsr, settings.meeting_api_url if settings else '',
+                               lambda request, text: _transcript_completion(request, text=text, task='discussion'))
 
     @app.post("/api/workspace/upload")
     async def ws_upload(request: Request, files: list[UploadFile] = File(...)):

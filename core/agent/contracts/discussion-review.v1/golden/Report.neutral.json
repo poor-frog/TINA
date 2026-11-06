@@ -1,0 +1,18 @@
+{
+  "version": "discussion-review.v1",
+  "id": "00000000000000000000000000000001",
+  "meeting_id": 42,
+  "agenda": "Làm rõ yêu cầu của payment service.",
+  "canonical_revision": 1,
+  "source_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "rubric": "discussion.vi-en.v1",
+  "created_at": "2026-11-04T00:00:00Z",
+  "model": "operator-configured-model",
+  "windows": [{
+    "id": "w0",
+    "relevance": { "label": "relevant", "reason": "Nêu yêu cầu của service.", "source_ids": ["s0"] },
+    "interaction": { "labels": [], "reason": "Không có tín hiệu tương tác trong danh mục.", "source_ids": ["s0"] },
+    "progress": { "label": "advancing", "reason": "Bổ sung yêu cầu idempotency.", "source_ids": ["s0"] }
+  }],
+  "sources": [{ "id": "s0", "segment_id": "segment-1", "revision": 0, "speaker_name": "Lan", "start_ms": 0, "end_ms": 2000, "quote": "Payment service cần idempotency key.", "audio_available": false }]
+}

@@ -850,6 +850,10 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
     if os.environ.get('TINA_MEETING_KNOWLEDGE') == '1':
         _run_meeting_knowledge(client, out_topic, start)
         return
+    if os.environ.get('TINA_DISCUSSION_REVIEW') == '1':
+        from worker.discussion_review import run as run_discussion_review
+        run_discussion_review(client, out_topic, start)
+        return
 
     transcript_stream = os.environ.get("TINA_TRANSCRIPT_STREAM")
     if transcript_stream:  # a live meeting dispatch — consume the transcript, emit cards

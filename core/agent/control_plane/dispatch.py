@@ -30,7 +30,7 @@ from shared.config import Settings
 from shared.ports import IdentityPort, RuntimePort
 from shared.units import (
     CANONICAL_NOTES_PREFIX, chat_session, dispatch_id, input_topic, is_dictation_polish,
-    is_dictation_translate, is_meeting_knowledge, is_private_transcript_job, output_topic,
+    is_dictation_translate, is_meeting_knowledge, is_discussion_review, is_private_transcript_job, output_topic,
 )
 from pathlib import Path
 
@@ -413,6 +413,8 @@ def build_unit_env(settings: Settings, invocation: dict, *, unit_id: str, token:
         env["TINA_DICTATION_TRANSLATE"] = "1"
     if is_meeting_knowledge(invocation):
         env['TINA_MEETING_KNOWLEDGE'] = '1'
+    if is_discussion_review(invocation):
+        env['TINA_DISCUSSION_REVIEW'] = '1'
     # Attribution (D4 / WP-A1.2): the per-mount turn commit is authored by the dispatch PRINCIPAL (the
     # authenticated human whose input drives the turn), committer stays the platform. Until membership/
     # sharing lands (later WPs) the principal IS the subject; a caller that already resolved a distinct

@@ -18,7 +18,7 @@ from typing import Optional
 import httpx
 
 from llm.errors import LLMAuthError, LLMConfigError, LLMError
-from llm.ports import CompletionResult
+from llm.ports import CompletionResult, schema_system
 
 _DEFAULT_BASE = "https://api.anthropic.com"
 _API_VERSION = "2023-06-01"
@@ -58,7 +58,8 @@ class AnthropicCompletion:
         self._client = httpx.Client(timeout=timeout, transport=transport)
 
     def complete(self, prompt: str, *, system: Optional[str] = None,
-                 model: Optional[str] = None) -> CompletionResult:
+                  model: Optional[str] = None, response_schema: Optional[dict] = None) -> CompletionResult:
+        system = schema_system(system, response_schema)
         target = (model or "").strip() or self._model
         if not target:
             raise LLMConfigError(

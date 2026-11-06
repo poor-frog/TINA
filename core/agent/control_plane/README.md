@@ -8,6 +8,11 @@ evidence versions and verification dates; absent evidence and partial failures r
 The server does not treat the agent's synthesis as independently verified facts. Private Codex chat
 history restores source URLs from the matching turn's metadata, never from another shared mount.
 
+`discussion_review.py` exposes owner-only `GET/POST /api/discussion-reviews/{meeting_id}` for manual
+post-meeting reviews. It reads canonical sources through the published Meeting API, dispatches a
+private completion job and persists the latest source-checked report in the caller's private workspace.
+See [Discussion Review](../../../docs/discussion-review.md) for limits and model configuration.
+
 ChatGPT plan credentials live in the private `openai-auth` volume. Terminal completes OAuth;
 `/internal/openai-auth/{subject}` requires the internal secret and owns generation reads, credential
 saves and disconnect. Saves and refresh share a file lock with disconnect. Disconnect rotates the
