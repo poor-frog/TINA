@@ -8,6 +8,7 @@ export type ModelPrefs = {
   mode?: "subscription" | "custom" | "bedrock" | "openai-api" | "openai-subscription" | "antigravity" | "groq" | "deepseek" | "gemini" | null;
   model?: string | null;
   meeting_model?: string | null;
+  translation_model?: string | null;
   effort?: string | null; // deprecated; ignored by runners, cleared on save (Auto)
   base_url?: string | null;
   region?: string | null;

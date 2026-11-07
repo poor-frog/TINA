@@ -37,3 +37,5 @@ suggestions and in-flight job progress without replacing mode/vocabulary.
 The quiet-audio test verifies default-off behavior, explicit ASR opt-in, prepared-input
 explanation and omission of normalization from check-only requests. Existing retry tests
 continue to require job-ID-only submission, so changing local options cannot alter retry.
+
+Model settings also verify a separately saved Translation model without changing Chat model.

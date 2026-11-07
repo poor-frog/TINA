@@ -276,12 +276,12 @@ class CalendarPatch(BaseModel):
 # (dispatch/bot_spawn only override what is set here).
 MODEL_MODES = ("subscription", "custom", "bedrock", "openai-api", "openai-subscription",
                "antigravity", "groq", "deepseek", "gemini")
-_MODELS_FIELDS = ("mode", "model", "meeting_model", "base_url", "api_key", "effort", "region",
+_MODELS_FIELDS = ("mode", "model", "meeting_model", "translation_model", "base_url", "api_key", "effort", "region",
                   "antigravity_terms_acknowledged")
 # Provider API presets use their own endpoint and credentials. A provider switch must not redirect
 # a retained credential or inherit another provider's model identifiers across these boundaries.
 _DIRECT_API_MODES = frozenset(("groq", "deepseek", "gemini"))
-_API_PROVIDER_FIELDS = ("model", "meeting_model", "base_url", "api_key", "effort", "region")
+_API_PROVIDER_FIELDS = ("model", "meeting_model", "translation_model", "base_url", "api_key", "effort", "region")
 _TRANSCRIPTION_FIELDS = (
     "default_backend", "url", "token", "funasr_url", "sherpa_url", "apple_url", "apple_token", "nvidia_url", "nvidia_token", "gipformer_url", "gipformer_token", "viegem_url", "viegem_token",
 )
@@ -336,6 +336,7 @@ class ModelPrefsUpdate(BaseModel):
     mode: Optional[str] = None
     model: Optional[str] = None
     meeting_model: Optional[str] = None
+    translation_model: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     region: Optional[str] = None
@@ -986,6 +987,7 @@ def create_app() -> FastAPI:
             "mode": prefs.get("mode"),
             "model": prefs.get("model"),
             "meeting_model": prefs.get("meeting_model"),
+            "translation_model": prefs.get("translation_model"),
             "base_url": prefs.get("base_url"),
             "region": prefs.get("region"),
             "effort": prefs.get("effort"),

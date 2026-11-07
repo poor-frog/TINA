@@ -456,8 +456,24 @@ def run_models_test(config: dict, env: Optional[dict] = None,
     else:
         out = test_subscription_credentials(creds_path)
         out["mode"] = "subscription"
+    translation_model = (config.get("translation_model") or "").strip()
+    if out["ok"] and mode in ("groq", "deepseek", "gemini", "bedrock", "openai-api", "openai-subscription", "custom") and translation_model and translation_model not in {config.get("model"), config.get("meeting_model")}:
+        if mode in ("groq", "deepseek", "gemini"):
+            out = {"groq": test_groq, "deepseek": test_deepseek, "gemini": test_gemini}[mode](
+                (config.get("api_key") or "").strip(), (config.get("model") or "").strip(), translation_model, post=post)
+        elif mode == "bedrock":
+            out = test_bedrock(bedrock_key, translation_model,
+                              (config.get("region") or env.get("AWS_REGION") or "").strip(), post=post, require_tools=False)
+        elif mode == "openai-api":
+            out = test_openai_responses(api_key, translation_model, post=post)
+        elif mode == "openai-subscription":
+            out = test_openai_responses(token, translation_model, post=post)
+        elif mode == "custom":
+            out = test_custom_endpoint(base_url, api_key, translation_model, post=post)
+        out["mode"] = mode
+        out["summary"] = "Translation model: " + out["summary"]
     # Non-secret provenance so the UI can say WHAT was tested.
-    out["config"] = {k: v for k, v in config.items() if k in ("mode", "model", "meeting_model",
+    out["config"] = {k: v for k, v in config.items() if k in ("mode", "model", "meeting_model", "translation_model",
                                                               "base_url") and v}
     return out
 

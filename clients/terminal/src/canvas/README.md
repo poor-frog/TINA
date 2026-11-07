@@ -2,8 +2,9 @@
 
 Harnessed Meeting Canvas runtime for terminal-side generated React views.
 
-Meeting Bot transcripts offer one language dropdown above search with **Tiếng Việt**,
-**English** and **Song ngữ**; **Song ngữ** is selected by default.
+Meeting Bot transcripts offer one language dropdown above search with **No Translate · Bản gốc**,
+**English** and **Song ngữ**; **Song ngữ** is selected by default. The original-only
+option does not request translation.
 English/bilingual requests the shared `meeting-translation.v2` overlay through the existing
 authenticated proxy. Exact accepted source text is retained separately from display cleanup
 so edits cannot attach a stale translation. Each pair preserves speaker/time and recording

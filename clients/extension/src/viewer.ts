@@ -52,7 +52,7 @@ function renderTranslationControls(): void {
     translation.groups.some(g => !g.ready) ? 'Đang gom câu…' : '',
   ].filter(Boolean).join(' · ') : 'Đang tải bản dịch…';
   ($('displayLanguage') as HTMLButtonElement).disabled = !supported;
-  $('displayLanguage').textContent = { vi: 'Tiếng Việt', en: 'English', bilingual: 'VI + EN' }[displayLanguage];
+  $('displayLanguage').textContent = { vi: 'Bản gốc', en: 'English', bilingual: 'VI + EN' }[displayLanguage];
   $('translationControls').dataset.state = translationError ? 'error' : translation?.status || 'pending';
   $('translationStatus').textContent = !selected ? '' : source === 'desktop' ? 'Dịch hiện hỗ trợ Meeting Bot.' : language === 'vi' ? ''
     : translationError ? 'Dịch chưa khả dụng · transcript tiếng Việt vẫn hoạt động'

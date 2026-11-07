@@ -106,3 +106,5 @@ runs right before `git add -A` — it reverts any tracked `policy/` change back 
 untracked `policy/` add, emitting `{"type":"policy-reverted","paths":[…]}`. So a turn's legitimate
 (non-policy) writes still commit while a policy tamper is reverted before it can land. (Chosen default
 per plan Q3: post-turn validation + revert.)
+
+Translation dispatch applies the owner-resolved translation_model only to tool-less translation units, using the existing TINA_MEETING_MODEL worker slot. Blank or disallowed overrides preserve the Meeting model fallback; chat and meeting units retain their own model.

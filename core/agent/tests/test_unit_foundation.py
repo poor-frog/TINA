@@ -733,3 +733,17 @@ def test_message_dispatch_stamps_the_chat_idle_window():
     d.dispatch(VALID_INV)
     _, _profile, env = rt.spawned[0]
     assert env["TINA_IDLE_TIMEOUT_SEC"] == str(settings.chat_idle_timeout_sec)
+
+
+@pytest.mark.parametrize("translation,allowlist,expected", [("luna", "", "luna"), ("", "", "meeting"), ("blocked", "sol,meeting", "meeting")])
+def test_translation_model_isolated_from_chat_and_meeting(translation, allowlist, expected):
+    from shared.units import DICTATION_TRANSLATE_PREFIX
+    settings = load_settings(model_allowlist=allowlist)
+    config = {"mode": "openai-api", "model": "sol", "meeting_model": "meeting", "translation_model": translation}
+    regular = dispatch.build_unit_env(settings, VALID_INV, unit_id="regular", token="test", model_config=config)
+    invocation = {**VALID_INV, "context": {"kind": "none", "session": "dictation-translate-test"},
+                  "start": {"entrypoint": {"inline": DICTATION_TRANSLATE_PREFIX + "{}"}}}
+    translated = dispatch.build_unit_env(settings, invocation, unit_id="translated", token="test", model_config=config)
+    assert regular["TINA_MEETING_MODEL"] == "meeting"
+    assert translated["TINA_MEETING_MODEL"] == expected
+    assert translated["TINA_AGENT_MODEL"] == regular["TINA_AGENT_MODEL"] == "sol"

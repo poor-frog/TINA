@@ -58,3 +58,5 @@ and legacy cooldowns; no new service, environment setting or canonical database 
 on failure and rejects streams without a completion marker. No provider details cross this seam.
 Reasoning blocks never enter the visible English output. Capture and raw/
 canonical transcripts stay independent. Inference advances only while a translated view is open.
+
+The owner may select translation_model separately in Models settings. Blank follows Meeting model. This choice uses the existing provider/credential and model allowlist; it does not change the overlay response schema.

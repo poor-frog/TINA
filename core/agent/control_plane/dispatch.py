@@ -440,6 +440,10 @@ def build_unit_env(settings: Settings, invocation: dict, *, unit_id: str, token:
     # defaults stamped above, field-by-field; anything it leaves unset falls through unchanged.
     if model_config:
         overlay_model_config(env, model_config, allowlist=settings.model_allowlist, subject=subject)
+        if is_dictation_translate(invocation):
+            translation_model = (model_config.get("translation_model") or "").strip()
+            if translation_model and _allowlisted(translation_model, settings.model_allowlist):
+                env["TINA_MEETING_MODEL"] = translation_model
     # The chat conversation thread (default "main") — the worker namespaces its continuity session file
     # by this so multiple threads coexist in the one user workspace. Meeting/digest paths ignore it.
     if invocation["trigger"] == "message":

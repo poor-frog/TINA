@@ -88,7 +88,7 @@ export function TranslationControls({ language, onChange, snapshot, error, onRet
   return <>
     <select className={styles.select} aria-label="Transcript language" title="Transcript language" value={language} disabled={disabled}
       onChange={event => onChange(event.currentTarget.value as TranscriptLanguage)}>
-      {([["vi", "Tiếng Việt"], ["en", "English"], ["bilingual", "Song ngữ"]] as const).map(([mode, label]) =>
+      {([["vi", "No Translate · Bản gốc"], ["en", "English"], ["bilingual", "Song ngữ"]] as const).map(([mode, label]) =>
         <option key={mode} value={mode}>{label}</option>)}
     </select>
     {language !== "vi" && <div className={styles.translationStatus} data-state={paused || error ? "attention" : "normal"}>

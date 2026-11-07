@@ -6,3 +6,5 @@ Autonomous testcontainers evals — ephemeral Postgres + Redis, no live bbb stac
 `test_stack_redis.py`, O-STACK-3 `test_stack_admin_api.py`.
 
 _Governed by `docs/docs/governance/architecture.mdx` (P1–P12). This folder owns one concern; its public surface is its `index`/contract; it may depend only on what the dependency-rules allow._
+
+Model settings cover translation_model persistence, effective resolution and clearing independently of chat/meeting selections.

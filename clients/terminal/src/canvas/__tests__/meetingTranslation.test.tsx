@@ -55,7 +55,7 @@ it("offers retry on API failure without hiding the language controls", async () 
   render(<Viewer />);
   fireEvent.change(screen.getByRole("combobox", { name: "Transcript language" }), { target: { value: "en" } });
   await waitFor(() => expect(screen.getByRole("button", { name: "Thử lại" })).toBeTruthy());
-  expect(screen.getByRole("option", { name: "Tiếng Việt" })).toBeTruthy();
+  expect(screen.getByRole("option", { name: "No Translate · Bản gốc" })).toBeTruthy();
 });
 
 it("clears the previous meeting's translations when navigating to another meeting", async () => {

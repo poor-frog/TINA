@@ -451,3 +451,17 @@ def test_asr_runtime_keeps_accounts_independent_and_fences_stale_updates(client)
     assert client.put(f"/internal/users/{first}/transcription-runtime", headers=h, json=payload).status_code == 200
     config = client.get(f"/internal/users/{first}/transcription", headers=h).json()
     assert config["disabled"] is True and not config.get("url") and "token" not in config
+
+
+def test_translation_model_round_trip_and_partial_clear(client):
+    uid, token = _user_token(client)
+    headers = {"X-API-Key": token}
+    saved = client.put("/user/models", headers=headers, json={
+        "mode": "openai-api", "model": "sol", "meeting_model": "meeting", "translation_model": "luna"})
+    assert saved.status_code == 200
+    assert saved.json()["translation_model"] == "luna"
+    effective = client.get(f"/internal/users/{uid}/model-config", headers=_internal()).json()
+    assert effective["models"]["translation_model"] == "luna"
+    cleared = client.put("/user/models", headers=headers, json={"translation_model": ""}).json()
+    assert cleared["translation_model"] is None
+    assert cleared["model"] == "sol" and cleared["meeting_model"] == "meeting"

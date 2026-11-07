@@ -105,3 +105,5 @@ The review filter includes a flagged second-pass suggestion at its exact source
 revision, even when source text was unflagged. Stale evidence is hidden after edits;
 after Apply only evidence matching the applied proposal/revision remains visible.
 Legacy jobs without text/proposal checks remain readable. Apply stays explicit.
+
+Translation model is an optional picker using the selected provider catalog. Blank follows Meeting model; provider switches clear this override with the other provider-specific model names.

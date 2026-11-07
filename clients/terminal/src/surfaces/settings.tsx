@@ -233,7 +233,7 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
       // An API provider is a different endpoint + credential + model namespace, so switching into or
       // out of one must not carry the previous provider's values across.
       if (apiModelProvider(value) || apiModelProvider(values.mode)) {
-        for (const providerField of ["api_key", "base_url", "model", "meeting_model"]) next[providerField] = "";
+        for (const providerField of ["api_key", "base_url", "model", "meeting_model", "translation_model"]) next[providerField] = "";
       }
     }
     setSaved(false);
@@ -453,6 +453,9 @@ export function ModelsSection() {
     { key: "meeting_model", label: "Meeting model", placeholder: "defaults to chat model", showIf: (v: Record<string, string>) => v.mode !== "antigravity",
       modelPicker: (v: Record<string, string>) => fallbackChoicesForMode(v.mode) !== null,
       modelEmptyLabel: () => "Same as chat model" },
+    { key: "translation_model", label: "Translation model", placeholder: "defaults to meeting model", showIf: (v: Record<string, string>) => v.mode !== "antigravity",
+      modelPicker: (v: Record<string, string>) => fallbackChoicesForMode(v.mode) !== null,
+      modelEmptyLabel: () => "Same as meeting model" },
   ];
   const renderModelWarning = (values: Record<string, string>) => values.mode === "antigravity" ? (
     <div role="alert" style={{ border: "1px solid var(--danger)", borderRadius: 8, padding: "10px 12px", background: "color-mix(in srgb, var(--danger) 8%, transparent)", color: "var(--t2)", fontSize: 12.5, lineHeight: 1.55 }}>
@@ -461,7 +464,7 @@ export function ModelsSection() {
   ) : apiModelProvider(values.mode) ? (
     <div role="status" style={{ fontSize: 12.5, color: "var(--t3)", lineHeight: 1.55 }}>
       Use your <a href={apiModelProvider(values.mode)!.keyUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--t1)" }}>{apiModelProvider(values.mode)!.label} API key</a> for chat and meeting notes.
-      {" "}Leave Chat model blank to use <code>{apiModelProvider(values.mode)!.model}</code>; Meeting model follows Chat model unless specified.
+      {" "}Leave Chat model blank to use <code>{apiModelProvider(values.mode)!.model}</code>; Meeting model follows Chat model unless specified. Translation model follows Meeting model unless specified.
       {" "}Save, then test model credentials. Speech-to-text is configured separately in Transcription.
     </div>
   ) : null;

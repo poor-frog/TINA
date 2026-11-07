@@ -485,3 +485,15 @@ def test_transcription_accepts_silence_from_tokenless_funasr():
         probe=lambda e, t: (200, '{"text":""}'), model="custom", require_token=False,
     )
     assert out["ok"]
+
+
+def test_separate_translation_model_is_probed(monkeypatch):
+    from control_plane import config_test
+    calls = []
+    def probe(key, model, meeting_model, **kwargs):
+        calls.append((model, meeting_model))
+        return {"ok": True, "summary": "inference OK"}
+    monkeypatch.setattr(config_test, "test_groq", probe)
+    result = config_test.run_models_test({"mode": "groq", "model": "chat", "meeting_model": "meeting", "translation_model": "translate"}, env={})
+    assert calls == [("chat", "meeting"), ("chat", "translate")]
+    assert result["ok"] and result["config"]["translation_model"] == "translate"

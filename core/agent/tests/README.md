@@ -49,3 +49,5 @@ It does not claim that a live model/account actually performed a search.
 The refinement Apply/Restore translation regression verifies that canonical text changes
 invalidate the affected phrase's cached translation, retain other phrases, and translate
 restored source text again without returning the previous revision's translation.
+
+Foundation tests cover translation-only model selection, Meeting model fallback, allowlist rejection and isolation from ordinary chat/meeting units.
