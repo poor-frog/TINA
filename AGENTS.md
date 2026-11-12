@@ -29,3 +29,13 @@ publish artifacts until the project owner supplies those endpoints.
 - Preserve Apache-2.0 and upstream copyright/third-party notices.
 - Do not create commits, rewrite history, add a remote, or publish images unless the user explicitly
   asks and provides any required ownership or destination details.
+
+## Docker cleanup after deployment
+
+- The owner requests automatic cleanup whenever an agent deploys a new container version here.
+  After verifying the replacement services are healthy, remove reviewed, stopped, disposable TINA
+  containers from completed worker jobs, ended meetings, and superseded deployments without asking
+  again. Recheck each candidate's state and remove by exact container ID, without force or volume removal.
+- Preserve running services and meetings, Compose initialization dependencies such as `storage-init`,
+  all volumes, recordings, model caches, and containers belonging to other projects. Do not use a
+  global Docker prune or expand container cleanup to images or build caches without a separate request.
