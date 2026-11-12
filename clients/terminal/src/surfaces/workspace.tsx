@@ -1036,14 +1036,17 @@ function FmValue({ k, v }: { k: string; v: string }) {
 function FrontmatterCard({ fm }: { fm: [string, string][] }) {
   if (fm.length === 0) return null;
   return (
-    <dl className={panelStyles.metadata}>
-      {fm.map(([k, v]) => (
-        <div key={k} className={panelStyles.metadataRow}>
-          <dt>{k}</dt>
-          <dd><FmValue k={k} v={v} /></dd>
-        </div>
-      ))}
-    </dl>
+    <section className={panelStyles.metadataSection} aria-label="YAML metadata">
+      <div className={panelStyles.metadataLabel}>YAML metadata</div>
+      <dl className={panelStyles.metadata}>
+        {fm.map(([k, v]) => (
+          <div key={k} className={panelStyles.metadataRow}>
+            <dt>{k}</dt>
+            <dd><FmValue k={k} v={v} /></dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 
