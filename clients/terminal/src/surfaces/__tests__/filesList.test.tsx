@@ -59,12 +59,12 @@ describe("FilesList — workspace-first Knowledge rail", () => {
     expect(screen.queryByRole("button", { name: "Manage leo" })).toBeNull();
     fireEvent.click(picker);
     await screen.findByRole("button", { name: "Manage leo" });
-    expect(screen.getByText(/Attach repo…/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Attach repo" })).toBeTruthy();
   });
 
   it("shows file search and the workspace tree by default", async () => {
     renderList();
-    expect(screen.getByPlaceholderText("Find files…")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Find files" })).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Files" })).toBeTruthy();
     await screen.findByText("kg");
     expect(screen.getByText("README.md")).toBeTruthy();

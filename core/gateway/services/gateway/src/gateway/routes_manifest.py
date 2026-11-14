@@ -10,8 +10,8 @@ So each domain declares its own routes beside its service, in a `routes.v1.json`
 as the `mcp.tools.v1` manifests and for the same reason: the domain that owns the door behind a
 route is the only one that can say what the route is and what it costs.
 
-    core/meetings/routes.v1.json                   38 rows
-    core/identity/routes.v1.json                   12
+    core/meetings/routes.v1.json                   64 rows
+    core/identity/routes.v1.json                   14
     core/meetings/services/mcp/routes.v1.json      12
     core/agent/routes.v1.json                       7   ← absent in the no-agents profile
     core/gateway/services/gateway/routes.v1.json    2   the edge's OWN /health and /auth/me
