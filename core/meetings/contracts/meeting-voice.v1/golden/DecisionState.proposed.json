@@ -1,0 +1,13 @@
+{
+  "kind": "decision",
+  "title": "dùng PostgreSQL",
+  "requested_status": "proposed",
+  "status_text": "đề xuất",
+  "source_hint": "",
+  "evidence_status": "unchecked",
+  "evidence": [],
+  "utterances": [
+    "Ghi quyết định dùng PostgreSQL, đây là đề xuất"
+  ],
+  "reprompts": 0
+}

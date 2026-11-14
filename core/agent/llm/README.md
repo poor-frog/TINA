@@ -63,6 +63,7 @@ and harness behavior is unchanged. Existing wrapped exceptions retain their caus
 | `ANTHROPIC_*`, `HOST_CLAUDE_CREDENTIALS` | claude-code adapter | — |
 | `OPENAI_API_KEY`, `ACCESS_TOKEN` | Codex/OpenAI provider credentials | — |
 | `GEMINI_API_KEY` | Antigravity CLI Gemini API-key authentication | — |
+| `TINA_AGENT_REACH_URL` | Shared public web/GitHub retrieval worker, used by granted MCP tools and explicit room web queries | disabled outside configured deployments |
 
 ## Provider model settings
 
@@ -115,6 +116,12 @@ The pinned Codex CLI also receives a temporary Groq model profile with TINA inst
 no freeform patch tool and no namespace delegation. File edits use the existing sandboxed
 exec function. This keeps the prompt and tool definitions consistent instead of telling
 the model to call a patch tool that the HTTP compatibility layer cannot forward.
+
+For the granted `tina-reach` MCP server, Groq receives only the selected public Reach functions
+with flattened names. The proxy restores their namespace on streamed function-call items and
+flattens it again in follow-up input history. Other namespaces stay omitted; provider keys and
+tool allowlists are unchanged. The bridge advertises read-only MCP annotations so Codex can run
+these reads with its existing automatic tool grant and `approvalPolicy=never`.
 
 Gemini defaults to `gemini-3.5-flash`. Gemini and DeepSeek credential tests also verify native
 function calls and matching results, preserving thought signatures and thinking blocks.

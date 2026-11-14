@@ -41,6 +41,7 @@ COPY licenses/multilingual-e5-small.LICENSE.txt /opt/tina/voice-retrieval/LICENS
 # The control-plane packages (NO worker): control_plane + shared + contracts, copied to /app so
 # `PYTHONPATH=/app` resolves them as top-level imports.
 COPY core/agent/shared ./shared
+RUN python -c "from underthesea import word_tokenize; assert word_tokenize('hệ thống nhận dạng giọng nói')"
 COPY core/agent/control_plane ./control_plane
 COPY core/agent/contracts ./contracts
 # Credential probes and model/effort validation share provider code with the worker.

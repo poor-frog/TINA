@@ -35,7 +35,7 @@ function StatusLine({ status }: { status: TurnStatus }) {
   useEffect(() => { const t = setInterval(() => force((n) => n + 1), 1000); return () => clearInterval(t); }, []);
   const secs = Math.max(0, Math.floor((Date.now() - status.since) / 1000));
   const alert = status.phase === "reconnecting" || status.phase === "stalled";
-  const color = alert ? "var(--accent)" : "var(--t3)";
+  const color = alert ? "var(--warn)" : "var(--agent-color)";
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontSize: 12, color, fontFamily: "var(--mono)" }}>
       <span className="vx-op-spin" style={{ width: 11, height: 11, borderRadius: "50%", border: "1.5px solid var(--line2)", borderTopColor: color, flex: "none" }} />
@@ -139,25 +139,25 @@ export function Conversation({ turns, busy, empty, onApprovalDecision }: {
         if (t.role === "user") {
           return (
             <div key={t.id} style={{ marginBottom: 18, borderLeft: "2px solid var(--line2)", paddingLeft: 12, marginLeft: 2 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 4, display: "flex", alignItems: "center", gap: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              <div style={{ fontSize: "var(--ui-type-meta)", fontWeight: 600, color: "var(--t3)", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
                 <span>You</span>
               </div>
-              <div style={{ fontSize: 13.5, color: "var(--t1)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{t.text}</div>
+              <div style={{ fontSize: "var(--ui-type-label)", color: "var(--t1)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{t.text}</div>
             </div>
           );
         }
         if (t.role === "insight") return (
           <div key={t.id} style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-            <Icon name="spark" size={15} style={{ color: "var(--accent)", marginTop: 1, flex: "none" }} />
+            <Icon name="spark" size={15} style={{ color: "var(--agent-color)", marginTop: 1, flex: "none" }} />
             <div>{t.t && <span style={{ fontSize: 11, color: "var(--t3)", fontFamily: "var(--mono)" }}>{t.t}</span>}
-              <div style={{ fontSize: 13.5, color: "var(--t1)", lineHeight: 1.55, marginTop: 2 }}>{linkify(t.text)}</div></div>
+              <div style={{ fontSize: "var(--ui-type-label)", color: "var(--t1)", lineHeight: 1.55, marginTop: 2 }}>{linkify(t.text)}</div></div>
           </div>
         );
         const last = i === turns.length - 1;
         return (
           <div key={t.id} style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--accent)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              <Icon name="spark" size={12} style={{ color: "var(--accent)" }} />
+            <div className="terminal-agent-label" style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="spark" size={12} />
               <span>TINA Agent</span>
             </div>
             {t.ops.length > 0 && (
@@ -165,13 +165,13 @@ export function Conversation({ turns, busy, empty, onApprovalDecision }: {
                 {t.ops.map((op, j) => <OpRow key={j} op={op} />)}
               </div>
             )}
-            {t.text && <div style={{ fontSize: 13.5, color: "var(--t1)", lineHeight: 1.65, maxWidth: 680 }}><Markdown>{t.text}</Markdown></div>}
+            {t.text && <div className="terminal-agent-response" style={{ fontSize: "var(--ui-type-label)", color: "var(--t1)", lineHeight: 1.65, maxWidth: 680 }}><Markdown>{t.text}</Markdown></div>}
             {t.approvals?.map((approval) => (
               <ToolApprovalCard key={approval.approval_id} approval={approval} onDecision={onApprovalDecision} />
             ))}
             {busy && last && (t.status
               ? <StatusLine status={t.status} />
-              : (!t.text && <div style={{ fontSize: 13.5, color: "var(--t3)" }}>…</div>))}
+              : (!t.text && <div style={{ fontSize: "var(--ui-type-label)", color: "var(--t3)" }}>…</div>))}
             {t.commit && (
               <div style={{ marginTop: 9, fontSize: 11, color: "var(--green)", display: "inline-flex", alignItems: "center", gap: 6, background: "var(--greenbg)", borderRadius: 6, padding: "3px 8px", fontFamily: "var(--mono)" }}>
                 <Icon name="git" size={12} />committed · {t.commit.slice(0, 7)}
@@ -196,7 +196,7 @@ export function AgentWindow({ top, scrollRef, children, composer, actions }: {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0, background: "var(--rail)" }}>
       {top}
-      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "18px 22px" }}>{children}</div>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", overflowX: "clip", minHeight: 0, padding: "18px 22px" }}>{children}</div>
       <div style={{ borderTop: "1px solid var(--line)", padding: "12px 22px 14px", flex: "none" }}>
         <div style={{ maxWidth: 760, margin: "0 auto", display: "flex", flexDirection: "column", gap: 9 }}>
           {composer}

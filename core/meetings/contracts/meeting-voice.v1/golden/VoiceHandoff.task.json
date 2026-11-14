@@ -1,0 +1,16 @@
+{
+  "request_id": "00000000-0000-4000-8000-000000000123",
+  "expires_at_ms": 2000000000000,
+  "kind": "task",
+  "meeting_id": 1,
+  "reason": "clarification_exhausted",
+  "original_request": "Tạo task demo",
+  "task": {
+    "title": "demo",
+    "assignee": "Lan",
+    "due": null,
+    "missing_field": "due"
+  },
+  "heard_turns": [],
+  "sources": []
+}

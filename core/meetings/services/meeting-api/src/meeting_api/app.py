@@ -283,6 +283,8 @@ def create_app(
     app.include_router(build_speak_router(meeting_repo, command_publisher, app.state.speech_playback))
     from .lifecycle.voice import build_voice_router
     app.include_router(build_voice_router(meeting_repo, playback_redis, command_publisher, app.state.speech_playback))
+    from .lifecycle.audio import build_audio_router
+    app.include_router(build_audio_router(meeting_repo))
     from .lifecycle.voice_settings import build_voice_settings_router
 
     # Resolve the shared recording storage before mounting the collector: completed-meeting erasure

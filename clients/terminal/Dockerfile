@@ -22,6 +22,7 @@ WORKDIR /app/clients/terminal
 COPY clients/terminal/package.json clients/terminal/package-lock.json ./
 RUN npm ci
 COPY clients/terminal/. .
+COPY packages/transcript-rendering/src/format.ts /app/packages/transcript-rendering/src/format.ts
 COPY branding/tokens.css /app/branding/tokens.css
 # Google Analytics measurement id (G-XXXXXXXXXX). NEXT_PUBLIC_* is inlined into the client bundle at
 # BUILD time, so it must be present BEFORE `next build` (pass via --build-arg / compose build.args).
@@ -78,6 +79,7 @@ COPY clients/terminal/server.mjs clients/terminal/next.config.ts clients/termina
 # rather than the build context, where it is absent on a clean clone.
 COPY --from=build /app/clients/terminal/next-env.d.ts ./
 COPY clients/terminal/src ./src
+COPY packages/transcript-rendering/src/format.ts /app/packages/transcript-rendering/src/format.ts
 COPY branding/tokens.css /app/branding/tokens.css
 EXPOSE 3000
 # `npm start` === PORT=3000 NODE_ENV=production node server.mjs

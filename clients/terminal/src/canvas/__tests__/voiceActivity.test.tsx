@@ -1,8 +1,12 @@
 import React from 'react';
-import { cleanup, render, screen, act } from '@testing-library/react';
+import { cleanup, render as renderView, screen, act } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { VoiceActivity } from '../VoiceActivity';
 import { createVoiceActivity } from '../../../../extension/src/voice-activity-view';
+import { ServicesProvider, createContainer, reg } from '../../platform';
+import { LayoutServiceId, createLayoutService } from '../../workbench/layout';
+const container=createContainer([reg(LayoutServiceId,()=>createLayoutService('sessions'))]);
+const render=(view:React.ReactNode)=>renderView(view,{wrapper:({children})=><ServicesProvider container={container}>{children}</ServicesProvider>});
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
 const body=(state='LISTENING')=>({available:true,policy:{enabled:true},runtime:{state,session_active:true,heartbeat_fresh:true,kws:{status:'ready',observed_at_ms:Date.now()}}});
 it('updates the tool label within THINKING in Terminal and Extension and clears it on failure',async()=>{

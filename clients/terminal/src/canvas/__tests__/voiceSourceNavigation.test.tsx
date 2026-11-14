@@ -25,13 +25,13 @@ function visible(){
   HTMLElement.prototype.scrollIntoView=vi.fn();
 }
 
-it('opens only a freshly claimed authorized document and consumes the hint once',async()=>{
+it.each(['wiki/demo.md','README.md'])('opens a freshly claimed authorized %s document and consumes the hint once',async(path)=>{
   visible();const nav=hint(),value=snapshot(nav);
-  const fetch=vi.fn(async()=>Response.json({...nav,source:{id:'ctx-'+'a'.repeat(64),kind:'document',path:'wiki/demo.md'}}));
+  const fetch=vi.fn(async()=>Response.json({...nav,source:{id:'ctx-'+'a'.repeat(64),kind:'document',path}}));
   vi.stubGlobal('fetch',fetch);
   const view=render(<Harness value={value}/>);
   await act(async()=>{await Promise.resolve();});
-  expect(mocks.openDoc).toHaveBeenCalledWith({path:'wiki/demo.md',slug:undefined});
+  expect(mocks.openDoc).toHaveBeenCalledWith({path,slug:undefined});
   expect(fetch).toHaveBeenCalledWith(`/api/meetings/42/voice-assistant/navigation/${rid}`,expect.objectContaining({method:'POST'}));
   view.rerender(<Harness value={{...value}}/>);await act(async()=>{await Promise.resolve();});
   expect(fetch).toHaveBeenCalledTimes(1);expect(mocks.openDoc).toHaveBeenCalledTimes(1);
@@ -101,6 +101,8 @@ it('refuses unsafe/mismatched targets and expired or different-session hints',()
   for(const patch of [{revision:2},{session_uid:'other'},{request_id:'bad'},{expires_at_ms:Date.now()-1}])
     expect(navigationHint(snapshot({...nav,...patch}),'42',Date.now())).toBeNull();
   for(const source of [{kind:'document',path:'../../private.md'},{kind:'document',path:'https://evil/file.md'},
+      ...['readme.md','private.md','/README.md','../README.md','README.md/file.md','README.md.bak','README.md?x',
+          'README.md\\..\\private.md'].map(path=>({kind:'document',path})),
       {kind:'document',path:'wiki/.secret.md'},{kind:'transcript',segment_id:''},{kind:'calculation'}]){
     expect(()=>navigationSource({...nav,source:{id:'ctx-'+'a'.repeat(64),...source}},nav)).toThrow();
   }

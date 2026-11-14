@@ -1,8 +1,11 @@
+/* Hallmark · built: TINA Terminal · redesign: full · shape: app screen · scope: app · genre: modern-minimal · theme: TINA Graphite Emerald · v2.0.0 */
+/* Critique · keep the TINA workbench; clarify the meeting record and reduce the transcript chrome at phone width. */
 @import "tailwindcss";
 @import "../../../../branding/tokens.css";
+@import "../surfaces/today.tokens.css";
+@import "./terminalColors.css";
 
-/* Terminal aliases. Dark mode uses the Terminal-only Graphite Emerald palette below; light mode
- * continues to inherit the shared TINA light tokens. */
+/* Terminal aliases. The five base colors and both theme mappings live in terminalColors.css. */
 :root {
   color-scheme: dark;
   /* Neutral raised level for light mode; dark mode replaces it with a graphite step. */
@@ -36,46 +39,18 @@
   --greenbg: var(--accepted-bg);
   --blue: var(--pending);
   --bluebg: var(--pending-bg);
-  --violet: #b08cf0;
-  --violetbg: rgba(176, 140, 240, 0.14);
+  --violet: var(--t2);
+  --violetbg: color-mix(in srgb, var(--t2) 12%, transparent);
+  --ui-type-meta: 12px;
+  --ui-type-label: 14px;
+  --ui-type-body: 16px;
+  --ui-type-section: 20px;
+  --ui-type-title: 24px;
   --r: var(--radius-control);
   --r2: var(--radius-panel);
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
   --sans: var(--font-body);
   --display: var(--font-display, Georgia, serif);
-}
-
-/* Graphite Emerald · approved Terminal direction B.
- * Graphite separates the work canvas, navigation rails, and raised controls. Emerald stays
- * focused on active navigation, primary actions, and keyboard focus. These local overrides keep
- * Dashboard and Extension on the shared TINA brand palette. */
-:root[data-theme="dark"] {
-  --canvas: #0D1310;
-  --surface: #232D26;
-  --subtle: #171F1A;
-  --raised: #34433A;
-  --rail: var(--subtle);
-  --ink: #F6FAF7;
-  --muted: #C9D5CB;
-  --quiet: #9AA99E;
-  --brand: #43D279;
-  --on-brand: #062013;
-  --line: #586B5E;
-  --control-line: #8AA094;
-  --focus: #43D279;
-}
-
-/*
- * Day mode — the light counterpart of the dark tokens above. Same variable names so every surface
- * (which paints from var(--*)) switches with no per-component changes. Toggled via the footer control,
- * which sets data-theme="light" on <html>.
- */
-:root[data-theme="light"] {
-  color-scheme: light;
-  /* Day-mode violet: #b08cf0 is a dark-mode lavender and only reaches 2.50:1 on the light canvas.
-   * This step keeps the hue and clears WCAG AA (6.68:1 on #F7F8F3, 7.13:1 on #FFFFFF). */
-  --violet: #6938C2;
-  --violetbg: rgba(105, 56, 194, 0.12);
 }
 
 html,
@@ -86,6 +61,7 @@ body {
   background: var(--bg);
   color: var(--t1);
   font-family: var(--sans);
+  font-size: var(--ui-type-body);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -153,11 +129,18 @@ body {
   font-weight: 500;
 }
 .dockview-theme-abyss .dv-tab {
-  font-size: 12px;
+  font-size: var(--ui-type-meta);
   transition: background-color .12s ease, color .12s ease;
 }
 .dockview-theme-abyss .dv-tab:hover {
   color: var(--t1);
+}
+
+@media (max-width: 559px) {
+  .dockview-theme-abyss .dv-tabs-container {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
 }
 
 /* cmdk command palette (headless — we style its data-attributes) */
@@ -168,27 +151,27 @@ body {
   border: none;
   outline: none;
   color: var(--t1);
-  font-size: 15px;
-  padding: 16px 18px;
+  font-size: var(--ui-type-body);
+  padding: var(--space-4);
   border-bottom: 1px solid var(--line);
 }
 [cmdk-input]::placeholder { color: var(--t3); }
-[cmdk-list] { max-height: 360px; overflow: auto; padding: 6px; }
+[cmdk-list] { max-height: 360px; overflow: auto; padding: var(--space-2); }
 [cmdk-group-heading] {
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--ui-type-meta);
+  text-transform: none;
+  letter-spacing: normal;
   color: var(--t3);
-  padding: 10px 10px 4px;
+  padding: var(--space-2) var(--space-2) var(--space-1);
 }
 [cmdk-item] {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-radius: 6px;
   color: var(--t1);
-  font-size: 13px;
+  font-size: var(--ui-type-label);
   cursor: pointer;
   user-select: none;
   transition: background .1s ease, color .1s ease;
@@ -197,8 +180,8 @@ body {
   background: var(--panel2);
   color: var(--accent);
 }
-[cmdk-empty] { padding: 18px; color: var(--t3); font-size: 13px; text-align: center; }
-.pal-skill { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+[cmdk-empty] { padding: var(--space-4); color: var(--t3); font-size: var(--ui-type-label); text-align: center; }
+.pal-skill { margin-left: auto; font-family: var(--mono); font-size: var(--ui-type-meta); color: var(--accent); }
 
 /* allotment — match the split sash to our palette */
 :root {
@@ -212,9 +195,9 @@ body {
 
 /* entity list — a quiet row: hover-only secondary action, type-color rail revealed on hover */
 .vx-row { position: relative; }
-.vx-row .vx-row-act { opacity: 0; transform: translateX(2px); transition: opacity .12s ease, transform .12s ease; }
+.vx-row .vx-row-act { opacity: .65; transition: opacity .12s ease; }
 .vx-row:hover .vx-row-act,
-.vx-row:focus-within .vx-row-act { opacity: 1; transform: none; }
+.vx-row:focus-within .vx-row-act { opacity: 1; }
 .vx-row .vx-row-rail { opacity: 0; transition: opacity .12s ease; }
 .vx-row:hover .vx-row-rail { opacity: 1; }
 
@@ -266,9 +249,19 @@ body {
 .shell-topbar-toggle {
   color: var(--t2);
 }
+.shell-context-label {
+  color: var(--t3);
+  font-size: var(--ui-type-meta);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.shell-context-separator {
+  color: var(--line2);
+  margin: 0 var(--space-2);
+}
 .panel-toggle-btn.btn-danger:hover {
-  color: var(--danger, #ff6b6b);
-  border-color: rgba(255, 107, 107, 0.25);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 25%, transparent);
 }
 
 /* Direction C capture controls — open, quiet field; emerald is reserved for the primary action. */
@@ -277,13 +270,13 @@ body {
   width: 0;
   min-width: 0;
   flex: 1;
-  height: 34px;
-  padding: 0 10px;
+  height: 36px;
+  padding: 0 var(--space-3);
   border: 1px solid var(--line);
   border-radius: 6px;
   background: transparent;
   color: var(--t1);
-  font-size: 12px;
+  font-size: var(--ui-type-label);
   outline: none;
   transition: border-color .12s ease, box-shadow .12s ease;
 }
@@ -295,17 +288,17 @@ body {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent);
 }
 .meeting-capture-add {
-  height: 34px;
+  height: 36px;
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 10px;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
   border: 0;
   border-radius: 6px;
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 11.5px;
+  font-size: var(--ui-type-label);
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
@@ -314,8 +307,11 @@ body {
   filter: brightness(1.07);
 }
 .meeting-capture-add:disabled {
-  cursor: default;
-  opacity: .82;
+  cursor: not-allowed;
+  opacity: .55;
+  background: var(--panel2);
+  color: var(--t3);
+  border: 1px solid var(--line);
 }
 
 @media (max-width: 559px) {
@@ -374,4 +370,15 @@ summary:focus-visible,
 .choice-card textarea:focus-visible,
 .choice-card select:focus-visible {
   outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }

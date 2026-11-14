@@ -355,3 +355,36 @@ Voice retrieval covers long segments/paragraphs using overlapping 1200-character
 Semantic voice RAG runs in Agent API on local CPU: multilingual-E5-small INT8 (384 dimensions), BM25 + reciprocal rank fusion, then existing adjacent-source and prompt budgets. This is separate from ASR/KWS/LLM/TTS. Cold indexing is bounded to three seconds plus the in-flight batch; partially indexed long meetings continue using BM25 and complete cache on later turns. Model failures retain lexical retrieval with a content-free warning. Deployments can prepare the pinned assets with `python -m control_plane.voice_retrieval --download`; Docker builds include them automatically.
 
 To recap the full transcript, say “TINA ơi, tóm tắt cuộc họp” or “Từ đầu đến giờ đã chốt gì?”. Requests for a recent time range retain regular retrieval. Whole recaps process chronological parts, preserve original citations and verify the final short spoken answer. If preparation cannot finish within the voice deadline, TINA reports progress and asks you to repeat. Completed part work is cached for 15 minutes; every part must be processed before a factual whole-meeting recap is released. A recap is a concise selection of salient facts, not every detail or a replacement for canonical notes.
+
+Spoken delivery follows the turn: acknowledge a name-only call, answer a clear question directly,
+and ask one precise question for unresolved scope. Follow-ups supply the new detail without another
+greeting; corrections retain the original goal with the latest scope. The LLM keeps the existing
+JSON/source-verification contract. Missing evidence is distinguished from an ambiguous request.
+Waiting speech describes a tool only when core progress belongs to the active leased session and
+policy revision and the bot sees the same request within 15 seconds of the progress event.
+Otherwise it uses neutral waiting copy. The notice timer skips speech if the answer arrived during
+the readiness check. Notices are not committed as factual assistant answers or added to answer history.
+
+Recovery distinguishes silent input expiry, unresolved input, unavailable sources, service failure
+and playback failure. An idle five-second follow-up expires silently; fresh quiet capture reports
+no_input, while speech without enough ASR and stale capture retain distinct diagnostics. It does
+not announce repeated reminders to the whole room. A source-valid heard clarification chain gets
+shorter repair guidance, then an example, and pauses after two unsuccessful repair prompts.
+Clear answers are still accepted at that limit. Task flows retain fields and count retries per
+missing step; failures do not count against the caller. Neither pause nor a service error creates
+a draft, invents missing data, or opens another automatic same-person follow-up.
+
+Unavailable answer requests may play one bounded public service notice only while the policy and
+generation remain current and TTS is ready. A failed/throwing TTS attempt reports playback failure
+in the UI and never recursively speaks another error. Terminal and Extension present only fresh,
+same-session recovery diagnostics. Model errors do not imply quota exhaustion or user error.
+
+## Recording a decision through Pipecat
+
+Call “TINA ơi, ghi quyết định chuyển sang PostgreSQL”. If needed TINA asks “Đây là đề xuất hay phương án đã chốt?”. Proposed content can proceed to readback; decided content needs an exact authorized source passage plus independent verification. If sources are missing/conflicting, point to the discussion or explicitly say “ghi dưới dạng đề xuất”. After readback, say “đồng ý” to prepare a private draft; the meeting owner reviews it under the existing voice drafts in meeting Q&A. Corrections and “hủy” are supported. Stop/source changes fence the pending turn. Voice confirmation never replaces owner approval. Paused/service-error decision flows can use Continue in chat.
+
+## Bounded recovery for mic and draft failures
+
+A stalled Meet mic evaluation has a five-second caller deadline; local PCM stops and the actual UI operations remain serialized to avoid late unmute races. Server cancellation and heard-prefix receipt do not wait for that browser operation. Unverified mic state prevents new playback until mute is verified.
+
+Task and decision histories retain the initial request and exact current-field input snippets at their bound, so corrections and explicit confirm/cancel stay available. An uncertain task/decision save blocks blind recreation; a definite source conflict instead returns to source clarification. Raw ASR/audio stay unchanged.

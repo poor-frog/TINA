@@ -9,6 +9,19 @@ name: tina-v012
 # mounted /var/run/docker.sock. That published ~3.6GB image is a REFERENCE here, never built.
 
 services:
+  agent-reach:
+    image: tina/agent-reach:${IMAGE_TAG:-dev}
+    build: {context: ../agent-reach}
+    networks: [tina]
+    read_only: true
+    tmpfs: [/tmp]
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   livekit:
     profiles: ["livekit"]
     image: livekit/livekit-server:v1.13.11
@@ -36,15 +49,22 @@ services:
   livekit-agent:
     profiles: ["livekit"]
     image: tina/livekit-agent:${IMAGE_TAG:-dev}
-    build: {context: ../livekit}
+    build:
+      context: ../..
+      dockerfile: deploy/livekit/Dockerfile
+      args: {TINA_BOT_IMAGE: "${BROWSER_IMAGE:-tina/tina-bot:dev}"}
     environment:
       LIVEKIT_URL: ws://livekit:7880
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
       MEETING_API_URL: http://meeting-api:8080
+      TINA_LIVEKIT_AUDIO: ${TINA_LIVEKIT_AUDIO:-0}
+      TINA_LIVEKIT_VAD_SHADOW: ${TINA_LIVEKIT_VAD_SHADOW:-0}
+      TINA_AUDIO_DENOISER: ${TINA_AUDIO_DENOISER:-webrtc}
       TTS_SERVICE_URL: ${TTS_SERVICE_URL:-http://tts:8000}
       TTS_API_TOKEN: ${TTS_API_TOKEN:-}
     networks: [tina]
+    volumes: ["meeting-voice-models:/models/meeting-voice:ro"]
     depends_on:
       livekit: {condition: service_healthy}
     read_only: true
@@ -84,6 +104,8 @@ services:
       context: ../tts
     environment:
       TTS_API_TOKEN: ${TTS_API_TOKEN:-}
+      TINA_TTS_PROFILE_KEY: ${TINA_TTS_PROFILE_KEY:-}
+      TINA_TTS_THREADS: ${TINA_TTS_THREADS:-2}
     volumes: ["tts-models:/models:ro"]
     networks: [tina]
     read_only: true
@@ -370,7 +392,8 @@ services:
       # agent-api and X-User-Id is always present — then a missing header fails closed (401).
       - TINA_AGENT_DEFAULT_SUBJECT=${TINA_AGENT_DEFAULT_SUBJECT:-u_live}
       # Server-owned tool.v1 names available to interactive chat; request bodies cannot add tools.
-      - TINA_CHAT_TOOLBELT=${TINA_CHAT_TOOLBELT:-[]}
+      - 'TINA_CHAT_TOOLBELT=${TINA_CHAT_TOOLBELT:-["reach.web.search","reach.web.read","reach.github.search","reach.github.read"]}'
+      - TINA_AGENT_REACH_URL=${TINA_AGENT_REACH_URL-http://agent-reach:8080}
       - TINA_AGENT_MODEL=${TINA_AGENT_MODEL:-}
       - TINA_MEETING_MODEL=${TINA_MEETING_MODEL:-}
       - TINA_OPENAI_AUTH_DIR=/var/lib/tina/openai-auth
@@ -506,10 +529,15 @@ services:
       # Optional OpenAI-compatible TTS endpoint for the bot's Speak acts. These stay server-side;
       # meeting-api forwards them only into voice-enabled bot workloads.
       - TINA_MEETING_VOICE=${TINA_MEETING_VOICE:-0}
+      - TINA_VOICE_TURN_SHADOW=${TINA_VOICE_TURN_SHADOW:-1}
+      - TINA_LIVEKIT_AUDIO=${TINA_LIVEKIT_AUDIO:-0}
+      - TINA_LIVEKIT_VAD_SHADOW=${TINA_LIVEKIT_VAD_SHADOW:-0}
       - LIVEKIT_AGENT_URL=${LIVEKIT_AGENT_URL:-}
       - AGENT_API_URL=${AGENT_API_URL:-http://agent-api:8100}
       - TTS_SERVICE_URL=${TTS_SERVICE_URL:-}
       - TTS_API_TOKEN=${TTS_API_TOKEN:-}
+      - TINA_TTS_PROFILE_KEY=${TINA_TTS_PROFILE_KEY:-}
+      - TINA_TTS_PREBUFFER_MS=${TINA_TTS_PREBUFFER_MS:-150}
       - DIARIZATION_SERVICE_URL=${DIARIZATION_SERVICE_URL:-}
       - DIARIZATION_SERVICE_TOKEN=${DIARIZATION_SERVICE_TOKEN:-}
       - ALIGNMENT_SERVICE_URL=${ALIGNMENT_SERVICE_URL:-}

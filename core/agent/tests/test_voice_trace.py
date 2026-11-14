@@ -29,3 +29,26 @@ def test_untrusted_trace_header_is_replaced_with_a_uuid(caplog):
     record = json.loads(caplog.records[0].message)
     UUID(record['request_id'])
     assert 'SECRET' not in caplog.text
+
+
+def test_rerank_empty_is_logged_separately_from_failure_without_untrusted_metadata(caplog):
+    with voice_span('source_selection') as metrics:metrics.update(outcome='empty',output_sources=0,query='PRIVATE')
+    with voice_span('source_selection') as metrics:metrics.update(outcome='PRIVATE OUTCOME')
+    records=[json.loads(r.message) for r in caplog.records if r.name=='shared.voice_trace']
+    assert records[0]['outcome']=='empty' and records[0]['output_sources']==0
+    assert 'outcome' not in records[1] and 'PRIVATE' not in caplog.text
+
+
+def test_round_and_cancelled_status_are_bounded_and_each_span_has_a_distinct_id(caplog):
+    import asyncio
+    with caplog.at_level(logging.INFO, logger='shared.voice_trace'):
+        with pytest.raises(asyncio.CancelledError), voice_span('rag_plan') as metrics:
+            metrics.update(round=2, tool_count=2, parallel=True, lookup_outcome='unavailable', query='PRIVATE QUESTION')
+            raise asyncio.CancelledError()
+        with voice_span('rag_plan') as metrics: metrics['round'] = True
+    records = [json.loads(r.message) for r in caplog.records]
+    assert records[0]['status'] == 'cancelled' and records[0]['round'] == 2
+    assert records[0]['tool_count'] == 2 and records[0]['parallel'] is True
+    assert records[0]['lookup_outcome'] == 'unavailable'
+    assert 'round' not in records[1] and records[0]['span_id'] != records[1]['span_id']
+    assert 'PRIVATE' not in caplog.text

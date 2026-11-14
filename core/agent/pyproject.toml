@@ -26,6 +26,7 @@ control-plane = [
     "numpy==2.4.6",
     "python-multipart>=0.0.31,<1",
     "uvicorn[standard]>=0.29,<1",
+    "underthesea==9.5.0",
 ]
 # worker image (claude-in-container) — base only; claude-code is an npm global, not a pip dep.
 worker = []

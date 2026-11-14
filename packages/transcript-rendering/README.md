@@ -38,9 +38,35 @@ WebSocket / REST segments
 | `deduplicateSegments` | `(segments: T[]) => T[]` | Speaker-aware dedup: adjacent duplicates, containment, expansion, tail-repeats |
 | `groupSegments` | `(segments: T[], options?: GroupingOptions) => SegmentGroup<T>[]` | Group consecutive same-key segments; splits at `maxCharsPerGroup` boundaries |
 | `parseUTCTimestamp` | `(timestamp: string) => Date` | Parse ISO timestamps as UTC (appends `Z` when no timezone suffix) |
+| `formatTranscript` | `(original: string, completed?: boolean, sourceParts?: readonly string[]) => FormattedTranscript` | Conservative final-text display projection with exact original offsets |
 | `TranscriptSegment` | type | Input segment interface |
 | `SegmentGroup` | type | Output grouped segments |
 | `GroupingOptions` | type | Grouping configuration |
+
+### Final Vietnamese display formatting
+
+`formatTranscript` returns `{original, text, changes, version: 'vi-display.v1'}` without modifying
+the segment or its identity/timestamps. Each change records original character offsets, original
+and replacement text and its kind (`number`, `date`, `time`, `phone`, `technical`). Drafts passed
+with `completed=false` and texts over 50000 characters are unchanged. Callers apply formatting
+per finalized ASR segment, before grouping; bilingual phrase groups pass their source member parts
+so formatting cannot construct a number from separate ASR turns. Mismatched member text stays raw.
+
+The initial deterministic rules cover explicit quantities/percent/currency/counts, valid
+`ngày … tháng … [năm …]`, contextual `lúc … giờ …` (including rưỡi and explicit morning/afternoon),
+digit-by-digit phones explicitly introduced as điện thoại (including leading zero and explicit
+cộng/+), version numbers after known technical names plus `phiên bản`, and explicitly separated
+`mã …` with literal/explicitly cased letters and digit sequences. Relative dates are not resolved;
+unsupported approximate/subtractive times and invalid dates remain raw. Incomplete/ambiguous phones
+are not padded, and O/0 or I/1/case are not guessed. URLs, email, inline/fenced code and contested
+transcript markup are protected. Ambiguous numeric separators/year phrases stay raw.
+
+Terminal and Extension import the same pure formatter source from this package. The UI displays
+only the formatted final copy; the original remains in the source data and formatter result.
+Stored canonical ASR, citations, fingerprints, translation
+source matching, RAG/LLM verification and audio offsets remain untouched. This is display ITN,
+not ASR correction or proof of a speaker's intended phone/code. New vocabularies need explicit
+rules and held-out audio testing rather than an unconstrained LLM rewrite.
 
 ### TranscriptSegment Fields
 

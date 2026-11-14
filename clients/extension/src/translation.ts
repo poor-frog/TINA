@@ -16,7 +16,7 @@ export interface TranslationSnapshot {
   can_advance?: boolean; service_error?: string;
 }
 
-export interface PhraseTranslation { text: string | null; ready: boolean; status?: TranslationGroup['status'] }
+export interface PhraseTranslation { text: string | null; ready: boolean; sourceParts?:string[]; status?: TranslationGroup['status'] }
 
 /** Render backend-owned phrase boundaries; reject a stale group if any visible source changed. */
 export function translationSegments<T extends TranscriptSegment & { speaker_id?: string; revision?: number }>(segments: T[], groups: TranslationGroup[]): (T & { translation?: PhraseTranslation })[] {
@@ -42,7 +42,7 @@ export function translationSegments<T extends TranscriptSegment & { speaker_id?:
     result.push({ ...segment, segment_id: group.group_id, text: group.source_text,
       absolute_start_time: group.start_ms > 100_000_000_000 ? new Date(group.start_ms).toISOString() : segment.absolute_start_time,
       absolute_end_time: group.end_ms > 100_000_000_000 ? new Date(group.end_ms).toISOString() : segment.absolute_end_time,
-      translation: { text: group.translated_text, ready: group.ready, status: group.status } });
+      translation: { text: group.translated_text, ready: group.ready, status: group.status,sourceParts:group.members.map(m=>m.source_text) } });
   }
   return result;
 }

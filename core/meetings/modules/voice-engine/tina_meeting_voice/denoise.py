@@ -36,7 +36,8 @@ class NativeNs:
 
 
 class NsStream:
-    def __init__(self, emit, factory=NativeNs, delay=DELAY):
+    def __init__(self, emit, factory=NativeNs, delay=DELAY, frame_size=FRAME):
+        self.frame_size=frame_size
         self.native, self.emit, self.skip = factory(), emit, delay
         self.raw = np.array([], dtype=np.float32)
         self.clean = np.array([], dtype=np.float32)
@@ -45,9 +46,9 @@ class NsStream:
 
     def _process(self):
         chunks = []
-        while len(self.raw) >= FRAME:
-            out = self.native.process(self.raw[:FRAME]); self.raw = self.raw[FRAME:]
-            self.processed += FRAME
+        while len(self.raw) >= self.frame_size:
+            out = self.native.process(self.raw[:self.frame_size]); self.raw = self.raw[self.frame_size:]
+            self.processed += self.frame_size
             skip = min(self.skip, len(out)); self.skip -= skip
             chunks.append(out[skip:])
         if chunks: self.clean = np.concatenate([self.clean, *chunks])
@@ -65,7 +66,7 @@ class NsStream:
         try:
             if self.frames:
                 extra = max(0, self.received + self.delay - self.processed)
-                pad = ((extra + FRAME - 1) // FRAME) * FRAME - len(self.raw)
+                pad = ((extra + self.frame_size - 1) // self.frame_size) * self.frame_size - len(self.raw)
                 self.raw = np.pad(self.raw, (0, pad)); self._process()
                 if self.frames: raise RuntimeError('NS tail not drained')
         finally:

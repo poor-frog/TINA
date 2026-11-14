@@ -406,6 +406,16 @@
     },
     {
       "method": "POST",
+      "path": "/meetings/{meeting_id}/voice-assistant/handoff/{request_id}",
+      "scopes": ["bot", "tx"]
+    },
+    {
+      "method": "GET",
+      "path": "/meetings/{meeting_id}/voice-assistant/handoff/{request_id}",
+      "scopes": ["bot", "tx"]
+    },
+    {
+      "method": "POST",
       "path": "/meetings/{meeting_id}/voice-assistant/navigation/{request_id}",
       "scopes": ["bot", "tx"]
     },

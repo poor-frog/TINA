@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _encoder = None
 _failed = False
+_retry_at = 0.0
 
 
 def file_hash(path):
@@ -124,15 +125,20 @@ class Encoder:
 
 
 def semantic_rank(scope, question, sources):
-    global _encoder, _failed
-    if not sources or _failed: return []
+    global _encoder, _failed, _retry_at
+    if not sources: return []
     if not _lock.acquire(timeout=.05): return []
     try:
+        if time.monotonic() < _retry_at: return []
         if _encoder is None: _encoder = Encoder(DIRECTORY)
-        return _encoder.rank(scope, question, sources)
+        ranked = _encoder.rank(scope, question, sources)
+        _failed, _retry_at = False, 0.0
+        return ranked
     except Exception as exc:
         log.warning('voice semantic retrieval unavailable error=%s', type(exc).__name__)
         _failed = True
+        # Retry both initialization and inference faults without hammering unavailable assets/runtime.
+        _retry_at = time.monotonic() + 30
         return []
     finally:
         _lock.release()

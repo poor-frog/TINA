@@ -18,6 +18,7 @@ exercises:
   is refused (422) — never silently dropped (#922).
 """
 import hmac
+import json
 import os
 import time
 from datetime import datetime, timedelta
@@ -334,6 +335,19 @@ def global_setup_state(value: dict) -> str:
 class VoicePrefsUpdate(BaseModel):
     model_config = {'extra': 'forbid'}
     prepare_new_bots: StrictBool | None = None
+    speech_voice: str = Field(default='auto',min_length=1,max_length=64)
+    pronunciations: dict[str,str] = Field(default_factory=dict,max_length=32)
+
+    @model_validator(mode='after')
+    def bounded_speech(self):
+        if not all(c.isalpha() or c in " -'" for c in self.speech_voice):raise ValueError('Choose a preset voice')
+        if len(json.dumps(self.pronunciations,ensure_ascii=False).encode())>2048:raise ValueError('Pronunciations exceed limit')
+        for term,spoken in self.pronunciations.items():
+            if (not 1<=len(term)<=80 or not 1<=len(spoken)<=120 or term!=term.strip() or spoken!=spoken.strip()
+                    or not all(c.isalpha() or c in " -'.," for c in term+spoken)):
+                raise ValueError('Use bounded words for pronunciations')
+        if len({k.casefold() for k in self.pronunciations})!=len(self.pronunciations):raise ValueError('Duplicate pronunciation term')
+        return self
 
 
 class ModelPrefsUpdate(BaseModel):
@@ -984,12 +998,13 @@ def create_app() -> FastAPI:
                              db: AsyncSession = Depends(get_db)):
         from sqlalchemy.orm import attributes
         data = dict(user.data or {})
-        data['voice_prefs'] = update.model_dump()
+        merged=VoicePrefsUpdate.model_validate({**(data.get('voice_prefs') or {}),**update.model_dump(exclude_unset=True)})
+        data['voice_prefs'] = merged.model_dump()
         user.data = data
         attributes.flag_modified(user, 'data')
         db.add(user)
         await db.commit()
-        return update.model_dump()
+        return merged.model_dump()
 
     @app.put("/user/models")
     async def set_user_models(update: ModelPrefsUpdate,

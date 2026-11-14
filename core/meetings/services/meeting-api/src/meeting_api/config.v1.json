@@ -167,6 +167,21 @@
       ]
     },
     {
+      "key": "TINA_TTS_PROFILE_KEY",
+      "class": "defaulted",
+      "secret": true,
+      "default": "",
+      "description": "Domain-separated speech-profile signing key derived from INTERNAL_API_SECRET by the stack runner; never forwarded to bots",
+      "targets": ["compose"]
+    },
+    {
+      "key": "TINA_TTS_PREBUFFER_MS",
+      "class": "defaulted",
+      "default": "150",
+      "description": "Bot PCM prebuffer in milliseconds; playback bounds values to 80-1000 ms",
+      "targets": ["compose"]
+    },
+    {
       "key": "DIARIZATION_SERVICE_URL",
       "class": "defaulted",
       "default": "",
@@ -758,6 +773,27 @@
       "targets": [
         "compose"
       ]
+    },
+    {
+      "key": "TINA_VOICE_TURN_SHADOW",
+      "class": "defaulted",
+      "default": "1",
+      "description": "Enable isolated Smart Turn v3.2 + Namo Multilingual CPU observations for new voice bots; scores never control endpoints",
+      "targets": ["compose"]
+    },
+    {
+      "key": "TINA_LIVEKIT_AUDIO",
+      "class": "defaulted",
+      "default": "0",
+      "description": "Route new Google Meet bot STT windows through the LiveKit SDK and shared local NS stream using signed active-session capabilities",
+      "targets": ["compose"]
+    },
+    {
+      "key": "TINA_LIVEKIT_VAD_SHADOW",
+      "class": "defaulted",
+      "default": "0",
+      "description": "Compare hosted Silero activity and endpoint candidates without changing bot turn authority",
+      "targets": ["compose"]
     },
     {
       "key": "AGENT_API_URL",

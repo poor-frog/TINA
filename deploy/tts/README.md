@@ -1,6 +1,6 @@
 # Optional Vietnamese TTS sidecar (speech phase 1)
 
-The female **Trúc Ly** preset (Northern Vietnamese, natural style) from **VieNeu-TTS v3 Turbo**,
+The default **Trúc Ly** preset (Northern Vietnamese) from **VieNeu-TTS v3 Turbo**,
 using the ONNX CPU backend. This implements
 the bot's existing speech HTTP interface. STT, agent dispatch, transcripts and bot playback
 are unchanged. The standalone Compose project remains available. The main stack now also offers an opt-in `speech` profile through `TINA_MEETING_VOICE=1`; see [bot-hosted voice](../../docs/tina-meeting-voice.md).
@@ -10,6 +10,33 @@ to ADR-0004. VieNeu, sea-g2p and the chosen model/codec cards declare Apache-2.0
 No reference recording, voice cloning or training is enabled.
 The SDK also installs transitive MPL/LGPL packages as separate unmodified dependencies;
 their scoped records are in the repository's `license-exceptions.json`.
+
+## Account voice and pronunciation settings
+
+Settings → Voice assistant exposes the pinned SDK's 25 preset voices, browser-only preview and
+up to 32 custom `term = pronunciation` overrides (2 KB encoded). Preferences live in the account's
+existing identity settings. Partial saves preserve the independent prepare-new-bots preference.
+New enabled bot sessions pin the owner's speech profile in private Redis; existing sessions keep
+their selected voice/rules. No glossary enters public meeting JSON or canonical answer text.
+
+Meeting API signs bounded speech profiles with a domain-separated key derived by the main stack
+from its existing `INTERNAL_API_SECRET`. Only API and TTS receive that derived key; bots/Agents
+receive the signed meeting/session descriptor. No additional private-key file is required. Ordinary
+TTS clients cannot supply unsigned pronunciation rules or audio references. Standalone clients may
+choose a preset directly; standalone signed profiles require the same explicitly supplied derived key.
+
+Public notice cache keys include the selected preset. Default notices warm at startup; a selected
+profile's notice catalog warms in a bounded, low-priority background job before room voice reports
+ready. User synthesis/queued requests take precedence. Only fixed public notices are cached, never
+private answers or pronunciation examples. The custom glossary does not rewrite fixed notices.
+
+`TINA_TTS_THREADS` sets CPU threads (1–8; portable default 2). `TINA_TTS_PREBUFFER_MS` configures bot
+prebuffer (80–1000 ms; default 150); short clips are still released when the stream finishes.
+`benchmark.py` measures uncached single/three-concurrent HTTP synthesis and simulates 150/300 ms
+playout without microphone output. On this Mac's Docker CPU run, warm first PCM was 248 ms at two
+threads and 180 ms at four; all sampled 150/300 ms playout simulations had zero potential starvation.
+The local deployment uses four threads and retains 150 ms. This small, stochastic sample set does
+not establish a meeting-playback SLA or performance under active ASR/VAD load.
 
 ## Encrypted token for one machine
 
@@ -183,8 +210,9 @@ playback. Discord speaking remains unsupported.
 - `POST /v1/audio/speech`, `X-API-Key`, `Content-Type: application/json`.
 - Body: `{"model":"tts-1","input":"Xin chào","voice":"auto","response_format":"pcm"}`.
 - Output: **headerless little-endian PCM16, mono, 24,000 Hz**, resampled from the model's 48 kHz.
-- Only preset `auto` and PCM are supported; unsupported choices return 422.
-- `auto` selects Trúc Ly explicitly. Standalone `TINA`/`Tina`/`tina` is spoken as "ti na"
+- `voice=auto` selects Trúc Ly unless a signed owner profile selects another preset. Preset names
+  are allowlisted from the pinned SDK; model paths, reference recordings and arbitrary rules are refused.
+- Standalone `TINA`/`Tina`/`tina` is spoken as "ti na"
   to prevent acronym spelling; agent/transcript text and other acronyms remain unchanged.
 - Limits: 4,000 input characters, 20,000 request bytes, 120 seconds synthesized audio.
   The sidecar admits at most sixteen connections and closes each after 145 seconds total
@@ -236,7 +264,7 @@ The CI TTS job installs pinned Dotenvx and runs these alongside the audio/protoc
 
 `GET /ready` requires the same `X-API-Key` as synthesis, and performs no inference. The bot voice preflight uses it to check that shared credentials match. `/health` and `/status` remain content-free unauthenticated probes.
 
-Bot ASR-addressed voice accepts its built-in TINA name variants at the beginning of a turn. Before readiness, the service prewarms/caches twelve public phrases in `WAKE_TEXTS`, `WAIT_TEXTS` and `SUMMARY_TEXTS`: four for name-only calls, four for question waiting and four for recap waiting. They match the bot's `VOICE_NOTICES` catalog, bypass project pronunciation overrides and the busy Agents LLM session. The bot rotates within each group without an extra LLM request. Bot answers are validated before sentence-by-sentence playback and never cached.
+Bot ASR-addressed voice accepts its built-in TINA name variants at the beginning of a turn. Before readiness, the service prewarms/caches the fixed public wake, neutral waiting, summary and tool-progress phrases. Two legacy waiting phrases remain cached for older bot images. These match the bot's public notice whitelist, bypass project pronunciation overrides and the busy Agents LLM session. Wake/neutral phrases rotate without an extra LLM request. Specific progress speech requires a fresh matching request/revision from the leased meeting turn; absent or stale progress uses neutral waiting copy. Bot answers are validated before sentence-by-sentence playback and never cached.
 
 ### Verified replies and the spoken copy
 

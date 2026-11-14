@@ -226,6 +226,13 @@
       "targets": ["compose"]
     },
     {
+      "key": "TINA_AGENT_REACH_URL",
+      "class": "defaulted",
+      "default": "",
+      "description": "Private public-only Agent Reach retrieval worker URL, forwarded to dispatched workers; empty retains provider web search",
+      "targets": ["compose"]
+    },
+    {
       "key": "TINA_UNIT_TOOLS",
       "class": "defaulted",
       "default": "[]",

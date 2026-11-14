@@ -2,6 +2,18 @@ import numpy as np
 from tina_meeting_voice.vad_monitor import VadMonitor
 
 
+def test_setup_makes_verified_shared_silero_readable_by_non_root_without_downloading(tmp_path,monkeypatch):
+    import hashlib
+    import sys
+    from tina_meeting_voice import assets,bot,turn_assets
+    model=tmp_path/'silero_vad.onnx';model.write_bytes(b'synthetic-model');model.chmod(0o600)
+    monkeypatch.setattr(assets,'manifest',lambda:{'vad':{'sha256':hashlib.sha256(b'synthetic-model').hexdigest()}})
+    monkeypatch.setattr(turn_assets,'install',lambda directory:None)
+    monkeypatch.setattr(sys,'argv',['bot',str(tmp_path),'--setup','--vad-only'])
+    bot.main()
+    assert model.stat().st_mode&0o444==0o444
+
+
 class Vad:
     def __init__(self): self.last_end_sample = None; self.active = False; self.ended = False
     def feed(self, samples): return self.active, self.ended

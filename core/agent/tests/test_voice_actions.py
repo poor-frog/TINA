@@ -1,4 +1,5 @@
 import json
+import os
 from copy import deepcopy
 from uuid import uuid4
 
@@ -155,3 +156,33 @@ def test_action_intent_requires_an_explicit_request_and_keeps_refinement_separat
     assert action_context('Demo cho An',pending)[0]=='task'
     assert action_context('Ai phụ trách demo?',pending)[0] is None
     assert action_context('Bỏ qua, không cần nữa',pending)[0] is None
+
+
+def test_old_pending_draft_is_pageable_and_reviewable_directly_by_id(actions):
+    client,root,row,state=actions
+    directory=root/'.meeting-knowledge'/'1'/'voice-drafts';directory.mkdir(parents=True)
+    pending=None
+    for index in range(21):
+        rid=str(uuid4())
+        from control_plane.voice_actions import create_draft
+        draft=create_draft(directory,request_id=rid,meeting_id=1,owner=7,policy_revision=1,
+            kind='task',title=f'Demo {index}',details='Synthetic owner-reviewed voice request')
+        path=directory/(draft.id+'.json')
+        if index==0:pending=draft
+        else:
+            value=json.loads(path.read_text());value['status']='discarded';value['revision']=2
+            path.write_text(json.dumps(value))
+        os.utime(path,(1000+index,1000+index))
+        state['replies'].append({'request_id':rid,'state':'completed','text':draft.readback})
+    listing=client.get(BASE,headers=OWNER)
+    assert listing.status_code==200 and len(listing.json()['drafts'])==20
+    assert all(d['status']=='discarded' for d in listing.json()['drafts'])
+    assert listing.json()['next_offset']==20
+    older=client.get(BASE+'?offset=20',headers=OWNER).json()
+    assert [d['id'] for d in older['drafts']]==[pending.id] and 'next_offset' not in older
+    assert client.get(BASE+'?offset=-1',headers=OWNER).status_code==422
+    review={'expected_revision':1,'status':'approved','title':pending.title,'details':pending.details}
+    result=client.post(BASE+'/'+pending.id+'/review',headers=OWNER,json=review)
+    assert client.post(BASE+'/'+pending.id+'/review',headers={'X-User-Id':'8'},json=review).status_code==404
+    assert result.status_code==200,result.text
+    assert json.loads((directory/(pending.id+'.json')).read_text())['status']=='approved'

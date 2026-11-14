@@ -9,7 +9,9 @@ class Element {
   constructor() {
     this._text='';this.textWrites=0;this.innerHTML='';this.style={};this.dataset={};this.value='';this.listeners={};
     this.children=[];this.parentElement=null;this.hidden=false;this.scrollTop=0;this.scrollHeight=2000;this.clientHeight=400;
-    this.classList={add(){},remove(){},toggle(){}};
+    const classes=new Set();this.classList={add(...names){names.forEach(name=>classes.add(name));},
+      remove(...names){names.forEach(name=>classes.delete(name));},contains(name){return classes.has(name);},
+      toggle(name){if(classes.has(name)){classes.delete(name);return false;}classes.add(name);return true;}};
   }
   get childNodes(){return this.children;}
   contains(node){for(let current=node;current;current=current.parentElement)if(current===this)return true;return false;}

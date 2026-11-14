@@ -1,4 +1,4 @@
-/** Behavioral test for the WORKSPACES sidebar section (workspace.tsx WorkspaceSwitcher).
+/** Behavioral tests for the workspace picker (workspace.tsx WorkspaceSwitcher).
  *
  *  ADDITIVE model (WP-A1): the list-level "+ New workspace…" action CREATES a fresh blank workspace and
  *  ADDS it to the mount set (a new CHECKED row) — it does NOT swap/rebuild/park the baseline, and pops NO
@@ -14,7 +14,7 @@ import { ServicesProvider, createContainer, reg } from "../../platform";
 import { LayoutServiceId, createLayoutService } from "../../workbench/layout";
 import * as api from "../workspaceApi";
 
-// WorkspaceSwitcher now opens the MANAGE tab via the LayoutService — provide a real one so it renders.
+// WorkspaceSwitcher opens the MANAGE tab via the LayoutService — provide a real one so it renders.
 const withServices = (node: React.ReactNode) => (
   <ServicesProvider container={createContainer([reg(LayoutServiceId, () => createLayoutService("files"))])}>{node}</ServicesProvider>
 );
@@ -44,7 +44,7 @@ const activeSet = {
 } as unknown as Awaited<ReturnType<typeof api.readActiveSet>>;
 
 async function renderOpenSwitcher(overrideActive?: Awaited<ReturnType<typeof api.readActiveSet>>) {
-  sessionStorage.setItem("ws.attach.open", "1"); // section open by default for the test
+  sessionStorage.setItem("ws.attach.open.v2", "1");
   vi.mocked(api.readAttachedWorkspaces).mockResolvedValue(view);
   vi.mocked(api.readActiveSet).mockResolvedValue(overrideActive ?? activeSet);
   vi.mocked(api.swapWorkspace).mockResolvedValue(undefined as never);
@@ -53,7 +53,7 @@ async function renderOpenSwitcher(overrideActive?: Awaited<ReturnType<typeof api
   vi.mocked(api.createWorkspace).mockResolvedValue({ subject: "u1", slug: "workspace-1", changed: true, added: true });
   const onSwapped = vi.fn();
   render(withServices(<WorkspaceSwitcher onSwapped={onSwapped} />));
-  await screen.findByText("leo"); // slots loaded
+  await screen.findByRole("button", { name: "leo" }); // workspace row loaded
   return { onSwapped };
 }
 
@@ -116,7 +116,7 @@ describe("WorkspaceSwitcher — '+ New workspace…' CREATES + ADDS (additive), 
     const cb = newRow.closest("div")!.querySelector<HTMLElement>('[role="checkbox"]')!;
     await waitFor(() => expect(cb.getAttribute("aria-checked")).toBe("true"));  // new row is CHECKED
     // the baseline (leo) is still checked (mounted) — untouched by the create; it's toggleable now
-    const leoCb = screen.getByText("leo").closest("div")!.querySelector<HTMLElement>('[role="checkbox"]')!;
+    const leoCb = screen.getByRole("button", { name: "leo" }).closest("div")!.querySelector<HTMLElement>('[role="checkbox"]')!;
     expect(leoCb.getAttribute("aria-checked")).toBe("true");
     expect(leoCb.getAttribute("aria-disabled")).not.toBe("true");
   });
@@ -169,7 +169,7 @@ describe("WorkspaceSwitcher — active set uses CHECKBOXES, not radio-style dots
   // The multi-select mental model must be visually obvious: each row renders a real role="checkbox"
   // (checked = mounted, unchecked = parked). A filled/hollow dot read as a single-select radio.
   const rowCheckbox = (name: string) =>
-    screen.getByText(name).closest("div")!.querySelector<HTMLElement>('[role="checkbox"]')!;
+    screen.getByRole("button", { name }).closest("div")!.querySelector<HTMLElement>('[role="checkbox"]')!;
 
   it("each workspace row renders a real accessible checkbox (no ●/○ dot)", async () => {
     await renderOpenSwitcher();
@@ -218,12 +218,12 @@ describe("WorkspaceSwitcher — active set uses CHECKBOXES, not radio-style dots
   it("a baseline switched OFF (baseline_hidden) renders UNCHECKED and re-activates on click", async () => {
     // Own mock setup (renderOpenSwitcher would overwrite the attached-view mock): baseline switched OFF,
     // and the active set no longer carries the baseline (nothing primary in the list).
-    sessionStorage.setItem("ws.attach.open", "1");
+    sessionStorage.setItem("ws.attach.open.v2", "1");
     vi.mocked(api.readAttachedWorkspaces).mockResolvedValue({ ...view, baseline_hidden: true } as unknown as Awaited<ReturnType<typeof api.readAttachedWorkspaces>>);
     vi.mocked(api.readActiveSet).mockResolvedValue({ subject: "u1", active: [] } as unknown as Awaited<ReturnType<typeof api.readActiveSet>>);
     vi.mocked(api.activateWorkspace).mockResolvedValue({ subject: "u1", slug: "leo", changed: true, cloned: false, nested: false });
     render(withServices(<WorkspaceSwitcher onSwapped={vi.fn()} />));
-    await screen.findByText("leo");
+    await screen.findByRole("button", { name: "leo" });
     const cb = rowCheckbox("leo");
     expect(cb.getAttribute("aria-checked")).toBe("false");       // switched off → unchecked
     fireEvent.click(cb);
@@ -251,24 +251,27 @@ describe("WorkspaceSwitcher — active set uses CHECKBOXES, not radio-style dots
   });
 });
 
-describe("WorkspaceSwitcher — selecting a row opens the MANAGE tab (not a toggle)", () => {
-  it("clicking a row's NAME opens the 'workspace' manage tab; it does NOT toggle active", async () => {
+describe("WorkspaceSwitcher — selecting a workspace focuses its files", () => {
+  it("switches the file focus without changing mount state and keeps Manage available", async () => {
     const openTab = vi.fn();
-    sessionStorage.setItem("ws.attach.open", "1");
+    const onFocusWorkspace = vi.fn();
+    sessionStorage.setItem("ws.attach.open.v2", "1");
     vi.mocked(api.readAttachedWorkspaces).mockResolvedValue(view);
     vi.mocked(api.readActiveSet).mockResolvedValue(activeSet);
     const container = createContainer([reg(LayoutServiceId, () => ({ ...createLayoutService("files"), openTab }))]);
-    render(<ServicesProvider container={container}><WorkspaceSwitcher onSwapped={vi.fn()} /></ServicesProvider>);
-    await screen.findByText("leo");
-    fireEvent.click(screen.getByText("leo"));  // the row NAME (not its checkbox)
+    render(<ServicesProvider container={container}><WorkspaceSwitcher onSwapped={vi.fn()} onFocusWorkspace={onFocusWorkspace} /></ServicesProvider>);
+    await screen.findByRole("button", { name: "leo" });
+    fireEvent.click(screen.getByRole("button", { name: "leo" }));
+    expect(onFocusWorkspace).toHaveBeenCalledWith("leo");
+    expect(api.deactivateWorkspace).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Manage leo" }));
     await waitFor(() => expect(openTab).toHaveBeenCalledWith(expect.objectContaining({ kind: "workspace", params: expect.objectContaining({ slug: "leo" }) })));
-    expect(api.deactivateWorkspace).not.toHaveBeenCalled();  // the name no longer toggles
   });
 });
 
 describe("WorkspaceSwitcher — unknown mount state", () => {
   it("does not show a fallback workspace as parked when workspace loading fails", async () => {
-    sessionStorage.setItem("ws.attach.open", "1");
+    sessionStorage.setItem("ws.attach.open.v2", "1");
     vi.mocked(api.readAttachedWorkspaces).mockRejectedValue(new Error("Your API key was rejected"));
     vi.mocked(api.readActiveSet).mockRejectedValue(new Error("Your API key was rejected"));
     render(withServices(<WorkspaceSwitcher onSwapped={vi.fn()} />));
@@ -279,7 +282,7 @@ describe("WorkspaceSwitcher — unknown mount state", () => {
   });
 
   it("keeps mount checkboxes disabled when the active set cannot be verified", async () => {
-    sessionStorage.setItem("ws.attach.open", "1");
+    sessionStorage.setItem("ws.attach.open.v2", "1");
     vi.mocked(api.readAttachedWorkspaces).mockResolvedValue(view);
     vi.mocked(api.readActiveSet).mockRejectedValue(new Error("Your API key was rejected"));
     render(withServices(<WorkspaceSwitcher onSwapped={vi.fn()} />));
@@ -292,7 +295,7 @@ describe("WorkspaceSwitcher — unknown mount state", () => {
   });
 
   it("retries the workspace list after an API error", async () => {
-    sessionStorage.setItem("ws.attach.open", "1");
+    sessionStorage.setItem("ws.attach.open.v2", "1");
     vi.mocked(api.readAttachedWorkspaces).mockRejectedValueOnce(new Error("Your API key was rejected"))
       .mockResolvedValue(view);
     vi.mocked(api.readActiveSet).mockResolvedValue(activeSet);

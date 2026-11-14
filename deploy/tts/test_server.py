@@ -23,10 +23,48 @@ TOKEN = "test-only-" + "x" * 40
 class TestEngine:
     def __init__(self, synthesize): self.synthesize = synthesize
     def stream(self, text, **kwargs): yield self.synthesize(text, **kwargs)
-    def cached_public(self, text): return None
+    def cached_public(self, text, **kwargs): return None
 
 
 class ServerTests(unittest.TestCase):
+    def test_voice_warmup_waits_for_user_work_and_caches_only_public_notices(self):
+        from engine import FIXED_TEXTS
+        cached=set();calls=[]
+        def synthesize(text,voice=None):calls.append((text,voice));cached.add((voice,text));return b'\0\0'
+        self.engine.synthesize=synthesize
+        self.engine.cached_public=lambda text,voice='auto':b'\0\0' if (voice,text) in cached else None
+        self.server.busy.acquire()
+        try:
+            self.assertFalse(self.server.warm_voice('Mai Anh'))
+            self.assertEqual(calls,[])
+        finally:self.server.release_synthesis()
+        deadline=time.monotonic()+2
+        while not self.server.warm_voice('Mai Anh') and time.monotonic()<deadline:time.sleep(.01)
+        self.assertEqual({text for text,_ in calls},set(FIXED_TEXTS))
+        self.assertTrue(all(voice=='Mai Anh' for _,voice in calls))
+
+    def test_preset_voice_reaches_synthesis_and_unknown_models_are_refused(self):
+        def selected(text,voice=None):self.calls.append(voice);return b'\x01\0'*100
+        self.engine.synthesize=selected
+        self.assertEqual(self.call({'input':'Xin chào','voice':'Mai Anh'})[0],200)
+        self.assertEqual(self.calls,['Mai Anh'])
+        self.assertEqual(self.call({'input':'Xin chào','voice':'../voice.wav'})[0],422)
+
+    def test_signed_profile_is_bound_to_meeting_and_unsigned_glossary_is_rejected(self):
+        import base64,hmac
+        received=[]
+        self.engine.synthesize=lambda text,**kwargs:(received.append(kwargs) or b'\x01\0'*100)
+        body={'voice':'Mai Anh','pronunciations':{'TINA':'ti na'},'meeting_id':14,'session':'synthetic'}
+        payload=base64.urlsafe_b64encode(json.dumps(body).encode()).decode().rstrip('=')
+        key='synthetic-profile-key-'+'x'*32
+        profile=payload+'.'+hmac.new(key.encode(),b'tina-speech.v1:'+payload.encode(),'sha256').hexdigest()
+        with patch.dict('os.environ',{'TINA_TTS_PROFILE_KEY':key}):
+            self.assertEqual(self.call({'input':'TINA','meeting_id':14,'profile':profile})[0],200)
+            self.assertEqual(received[-1]['voice'],'Mai Anh')
+            self.assertEqual(received[-1]['pronunciations'],{'TINA':'ti na'})
+            self.assertEqual(self.call({'input':'TINA','meeting_id':15,'profile':profile})[0],422)
+            self.assertEqual(self.call({'input':'TINA','meeting_id':14,'profile':profile+'x'})[0],422)
+        self.assertEqual(self.call({'input':'TINA','pronunciations':{'TINA':'ti na'}})[0],422)
     def setUp(self):
         self.calls = []
         def synthesize(text):
@@ -276,6 +314,19 @@ class ConnectionLimitTests(unittest.TestCase):
 
 
 class AudioTests(unittest.TestCase):
+    def test_notice_cache_is_separate_for_each_preset_voice(self):
+        from engine import Engine,ACK_TEXT
+        import numpy as np
+        calls=[];engine=Engine.__new__(Engine)
+        def infer(text,**kwargs):
+            calls.append(kwargs['voice']);return np.full(2400,.1 if kwargs['voice']=='Trúc Ly' else .2,dtype=np.float32)
+        engine.tts=SimpleNamespace(sample_rate=24000,infer=infer)
+        first=engine.synthesize(ACK_TEXT);second=engine.synthesize(ACK_TEXT,voice='Mai Anh')
+        self.assertNotEqual(first,second)
+        self.assertEqual(engine.synthesize(ACK_TEXT,voice='Mai Anh'),second)
+        self.assertEqual(list(engine.stream(ACK_TEXT,voice='Mai Anh')),[second])
+        self.assertEqual(calls,['Trúc Ly','Mai Anh'])
+
     def test_synthesis_uses_female_voice_and_spoken_name(self):
         import numpy as np
         from engine import Engine, spoken_text

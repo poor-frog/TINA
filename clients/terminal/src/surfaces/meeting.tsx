@@ -93,7 +93,7 @@ function ShareSessionButton({ platform, native }: { platform: string; native: st
             <option value="">live feed only (no workspace)</option>
             {shares.map((s) => <option key={s.workspace_id} value={s.workspace_id}>+ workspace: {s.workspace_id}</option>)}
           </select>
-          {err && <div role="alert" style={{ fontSize: 11.5, color: "var(--danger)" }}>⚠ {err}</div>}
+          {err && <div role="alert" style={{ fontSize: 11.5, color: "var(--danger)" }}>{err}</div>}
           {link ? (
             <div style={{ display: "flex", gap: 6 }}>
               <input readOnly value={link} onFocus={(e) => e.currentTarget.select()} style={{ ...fieldStyle, flex: 1, fontSize: 11 }} />
@@ -256,7 +256,7 @@ function ConnectedPanel({ native, docs }: { native: string; docs?: ConnectedDoc[
               })}
             </div>
           )}
-          {state.links.length === 0 && <div style={{ fontSize: 12.5, color: "var(--t3)", padding: "2px 2px" }}>Notes recorded — no linked entities yet.</div>}
+          {state.links.length === 0 && <div style={{ fontSize: 12.5, color: "var(--t3)", padding: "2px 2px" }}>Notes recorded: no linked entities yet.</div>}
         </>
       )}
     </div>
@@ -491,12 +491,12 @@ function MeetingRow({ m }: { m: MeetingMock }) {
       <div style={{ fontSize: 11, color: inRoom ? "var(--green)" : "var(--t3)", marginTop: 1, paddingLeft: inRoom ? 13 : 0 }}>{inRoom ? "live" : m.when}</div>
       {isIntent && m.auto_join_error && (
         <div role="alert" style={{ fontSize: 11, color: "var(--danger)", marginTop: 3, lineHeight: 1.35 }}>
-          ⚠ Auto-join failed: {m.auto_join_error}
+          Auto-join failed: {m.auto_join_error}
         </div>
       )}
       {m.live_status === "failed" && m.join_failure_summary && (
         <div role="status" style={{ fontSize: 11, color: "var(--danger)", marginTop: 3, lineHeight: 1.35 }}>
-          ⚠ {m.join_failure_summary}
+          {m.join_failure_summary}
         </div>
       )}
       {actionFailure?.denial ? (
@@ -565,7 +565,7 @@ function CalendarSyncStatusLine({ stamp }: { stamp: CalendarSyncStamp | null }) 
     return `${Math.round(s / 3600)} h ago`;
   })();
   if (stamp.last_error) {
-    return <div role="alert" style={{ fontSize: 11.5, color: "var(--danger)", lineHeight: 1.5 }}>⚠ Last sync failed ({ago}): {stamp.last_error}</div>;
+    return <div role="alert" style={{ fontSize: 11.5, color: "var(--danger)", lineHeight: 1.5 }}>Last sync failed ({ago}): {stamp.last_error}</div>;
   }
   const c = stamp.counts ?? {};
   const bits = [c.created ? `imported ${c.created}` : "", c.updated ? `updated ${c.updated}` : "", c.cancelled ? `removed ${c.cancelled}` : ""].filter(Boolean);
@@ -719,9 +719,9 @@ function CalendarSyncButton({ variant = "icon" }: { variant?: "icon" | "row" }) 
                   <CalendarSyncStatusLine stamp={stamps[c.id] ?? null} />
                 </div>
               ))}
-              <button onClick={openSettings}
-                style={{ fontSize: 11.5, padding: "4px 10px", background: "transparent", border: "1px solid var(--line2)", color: "var(--t2)", borderRadius: 6, cursor: "pointer" }}>
-                Add, rename or disconnect in Settings → Calendar
+              <button onClick={openSettings} aria-label="Add, rename or disconnect calendars" title="Add, rename or disconnect calendars"
+                style={{ fontSize: 11.5, padding: "4px 10px", background: "transparent", border: "1px solid var(--line2)", color: "var(--t2)", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>
+                Calendar settings
               </button>
             </>
           ) : (
@@ -742,11 +742,11 @@ function CalendarSyncButton({ variant = "icon" }: { variant?: "icon" | "row" }) 
                 {busy || syncing !== null ? "Connecting…" : "Connect"}
               </button>
               <div style={{ fontSize: 10.5, color: "var(--t3)", lineHeight: 1.45 }}>
-                Tip: the <i>public</i> address only carries events you made public — use the <b>secret</b> one for your full calendar.
+                Tip: the <i>public</i> address only carries events you made public; use the <b>secret</b> one for your full calendar.
               </div>
             </>
           )}
-          {err && <div role="alert" style={{ fontSize: 11, color: "var(--danger)" }}>⚠ {err}</div>}
+          {err && <div role="alert" style={{ fontSize: 11, color: "var(--danger)" }}>{err}</div>}
         </div>
       )}
     </div>
@@ -802,7 +802,7 @@ export function SidebarMeetingCapture() {
   return (
     <section aria-label="Start meeting capture" style={{ padding: "17px 17px 14px", borderBottom: "1px solid var(--line)", flex: "none" }}>
       <div style={{ display: "flex", alignItems: "center", minHeight: 20, padding: "0 0 9px" }}>
-        <span style={{ fontSize: 10, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".09em", fontWeight: 650, flex: 1 }}>Start capture</span>
+        <span style={{ fontSize: "var(--ui-type-meta)", color: "var(--t3)", fontWeight: 500, flex: 1 }}>Start capture</span>
       </div>
       <div>
         <div style={{ display: "flex", gap: 7, minWidth: 0 }}>
@@ -929,7 +929,7 @@ export function BotControls({ m, connected = true }: { m: MeetingMock; connected
           </button>
         );
       })}
-      {err && <span role="alert" style={{ fontSize: 11, color: "var(--danger)", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={err}>⚠ {err}</span>}
+      {err && <span role="alert" style={{ fontSize: 11, color: "var(--danger)", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={err}>{err}</span>}
     </span>
   );
 }
@@ -1054,19 +1054,19 @@ function MeetingTab({ id, params }: TabProps) {
           <button type="button" aria-label="Back to previous view" title="Back" onClick={() => { if (!layout.goBack()) layout.openTab({ id: "today", title: "Today", kind: "today", params: {} }); }}
             style={{ width: 30, height: 30, flex: "none", border: "1px solid var(--line)", borderRadius: 7, background: "transparent", color: "var(--t2)", fontSize: 19, lineHeight: 1, cursor: "pointer" }}>‹</button>
           {header === "live" || header === "pending"
-            ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: badgeFor(m?.live_status || "active").color, fontWeight: 650, letterSpacing: ".04em", fontSize: 11, textTransform: "uppercase", flex: "none" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: badgeFor(m?.live_status || "active").color }} />{badgeFor(m?.live_status || "active").label}</span>
+            ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: badgeFor(m?.live_status || "active").color, fontWeight: 600, fontSize: "var(--ui-type-meta)", flex: "none" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: badgeFor(m?.live_status || "active").color }} />{badgeFor(m?.live_status || "active").label}</span>
             : header === "reconnecting"
-              ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--accent)", fontWeight: 650, letterSpacing: ".04em", fontSize: 11, textTransform: "uppercase", flex: "none" }} title="Live connection lost — the last known state may be stale"><span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)", boxShadow: "0 0 0 3px var(--accentbg)" }} />Reconnecting…</span>
+              ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--accent)", fontWeight: 600, fontSize: "var(--ui-type-meta)", flex: "none" }} title="Live connection lost — the last known state may be stale"><span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)", boxShadow: "0 0 0 3px var(--accentbg)" }} />Reconnecting…</span>
               : header === "recap"
-                ? <span style={{ display: "inline-flex", alignItems: "center", color: "var(--violet)", background: "var(--violetbg)", fontWeight: 650, letterSpacing: ".06em", fontSize: 11, textTransform: "uppercase", borderRadius: 999, padding: "4px 9px", flex: "none" }}>Recap</span>
-                : <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 650, letterSpacing: ".04em", textTransform: "uppercase", flex: "none" }}>Connecting…</span>}
+                ? <span className={pageStyles.phase}>Recap</span>
+                : <span style={{ fontSize: "var(--ui-type-meta)", color: "var(--t3)", fontWeight: 600, flex: "none" }}>Connecting…</span>}
           <h1 className={pageStyles.title}>
             {m ? (m.title_custom ?? (m.native_id ?? m.title).replace(/^Google Meet · /, "")) : "Meeting"}
           </h1>
         </div>
           <div className={pageStyles.actions}>
             {m && !meetingsOnly() && <button type="button" aria-expanded={knowledgeOpen} aria-controls={`meeting-knowledge-${m.id}`} onClick={() => setKnowledgeOpen((open) => !open)}
-              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minHeight: 30, padding: "0 11px", border: "1px solid var(--line2)", borderRadius: 7, background: "transparent", color: "var(--accent)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 var(--space-3)", border: "1px solid var(--line2)", borderRadius: 7, background: "transparent", color: "var(--accent)", fontSize: "var(--ui-type-meta)", fontWeight: 600, cursor: "pointer" }}>
               {knowledgeOpen ? "Close TINA" : "Ask TINA"}
             </button>}
             {m && <BotControls m={m} connected={connected} />}

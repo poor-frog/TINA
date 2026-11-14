@@ -4,17 +4,20 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Invocation } from './config.js';
 import type { Act } from './contracts.js';
 import type { SpeakController } from './capture-bridge.js';
-import { VoiceTrigger, speechSentences, turnPauseMs, summaryWaitNotice, VOICE_NOTICES, isFixedVoiceNotice, type VoiceHypothesis } from './voice-trigger.js';
+import { VoiceTrigger, speechSentences, turnPauseMs, voiceProgressNotice, VOICE_NOTICES, VOICE_SERVICE_ERROR, isFixedVoiceNotice, type VoiceHypothesis } from './voice-trigger.js';
 import {VoiceInterruption, mergeVoiceRefinement, isVoiceRefinement} from './voice-interruption.js';
 import type { SpeechReporter } from './speech-status.js';
 import { AudioDiagnostics, type AudioSnapshot } from './audio-diagnostics.js';
 import type { AsrDiagnostic } from '@tina/gmeet-pipeline';
 import {NoiseSuppressor,type NoiseFrame} from './noise-suppression.js';
+import { TurnShadow } from './turn-shadow.js';
+import { VadShadow } from './vad-shadow.js';
 import type { PreparedSpeech, SpeechTiming } from './tts-playback.js';
 
 const FOLLOW_UP_MS = 5_000;
 const ACK_TIMEOUT_MS = 3_000;
 const WAIT_NOTICE_TIMEOUT_MS = 6_000;
+const RECOVERY_TIMEOUT_MS = 10_000;
 
 export type VoiceState = 'OFF' | 'LISTENING' | 'CAPTURING' | 'THINKING' | 'SPEAKING' | 'QUIET' | 'ERROR';
 export type VoiceDiagnosticCode = 'starting' | 'listening' | 'waiting_asr' | 'tts_unavailable' | 'sources_unavailable' | 'name_not_matched' | 'name_unconfirmed' | 'wake_confirmed'
@@ -22,7 +25,7 @@ export type VoiceDiagnosticCode = 'starting' | 'listening' | 'waiting_asr' | 'tt
   | 'waiting_quiet' | 'stopped' | 'completed' | 'question_timeout' | 'ambiguous_audio'
   | 'ambiguous_window' | 'stale_asr' | 'asr_unavailable' | 'services_unavailable'
   | 'worker_failed' | 'kws_unavailable' | 'answer_failed' | 'no_evidence' | 'playback_failed' | 'policy_changed'
-  | 'interrupted' | 'waiting_turn_end' | 'livekit_unavailable';
+  | 'interrupted' | 'waiting_turn_end' | 'livekit_unavailable' | 'no_input' | 'dialogue_paused';
 export interface KwsStatus {
   engine: 'livekit-wakeword'; version: '2.1.1'; mode: 'activation'; device: 'cpu';
   status: 'off' | 'starting' | 'ready' | 'failed'; models: string[]; observed_at_ms: number;
@@ -31,13 +34,14 @@ export interface VoiceDiagnostic {
   event_id: string; code: VoiceDiagnosticCode; observed_at_ms: number;
   heard_prefix?: string; heard_at_ms?: number; channel?: number; source_start_ms?: number;
 }
-export interface VoiceConfig { enabled: boolean; ready: boolean; revision: number; wake_variants?: string[]; noise_suppression?:boolean; unavailable_reason?: 'tts_unavailable' | 'sources_unavailable' | 'livekit_unavailable' | null; engine?:'tina'|'livekit'; agent_url?:string|null }
+export interface VoiceConfig { enabled: boolean; ready: boolean; revision: number; wake_variants?: string[]; noise_suppression?:boolean; speech_profile?:string|null; progress?:unknown; unavailable_reason?: 'tts_unavailable' | 'sources_unavailable' | 'livekit_unavailable' | null; engine?:'tina'|'livekit'; agent_url?:string|null }
 export interface VoiceApi {
   config(signal: AbortSignal): Promise<VoiceConfig>;
   answer(question: string, requestId: string, revision: number, signal: AbortSignal, speakerKey?: string): Promise<{ text: string; evidence_available?: boolean; clarification?: boolean; reason?:string; answer_kind?:string }>;
   state(state: VoiceState, requestId?: string, diagnostic?: VoiceDiagnostic, audio?: AudioSnapshot, kws?: KwsStatus): Promise<void>;
   speechService?(text?:string): {baseUrl:string;token:string;revision:number;requestId:string} | undefined;
   cancelTurn?(requestId:string): Promise<void> | void;
+  speechProfile?():string|undefined;
 }
 export interface VoiceWorker {
   send(message: object): boolean;
@@ -49,11 +53,12 @@ type TimingStage = 'speech_end' | 'vad_detected' | 'asr_started' | 'asr_complete
   | `${'ack' | 'notice' | 'answer'}_${'tts_requested' | 'pcm_received' | 'buffer_ready' | 'playback_started'}` | 'turn_finished';
 
 export function nativeVoiceWorker(event: (value: Record<string, unknown>) => void, failed: () => void,
-  env: NodeJS.ProcessEnv = process.env, mode: 'vad' | 'kws' = 'vad'): VoiceWorker {
+  env: NodeJS.ProcessEnv = process.env, mode: 'vad' | 'kws' | 'turn' = 'vad'): VoiceWorker {
   const directory = env.TINA_VOICE_MODEL_DIR || '/models/meeting-voice';
   const child: ChildProcessWithoutNullStreams = spawn(env.TINA_VOICE_PYTHON || '/opt/tina-voice/bin/python',
-    ['-m', 'tina_meeting_voice.bot', mode === 'vad' ? directory : directory + '/livekit-tina-v1',
-      mode === 'vad' ? '--vad-only' : '--kws'],
+    mode === 'turn' ? ['-m','tina_meeting_voice.turn_worker',directory+'/turn-models']
+      : ['-m', 'tina_meeting_voice.bot', mode === 'vad' ? directory : directory + '/livekit-tina-v1',
+          mode === 'vad' ? '--vad-only' : '--kws'],
     { stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: env.PATH, PYTHONUNBUFFERED: '1' } });
   let buffer = '', closed = false;
   const readyTimeout = setTimeout(() => fail(), 20_000); readyTimeout.unref();
@@ -70,14 +75,15 @@ export function nativeVoiceWorker(event: (value: Record<string, unknown>) => voi
       const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
       try { const value = JSON.parse(line);
         if (value.event === 'state' && value.state === 'LISTENING'
-            || mode === 'kws' && value.event === 'kws' && value.status === 'ready') clearTimeout(readyTimeout);
+            || mode === 'kws' && value.event === 'kws' && value.status === 'ready'
+            || mode === 'turn' && value.event === 'turn-ready') clearTimeout(readyTimeout);
         event(value);
       } catch { fail(); return; }
     }
   });
   return {
     send(message) {
-      if (closed || child.stdin.writableLength > 128_000) { fail(); return false; }
+      if (closed || child.stdin.writableLength > (mode==='turn'?720_000:128_000)) { fail(); return false; }
       child.stdin.write(JSON.stringify(message) + '\n');
       return true;
     },
@@ -87,6 +93,7 @@ export function nativeVoiceWorker(event: (value: Record<string, unknown>) => voi
 }
 
 export const nativeKwsWorker: WorkerFactory = (event, failed) => nativeVoiceWorker(event, failed, process.env, 'kws');
+export const nativeTurnWorker: WorkerFactory = (event, failed) => nativeVoiceWorker(event, failed, process.env, 'turn');
 const KWS_MODELS = ['hey_tina', 'tina_oi'];
 
 export async function voiceAsrReady(inv: Invocation, fetchImpl = globalThis.fetch): Promise<boolean> {
@@ -101,6 +108,7 @@ export async function voiceAsrReady(inv: Invocation, fetchImpl = globalThis.fetc
 }
 
 export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetch): VoiceApi {
+  let speechProfile:string|undefined;
   let agent: {baseUrl:string;token:string;revision:number} | undefined, currentId: string | undefined;
   async function call(path: string, method: string, body?: object, signal?: AbortSignal, speakerKey?: string, base = url) {
     const response = await fetchImpl(base + path, { method, headers: {
@@ -128,6 +136,8 @@ export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetc
       if (value.wake_variants !== undefined && (!Array.isArray(value.wake_variants) || value.wake_variants.length > 8 || value.wake_variants.some((v: unknown) => typeof v !== 'string' || v.length > 40))) throw new Error('Invalid voice variants');
       if (value.unavailable_reason != null && !['tts_unavailable', 'sources_unavailable', 'livekit_unavailable'].includes(value.unavailable_reason)) throw new Error('Invalid voice readiness reason');
       if (value.noise_suppression !== undefined && typeof value.noise_suppression !== 'boolean') throw new Error('Invalid NS setting');
+      if(value.speech_profile!=null&&(typeof value.speech_profile!=='string'||value.speech_profile.length>6000))throw Error('Invalid speech profile');
+      speechProfile=value.speech_profile||undefined;
       if (value.engine != null && !['tina','livekit'].includes(value.engine)) throw new Error('Invalid voice runtime');
       agent = undefined;
       if (value.engine === 'livekit') {
@@ -152,12 +162,14 @@ export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetc
     // A fixed acknowledgment must not queue behind the Agents session's in-flight LLM task.
     speechService: text => !isFixedVoiceNotice(text) && agent && currentId ? {...agent,requestId:currentId} : undefined,
     cancelTurn,
+    speechProfile:()=>speechProfile,
   };
 }
 
 /** PCM is a tee: every error disarms voice without throwing into the transcript pipeline. */
 export class MeetingVoice {
-  private ns=new NoiseSuppressor();
+  private vadShadow?:VadShadow;
+  private ns:NoiseSuppressor;
   processAudio(frame:NoiseFrame,deliver:(pcm:Float32Array)=>void){this.ns.feed(frame,deliver);}
   private audio = new AudioDiagnostics();
   asrDiagnostic(event: AsrDiagnostic) { if (!this.closed) this.audio.asr(event); }
@@ -178,6 +190,7 @@ export class MeetingVoice {
   private generation = 0;
   private closed = true;
   private pollTimer?: ReturnType<typeof setTimeout>;
+  private probeRecovery = false;
   private abort = new AbortController();
   private pendingState?: { state: VoiceState; id?: string; diagnostic?: VoiceDiagnostic };
   private diagnostic?: VoiceDiagnostic;
@@ -199,11 +212,13 @@ export class MeetingVoice {
   private playedText = '';
   private speakingText = '';
   private playbackStarted = false;
+  private idleDiagnostic?: VoiceDiagnosticCode;
   private trigger = new VoiceTrigger();
   private activity = new Map<number, { speech: boolean; endMs?: number; stamp: number; receivedAtMs: number }>();
   private timing?: { request_id: string; channel: number; stages: Partial<Record<TimingStage, number>> };
   private turnTimer?: ReturnType<typeof setInterval>;
   private noticeCursor = {wake: 0, wait: 0, summary: 0};
+  private turnShadow?: TurnShadow;
 
   private nextNotice(kind: keyof typeof VOICE_NOTICES): string {
     const choices = VOICE_NOTICES[kind];
@@ -215,7 +230,12 @@ export class MeetingVoice {
     private log: (state: string) => void = state => console.log(`[bot] meeting-voice: ${state}`),
     private asrReady: () => Promise<boolean> = async () => true,
     private requestEndpoint: (channel: number, endMs: number | null) => void = () => {},
-    private kwsFactory?: WorkerFactory) { this.trigger = new VoiceTrigger(Date.now, [], !!kwsFactory); }
+    private kwsFactory?: WorkerFactory, turnFactory?: WorkerFactory, noise?:NoiseSuppressor, vadFactory?:WorkerFactory) {
+    this.ns=noise??new NoiseSuppressor();
+    if(vadFactory)this.vadShadow=new VadShadow(vadFactory,value=>this.log(JSON.stringify({type:'livekit_vad_shadow',...value})));
+    this.trigger = new VoiceTrigger(Date.now, [], !!kwsFactory);
+    if(turnFactory)this.turnShadow=new TurnShadow(turnFactory,this.log);
+  }
 
   private kwsLog(value: object) {
     try { this.log(JSON.stringify({type: 'kws', mode: 'activation', ...value})); } catch { /* Logging cannot affect a turn. */ }
@@ -323,7 +343,7 @@ export class MeetingVoice {
     if (caller) this.trigger.continueAfter(caller.after, caller, caller.expires);
     else { this.trigger.reset(Date.now()); this.activity.clear(); }
     this.waitingCaller = undefined; this.continuationHypotheses = []; this.recent.clear();
-    this.setState('LISTENING'); this.diagnose('listening');
+    this.setState('LISTENING'); this.diagnose(this.idleDiagnostic??'listening');this.idleDiagnostic=undefined;
     if(caller?.endMs!==undefined&&!this.activity.get(caller.channel)?.speech){
       const end=Math.max(caller.endMs,this.activity.get(caller.channel)?.endMs??0);
       this.activity.set(caller.channel,{speech:false,endMs:end,stamp:end,receivedAtMs:Date.now()});
@@ -388,6 +408,8 @@ export class MeetingVoice {
   }
   private setState(state: VoiceState) {
     this.state = state;
+    this.vadShadow?.control(state,this.epoch);
+    if(!['LISTENING','CAPTURING'].includes(state))this.turnShadow?.clearAudio();
     if (!['LISTENING', 'CAPTURING'].includes(state)) this.vadListening = false;
     try { if (this.kws?.send({type: 'control', state, generation: this.epoch}) === false) this.closeKws(true); }
     catch { this.closeKws(true); }
@@ -422,10 +444,14 @@ export class MeetingVoice {
     catch { this.worker?.close(); this.worker = undefined; this.generation++; this.abort.abort(); this.setState('ERROR'); this.diagnose('worker_failed'); return false; }
   }
   private async cancel(dispose = false, reason: VoiceDiagnosticCode = 'stopped') {
+    this.probeRecovery = false;
     const requestId=this.requestId,playedText=this.playedText,started=this.playbackStarted;
     this.finishTiming(reason);
     const generation = ++this.generation;
     this.epoch++; this.processing = false; this.externalSpeaking = false;
+    this.vadShadow?.control('QUIET',this.epoch);
+    this.turnShadow?.cancel();
+    if(dispose){this.turnShadow?.close();this.vadShadow?.close();}
     this.trigger.reset(); this.activity.clear();
     this.interruption=undefined;this.turnCaller=undefined;
     this.turnQuestion=undefined;this.refinementBase=undefined;
@@ -435,12 +461,15 @@ export class MeetingVoice {
     this.continuationHypotheses = [];
     this.abort.abort(); this.abort = new AbortController();
     let stopped = true, workerReady = true;
-    try { await this.speak.stop(); } catch { stopped = false; this.log('playback_stop_failed'); }
-    if (generation !== this.generation) return false;
+    const stopping = (async () => {
+      try { await this.speak.stop(); }
+      catch { stopped = false; this.log('playback_stop_failed'); }
+    })();
     let receipt=true;
     // Persist the confirmed prefix before server cancellation finalizes the receipt.
     if(requestId&&started){try{await this.report(requestId,'stopped',playedText);}catch{receipt=false;this.log('playback_receipt_failed');}}
     const released=await Promise.resolve().then(()=>requestId?this.api.cancelTurn?.(requestId):undefined).then(()=>true,()=>false);
+    await stopping;
     if (generation !== this.generation) return false;
     this.playedText='';this.speakingText='';this.playbackStarted=false;
     if (dispose) { this.workerSerial++; this.worker?.close(); this.worker = undefined; this.closeKws(); }
@@ -458,11 +487,15 @@ export class MeetingVoice {
   }
   private async poll() {
     if (this.closed) return;
+    let probing = true;
     try {
       const config = await this.api.config(AbortSignal.timeout(5000));
+      probing = false;
       if (this.closed) return;
       this.ns.setEnabled(config.noise_suppression===true);
+      probing = true;
       const asrReady = config.enabled && config.ready ? await this.asrReady() : false;
+      probing = false;
       const ready = config.enabled && config.ready && asrReady;
       if (this.closed) return;
       if (!ready) {
@@ -474,7 +507,12 @@ export class MeetingVoice {
         if (config.revision !== this.revision && (this.worker || this.state === 'ERROR') && !await this.cancel(true, 'policy_changed')) return;
         this.revision = config.revision;
         if (this.closed) return;
+        if (this.probeRecovery && this.state === 'ERROR' && !this.worker && !this.externalSpeaking) {
+          this.probeRecovery = false; this.setState('OFF');
+        }
         if (!this.worker && !this.externalSpeaking && this.state !== 'ERROR') {
+          this.vadShadow?.start();
+          this.turnShadow?.start();
           const serial = ++this.workerSerial;
           this.epoch = 0;
           this.trigger.reset(Date.now(), config.wake_variants || []);
@@ -498,14 +536,19 @@ export class MeetingVoice {
       }
       this.publishState(this.state, this.requestId);
     } catch {
+      const recoverable = probing && (this.state !== 'ERROR' || this.probeRecovery) && !this.externalSpeaking;
       this.ns.setEnabled(false);
-      if (!this.closed && await this.cancel(true)) { this.setState('ERROR'); this.diagnose('services_unavailable'); }
+      if (!this.closed && await this.cancel(true)) {
+        this.probeRecovery = recoverable && this.state === 'OFF';
+        this.setState('ERROR'); this.diagnose('services_unavailable');
+      }
     } finally {
       if (!this.closed) this.pollTimer = setTimeout(() => { void this.poll(); }, 2000);
     }
   }
   private onEvent(event: Record<string, unknown>) {
     if (event.generation !== this.epoch) return;
+    if(event.event==='activity')this.vadShadow?.activity(event);
     if (event.event === 'state' && event.state === 'LISTENING' && ['OFF', 'QUIET'].includes(this.state)) {
       this.vadListening = true; this.listen();
     } else if (event.event === 'activity' && Number.isInteger(event.channel) && typeof event.speech === 'boolean'
@@ -513,6 +556,7 @@ export class MeetingVoice {
       const channel = event.channel as number;
       if (!this.activity.has(channel) && this.activity.size >= 32) return;
       const wasSpeaking = this.activity.get(channel)?.speech;
+      if(event.speech && !wasSpeaking)this.turnShadow?.resume(channel);
       const interruptible=['THINKING','SPEAKING'].includes(this.state)&&this.turnCaller?.channel===channel;
       if (event.speech && !wasSpeaking && this.state === 'LISTENING') this.diagnose('waiting_asr');
       if (event.speech && !wasSpeaking && (['LISTENING', 'CAPTURING'].includes(this.state)||interruptible)) {
@@ -623,11 +667,24 @@ export class MeetingVoice {
     const now = Date.now();
     if (this.lastHeard && now - this.lastHeard.heard_at_ms! >= 30_000) this.lastHeard = undefined;
     if (this.diagnostic && now - (this.diagnostic.heard_at_ms ?? this.diagnostic.observed_at_ms) >= 30_000) { this.diagnostic = undefined; this.diagnosticKey = ''; }
+    if (this.state==='LISTENING' && !this.processing) {
+      const expired=this.trigger.takeExpiredContinuation();
+      if (expired) {
+        const input=this.inputs.get(expired.channel),activity=this.activity.get(expired.channel);
+        this.diagnose(!input || now-input.endMs>1500 ? 'services_unavailable'
+          : activity && (activity.speech || (activity.endMs??0)>expired.after) ? 'question_timeout' : 'no_input');
+      }
+    }
     if (this.closed || this.state !== 'CAPTURING' || this.processing) return;
     if (this.trigger.expired()) { void this.cancel(false, 'question_timeout'); this.log('question_timeout'); return; }
     const activity = this.activity.get(this.trigger.channel!);
     if (!activity || activity.speech) { this.diagnose('waiting_speech_end'); return; }
+    const observed=this.trigger.question(activity.endMs,true),observedCaller=this.trigger.caller;
+    if(observed && observedCaller && activity.endMs!==undefined && this.requestId)
+      this.turnShadow?.observe(observed,observedCaller,activity.endMs,this.requestId);
     const question = this.trigger.question(activity.endMs);
+    if(this.requestId&&typeof activity.endMs==='number')
+      this.vadShadow?.observe(this.requestId,this.trigger.channel!,activity.endMs,this.trigger.endMs,question!==null&&question!==undefined);
     if (question === '' && this.requestId) {
       const caller = this.trigger.caller;
       if (!caller) return;
@@ -673,7 +730,7 @@ export class MeetingVoice {
       this.waitingCaller = {...caller, expires: Date.now() + FOLLOW_UP_MS, after: Date.now()};
       this.diagnose('waiting_question');
     } catch {
-      if (live()) { this.waitingCaller = undefined; this.continuationHypotheses = []; this.diagnose('playback_failed'); }
+      if (live()) { this.waitingCaller = undefined; this.continuationHypotheses = []; this.diagnose('playback_failed');this.idleDiagnostic='playback_failed'; }
     } finally {
       if (live()) {
         this.finishTiming(completed ? 'name_acknowledged' : 'playback_failed');
@@ -702,6 +759,8 @@ export class MeetingVoice {
       nextSample: startSample === undefined ? undefined : startSample + pcm.length});
     const frame = {type: 'audio', channel, participant, stamp, start_sample: startSample,
       audio: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString('base64')};
+    this.vadShadow?.feed(frame);
+    if(['LISTENING','CAPTURING'].includes(this.state))this.turnShadow?.feed(channel,pcm,stamp,participant,startSample);
     if (this.state === 'LISTENING') {
       try { if (this.kws?.send(frame) === false) this.closeKws(true); }
       catch { this.closeKws(true); }
@@ -718,7 +777,6 @@ export class MeetingVoice {
     let outcome = 'failed';
     let answerReceived = false;
     const noticeAbort = new AbortController();
-    const progressNotice = summaryWaitNotice(question);
     // A wake acknowledgment buys a longer quiet interval, not indefinite silence during a slow tool.
     const ackTimer = setTimeout(() => {
       if (!live()) return;
@@ -731,14 +789,14 @@ export class MeetingVoice {
           return;
         }
         if (!live() || answerReceived || !config.enabled || !config.ready || config.revision !== this.revision) return;
-        const notice = this.nextNotice(progressNotice ? 'summary' : 'wait');
+        const notice = voiceProgressNotice(config.progress, id, this.revision) ?? this.nextNotice('wait');
         this.speakingText=notice;
         return this.speak.speak(notice, 'auto', timing => {
           if (live()) {this.interruption?.observePlayback(notice);this.markSpeechTiming('notice',timing,true);}
         }, WAIT_NOTICE_TIMEOUT_MS);
       })().then(result => { if (result && result !== 'completed' && live()) this.log('ack_playback_failed'); },
         () => { if (live()) this.log('ack_playback_failed'); });
-    }, acknowledged && !progressNotice ? 4000 : 900);
+    }, acknowledged ? 4000 : 900);
     // Include a two-minute recap and bounded TTS playback inside the 360-second room reservation.
     const timeout = setTimeout(() => { if (live()) void this.cancel(false, 'answer_failed').then(current => { if (current) this.setState('ERROR'); }); }, 330_000);
     try {
@@ -792,7 +850,7 @@ export class MeetingVoice {
             prepared?.cancel(); pending?.cancel(); prepared = undefined; pending = undefined;
             continue;
           }
-          if (result !== 'completed') { this.diagnose('playback_failed'); await this.report(id, result ?? 'failed'); return; }
+          if (result !== 'completed') { this.diagnose('playback_failed');this.idleDiagnostic='playback_failed'; await this.report(id, result ?? 'failed'); return; }
           this.interruption?.observePlayback(sentence);
           this.playedText=(this.playedText+' '+sentence).trim();this.speakingText='';
           await this.report(id,'started',this.playedText);
@@ -803,12 +861,31 @@ export class MeetingVoice {
       await this.report(id, 'completed');
       if (!live()) return;
       outcome = answer.clarification ? 'clarification' : unanswered ? 'no_evidence' : 'completed';
-      if (caller?.participant && speakerKey) {
+      if (answer.reason==='clarification_exhausted') this.idleDiagnostic='dialogue_paused';
+      else if (['llm_unavailable','verification_unavailable','draft_unavailable'].includes(answer.reason??'')) this.idleDiagnostic='answer_failed';
+      if (caller?.participant && speakerKey && (answer.clarification || !unanswered)) {
         this.waitingCaller = {...caller, after: Date.now(), expires: Date.now() + FOLLOW_UP_MS};
         this.continuationHypotheses = [];
       }
       if (answer.clarification || answer.evidence_available !== false) this.diagnose('completed');
-    } catch { if (live()) { this.log('turn_failed'); this.diagnose('answer_failed'); } }
+    } catch {
+      if (live()) {
+        this.log('turn_failed');this.diagnose('answer_failed');this.idleDiagnostic='answer_failed';
+        clearTimeout(ackTimer);noticeAbort.abort();await ack.catch(()=>{});
+        if (!answerReceived && live()) {
+          let attemptedAudio=false;
+          try {
+            const config=await this.api.config(AbortSignal.any([this.abort.signal,AbortSignal.timeout(2500)]));
+            if (live() && config.enabled && config.ready && config.revision===this.revision) {
+              this.setState('SPEAKING');this.speakingText=VOICE_SERVICE_ERROR;
+              attemptedAudio=true;
+              const played=await this.speak.speak(VOICE_SERVICE_ERROR,'auto',undefined,RECOVERY_TIMEOUT_MS);
+              if (live() && played!=='completed') {this.diagnose('playback_failed');this.idleDiagnostic='playback_failed';}
+            }
+          } catch { if (live()) {this.idleDiagnostic=attemptedAudio?'playback_failed':'answer_failed';this.diagnose(this.idleDiagnostic);} }
+        }
+      }
+    }
     finally {
       answerReceived = true;
       noticeAbort.abort();
@@ -838,6 +915,8 @@ export class MeetingVoice {
   }
   disarm() {
     this.closed = true;
+    this.vadShadow?.close();
+    this.turnShadow?.close();
     this.closeKws();
     clearTimeout(this.pollTimer);
     clearInterval(this.turnTimer);

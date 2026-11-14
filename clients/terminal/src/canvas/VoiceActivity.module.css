@@ -21,3 +21,11 @@
 .wave path:nth-child(3) { animation-delay: -.8s; }
 @keyframes voice-wave { 0%, 100% { transform: scaleY(.6); } 50% { transform: scaleY(1); } }
 @media (prefers-reduced-motion: reduce) { .indicator .wave path { animation: none; } }
+.group { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.handoff {
+  font: inherit; font-size: 11px; line-height: 16px; padding: 5px 9px; border-radius: 7px;
+  border: 1px solid var(--line2); background: var(--panel2); color: var(--t1); cursor: pointer;
+}
+.handoff:hover { color: var(--accent); border-color: var(--accent); }
+.handoff:disabled { opacity: .6; cursor: wait; }
+.error { color: var(--danger, var(--t2)); font-size: 11px; max-width: 320px; }

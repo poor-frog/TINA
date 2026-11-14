@@ -1,0 +1,63 @@
+/* Hallmark · component: Agent model settings · genre: modern-minimal · theme: brand Graphite Emerald · states: existing form, connection and validation · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V3 · weakest: variety; use a compact account area and paired model fields rather than more nested cards. */
+.root { max-width: 720px; min-width: 0; container-type: inline-size; }
+.summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-6); padding: var(--space-3); margin-bottom: var(--space-4); background: var(--sidebar); border-radius: var(--r); }
+.summary > div { display: grid; min-width: 0; gap: var(--space-1); }
+.summary span { font-size: 12px; color: var(--t3); overflow-wrap: anywhere; }
+.summary strong { font-size: 14px; font-weight: 600; color: var(--t1); overflow-wrap: anywhere; }
+.tabs { display: flex; gap: var(--space-6); border-bottom: 1px solid var(--line); margin-bottom: var(--space-4); }
+.tabs button { min-height: 40px; padding: var(--space-2) 0 var(--space-3); margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--t2); font: 14px var(--sans); cursor: pointer; }
+.tabs button[aria-selected=true] { border-bottom-color: var(--accent); color: var(--accent); }
+.tabs button:hover { color: var(--t1); }
+.tabs button:active { color: var(--accent); }
+.panelTitle { margin: 0 0 var(--space-3); color: var(--t1); font: 600 17px var(--sans); min-width: 0; overflow-wrap: break-word; }
+.form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.form > :not(.field) { grid-column: 1 / -1; }
+.field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; color: var(--t2); font: 13px var(--sans); }
+.field:not([data-field=model]):not([data-field=meeting_model]) { grid-column: 1 / -1; }
+.field > span { font-weight: 500; }
+.field > div > span { font-size: 12px !important; }
+.field > input, .field > select {
+  width: 100%; min-width: 0; min-height: 40px; box-sizing: border-box;
+  padding: var(--space-2) var(--space-3); border: 1px solid var(--line2);
+  border-radius: var(--r); background: var(--panel); color: var(--t1); font: 14px var(--sans);
+}
+.field > select { cursor: pointer; }
+.field > input::placeholder { color: var(--t3); }
+.field > input:hover, .field > select:hover { border-color: var(--t2); }
+.field > input:active, .field > select:active { border-color: var(--accent); }
+.connection { display: grid; gap: var(--space-2); padding: var(--space-3) 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.connectionHeader { display: flex; align-items: center; gap: var(--space-3); color: var(--t2); }
+.connectionIdentity { display: flex; align-items: baseline; justify-content: space-between; flex: 1; gap: var(--space-2); flex-wrap: wrap; min-width: 0; font: 13px var(--sans); }
+.accountEmail { font-size: 12px; color: var(--t3); overflow-wrap: anywhere; }
+.connectionActions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+.secondary, .disconnect, .primary {
+  min-height: 36px; padding: var(--space-2) var(--space-3); border: 1px solid var(--line);
+  border-radius: var(--r); font: 13px var(--sans); cursor: pointer;
+}
+.secondary { background: var(--sidebar); color: var(--t1); }
+.secondary:hover, .secondary.isHover { background: var(--panel2); }
+.secondary:active, .secondary.isActive { border-color: var(--accent); }
+.disconnect { background: transparent; color: var(--t3); border-color: transparent; margin-left: auto; }
+.disconnect:hover { color: var(--danger); border-color: var(--line); }
+.disconnect:active { background: var(--panel2); }
+.accountDetails { color: var(--t3); font: 12px/1.6 var(--sans); }
+.accountDetails summary { cursor: pointer; width: fit-content; }
+.accountDetails p { margin: var(--space-2) 0 0; max-width: 65ch; }
+.saveRow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--line); margin-top: var(--space-1); }
+.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; min-width: 88px; }
+.primary:hover:not(:disabled) { filter: brightness(.95); }
+.primary:active { border-color: var(--t1); }
+.primary:disabled, .secondary:disabled, .disconnect:disabled, .field > input:disabled, .field > select:disabled { background: var(--sidebar); color: var(--t3); border-color: var(--line); cursor: not-allowed; }
+.hint { margin: 0; color: var(--t3); font: 12px/1.5 var(--sans); }
+.error { display: flex; align-items: center; gap: var(--space-2); color: var(--danger); font: 13px/1.5 var(--sans); }
+.validation { min-width: 0; margin-left: auto; }
+.testRow > div { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.tabs button:focus-visible, .field > input:focus-visible, .field > select:focus-visible,
+.connection :is(button, a, input, summary):focus-visible, .primary:focus-visible, .secondary:focus-visible, .secondary.isFocus { outline: 2px solid var(--accent); outline-offset: 2px; }
+@container (max-width: 480px) {
+  .form { grid-template-columns: minmax(0, 1fr); }
+  .summary { gap: var(--space-3); padding: var(--space-3); }
+  .tabs { gap: var(--space-4); }
+  .disconnect { margin-left: 0; }
+}

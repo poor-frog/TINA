@@ -1,7 +1,7 @@
 {
   "name": "@tina/extension",
   "version": "0.1.0",
-  "description": "Read-only TINA transcript viewer for Meeting Bot and the Desktop archive; no audio capture permissions.",
+  "description": "Send TINA Bot to supported meeting tabs and view Meeting Bot or Desktop transcripts; no audio capture permissions.",
   "private": true,
   "type": "module",
   "scripts": {

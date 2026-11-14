@@ -6,6 +6,8 @@ services:
       context: .
     environment:
       TTS_API_TOKEN: ${TTS_API_TOKEN:?Set a private TTS_API_TOKEN}
+      TINA_TTS_THREADS: ${TINA_TTS_THREADS:-2}
+      TINA_TTS_PROFILE_KEY: ${TINA_TTS_PROFILE_KEY:-}
     volumes:
       - ${TINA_TTS_MODELS:?Set the absolute model cache path}:/models:ro
     ports:

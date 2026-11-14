@@ -134,6 +134,10 @@ def main():
             directory.mkdir(parents=True, exist_ok=True)
             try: verify_vad(directory)
             except ValueError: install_vad(directory)
+            # Public model weights are shared read-only with the non-root LiveKit observer.
+            verify_vad(directory).chmod(0o644)
+            from .turn_assets import install as install_turn_models
+            install_turn_models(directory/'turn-models')
         else:
             install(directory)
         return

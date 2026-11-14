@@ -1509,17 +1509,29 @@ export function createSpeakController(
 
   let micQueue: Promise<void> = Promise.resolve();
   let speechGeneration = 0;
+  let micUncertain = false;
   const setMic = async (on: boolean): Promise<boolean> => {
-    let verified = false;
+    const generation = speechGeneration;
     const operation = micQueue.then(async () => {
+      if (on && (micUncertain || generation !== speechGeneration)) return false;
       const nextState = await page.evaluate(setMeetingMicrophone, { desiredOn: on, platform }).catch(() => undefined);
-
-      if (typeof nextState === 'boolean') verified = nextState === on;
-      else console.error(`[bot] speak: microphone state could not be changed (${platform})`);
+      const verified = typeof nextState === 'boolean' && nextState === on;
+      if (!verified) console.error(`[bot] speak: microphone state could not be changed (${platform})`);
+      if (!on && verified) micUncertain = false;
+      return verified;
     });
-    micQueue = operation.catch(() => { /* mic UI failures never reject the voice handler */ });
-    await micQueue;
-    return verified;
+    // Keep the actual UI queue serialized: a timed-out evaluate can still click later.
+    micQueue = operation.then(() => {}, () => {});
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([operation, new Promise<boolean>(resolve => {
+        timer = setTimeout(() => {
+          micUncertain = true;
+          try { tts.stop(); } catch { /* Keep the UI deadline bounded even if the local player failed. */ }
+          console.error('[bot] speak: microphone control timed out'); resolve(false);
+        }, 5000);
+      })]);
+    } finally { clearTimeout(timer); }
   };
 
   const play = async (run: () => Promise<PlaybackOutcome | void>, ready?: Promise<boolean>): Promise<PlaybackOutcome> => {

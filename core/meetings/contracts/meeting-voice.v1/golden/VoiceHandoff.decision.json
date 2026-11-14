@@ -1,0 +1,17 @@
+{
+  "request_id": "00000000-0000-4000-8000-000000000123",
+  "expires_at_ms": 2000000000000,
+  "kind": "decision",
+  "meeting_id": 1,
+  "reason": "clarification_exhausted",
+  "original_request": "Ghi quyết định dùng PostgreSQL, đây là đề xuất",
+  "task": null,
+  "decision": {
+    "title": "dùng PostgreSQL",
+    "requested_status": "proposed",
+    "evidence_status": "unchecked",
+    "missing_field": "review"
+  },
+  "heard_turns": [],
+  "sources": []
+}

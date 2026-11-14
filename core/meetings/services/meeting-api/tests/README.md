@@ -87,3 +87,19 @@ signal/timing checks, not a claim that every recognized word is now correct.
 Prepared-audio Apply tests validate transcript-document.v1 and retain the prepared-input provenance through Restore and a new check-only job.
 
 test_voice_navigation.py covers source-open intent/ambiguity, heard caller scope, owner claims and late/revoked/stopped navigation fences.
+
+`test_audio_bridge.py` checks the selected ASR model's session-bound bridge route, signed capability,
+Stop/new-session revocation, and refusal of invalid bridge configuration before any meeting is inserted.
+The permit also distinguishes enabled room voice from transcript-only access for the VAD observer.
+
+`test_task_flow.py` checks Pipecat flow reservation order, core-owned state, exact completed-prompt receipts, caller/policy/expiry isolation and Stop fencing late extraction.
+
+Recovery cases distinguish service failure from unmatched input, retain task state without charging retries, and use failed-TTS recovery only to re-ask before consuming another slot.
+
+`test_voice_handoff.py` exercises owner-only claim/read, preserved task fields, idempotent claim without draft creation, expiry, Stop, replacement turns/sessions, task-state changes, active leases, revoked sources and deleted artifacts.
+
+`test_decision_flow.py` checks caller isolation, correct decision endpoint dispatch, finalization, unknown-speaker refusal, late-plan Stop fencing and decision-to-chat state transfer.
+
+`test_decision_flow.py` distinguishes stale-source 409 recovery from unknown-write 503 recovery and checks that uncertain task writes receive the same retry-blocking marker as decisions.
+
+Decision readback regression cases cover current proof receipts, source edits after plan/apply, source-service outage preserving fields, and Stop during source revalidation.
