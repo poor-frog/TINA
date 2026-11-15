@@ -8,6 +8,8 @@ import logging
 import os
 import time
 from uuid import UUID, uuid4
+from typing import Callable, Awaitable
+from weakref import WeakValueDictionary
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -19,6 +21,8 @@ from livekit.agents.types import APIConnectOptions
 from livekit.agents.voice import SessionConnectOptions
 
 from adapters import TinaLLM, VieNeuTTS, SynthesisStatus, HttpAudioOutput, SAMPLE_RATE
+from rag import SourceAccessChanged
+from task_flow import run_task_flow
 
 MAX_ROOMS = 3
 
@@ -35,7 +39,8 @@ class BoundedBody:
     async def __call__(self, scope, receive, send):
         if scope['type']=='http' and scope['method'] in ('POST','DELETE'):
             length = dict(scope['headers']).get(b'content-length',b'')
-            if not length.isdigit() or len(length)>6 or int(length)>20000:
+            limit=4*1024*1024 if scope.get('path','').startswith('/audio/') else 20000
+            if not length.isdigit() or len(length)>8 or int(length)>limit:
                 await JSONResponse({'detail':'Bounded request body required'},status_code=413)(scope,receive,send)
                 return
         await self.app(scope,receive,send)
@@ -74,6 +79,7 @@ class Speech(BaseModel):
     model: str = 'tts-1'
     input: str = Field(min_length=1, max_length=4000)
     voice: str = Field(default='auto', max_length=64)
+    profile: str | None = Field(default=None,max_length=6000)
     response_format: str = Field(default='pcm', pattern='^pcm$')
     meeting_id: int = Field(gt=0)
 
@@ -91,7 +97,7 @@ async def connect_room(name):
         await asyncio.wait_for(room.connect(os.environ['LIVEKIT_URL'], token,
             options=rtc.RoomOptions(auto_subscribe=False)), 12)
     except BaseException:
-        await room.disconnect()
+        with suppress(Exception):await asyncio.wait_for(room.disconnect(),5)
         raise
     return room
 
@@ -120,13 +126,29 @@ class Runtime:
     pending_audio: int = 0
     failed: bool = False
     contexts: OrderedDict = field(default_factory=OrderedDict)
+    release_turn: Callable[[str], Awaitable[None]] | None = None
+    closing: asyncio.Task | None = None
+    created_by: asyncio.Task | None = None
 
     async def close(self):
-        with suppress(Exception):
-            await asyncio.wait_for(self.session.aclose(),5)
-        with suppress(Exception):
-            await asyncio.wait_for(self.room.disconnect(),5)
-        await delete_room(self.room_name)
+        async def dispose():
+            task,rid,done=self.context_task,self.current_id,self.turn_done
+            if task is not None:task.cancel()
+            if self.current_handle is not None:
+                with suppress(Exception):self.current_handle.interrupt()
+            if rid and self.release_turn:
+                with suppress(Exception):await asyncio.wait_for(self.release_turn(rid),6)
+            if task is not None:
+                await asyncio.wait({task},timeout=3)
+                if task.done() and not task.cancelled():task.exception()
+                elif not task.done():task.add_done_callback(lambda done:None if done.cancelled() else done.exception())
+            if done is not None:
+                with suppress(TimeoutError):await asyncio.wait_for(done.wait(),3)
+            with suppress(Exception):await asyncio.wait_for(self.session.aclose(),5)
+            with suppress(Exception):await asyncio.wait_for(self.room.disconnect(),5)
+            await delete_room(self.room_name)
+        if self.closing is None:self.closing=asyncio.create_task(dispose())
+        await asyncio.shield(self.closing)
 
 
 class PCMResponse(StreamingResponse):
@@ -151,7 +173,14 @@ def create_app(client=None, room_connector=connect_room):
     tts_url = os.environ.get('TTS_SERVICE_URL', 'http://tts:8000').rstrip('/')
     tts_token = os.environ.get('TTS_API_TOKEN', '')
     http = client or httpx.AsyncClient(timeout=150, follow_redirects=False)
-    rows, opening, stopped = {}, asyncio.Lock(), deque(maxlen=128)
+    from audio import build_audio_router
+    rows, opening, initializing, stopped = {}, WeakValueDictionary(), set(), deque(maxlen=128)
+
+    def room_lock(key):
+        # Active callers retain the lock; idle keys need no permanent registry entry.
+        lock = opening.get(key)
+        if lock is None: opening[key] = lock = asyncio.Lock()
+        return lock
 
     async def config(mid, session, token, revision=None):
         if mid <= 0 or len(session) > 128:
@@ -179,19 +208,21 @@ def create_app(client=None, room_connector=connect_room):
     async def get_runtime(mid, session, token, revision):
         await config(mid, session, token, revision)
         key = (mid, session)
-        async with opening:
+        async with room_lock(key):
             row = rows.get(key)
+            if row and row.closing is not None:
+                if not row.closing.done():raise HTTPException(409,'Previous runtime is closing')
+                await row.close();rows.pop(key);row=None
             if row and (row.revision != revision or row.token != token or row.failed):
                 if row.lock.locked(): raise HTTPException(409, 'Previous voice turn is stopping')
-                rows.pop(key); await row.close(); row = None
+                await row.close(); rows.pop(key); row = None
             if row:
                 if getattr(row.room,'connection_state',rtc.ConnectionState.CONN_CONNECTED) != rtc.ConnectionState.CONN_CONNECTED:
                     if row.lock.locked(): raise HTTPException(503,'LiveKit room is reconnecting')
-                    rows.pop(key); await row.close(); row=None
+                    await row.close(); rows.pop(key); row=None
             if row:
                 row.touched = time.monotonic()
                 return row
-            if len(rows) >= MAX_ROOMS: raise HTTPException(503, 'LiveKit meeting capacity is full')
             async def answer(request):
                 headers = {'Authorization': token}
                 if request['speaker']: headers['X-Voice-Speaker-Key'] = request['speaker']
@@ -205,36 +236,51 @@ def create_app(client=None, room_connector=connect_room):
                 if operation == 'context': body.pop('agent_context', None)
                 if lookup is not None: body['lookup'] = lookup
                 r = await http.post(f'{core}/bots/voice/{mid}/{session}/agent', json=body, headers=headers)
+                if r.status_code in (401,403,404,409): raise SourceAccessChanged('TINA source or session access changed')
                 if r.status_code != 200 or len(r.content) > 200000: raise RuntimeError('TINA agent operation rejected')
                 return r.json()
             async def speech(text):
+                selected=await config(mid,session,token,revision)
+                speech_profile=selected.get('speech_profile')
                 async with http.stream('POST', tts_url+'/v1/audio/speech', headers={'X-API-Key': tts_token},
-                    json={'model':'tts-1','input':text,'voice':'auto','response_format':'pcm','meeting_id':mid}, timeout=145) as r:
+                    json={'model':'tts-1','input':text,'voice':'auto','response_format':'pcm','meeting_id':mid,
+                          **({'profile':speech_profile} if speech_profile else {})}, timeout=145) as r:
                     if (r.status_code != 200 or r.headers.get('x-audio-sample-rate','24000') != '24000'
                             or r.headers.get('x-audio-channels','1') != '1'):
                         raise RuntimeError('Local TTS rejected')
                     async for chunk in r.aiter_bytes(): yield chunk
             # A late server-side deletion must never target a replacement generation's room.
             name = f'tina-meeting-{mid}-{session}-{uuid4().hex}'
-            room = await room_connector(name)
-            model = TinaLLM(answer, agent)
-            tts = VieNeuTTS(speech)
-            session_io = AgentSession(llm=model, tts=tts, vad=None, max_tool_steps=3, turn_handling={'turn_detection':'manual','interruption':{'resume_false_interruption':False}},
-                user_away_timeout=None, conn_options=SessionConnectOptions(
-                    llm_conn_options=APIConnectOptions(max_retry=0,timeout=160),
-                    tts_conn_options=APIConnectOptions(max_retry=0,timeout=145)))
+            room=session_io=None
+            # No await between checking capacity and reserving this pending admission.
+            if len(rows)+len(initializing) >= MAX_ROOMS: raise HTTPException(503, 'LiveKit meeting capacity is full')
+            initializing.add(key)
             try:
+                room = await room_connector(name)
+                model = TinaLLM(answer, agent)
+                tts = VieNeuTTS(speech)
+                session_io = AgentSession(llm=model, tts=tts, vad=None, turn_handling={'turn_detection':'manual','interruption':{'resume_false_interruption':False}},
+                    user_away_timeout=None, conn_options=SessionConnectOptions(
+                        llm_conn_options=APIConnectOptions(max_retry=0,timeout=160),
+                        tts_conn_options=APIConnectOptions(max_retry=0,timeout=145)))
                 from livekit.agents.voice import room_io
-                await session_io.start(Agent(instructions='Use only the authorized TINA backend.', tools=model.tools()),room=room,
-                    session_host=False,record=False,room_options=room_io.RoomOptions(
-                        audio_input=False,video_input=False,text_input=False,audio_output=False,text_output=False,
-                        close_on_disconnect=False))
+                await session_io.start(Agent(instructions='Use only the authorized TINA backend.'),room=room,
+                        session_host=False,record=False,room_options=room_io.RoomOptions(
+                            audio_input=False,video_input=False,text_input=False,audio_output=False,text_output=False,
+                            close_on_disconnect=False))
+                row = Runtime(room,session_io,model,tts,revision,token,name,
+                    release_turn=lambda rid:cancel_turn(mid,session,rid,token),created_by=asyncio.current_task())
+                rows[key] = row
+                return row
             except BaseException:
-                await session_io.aclose(); await room.disconnect(); await delete_room(name)
+                if session_io is not None:
+                    with suppress(Exception):await asyncio.wait_for(session_io.aclose(),5)
+                if room is not None:
+                    with suppress(Exception):await asyncio.wait_for(room.disconnect(),5)
+                await delete_room(name)
                 raise
-            row = Runtime(room,session_io,model,tts,revision,token,name)
-            rows[key] = row
-            return row
+            finally:
+                initializing.discard(key)
 
     async def reap():
         while True:
@@ -245,11 +291,11 @@ def create_app(client=None, room_connector=connect_room):
                     await config(*key, row.token, row.revision)
                 except HTTPException as exc:
                     invalid = exc.status_code != 503
-                async with opening:
+                async with room_lock(key):
                     if rows.get(key) is not row: continue
                     if not invalid and (row.lock.locked() or time.monotonic()-row.touched < 90): continue
-                    rows.pop(key)
                     await row.close()
+                    if rows.get(key) is row:rows.pop(key)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -262,6 +308,7 @@ def create_app(client=None, room_connector=connect_room):
             if client is None: await http.aclose()
 
     app = FastAPI(lifespan=lifespan)
+    app.include_router(build_audio_router(http,core))
     app.add_middleware(BoundedBody)
     app.state.rows = rows
     app.state.get_runtime = get_runtime
@@ -295,7 +342,20 @@ def create_app(client=None, room_connector=connect_room):
                 raise HTTPException(503, 'Unexpected TTS audio format')
         except (httpx.HTTPError, ValueError, AttributeError):
             raise HTTPException(503, 'TTS is unavailable') from None
-        return status | {'tts_ready': True}
+        if os.environ.get('TINA_LIVEKIT_AUDIO')=='1':
+            try:
+                from audio import noise_ready
+                noise_info=await asyncio.to_thread(noise_ready)
+                if not os.environ.get('LIVEKIT_API_SECRET'):raise ValueError()
+            except Exception:raise HTTPException(503,'Local audio preprocessing unavailable') from None
+        vad_ready=False
+        if os.environ.get('TINA_LIVEKIT_VAD_SHADOW')=='1':
+            try:
+                from vad_shadow import verify_assets
+                verify_assets();vad_ready=True
+            except Exception:pass  # Optional observer failure must not stop STT or TTS.
+        return status | {'tts_ready': True,'audio_bridge_ready':os.environ.get('TINA_LIVEKIT_AUDIO')=='1',
+                         'noise_filter':noise_info if os.environ.get('TINA_LIVEKIT_AUDIO')=='1' else None,'vad_shadow_ready':vad_ready}
 
     async def turn_permit(mid, session, rid, token, revision):
         try:
@@ -319,6 +379,29 @@ def create_app(client=None, room_connector=connect_room):
             if not task.done(): handle.interrupt(); task.cancel()
             with suppress(asyncio.CancelledError): await task
 
+    async def wait_flow(task, request):
+        try:
+            while not task.done():
+                await asyncio.sleep(.05)
+                if await request.is_disconnected():
+                    raise asyncio.CancelledError()
+            return await task
+        finally:
+            if not task.done(): task.cancel()
+            with suppress(asyncio.CancelledError): await task
+
+    async def admit(mid,session,token,revision,request):
+        task=asyncio.create_task(get_runtime(mid,session,token,revision))
+        try:return await wait_flow(task,request)
+        except BaseException:
+            # Admission can finish in the same tick as disconnect; discard only an unused new runtime.
+            if task.done() and not task.cancelled() and task.exception() is None:
+                row=task.result()
+                async with room_lock((mid,session)):
+                    if row.created_by is task and rows.get((mid,session)) is row and not row.lock.locked():
+                        await row.close();rows.pop((mid,session))
+            raise
+
     async def cancel_turn(mid, session, rid, token, *, strict=False):
         # Release TINA's room reservation even if planning or the SDK failed before finalization.
         try:
@@ -334,19 +417,20 @@ def create_app(client=None, room_connector=connect_room):
     @app.post('/bots/{mid}/{session}/answer')
     async def answer(mid:int,session:str,body:Question,request:Request,authorization:str=Header(default=''),
                      x_voice_speaker_key:str|None=Header(default=None,pattern=r'^[0-9a-f]{64}$')):
-        row=await get_runtime(mid,session,authorization,body.revision)
+        row=await admit(mid,session,authorization,body.revision,request)
         if row.lock.locked(): raise HTTPException(409,'Voice turn is busy')
         async with row.lock:
+            if row.closing is not None:raise HTTPException(409,'Voice runtime is closing')
             rid=str(body.request_id)
             if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
-            row.current_id=rid; row.model.result=None; row.model.plan_rounds=0; row.model.tool_requests.clear()
+            row.current_id=rid; row.model.result=None
             done=asyncio.Event();row.turn_done=done
             row.model.request={'body':body.model_dump(mode='json'),'speaker':x_voice_speaker_key}
             row.session.output.audio=None
             context = llm.ChatContext.empty()
             try:
                 row.context_task=asyncio.create_task(row.model.agent(row.model.request, 'context'))
-                try: snapshot = await row.context_task
+                try: snapshot = await wait_flow(row.context_task,request)
                 finally: row.context_task=None
                 if len(snapshot['history']) > 3: raise RuntimeError('Heard context exceeds bound')
                 context = heard_context([HeardTurn.model_validate(t) for t in snapshot['history']])
@@ -358,6 +442,21 @@ def create_app(client=None, room_connector=connect_room):
                     while len(row.contexts) > 32: row.contexts.popitem(last=False)
                     context = row.contexts[x_voice_speaker_key][1].copy()
                 row.model.request['body']['agent_context'] = context_turns(context)
+                if snapshot.get('task_flow'):
+                    row.context_task=asyncio.create_task(run_task_flow(snapshot['task_flow']['node'],row.model.agent,row.model.request,
+                        kind=snapshot['task_flow'].get('kind','task')))
+                    try: flow=await wait_flow(row.context_task,request)
+                    finally: row.context_task=None
+                    if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
+                    if flow['action']!='leave':
+                        row.context_task=asyncio.create_task(row.model.answer(row.model.request))
+                        try: result=await wait_flow(row.context_task,request)
+                        finally: row.context_task=None
+                        if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
+                        if not isinstance(result.get('text'),str) or not 1<=len(result['text'])<=4000:
+                            raise RuntimeError('Invalid task flow answer')
+                        row.model.result=result
+                        return row.model.result | {'voice_runtime':'livekit','workflow_runtime':'pipecat-flows'}
                 await row.session.current_agent.update_chat_ctx(context.copy())
                 if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
                 handle=row.session.generate_reply(user_input=body.question,chat_ctx=context.copy())
@@ -367,7 +466,7 @@ def create_app(client=None, room_connector=connect_room):
                 if not row.model.result: raise HTTPException(503,'TINA answer failed')
                 return row.model.result | {'voice_runtime':'livekit'}
             except asyncio.CancelledError:
-                if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped') from None
+                if (mid,session,rid) in stopped or row.closing is not None: raise HTTPException(409,'Voice turn stopped') from None
                 raise
             except (RuntimeError, ValueError, httpx.HTTPError):
                 raise HTTPException(503,'TINA agent operation failed') from None
@@ -375,7 +474,8 @@ def create_app(client=None, room_connector=connect_room):
                 if row.model.result is None:
                     if (mid,session,rid) not in stopped: row.failed=True
                     await cancel_turn(mid,session,rid,authorization)
-                row.model.request=None; row.model.result=None; row.model.tool_requests.clear(); row.touched=time.monotonic()
+                    row.current_id=None
+                row.model.request=None; row.model.result=None; row.touched=time.monotonic()
                 row.current_handle=None
                 try:
                     with suppress(RuntimeError): await row.session.current_agent.update_chat_ctx(context.copy())
@@ -385,13 +485,14 @@ def create_app(client=None, room_connector=connect_room):
     async def speech(mid:int,session:str,body:Speech,request:Request,authorization:str=Header(default=''),
                      x_voice_revision:int=Header(ge=0),x_voice_request_id:UUID=Header()):
         if body.meeting_id!=mid or body.voice!='auto': raise HTTPException(422,'Only the selected room voice is supported')
-        row=await get_runtime(mid,session,authorization,x_voice_revision)
+        row=await admit(mid,session,authorization,x_voice_revision,request)
         rid=str(x_voice_request_id)
         await turn_permit(mid,session,rid,authorization,x_voice_revision)
         if row.pending_audio >= 2: raise HTTPException(429,'Current speech and lookahead are already reserved')
         row.pending_audio += 1
         async def stream():
             async with row.lock:
+                if row.closing is not None:return
                 if (mid,session,rid) in stopped: return
                 await turn_permit(mid,session,rid,authorization,x_voice_revision)
                 if (mid,session,rid) in stopped: return
@@ -447,4 +548,5 @@ def create_app(client=None, room_connector=connect_room):
 
 if __name__=='__main__':
     import uvicorn
-    uvicorn.run(create_app(),host='0.0.0.0',port=8080,access_log=False)
+    uvicorn.run(create_app(),host='0.0.0.0',port=8080,access_log=False,
+                ws='websockets-sansio',ws_max_size=100000,ws_max_queue=16)

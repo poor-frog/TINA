@@ -25,14 +25,39 @@ _UNSUPPORTED_FIELDS = frozenset({
     "previous_response_id", "store", "truncation", "include", "safety_identifier",
     "prompt_cache_key", "prompt", "client_metadata",
 })
+_REACH_NAMESPACE = 'mcp__tina_reach'
+_REACH_TOOLS = {f'{_REACH_NAMESPACE}__reach_{channel}_{action}': f'reach_{channel}_{action}'
+                for channel in ('web','github') for action in ('search','read')}
+
+
+def _reach_call(item, *, restore=False):
+    if not isinstance(item, dict) or item.get('type') != 'function_call':
+        return item
+    if restore and item.get('name') in _REACH_TOOLS:
+        return item | {'name': _REACH_TOOLS[item['name']], 'namespace': _REACH_NAMESPACE}
+    if not restore and item.get('namespace') == _REACH_NAMESPACE:
+        name = f"{_REACH_NAMESPACE}__{item.get('name')}"
+        if name in _REACH_TOOLS:
+            return {k:v for k,v in (item | {'name':name}).items() if k != 'namespace'}
+    return item
+
+
+def restore_reach_event(body):
+    """Restore the exact namespace selected by Codex, never introducing a new tool."""
+    if not isinstance(body, dict): return body
+    if isinstance(body.get('item'), dict): body = body | {'item': _reach_call(body['item'], restore=True)}
+    response = body.get('response')
+    if isinstance(response, dict) and isinstance(response.get('output'), list):
+        body = body | {'response': response | {'output': [_reach_call(i, restore=True) for i in response['output']]}}
+    return body
 
 
 def sanitize_responses_request(payload: dict) -> dict:
     """Return Groq's supported subset without changing the original request.
 
     Groq does not persist response state; Codex already supplies conversation
-    history in ``input``. Namespace/custom/built-in tools are omitted, leaving
-    only the function definitions Codex offered under TINA's existing grants.
+    history in ``input``. The four public Reach functions flatten their namespace
+    for Groq; other namespace/custom/built-in tools are omitted. Grants still come from Codex.
     """
     cleaned = {key: value for key, value in payload.items() if key not in _UNSUPPORTED_FIELDS}
     if "tools" in cleaned:
@@ -40,6 +65,16 @@ def sanitize_responses_request(payload: dict) -> dict:
         cleaned["tools"] = [dict(tool) for tool in tools
                             if isinstance(tool, dict) and tool.get("type") == "function"] \
             if isinstance(tools, list) else []
+        for namespace in tools if isinstance(tools, list) else []:
+            if not isinstance(namespace, dict) or namespace.get('type') != 'namespace' or namespace.get('name') != _REACH_NAMESPACE:
+                continue
+            functions = namespace.get('tools')
+            for tool in functions if isinstance(functions, list) else []:
+                if not isinstance(tool, dict) or tool.get('type') != 'function': continue
+                name = f"{_REACH_NAMESPACE}__{tool.get('name')}"
+                if name in _REACH_TOOLS: cleaned['tools'].append(tool | {'name':name})
+    if isinstance(cleaned.get('input'), list):
+        cleaned['input'] = [_reach_call(item) for item in cleaned['input']]
     # Codex uses developer messages for workspace/sandbox instructions. Groq's
     # non-GPT-OSS chat templates (including Qwen) accept system, not developer.
     # Preserve their position, content and tool history; never turn them into user text.
@@ -190,9 +225,20 @@ def groq_responses_proxy(api_key: str, *,
                     self.send_header("Connection", "close")
                     self.end_headers()
                     headers_sent = True
-                    for chunk in response.iter_bytes():
-                        self.wfile.write(chunk)
-                        self.wfile.flush()
+                    if 'text/event-stream' in response.headers.get('Content-Type', ''):
+                        for line in response.iter_lines():
+                            if line.startswith('data:'):
+                                try:
+                                    event = json.loads(line[5:].strip())
+                                    restored = restore_reach_event(event)
+                                    if restored != event: line = 'data: ' + json.dumps(restored)
+                                except ValueError: pass
+                            self.wfile.write((line + '\n').encode('utf-8'))
+                            self.wfile.flush()
+                    else:
+                        for chunk in response.iter_bytes():
+                            self.wfile.write(chunk)
+                            self.wfile.flush()
             except httpx.TimeoutException:
                 if not headers_sent:
                     self._json_error(504, "Groq Responses endpoint timed out.")

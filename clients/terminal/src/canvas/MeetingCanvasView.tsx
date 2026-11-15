@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CanvasActionsProvider, useActions, OPEN_ENTITY_EVENT } from "./actions";
 import { VoiceActivity } from "./VoiceActivity";
 import { useVoiceSourceNavigation,VOICE_SOURCE_REVEAL } from './useVoiceSourceNavigation';
+import {formatTranscript} from '../../../../packages/transcript-rendering/src/format';
 import { MeetingHealthBanner } from "./MeetingHealthBanner";
 import { LiveTranscriptEngine, type EngineActions, type EngineEntity, type EngineSignal } from "./LiveTranscriptEngine";
 import { useMeetingNotes } from "./notes";
@@ -48,7 +49,7 @@ function RawTranscript({ searchQuery, speakerFilter, onSegmentClick, playableSeg
   const source = language && language !== "vi" ? transcript.segments.map(segment => ({ ...segment, text: segment.sourceText ?? segment.text })) : transcript.segments;
   const paired = projectTranslationGroups(source, language && language !== "vi" ? translationGroups : []);
   const searchable = paired.filter(segment => !searchQuery.trim() ||
-    `${segment.speaker ?? ''} ${segment.text} ${segment.translation?.text ?? ''}`.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase()));
+    `${segment.speaker ?? ''} ${segment.text} ${formatTranscript(segment.text,segment.completed!==false,segment.translation?.sourceParts).text} ${segment.translation?.text ?? ''}`.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase()));
   const segments = filterSegments(searchable, "", speakerFilter);
   return <LiveTranscriptEngine segments={segments} emptyLabel={searchQuery || speakerFilter ? "No transcript segments match these filters." : ended ? "No transcript is available for this meeting." : "Waiting for transcript…"}
     onSegmentClick={onSegmentClick} playableSegmentIds={playableSegmentIds} activeSegmentId={activeSegmentId}
@@ -142,6 +143,10 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
   const toolsId = useId();
   const [searchQuery, setSearchQuery] = useState("");
   const [speakerFilter, setSpeakerFilter] = useState("");
+  const transcriptScrollRef = useRef<HTMLElement>(null);
+  const transcriptContentRef = useRef<HTMLDivElement>(null);
+  const followingTranscript = useRef(true);
+  const [showLatestTranscript, setShowLatestTranscript] = useState(false);
   const [audioFragments, setAudioFragments] = useState<MeetingAudioFragment[]>([]);
   const [audioLoading, setAudioLoading] = useState(false);
   const [audioMessage, setAudioMessage] = useState("");
@@ -170,6 +175,25 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
     transcript.segments.filter(segment => segment.completed !== false && !!segment.id).map(segment => segment.id!));
   const speakerOptions = Array.from(new Set(transcript.segments.map((segment) => segment.speaker?.trim()).filter((speaker): speaker is string => !!speaker)));
   const processing = deriveProcessingView({ override, live, hasNotes, durableTerminal });
+
+  useLayoutEffect(() => {
+    const viewport = transcriptScrollRef.current;
+    const content = transcriptContentRef.current;
+    if (!viewport || !content) return;
+    followingTranscript.current = true;
+    setShowLatestTranscript(false);
+    let frame = 0;
+    const follow = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (followingTranscript.current) viewport.scrollTop = viewport.scrollHeight;
+      });
+    };
+    const observer = new MutationObserver(follow);
+    observer.observe(content, { childList: true, subtree: true, characterData: true });
+    follow();
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  }, [dialogMeetingId]);
 
   useEffect(() => {
     if (!canPlayMeetingAudio) {
@@ -283,6 +307,12 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
     setPlaybackActive(true);
     audioPlayerRef.current?.seekToFragment(seek.fragmentIndex, seek.secondsInFragment);
   };
+  const followLatestTranscript = () => {
+    followingTranscript.current = true;
+    setShowLatestTranscript(false);
+    const viewport = transcriptScrollRef.current;
+    if (viewport) viewport.scrollTop = viewport.scrollHeight;
+  };
 
   // LIVE: the toggle ALSO controls backend processing — ON enables the copilot (full-history backfill
   // the first time, else resume); OFF disables it. COMPLETED: pure view switch — there is nothing to
@@ -357,6 +387,7 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
             </button>
             {!canPlayMeetingAudio && meetingRecord?.has_recording && <span className={transcriptStyles.meta}>Recording available</span>}
           </div>
+          {showLatestTranscript && <button type="button" className={transcriptStyles.latest} onClick={followLatestTranscript} aria-label="Scroll to the latest transcript">Latest transcript ↓</button>}
           {dialogMeetingId && ["google_meet", "Google Meet"].includes(meetingRecord?.platform || "") && <VoiceActivity meetingId={dialogMeetingId} ended={durableTerminal || meetingRecord?.status === "past"} onSnapshot={voiceNavigation.follow} />}
           {voiceNavigation.message&&<span role="status" style={{fontSize:12,color:'var(--t3)'}}>{voiceNavigation.message}</span>}
           {meetingRecord && <button type="button" className={transcriptStyles.info} aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
@@ -376,16 +407,10 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
             <button type="button" className={transcriptStyles.tool} onClick={() => speakersOpen.current?.()}>Speaker identities</button>
             <button type="button" className={transcriptStyles.tool} onClick={() => reviewOpen.current?.()}>Review transcript</button>
           </div>}
-          {canPlayMeetingAudio && (audioLoading || audioMessage || audioFragments.length > 0) && <div className={transcriptStyles.recordingRow} aria-label="Meeting recording">
-            <span className={transcriptStyles.recordingLabel}>Recording</span>
-            {audioFragments.length > 0
-              ? <div className={dossierStyles.recordingPlayer}><MeetingAudioPlayer ref={audioPlayerRef} fragments={audioFragments} onPositionChange={handleAudioPosition} /></div>
-              : <div className={dossierStyles.recordingMessage} role="status">{audioLoading ? "Preparing recording…" : audioMessage}</div>}
-          </div>}
           <div className={transcriptStyles.filters}>
             <div className={transcriptStyles.search}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
-              <input className={transcriptStyles.input} aria-label="Search transcript" placeholder="Search transcript…" value={searchQuery} onChange={(event) => setSearchQuery(event.currentTarget.value)} />
+              <input className={transcriptStyles.input} aria-label="Search transcript" placeholder="Search…" value={searchQuery} onChange={(event) => setSearchQuery(event.currentTarget.value)} />
             </div>
             <select className={transcriptStyles.select} aria-label="Filter transcript by speaker" value={speakerFilter} onChange={(event) => setSpeakerFilter(event.currentTarget.value)} disabled={!speakerOptions.length}>
               <option value="">All speakers</option>
@@ -396,8 +421,13 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
           </div>
 
         </header>
-        <main className={transcriptStyles.body}>
-          <div className={transcriptStyles.bodyContent}>
+        <main className={transcriptStyles.body} ref={transcriptScrollRef} onScroll={(event) => {
+          const viewport = event.currentTarget;
+          const following = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop < 48;
+          followingTranscript.current = following;
+          setShowLatestTranscript(!following);
+        }}>
+          <div className={transcriptStyles.bodyContent} ref={transcriptContentRef}>
             {processing && language === "vi"
               ? <ProcessedTranscript searchQuery={searchQuery} speakerFilter={speakerFilter} ended={durableTerminal}
                   onSegmentClick={canPlayMeetingAudio && audioFragments.length ? handleSegmentClick : undefined}
@@ -408,6 +438,11 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
                   playableSegmentIds={playableSegmentIds} activeSegmentId={activeSegmentId} />}
           </div>
         </main>
+        {canPlayMeetingAudio && (audioLoading || audioMessage || audioFragments.length > 0) && <div className={transcriptStyles.recordingDock} role="group" aria-label="Meeting recording">
+          {audioFragments.length > 0
+            ? <div className={dossierStyles.recordingPlayer}><MeetingAudioPlayer ref={audioPlayerRef} fragments={audioFragments} onPositionChange={handleAudioPosition} /></div>
+            : <div className={dossierStyles.recordingMessage} role="status">{audioLoading ? "Preparing recording…" : audioMessage}</div>}
+        </div>}
       </section>
       </div>
       {meetingRecord && detailsOpen && <MeetingDetailsRail meeting={meetingRecord} segments={transcript.segments} recordingAvailable={canPlayMeetingAudio && audioFragments.length > 0} onDeleteMeeting={onDeleteMeeting} deletingMeeting={deletingMeeting} notesControl={notesControl ? {

@@ -163,7 +163,9 @@
             "policy_changed",
             "interrupted",
             "waiting_turn_end",
-            "livekit_unavailable"
+            "livekit_unavailable",
+            "no_input",
+            "dialogue_paused"
           ],
           "title": "Code",
           "type": "string"
@@ -349,7 +351,9 @@
             "web_disabled",
             "web_unavailable",
             "web_no_sources",
-            "summary_pending"
+            "summary_pending",
+            "clarification_exhausted",
+            "draft_unavailable"
           ],
           "title": "Reason",
           "type": "string"
@@ -877,7 +881,9 @@
           "enum": [
             "context",
             "plan",
-            "lookup"
+            "lookup",
+            "flow_plan",
+            "flow_apply"
           ],
           "title": "Operation",
           "type": "string"
@@ -1416,6 +1422,790 @@
         "source"
       ],
       "title": "VoiceNavigation",
+      "type": "object"
+    },
+    "VoiceHandoffHint": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "minimum": 0,
+          "title": "Expires At Ms",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "task",
+            "decision",
+            "question"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "expires_at_ms",
+        "kind"
+      ],
+      "title": "VoiceHandoffHint",
+      "type": "object"
+    },
+    "HandoffTask": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "maxLength": 200,
+          "title": "Title",
+          "type": "string"
+        },
+        "assignee": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Assignee"
+        },
+        "due": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Due"
+        },
+        "missing_field": {
+          "enum": [
+            "title",
+            "assignee",
+            "due",
+            "review"
+          ],
+          "title": "Missing Field",
+          "type": "string"
+        },
+        "save_uncertain": {
+          "default": false,
+          "title": "Save Uncertain",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "title",
+        "assignee",
+        "due",
+        "missing_field"
+      ],
+      "title": "HandoffTask",
+      "type": "object"
+    },
+    "HandoffTurn": {
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "maxLength": 2000,
+          "title": "Question",
+          "type": "string"
+        },
+        "answer": {
+          "maxLength": 4000,
+          "title": "Answer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question",
+        "answer"
+      ],
+      "title": "HandoffTurn",
+      "type": "object"
+    },
+    "VoiceHandoff": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "minimum": 0,
+          "title": "Expires At Ms",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "task",
+            "decision",
+            "question"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "meeting_id": {
+          "exclusiveMinimum": 0,
+          "title": "Meeting Id",
+          "type": "integer"
+        },
+        "reason": {
+          "enum": [
+            "clarification_exhausted",
+            "llm_unavailable",
+            "verification_unavailable",
+            "draft_unavailable"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "original_request": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Original Request",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HandoffTask"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HandoffDecision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "heard_turns": {
+          "items": {
+            "$ref": "#/$defs/HandoffTurn"
+          },
+          "maxItems": 3,
+          "title": "Heard Turns",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/VoiceSource"
+          },
+          "maxItems": 8,
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "expires_at_ms",
+        "kind",
+        "meeting_id",
+        "reason",
+        "original_request",
+        "task",
+        "heard_turns",
+        "sources"
+      ],
+      "title": "VoiceHandoff",
+      "type": "object"
+    },
+    "DecisionSource": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "quote": {
+          "maxLength": 1200,
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "fingerprint",
+        "quote"
+      ],
+      "title": "DecisionSource",
+      "type": "object"
+    },
+    "DecisionState": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "decision",
+          "default": "decision",
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Title",
+          "type": "string"
+        },
+        "requested_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "proposed",
+                "decided"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Status"
+        },
+        "status_text": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status Text"
+        },
+        "source_hint": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Source Hint",
+          "type": "string"
+        },
+        "evidence_status": {
+          "default": "unchecked",
+          "enum": [
+            "unchecked",
+            "supported",
+            "missing",
+            "conflict"
+          ],
+          "title": "Evidence Status",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/DecisionSource"
+          },
+          "maxItems": 3,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "utterances": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Utterances",
+          "type": "array"
+        },
+        "reprompts": {
+          "default": 0,
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Reprompts",
+          "type": "integer"
+        },
+        "save_uncertain": {
+          "default": false,
+          "title": "Save Uncertain",
+          "type": "boolean"
+        }
+      },
+      "title": "DecisionState",
+      "type": "object"
+    },
+    "DecisionPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "intent": {
+          "enum": [
+            "update",
+            "confirm",
+            "cancel",
+            "leave",
+            "unmatched"
+          ],
+          "title": "Intent",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Title"
+        },
+        "requested_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "proposed",
+                "decided"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Requested Status"
+        },
+        "status_text": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status Text"
+        },
+        "source_hint": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Hint"
+        }
+      },
+      "required": [
+        "intent",
+        "title",
+        "requested_status",
+        "status_text",
+        "source_hint"
+      ],
+      "title": "DecisionPatch",
+      "type": "object"
+    },
+    "EvidenceVerdict": {
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {
+          "enum": [
+            "supported",
+            "missing",
+            "conflict"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "source_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Source Ids",
+          "type": "array"
+        },
+        "quotes": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Quotes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "verdict",
+        "source_ids",
+        "quotes"
+      ],
+      "title": "EvidenceVerdict",
+      "type": "object"
+    },
+    "VoiceHistoryTurn": {
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "answer": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Answer",
+          "type": "string"
+        },
+        "created_at_ms": {
+          "minimum": 0,
+          "title": "Created At Ms",
+          "type": "integer"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/VoiceSourceRef"
+          },
+          "maxItems": 32,
+          "title": "Sources",
+          "type": "array"
+        },
+        "clarification": {
+          "default": false,
+          "title": "Clarification",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "question",
+        "answer",
+        "created_at_ms",
+        "sources"
+      ],
+      "title": "VoiceHistoryTurn",
+      "type": "object"
+    },
+    "DecisionFlowQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/$defs/VoiceHistoryTurn"
+          },
+          "maxItems": 3,
+          "title": "History",
+          "type": "array"
+        },
+        "lookups": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/VoiceLookupQuery"
+              },
+              "maxItems": 4,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lookups"
+        },
+        "web_result": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Web Result"
+        },
+        "operation": {
+          "enum": [
+            "plan",
+            "finish"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "decision_state": {
+          "$ref": "#/$defs/DecisionState"
+        },
+        "recover_prompt": {
+          "default": false,
+          "title": "Recover Prompt",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "question",
+        "revision",
+        "operation",
+        "decision_state"
+      ],
+      "title": "DecisionFlowQuestion",
+      "type": "object"
+    },
+    "HandoffDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "maxLength": 200,
+          "title": "Title",
+          "type": "string"
+        },
+        "requested_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "proposed",
+                "decided"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Requested Status"
+        },
+        "evidence_status": {
+          "enum": [
+            "unchecked",
+            "supported",
+            "missing",
+            "conflict"
+          ],
+          "title": "Evidence Status",
+          "type": "string"
+        },
+        "missing_field": {
+          "enum": [
+            "title",
+            "decision_status",
+            "decision_evidence",
+            "review"
+          ],
+          "title": "Missing Field",
+          "type": "string"
+        },
+        "save_uncertain": {
+          "default": false,
+          "title": "Save Uncertain",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "title",
+        "requested_status",
+        "evidence_status",
+        "missing_field"
+      ],
+      "title": "HandoffDecision",
+      "type": "object"
+    },
+    "TaskState": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Title",
+          "type": "string"
+        },
+        "assignee": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Assignee"
+        },
+        "due": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Due"
+        },
+        "utterances": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Utterances",
+          "type": "array"
+        },
+        "reprompts": {
+          "default": 0,
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Reprompts",
+          "type": "integer"
+        },
+        "save_uncertain": {
+          "default": false,
+          "title": "Save Uncertain",
+          "type": "boolean"
+        }
+      },
+      "title": "TaskState",
+      "type": "object"
+    },
+    "TaskFlowQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/$defs/VoiceHistoryTurn"
+          },
+          "maxItems": 3,
+          "title": "History",
+          "type": "array"
+        },
+        "lookups": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/VoiceLookupQuery"
+              },
+              "maxItems": 4,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lookups"
+        },
+        "web_result": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Web Result"
+        },
+        "operation": {
+          "enum": [
+            "plan",
+            "finish"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "task_state": {
+          "$ref": "#/$defs/TaskState"
+        },
+        "recover_prompt": {
+          "default": false,
+          "title": "Recover Prompt",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "question",
+        "revision",
+        "operation",
+        "task_state"
+      ],
+      "title": "TaskFlowQuestion",
+      "type": "object"
+    },
+    "VoiceActionDraftPage": {
+      "additionalProperties": false,
+      "properties": {
+        "drafts": {
+          "items": {
+            "$ref": "#/$defs/VoiceActionDraft"
+          },
+          "maxItems": 20,
+          "title": "Drafts",
+          "type": "array"
+        },
+        "next_offset": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Offset"
+        }
+      },
+      "required": [
+        "drafts"
+      ],
+      "title": "VoiceActionDraftPage",
       "type": "object"
     }
   }

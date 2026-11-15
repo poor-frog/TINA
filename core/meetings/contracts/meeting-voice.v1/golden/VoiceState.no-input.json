@@ -1,0 +1,8 @@
+{
+  "state": "LISTENING",
+  "diagnostic": {
+    "event_id": "00000000-0000-4000-8000-000000000002",
+    "code": "no_input",
+    "observed_at_ms": 1800000000000
+  }
+}

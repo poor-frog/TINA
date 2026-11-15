@@ -13,3 +13,5 @@ export {
 } from './state';
 export type { TranscriptManager, TranscriptMessage, TranscriptRetractMessage, TranscriptWireMessage } from './manager';
 export { createTranscriptManager } from './manager';
+export {formatTranscript} from './format';
+export type {FormattedTranscript,TranscriptFormatChange,TranscriptFormatKind} from './format';

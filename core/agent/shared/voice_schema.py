@@ -1,9 +1,5 @@
 """Provider-side voice shapes; source and entailment checks remain mandatory after generation."""
-
-
-def object_schema(properties):
-    return {'type': 'object', 'properties': properties, 'required': list(properties),
-            'additionalProperties': False}
+from shared.voice_tools import object_schema, tool_call_schema
 
 
 def voice_schema(mode, sources=(), *, tools=()):
@@ -15,9 +11,7 @@ def voice_schema(mode, sources=(), *, tools=()):
             'claim_indexes': {'type': ['array', 'null'], 'maxItems': 3, 'items': {'type': 'integer', 'minimum': 0}}})
     if mode == 'rerank':
         return object_schema({'source_ids': {'type': 'array', 'maxItems': 12, 'items': source_id}})
-    calls = {'type': 'array', 'maxItems': 2 if tools else 0, 'items': object_schema({
-        'name': {'type': 'string', **({'enum': list(tools)} if tools else {})},
-        'query': {'type': 'string', 'maxLength': 200}})}
+    calls = {'type': 'array', 'maxItems': 2 if tools else 0, 'items': tool_call_schema(tools)}
     if mode == 'plan':
         return object_schema({'tool_calls': calls})
     return object_schema({

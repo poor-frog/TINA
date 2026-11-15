@@ -13,7 +13,7 @@ from uuid import UUID
 from typing import Literal, Annotated
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from .stop_router import _resolve_user_id
@@ -22,8 +22,12 @@ from .speech_status import SpeechConflict
 from .voice_replies import VoiceReply, VoiceSourceRef, VoiceSources, public_replies
 from .voice_navigation import VoiceNavigationHint,VoiceNavigation,open_source_intent,select_open_source,navigation_reply
 from redis.exceptions import WatchError
+from .task_flow import TaskFlowStore, checked_proposal, service_error, decision_sources_changed
+from .voice_handoff import VoiceHandoffs, VoiceHandoff, public_context
 
 STATES = '^(LISTENING|CAPTURING|THINKING|SPEAKING|QUIET|ERROR|OFF)$'
+RECOVERABLE_READS = {'get_recent_transcript', 'search_meeting', 'search_shared_meetings',
+                     'search_shared_documents', 'search_approved_actions'}
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 if not log.hasHandlers(): log.addHandler(logging.StreamHandler())
@@ -42,6 +46,22 @@ class VoiceProgress(BaseModel):
     stage: Literal['planning', 'searching_transcript', 'reading_documents', 'searching_web',
                    'reading_context', 'answering', 'preparing_speech', 'drafting']
     observed_at_ms: int = Field(ge=0, strict=True)
+
+
+def live_progress(raw, held, session, revision, request_id=None):
+    if not raw or not session:
+        return None
+    try:
+        value = VoiceProgress.model_validate_json(raw).model_dump(mode='json')
+        if isinstance(held, bytes): held = held.decode()
+        if (value['session_uid'] == session and value['revision'] == revision
+                and held == f"{session}:{value['request_id']}"
+                and (request_id is None or value['request_id'] == request_id)
+                and 0 <= int(time.time()*1000) - value['observed_at_ms'] < 180000):
+            return value
+    except (ValueError, TypeError):
+        pass
+    return None
 
 
 def voice_token(secret, meeting, session):
@@ -130,7 +150,7 @@ class VoiceLookupQuery(BaseModel):
 
 
 class VoiceAgentQuestion(VoiceQuestion):
-    operation: Literal['context', 'plan', 'lookup']
+    operation: Literal['context', 'plan', 'lookup', 'flow_plan', 'flow_apply']
     lookup: VoiceLookupQuery | None = None
 
 
@@ -140,7 +160,7 @@ DiagnosticCode = Literal[
     'waiting_quiet', 'stopped', 'completed', 'question_timeout', 'ambiguous_audio',
     'ambiguous_window', 'stale_asr', 'asr_unavailable', 'services_unavailable',
     'worker_failed', 'kws_unavailable', 'answer_failed', 'no_evidence', 'playback_failed', 'policy_changed',
-    'interrupted', 'waiting_turn_end', 'livekit_unavailable',
+    'interrupted', 'waiting_turn_end', 'livekit_unavailable', 'no_input', 'dialogue_paused',
 ]
 DIAGNOSTIC_TTL_SECONDS = 30
 
@@ -234,6 +254,8 @@ def policy_of(row):
 
 def build_voice_router(repo, redis, publisher, playback=None, client_factory=httpx.AsyncClient):
     router = APIRouter()
+    task_flows = TaskFlowStore(redis, playback)
+    handoffs = VoiceHandoffs(redis, playback)
 
     async def meeting(mid, user=None, session: str | None = None, authorization=None):
         row = await repo.get_meeting(mid)
@@ -263,6 +285,8 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 response = await client.request('POST' if body is not None else 'GET',
                     f'{base}/api/internal/meeting-voice/{row["id"]}/{suffix}', json=body,
                     headers=headers)
+                if response.status_code in (401,403,404,409,422):
+                    raise HTTPException(response.status_code,'Voice request or shared sources changed; refresh before retrying')
                 if response.status_code >= 400 or len(response.content) > 200000:
                     raise HTTPException(503, 'Approved meeting sources are unavailable')
                 result = response.json()
@@ -376,23 +400,45 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         if (not active_session or not detail or detail.get('session_uid') != active_session
                 or detail.get('expires_at_ms', 0) <= int(time.time() * 1000)):
             detail = None
-        current_progress = json.loads(raw_progress) if raw_progress else None
-        if isinstance(held, bytes): held = held.decode()
         policy = policy_of(row)
-        if not (current_progress and policy.enabled and runtime.get('state') == 'THINKING'
-                and current_progress['session_uid'] == active_session
-                and current_progress['revision'] == policy.revision
-                and current_progress['request_id'] == runtime.get('request_id')
-                and held == f"{active_session}:{current_progress['request_id']}"
-                and 0 <= int(time.time()*1000) - current_progress['observed_at_ms'] < 180000):
-            current_progress = None
+        current_progress = live_progress(raw_progress, held, active_session, policy.revision, runtime.get('request_id')) \
+            if policy.enabled and runtime.get('state') == 'THINKING' and runtime.get('request_id') else None
         return {'replies': public_replies(row, active_session, bool(runtime)),
                 'livekit_available': bool(os.environ.get('LIVEKIT_AGENT_URL', '').strip()),
                 'available': bool((row.get('data') or {}).get('voice_assistant_capable')),
                 'policy': policy_of(row).model_dump(), 'runtime': {
                     **runtime, 'state': runtime.get('state', 'OFF'), 'session_active': bool(active_session),
                     'heartbeat_fresh': bool(runtime), 'diagnostic': detail, 'progress': current_progress,
-                    'navigation':await navigation_hint(mid,row,runtime)}}
+                    'navigation':await navigation_hint(mid,row,runtime),
+                    'handoff':await handoffs.hint(mid,policy.revision,active_session,runtime)
+                        if policy.enabled and not (row.get('data') or {}).get('artifact_deletion') else None}}
+
+    async def handoff_context(mid,rid,user,claim):
+        row=await meeting(mid,user);policy=policy_of(row)
+        if not policy.enabled or (row.get('data') or {}).get('artifact_deletion'):
+            raise HTTPException(409,'Voice sharing is no longer available')
+        sessions=await repo.list_sessions(meeting_id=mid) if row.get('status')=='active' else []
+        value=await handoffs.read(mid,rid,policy.revision,sessions[-1] if sessions else None)
+        if not claim and not value['claimed']:raise HTTPException(409,'Open this handoff from the meeting first')
+        sources=VoiceSources.model_validate(await agent(row,'sources',{'sources':value['source_refs']}))
+        fresh=await meeting(mid,user)
+        if sources.unavailable or policy_of(fresh)!=policy or (fresh.get('data') or {}).get('artifact_deletion'):
+            raise HTTPException(409,'Voice sources changed; start a new request')
+        # Claim only after rechecking playback/session and sharing after the source lookup.
+        fresh_sessions=await repo.list_sessions(meeting_id=mid) if fresh.get('status')=='active' else []
+        value=await handoffs.read(mid,rid,policy.revision,fresh_sessions[-1] if fresh_sessions else None)
+        if claim:value=await handoffs.claim(mid,rid,value)
+        return public_context(mid,value,sources.sources)
+
+    @router.post('/meetings/{meeting_id}/voice-assistant/handoff/{request_id}',response_model=VoiceHandoff)
+    async def claim_handoff(meeting_id:int,request_id:UUID,response:Response,x_user_id:str|None=Header(default=None)):
+        response.headers['Cache-Control']='no-store'
+        return await handoff_context(meeting_id,str(request_id),_resolve_user_id(x_user_id),True)
+
+    @router.get('/meetings/{meeting_id}/voice-assistant/handoff/{request_id}',response_model=VoiceHandoff)
+    async def read_handoff(meeting_id:int,request_id:UUID,response:Response,x_user_id:str|None=Header(default=None)):
+        response.headers['Cache-Control']='no-store'
+        return await handoff_context(meeting_id,str(request_id),_resolve_user_id(x_user_id),False)
 
     async def navigation_hint(mid,row,runtime=None):
         raw=await redis.get(f'meeting:voice:{mid}:navigation')
@@ -497,6 +543,8 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                      x_tina_voice_runtime: str | None = Header(default=None)):
         row = await meeting(mid, session=session, authorization=authorization)
         policy = policy_of(row)
+        from .speech_profile import room_profile
+        speech_profile=await room_profile(row,session,redis,client_factory) if policy.enabled else None
         ready = False
         reason = None
         if policy.enabled:
@@ -540,11 +588,25 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                     if not ready: reason = 'livekit_unavailable'
                 # Readiness is advisory; answers always recheck live policy/source fingerprints.
                 await redis.set(ready_key, json.dumps({'ready': ready, 'reason': reason}), ex=10)
+        if ready and speech_profile:
+            try:
+                async with client_factory(timeout=4,follow_redirects=False) as client:
+                    response=await client.post(os.environ.get('TTS_SERVICE_URL','').rstrip('/')+'/v1/voices/warm',
+                        headers={'X-API-Key':os.environ.get('TTS_API_TOKEN','')},json={'profile':speech_profile,'meeting_id':mid})
+                    ready=response.status_code==200 and response.json().get('ready') is True
+            except (httpx.HTTPError,ValueError):ready=False
+            if not ready:reason='tts_unavailable'
+        current_progress = None
+        if ready and policy.enabled:
+            raw_progress, held = await redis.mget(f'meeting:voice:{mid}:progress', f'meeting:voice:{mid}:lock')
+            current_progress = live_progress(raw_progress, held, session, policy.revision)
         return {'enabled': policy.enabled, 'ready': ready, 'revision': policy.revision,
+                **({'progress': current_progress} if current_progress else {}),
                 'engine': policy.engine,
                 'agent_url': (os.environ.get('LIVEKIT_AGENT_URL', '').rstrip('/') + f'/bots/{mid}/{session}')
                     if policy.engine == 'livekit' and os.environ.get('LIVEKIT_AGENT_URL', '').strip() else None,
-                'wake_variants': policy.wake_variants, 'noise_suppression':policy.noise_suppression, 'unavailable_reason': reason}
+                'wake_variants': policy.wake_variants, 'noise_suppression':policy.noise_suppression,
+                **({'speech_profile':speech_profile} if speech_profile else {}),'unavailable_reason': reason}
 
     @router.post('/bots/voice/{mid}/{session}/state', include_in_schema=False)
     async def state(mid: int, session: str, body: VoiceState, authorization: str | None = Header(default=None)):
@@ -623,7 +685,8 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
             if reply.get('state') == 'completed': history.append(turn)
             elif reply.get('state') == 'stopped' and reply.get('played_text'):
                 history.append(turn | {'answer': reply['played_text'], 'clarification': False})
-        return key, stored, [{k: v for k, v in t.items() if k != 'request_id'} for t in history]
+        history = history[-3:]
+        return key, history, [{k: v for k, v in t.items() if k != 'request_id'} for t in history]
 
     async def prepare_source_navigation(mid, session: str, policy, speaker, row, question):
         _,stored,_=await heard_history(mid,session,policy,speaker,row)
@@ -695,6 +758,37 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         payload = {'operation': body.operation, 'question': body.question, 'revision': body.revision,
                    'history': history if body.operation == 'context' else match_context(body.agent_context, history)}
         try:
+            if body.operation in ('flow_plan','flow_apply'):
+                flow=saved.get('task_flow')
+                if not flow or body.lookup is not None:
+                    raise HTTPException(403,'No caller-scoped task flow')
+                updated={**saved,'task_flow':dict(flow)}
+                if body.operation=='flow_plan':
+                    if flow.get('proposal'): raise HTTPException(409,'Task flow already planned')
+                    if not await redis.set(key+':flow-plan','1',nx=True,ex=240):
+                        raise HTTPException(409,'Task flow planning already requested')
+                    try:
+                        suffix,field=('decision-flow','decision_state') if flow.get('kind')=='decision' else ('task-flow','task_state')
+                        result=checked_proposal(await agent(row,suffix,{'operation':'plan','question':body.question,
+                            'revision':body.revision,field:flow['state'],'recover_prompt':flow.get('recover_prompt',False)},request_id=body.request_id))
+                    except HTTPException as exc:
+                        if exc.status_code not in (502,503,504): raise
+                        result=service_error(flow,body.question)
+                    updated['task_flow']['proposal']=result
+                    await progress(mid,session,body,'planning')
+                else:
+                    if not flow.get('proposal') or flow.get('applied'): raise HTTPException(409,'Task flow was not planned or already applied')
+                    result=flow['proposal']
+                    updated['task_flow']['applied']=True
+                    if result['action']=='leave':
+                        updated.pop('task_flow')
+                fresh=await meeting(mid,session=session,authorization=authorization)
+                if policy_of(fresh)!=policy: raise HTTPException(409,'Voice sharing policy changed')
+                await task_flows.save_reservation(lock,key,f'{session}:{body.request_id}',saved,updated,
+                    clear_key=flow['key'] if body.operation=='flow_apply' and result['action']=='leave' else None)
+                return result
+            if saved.get('task_flow') and body.operation!='context':
+                raise HTTPException(409,'Task flow owns this turn')
             if body.operation == 'plan':
                 round_index=saved.get('plan_round',0)
                 if round_index>=2 or any(c not in saved['completed'] for c in saved['planned']):
@@ -743,6 +837,16 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
             elif body.operation=='context':
                 result=await agent(row,'agent',payload,request_id=body.request_id)
                 if 'navigation' in saved:result['available_tools']=['open_source'] if saved['navigation']['status']=='ready' else []
+                requested=result.pop('task_flow_requested',False) is True
+                if result.pop('decision_flow_requested',False) is True:requested='decision'
+                flow=await task_flows.context(mid,session,policy.revision,x_voice_speaker_key,requested) if 'navigation' not in saved else None
+                if requested=='decision' and flow is None:
+                    raise HTTPException(409,'Decision flow needs an identified speaker channel')
+                if flow:
+                    await task_flows.save_reservation(lock,key,f'{session}:{body.request_id}',saved,{**saved,'task_flow':flow},
+                        clear_key=flow['key'] if requested else None)
+                    result['task_flow']={'node':flow['node'],**({'kind':'decision'} if flow.get('kind')=='decision' else {})}
+                    result['available_tools']=[]
             else:
                 remaining=(saved['retrieval_deadline_ms']-int(time.time()*1000))/1000
                 try:
@@ -755,7 +859,8 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                     if body.operation=='lookup' and body.lookup.name=='search_web':
                         result['web_result']={'text':'','links':[],'reason':'web_unavailable'}
                 except HTTPException as exc:
-                    if exc.status_code!=503 or not saved['executed']: raise
+                    local_read = body.operation == 'lookup' and body.lookup.name in RECOVERABLE_READS
+                    if exc.status_code!=503 or not (local_read or saved['executed']): raise
                     result={'tool_calls':[]} if body.operation=='plan' else {
                         'tool':body.lookup.name,'source_count':0,'sources':[],'skipped':True,'retrieval_unavailable':True}
                     if body.operation=='lookup' and body.lookup.name=='search_web':
@@ -776,6 +881,16 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                                 saved['planned'].extend(calls)
                                 saved['plan_round']=round_index+1
                             else:
+                                if body.lookup.name in RECOVERABLE_READS:
+                                    count = result.get('source_count')
+                                    if type(count) is not int or count < 0 or not isinstance(result.get('sources'), list):
+                                        raise ValueError('Invalid lookup result')
+                                    result['lookup_status'] = ('unavailable' if result.get('budget_exhausted') or result.get('skipped')
+                                        else 'found' if count > 0 else 'empty')
+                                    if result['lookup_status'] == 'unavailable':
+                                        saved['retrieval_unavailable'] = True
+                                    elif result['lookup_status'] == 'found':
+                                        saved['retrieval_has_evidence'] = True
                                 saved['completed'].append(body.lookup.model_dump())
                                 if not result.get('budget_exhausted') and not result.get('skipped'):
                                     saved['executed'].append(body.lookup.model_dump())
@@ -784,6 +899,9 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                                         raise ValueError('Invalid tool context handles')
                                     saved['context_handles']=list(dict.fromkeys(saved['context_handles']+handles))[-128:]
                                 if body.lookup.name == 'search_web': saved['web_result'] = result['web_result']
+                                # Concurrent lookup completion must not reorder the next evidence prompt.
+                                saved['completed'].sort(key=saved['planned'].index)
+                                saved['executed'].sort(key=saved['planned'].index)
                             pipe.multi(); pipe.set(key + ':agent', json.dumps(saved), ex=240)
                             await pipe.execute()
                             break
@@ -826,15 +944,55 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
             history_key, stored, history = await heard_history(mid, session, policy, x_voice_speaker_key, row)
             await redis.delete(f'meeting:voice:{mid}:navigation')
             payload = {'question': body.question, 'revision': body.revision, 'history': history}
+            flow = saved.get('task_flow') if saved is not None else None
             if saved is not None:
-                if not saved.get('plan_round') or sorted(saved['completed'], key=lambda c:(c['name'],c['query'])) != sorted(saved['planned'], key=lambda c:(c['name'],c['query'])):
+                if saved.get('retrieval_unavailable') and not saved.get('retrieval_has_evidence'):
+                    raise HTTPException(503, 'Retrieval is unavailable; no verified source lookup remains')
+                if flow and not flow.get('applied'):
+                    raise HTTPException(409,'Task flow transition has not completed')
+                if not flow and (not saved.get('plan_round') or sorted(saved['completed'], key=lambda c:(c['name'],c['query'])) != sorted(saved['planned'], key=lambda c:(c['name'],c['query']))):
                     raise HTTPException(409, 'Agent tools have not completed')
                 payload.update(history=match_context(body.agent_context, history), lookups=saved['executed'])
                 if 'web_result' in saved: payload['web_result'] = saved['web_result']
                 if not await redis.set(key + ':final', '1', nx=True, ex=240):
                     raise HTTPException(409, 'Agent answer already dispatched')
             await progress(mid, session, body, 'answering')
-            if saved is not None and 'navigation' in saved:
+            if flow:
+                proposal=flow['proposal']
+                if proposal['action']=='finish':
+                    try:
+                        suffix,field=('decision-flow','decision_state') if flow.get('kind')=='decision' else ('task-flow','task_state')
+                        result=await agent(row,suffix,{'operation':'finish','question':body.question,
+                            'revision':body.revision,field:proposal['state']},request_id=body.request_id)
+                    except HTTPException as exc:
+                        if exc.status_code==409 and flow.get('kind')=='decision':
+                            proposal=decision_sources_changed(proposal)
+                            result={'text':proposal['text'],'sources':[],'answer_kind':'assistant',
+                                    'reason':'clarification','clarification':True}
+                        else:
+                            if exc.status_code not in (502,503,504): raise
+                            proposal=service_error({'node':proposal['node'],'state':proposal['state']},body.question,saving=True)
+                            proposal['state']['save_uncertain']=True
+                            result={'text':proposal['text'],'sources':[],'answer_kind':'assistant',
+                                    'reason':'draft_unavailable','clarification':False}
+                else:
+                    proofs=[]
+                    if (flow.get('kind')=='decision' and proposal['action']=='update'
+                            and proposal['state'].get('requested_status')=='decided'
+                            and proposal['state'].get('evidence_status')=='supported'):
+                        proofs=[VoiceSourceRef.model_validate({k:p[k] for k in ('key','fingerprint')}).model_dump()
+                                for p in proposal['state'].get('evidence',[])]
+                        try:
+                            checked=VoiceSources.model_validate(await agent(row,'sources',{'sources':proofs}))
+                            if not proofs or checked.unavailable or len(checked.sources)!=len(proofs):
+                                proposal=decision_sources_changed(proposal);proofs=[]
+                        except HTTPException as exc:
+                            if exc.status_code not in (502,503,504):raise
+                            proposal=service_error({'node':proposal['node'],'state':proposal['state']},body.question);proofs=[]
+                    result={'text':proposal['text'],'sources':proofs,'answer_kind':'assistant',
+                        'reason':{'update':'clarification','pause':'clarification_exhausted','service_error':'llm_unavailable'}.get(proposal['action'],'answered'),
+                        'clarification':proposal['action']=='update'}
+            elif saved is not None and 'navigation' in saved:
                 nav=saved['navigation'];status=nav['status']
                 if status=='ready':
                     if {'name':'open_source','query':nav['target_id']} not in saved['executed']:
@@ -863,6 +1021,11 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 except SpeechConflict as exc:
                     raise HTTPException(409, 'Speech turn was stopped or another playback is active') from exc
             result['evidence_available'] = bool(result.get('sources'))
+            if flow:
+                await task_flows.stage(flow,proposal,body.request_id,result['text'],lock,holder)
+            if x_voice_speaker_key:
+                await handoffs.stage(mid,session,policy.revision,body.request_id,body.question,result,
+                    history,flow,proposal if flow else None,lock,holder)
             await redis.set(key, json.dumps({'fingerprint': fingerprint, 'answer': result}), ex=240)
             if saved is not None and saved.get('navigation',{}).get('status')=='ready':
                 now=int(time.time()*1000)
@@ -874,12 +1037,22 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
             refs = result.pop('context_refs', []) if result.get('clarification') else []
             result.pop('context_refs', None)
             refs = refs or [{'key': s['key'], 'fingerprint': s['fingerprint']} for s in result.get('sources', [])]
-            if history_key and (refs or result.get('clarification') is True):
+            if history_key and (refs or result.get('clarification') is True or result.get('reason')=='clarification_exhausted'):
                 turn = {'request_id': str(body.request_id), 'question': body.question, 'answer': result['text'],
                         'clarification': result.get('clarification') is True,
                         'created_at_ms': int(time.time() * 1000),
                         'sources': refs}
-                await redis.set(history_key, json.dumps((stored + [turn])[-3:]), ex=900)
+                async with redis.pipeline(transaction=True) as pipe:
+                    try:
+                        await pipe.watch(lock)
+                        held=await pipe.get(lock)
+                        if isinstance(held,bytes): held=held.decode()
+                        if held!=holder: raise HTTPException(409,'Voice turn was cancelled')
+                        # Keep three heard turns plus this pending candidate; unheard replies use no heard slot.
+                        pipe.multi();pipe.set(history_key,json.dumps(stored+[turn]),ex=900)
+                        await pipe.execute()
+                    except WatchError:
+                        raise HTTPException(409,'Voice turn was cancelled') from None
             return result
         except BaseException:
             if playback is not None:

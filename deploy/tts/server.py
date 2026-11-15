@@ -13,7 +13,8 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from engine import Engine, MODEL, SAMPLE_RATE, FIXED_TEXTS, PRESET_VOICE
+from engine import Engine, MODEL, SAMPLE_RATE, FIXED_TEXTS, PRESET_VOICE, preset_voices,selected_voice
+from voice_profile import resolve_profile
 
 MAX_BODY = 20000
 MAX_TEXT = 4000
@@ -35,7 +36,31 @@ class SpeechServer(ThreadingHTTPServer):
         self.queue_timeout = queue_timeout
         self.connections = threading.BoundedSemaphore(max_connections)
         self.request_timeout = request_timeout
+        self.warming=set()
         super().__init__(address, Handler)
+
+    def warm_voice(self,voice):
+        if all(self.engine.cached_public(text,voice=voice) is not None for text in FIXED_TEXTS):return True
+        with self.queue_condition:
+            if voice in self.warming:return False
+            if len(self.warming)>=3:return False
+            self.warming.add(voice)
+        def prepare():
+            deadline=time.monotonic()+60
+            try:
+                for text in FIXED_TEXTS:
+                    if self.engine.cached_public(text,voice=voice) is not None:continue
+                    with self.queue_condition:
+                        while self.queue or not self.busy.acquire(blocking=False):
+                            if time.monotonic()>=deadline:return
+                            self.queue_condition.wait(.1)
+                    try:self.engine.synthesize(text,voice=voice)
+                    finally:self.release_synthesis()
+            except Exception:log.error('voice warmup failed')
+            finally:
+                with self.queue_condition:self.warming.discard(voice)
+        threading.Thread(target=prepare,daemon=True).start()
+        return False
 
     def acquire_synthesis(self, connection):
         ticket = object()
@@ -137,10 +162,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_bytes(200, json.dumps({"status": "ok", "model": MODEL,
             "voice": PRESET_VOICE,
             "device": "cpu", "sample_rate": SAMPLE_RATE, "channels": 1,
-            "format": "pcm_s16le", "busy": self.server.busy.locked()}).encode())
+            "format": "pcm_s16le", "busy": self.server.busy.locked(),"voices":preset_voices(),
+            "profiles_supported":len(os.environ.get('TINA_TTS_PROFILE_KEY',''))>=32},ensure_ascii=False).encode())
 
     def do_POST(self):
-        if self.path != "/v1/audio/speech":
+        if self.path not in ("/v1/audio/speech","/v1/voices/warm"):
             return self.error(404, "Not found")
         supplied = self.headers.get("X-API-Key", "").encode("utf-8")
         if not hmac.compare_digest(supplied, self.server.token):
@@ -164,19 +190,35 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(raw)
         except (ValueError, UnicodeError, TimeoutError):
             return self.error(400, "Invalid JSON")
-        if not isinstance(body, dict) or set(body) - {"input", "model", "voice", "response_format", "meeting_id"}:
+        if not isinstance(body, dict) or set(body) - {"input", "model", "voice", "response_format", "meeting_id","profile"}:
             return self.error(422, "Unsupported speech fields")
         meeting_id = body.get('meeting_id')
         if meeting_id is not None and (type(meeting_id) is not int or not 0 < meeting_id <= 9007199254740991):
             return self.error(422, 'Invalid meeting ID')
+        if self.path=='/v1/voices/warm':
+            try:
+                voice,_=resolve_profile(body.get('profile'),meeting_id)
+                ready=self.server.warm_voice(selected_voice(voice))
+            except (ValueError,TypeError,KeyError,AttributeError):return self.error(422,'Invalid speech profile')
+            return self.send_bytes(200,json.dumps({'ready':ready}).encode())
         text = body.get("input")
         if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT:
             return self.error(422, "Input must contain 1-4000 characters")
         if (body.get("model", "tts-1") not in ("tts-1", MODEL)
-                or body.get("voice", "auto") != "auto"
                 or body.get("response_format", "pcm") != "pcm"):
-            return self.error(422, "Use model=tts-1, voice=auto and response_format=pcm")
-        cached = self.server.engine.cached_public(text.strip())
+            return self.error(422, "Use model=tts-1 and response_format=pcm")
+        try:
+            voice=body.get('voice','auto');pronunciations={}
+            if body.get('profile') is not None:
+                chosen,pronunciations=resolve_profile(body['profile'],meeting_id)
+                if voice!='auto' and selected_voice(voice)!=selected_voice(chosen):raise ValueError()
+                voice=chosen
+            voice=selected_voice(voice)
+        except (ValueError,TypeError,KeyError,AttributeError):return self.error(422,'Invalid preset voice or speech profile')
+        options={}
+        if voice!=PRESET_VOICE:options['voice']=voice
+        if pronunciations:options['pronunciations']=pronunciations
+        cached = self.server.engine.cached_public(text.strip(),**({'voice':voice} if voice!=PRESET_VOICE else {}))
         if cached is not None:
             return self.send_bytes(200, cached, 'audio/pcm', {
                 'X-Audio-Sample-Rate': str(SAMPLE_RATE), 'X-Audio-Channels': '1',
@@ -185,9 +227,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.error(503, "Speech queue is full, cancelled or timed out")
         started = time.monotonic()
         streaming = False
+        failed = False
         chunks = None
         try:
-            chunks = self.server.engine.stream(text.strip(), meeting_id=meeting_id) if meeting_id is not None else self.server.engine.stream(text.strip())
+            if meeting_id is not None:options['meeting_id']=meeting_id
+            chunks = self.server.engine.stream(text.strip(),**options)
             total = 0
             while True:
                 readable, _, _ = select.select([self.connection], [], [], 0)
@@ -225,7 +269,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             # Never expose model exception messages: they may contain input text.
             log.error("synthesis failed")
-            if not streaming: self.error(503, "Speech synthesis failed")
+            failed=True
         finally:
             try:
                 if chunks is not None: chunks.close()
@@ -234,6 +278,7 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 self.close_connection = True
                 self.server.release_synthesis()
+        if failed and not streaming:self.error(503,"Speech synthesis failed")
 
 
 def main():

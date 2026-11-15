@@ -2,6 +2,17 @@
 
 Tai lieu mo ta chi tiet cach hoat dong cua he thong giong noi trong TINA tu luc thu am thanh cuoc hop (Google Meet), loc tap am, xu ly VAD (Voice Activity Detection), nhan dang tieng noi (ASR), nhan dien tu khoa goi (LiveKit WakeWord), truy van cau tra loi (Agent/RAG), cho den tong hop giong noi (TTS) va phat lai vao micro ao.
 
+Với `TINA_LIVEKIT_AUDIO=1`, NS Low chạy trong dịch vụ LiveKit qua WebSocket riêng, rồi PCM được
+chia cho transcript, Silero và KWS. Cả cửa sổ ASR transcript lẫn câu hỏi voice đi qua adapter
+`livekit.agents.stt.STT` đến đúng VieGem/Gipformer đã chọn cho bot. LocalAgreement và nơi lưu
+transcript không đổi; transcript liên tục không tự kích hoạt LLM. Smart Turn/Namo vẫn chỉ quan sát.
+Xem [cấu hình và giới hạn audio bridge](../deploy/livekit/README.md#local-audio-bridge).
+
+Nhánh hỏi đáp dùng LangGraph trong adapter LLM của LiveKit Agents: lập kế hoạch → gọi tool TINA
+→ tìm bổ sung phần còn thiếu → trả lời đã kiểm chứng. Tối đa hai vòng, hai tool mỗi vòng; không
+checkpoint hoặc stream bản nháp vào TTS. Task/decision vẫn dùng Pipecat, và API TINA giữ quyền
+nguồn, lịch sử đã phát và kiểm chứng. Xem [LangGraph RAG](../deploy/livekit/README.md#langgraph-rag).
+
 ---
 
 ## 1. So do luong tong quan (Pipeline Architecture)
@@ -152,3 +163,99 @@ Trong bot Google Meet cua TINA, khong can chay them mo hinh KWS (Keyword Spottin
 ## 5. Che do Host Speech Client doc lap (clients/speech)
 
 Ngoai luong voice bot trong Google Meet o tren, TINA con cung cap mot cong cu chay tren may tinh ca nhan nguoi dung tai [clients/speech](file:///Users/jky/orca/pre-TINA/TINA/clients/speech/README.md). Che do nay su dung thu vien **Sherpa-ONNX** tren CPU cung mo hinh GigaSpeech INT8 (3.3M tham so) de lang nghe truc tiep tu microphone may tinh va phat hien tu khoa "Hey TINA".
+
+
+
+
+&nbsp;
+
+```
+┌────────────────────┐         WebRTC / SIP          ┌──────────────────────┐
+│   USER / CLIENT    │ ◄═══════════════════════════► │    LIVEKIT SERVER    │
+│ (Web, App, Phone)  │   Audio, Video, Data Track    │   (SFU Media Room)   │
+└────────────────────┘                               └──────────┬───────────┘
+                                                                ║
+                                                   Job Dispatch ║ WebRTC
+                                                   & Media      ║ Participant
+                                                                ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│                         LIVEKIT AGENT SERVER (Worker)                     │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │                           AgentSession                              │  │
+│  │                                                                     │  │
+│  │  [Audio In] ──► [Noise Cancel] ──► [VAD + Turn Detector]            │  │
+│  │                                             │                       │  │
+│  │         ┌───────────────────────────────────┴───────────────┐       │  │
+│  │         ▼ (Nhánh 1: Cascaded Pipeline)  (Nhánh 2: Realtime) ▼       │  │
+│  │   ┌───────────┐                                     ┌─────────────┐ │  │
+│  │   │    STT    │                                     │  Realtime   │ │  │
+│  │   └─────┬─────┘                                     │ Multimodal  │ │  │
+│  │         ▼                                           │    Model    │ │  │
+│  │   ┌───────────┐       ┌─────────────────────┐       │  (OpenAI /  │ │  │
+│  │   │    LLM    │ ◄───► │ Function Tools / MCP│ ◄───► │ Gemini Live)│ │  │
+│  │   └─────┬─────┘       └─────────────────────┘       └──────┬──────┘ │  │
+│  │         ▼                                                  │        │  │
+│  │   ┌───────────┐                                            │        │  │
+│  │   │    TTS    │                                            │        │  │
+│  │   └─────┬─────┘                                            │        │  │
+│  │         └───────────────────────┬──────────────────────────┘        │  │
+│  │                                 ▼                                   │  │
+│  │                 [Audio Out / Transcription / Avatar]                │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+
+```mermaid
+flowchart TD
+    AUDIO["Người dùng gọi TINA và đặt câu hỏi"]
+    AUDIO --> ASR["ASR hiện tại<br/>VieGem hoặc Gipformer"]
+    ASR --> LK["LiveKit Agents"]
+    LK --> GRAPH["LangGraph<br/>Chọn tool và phạm vi tra cứu"]
+
+    subgraph RETRIEVAL["Retrieval Engine V2"]
+        SCOPE["Kiểm tra quyền nguồn<br/>Meeting / tài liệu được chia sẻ"]
+        FILTER["Lọc metadata đã xác định<br/>Meeting · Speaker ID · Time"]
+
+        RAW["BM25 Raw<br/>Giữ tên, mã và thuật ngữ"]
+        VI["Underthesea + Domain Dictionary<br/>BM25 Vietnamese"]
+        DENSE["E5 Semantic Search<br/>Văn bản tự nhiên"]
+        FUZZY["Alias Mapping + Character N-gram<br/>Mở rộng ứng viên có giới hạn"]
+
+        FUSION["Weighted RRF<br/>Gộp hạng + loại kết quả trùng"]
+        BOOST["Ưu tiên ngữ cảnh phù hợp<br/>Entity · nguồn hội thoại · lời nói gần đây"]
+        RERANK["Reranking<br/>Thử BGE-v2-m3 so với LLM hiện tại"]
+        WINDOW["Sentence Window Retrieval<br/>Lấy thêm ngữ cảnh quanh đoạn trúng"]
+        PACK["Structured Evidence Pack<br/>Quote gốc · ID · revision · fingerprint<br/>speaker/time · vị trí nguồn"]
+
+        SCOPE --> FILTER
+        FILTER --> RAW
+        FILTER --> VI
+        FILTER --> DENSE
+        FILTER -.-> FUZZY
+
+        RAW --> FUSION
+        VI --> FUSION
+        DENSE --> FUSION
+        FUZZY -.-> FUSION
+
+        FUSION --> BOOST
+        BOOST --> RERANK
+        RERANK --> WINDOW
+        WINDOW --> PACK
+    end
+
+    GRAPH --> SCOPE
+    PACK --> ASSESS{"LangGraph đánh giá kết quả"}
+
+    ASSESS -->|"Cần tìm bổ sung, còn ngân sách"| GRAPH
+    ASSESS -->|"Đủ hoặc trả lời được một phần"| LLM["LLM soạn câu trả lời"]
+    ASSESS -->|"Yêu cầu mơ hồ"| ASK["Hỏi lại ngắn gọn"]
+    ASSESS -->|"Không còn nguồn dùng được"| ERROR["Báo lỗi hoặc thiếu bằng chứng<br/>theo đúng nguyên nhân"]
+
+    LLM --> VERIFY["API TINA kiểm chứng câu trả lời<br/>Kiểm tra nguồn và quyền hiện tại"]
+    VERIFY --> OUTPUT["Terminal / Extension<br/>VieNeu-TTS → bot phát"]
+    ASK --> OUTPUT
+
+
+```

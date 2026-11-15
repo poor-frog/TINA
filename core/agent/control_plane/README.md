@@ -1,5 +1,11 @@
 # agent · control_plane
 
+Voice retrieval uses the V2 shared lexical/evidence modules and pinned offline Underthesea word
+segmentation; original E5 assets/authorization remain unchanged. Workspace `retrieval-domain.json`
+is bounded search data, never a source grant. `voice_reranker.py` and its pinned asset manifest provide
+an explicit offline BGE candidate evaluation, not a default production model replacement. See
+[Retrieval V2](../../../docs/tina-retrieval-v2.md).
+
 The agent control plane: the FastAPI app (`api.py`) and orchestration that dispatches work to workers and reconciles routine/meeting lifecycle. Owns request handling, routine bookkeeping, transcription watching, and event relay — distinct from the `worker/` that runs a single agent workload.
 
 A leading chat `/research <topic>` (or explicit `research: true` from document actions) uses `knowledge_research.py` to select an active private writable

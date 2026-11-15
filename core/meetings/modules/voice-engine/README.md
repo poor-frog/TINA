@@ -26,3 +26,13 @@ metadata is not account authentication; meeting source permissions remain server
 The bot controller may preserve a caller while a different known ID speaks on another fresh
 channel. KWS itself still emits channel-local detections; source models/thresholds are unchanged.
 A fresh known caller can take an idle follow-up slot only, not preempt a question or playback.
+
+## Smart Turn and Namo observations
+
+`TINA_VOICE_TURN_SHADOW=1` starts an isolated CPU process in new voice bots. It uses pinned
+Smart Turn v3.2 INT8 and Namo v1 Multilingual INT8 plus tokenizer. `make all` installs hash-verified
+assets into the existing model volume; inference mounts them read-only and never downloads them.
+Scores never authorize a voice turn or introduce a wait. Stop, resumed speech and source/identity
+changes fence old results. Only content-free scores/timing are logged; text/audio stay in bounded
+memory and IPC. A slow/failed observer is retired independently of VAD/ASR.
+See [deployment and interpretation](../../../../docs/tina-turn-shadow.md).

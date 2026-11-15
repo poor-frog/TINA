@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from uuid import uuid4
 
 import asyncio
@@ -20,14 +20,15 @@ async def service(monkeypatch):
     monkeypatch.delenv('MEETING_API_URL',raising=False)
     monkeypatch.setenv('TTS_API_TOKEN', 'synthetic-tts-' + 'x' * 40)
     calls=[];blocked=[None];entered=asyncio.Event();connect_gate=[None];connect_entered=asyncio.Event();context_gate=[None]
+    connect_names=[]
     broken_tts=[False];config_hook=[None];config_status=[200]
     class PartialTTS(httpx.AsyncByteStream):
         async def __aiter__(self):
             yield b'\0\0'*24000
             await asyncio.sleep(.1)
             raise httpx.ReadError('synthetic TTS connection lost after partial PCM')
-    state={'engine':'livekit','enabled':True,'revision':1}
-    heard={};planned=set()
+    state={'engine':'livekit','enabled':True,'revision':1};flow_gate=[None]
+    heard={};planned=set();lookup_gate=[None];lookup_started=[];lookup_closed=[];both_lookups=asyncio.Event()
     async def upstream(request):
         calls.append(request)
         if '/turn/' in request.url.path:
@@ -45,13 +46,28 @@ async def service(monkeypatch):
             if body['operation']=='context':
                 if context_gate[0]:entered.set();await context_gate[0].wait()
                 mid=int(request.url.path.split('/')[3]);speaker=request.headers.get('X-Voice-Speaker-Key')
-                return httpx.Response(200,json={'history':heard.get((mid,speaker),heard.get(speaker,[])),'available_tools':['search_meeting']})
+                return httpx.Response(200,json={'history':heard.get((mid,speaker),heard.get(speaker,[])),'available_tools':['search_meeting'],
+                    **({'task_flow':{'node':state.get('flow_node','title'),**({'kind':'decision'} if state.get('decision_flow') else {})}} if state.get('task_flow') else {})})
+            if body['operation'] in ('flow_plan','flow_apply'):
+                if flow_gate[0]:entered.set();await flow_gate[0].wait()
+                return httpx.Response(200,json={'action':state.get('flow_action','update'),'node':'decision_status' if state.get('decision_flow') else 'assignee',
+                    'state':{'title':'demo'},'text':'Bạn muốn ghi ai phụ trách, hay để trống?'})
             if body['operation']=='plan':
                 if body['request_id'] in planned:return httpx.Response(200,json={'tool_calls':[]})
                 planned.add(body['request_id'])
                 plan=[{'name':'search_meeting','query':'demo'}]
                 if state.get('two_tools'):plan.append({'name':'search_shared_documents','query':'demo'})
                 return httpx.Response(200,json={'tool_calls':plan})
+            if lookup_gate[0]:
+                name=body['lookup']['name'];lookup_started.append(name)
+                if len(lookup_started)==2:both_lookups.set()
+                try:await lookup_gate[0].wait()
+                finally:lookup_closed.append(name)
+            name=body['lookup']['name']
+            if name in state.get('lookup_http_status',{}):
+                return httpx.Response(state['lookup_http_status'][name],json={'detail':'PRIVATE rejected source'})
+            if name in state.get('lookup_results',{}):
+                return httpx.Response(200,json=state['lookup_results'][name])
             return httpx.Response(200,json={'tool':'search_meeting','source_count':1,'sources':[{'id':'s0','text':'Lan phụ trách demo.'}]})
         if request.url.path.endswith('/answer'):
             entered.set()
@@ -67,6 +83,7 @@ async def service(monkeypatch):
     monkeypatch.setattr(AgentSession,'start',start)
     async def disconnect():pass
     async def connect(name):
+        connect_names.append(name)
         connect_entered.set()
         if connect_gate[0]: await connect_gate[0].wait()
         from types import SimpleNamespace
@@ -77,16 +94,183 @@ async def service(monkeypatch):
         app=server.create_app(client=upstream_client,room_connector=connect)
         app.state.blocked=blocked;app.state.entered=entered;app.state.context_gate=context_gate
         app.state.connect_gate=connect_gate;app.state.connect_entered=connect_entered
+        app.state.connect_names=connect_names
         app.state.broken_tts=broken_tts
         app.state.config_hook=config_hook
         app.state.config_status=config_status
         app.state.heard=heard
+        app.state.flow_gate=flow_gate
+        app.state.lookup_gate=lookup_gate;app.state.lookup_started=lookup_started
+        app.state.lookup_closed=lookup_closed;app.state.both_lookups=both_lookups
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://pilot') as client:
                 yield client,calls,state,app
 
 
 def question():return {'request_id':str(uuid4()),'question':'Ai làm demo?','revision':1}
+
+
+async def test_slow_new_room_does_not_block_an_existing_runtime(service):
+    _,_,_,app=service
+    existing=await app.state.get_runtime(1,SESSION,HEADERS['Authorization'],1)
+    gate=asyncio.Event();app.state.connect_gate[0]=gate;app.state.connect_entered.clear()
+    slow=asyncio.create_task(app.state.get_runtime(2,str(uuid4()),HEADERS['Authorization'],1))
+    reuse=None
+    try:
+        await asyncio.wait_for(app.state.connect_entered.wait(),2)
+        reuse=asyncio.create_task(app.state.get_runtime(1,SESSION,HEADERS['Authorization'],1))
+        assert await asyncio.wait_for(asyncio.shield(reuse),1) is existing
+        assert not gate.is_set()
+    finally:
+        gate.set();await asyncio.gather(slow,*([reuse] if reuse else []),return_exceptions=True)
+
+
+async def test_pending_admissions_reserve_capacity_and_cancellation_releases_the_slot(service):
+    _,_,_,app=service
+    gate=asyncio.Event();app.state.connect_gate[0]=gate
+    tasks=[asyncio.create_task(app.state.get_runtime(mid,str(uuid4()),HEADERS['Authorization'],1)) for mid in (1,2,3)]
+    try:
+        for _ in range(50):
+            if len(app.state.connect_names)==3:break
+            await asyncio.sleep(.01)
+        assert len(app.state.connect_names)==3 and not app.state.rows
+        with pytest.raises(server.HTTPException) as error:
+            await asyncio.wait_for(app.state.get_runtime(4,str(uuid4()),HEADERS['Authorization'],1),1)
+        assert error.value.status_code==503
+        tasks[0].cancel();await asyncio.gather(tasks[0],return_exceptions=True)
+        tasks.append(asyncio.create_task(app.state.get_runtime(4,str(uuid4()),HEADERS['Authorization'],1)))
+        for _ in range(50):
+            if len(app.state.connect_names)==4:break
+            await asyncio.sleep(.01)
+        assert len(app.state.connect_names)==4
+    finally:
+        gate.set();await asyncio.gather(*tasks,return_exceptions=True)
+    assert len(app.state.rows)==3
+
+
+async def test_same_room_admissions_share_one_runtime(service):
+    _,_,_,app=service
+    gate=asyncio.Event();app.state.connect_gate[0]=gate
+    tasks=[asyncio.create_task(app.state.get_runtime(1,SESSION,HEADERS['Authorization'],1)) for _ in range(2)]
+    try:
+        await asyncio.wait_for(app.state.connect_entered.wait(),2)
+        await asyncio.sleep(.02)
+        assert len(app.state.connect_names)==1
+    finally:
+        gate.set();values=await asyncio.gather(*tasks)
+    assert values[0] is values[1] and len(app.state.rows)==1
+
+
+async def test_slow_cleanup_does_not_block_another_ready_room(service,monkeypatch):
+    _,_,_,app=service
+    old=await app.state.get_runtime(1,SESSION,HEADERS['Authorization'],1)
+    other_session=str(uuid4())
+    other=await app.state.get_runtime(2,other_session,HEADERS['Authorization'],1)
+    gate,entered=asyncio.Event(),asyncio.Event();original=server.Runtime.close
+    async def close(row):
+        if row is old:entered.set();await gate.wait()
+        await original(row)
+    monkeypatch.setattr(server.Runtime,'close',close);old.failed=True
+    replacing=asyncio.create_task(app.state.get_runtime(1,SESSION,HEADERS['Authorization'],1))
+    reuse=None
+    try:
+        await asyncio.wait_for(entered.wait(),2)
+        reuse=asyncio.create_task(app.state.get_runtime(2,other_session,HEADERS['Authorization'],1))
+        assert await asyncio.wait_for(asyncio.shield(reuse),1) is other
+        assert not gate.is_set()
+    finally:
+        gate.set();await asyncio.gather(replacing,*([reuse] if reuse else []),return_exceptions=True)
+
+
+@pytest.mark.parametrize('stop', [False, True])
+async def test_actual_session_parallel_lookup_waits_for_both_and_stop_drains_http_requests(service, stop):
+    import json
+    client,calls,state,app=service;state['two_tools']=True;app.state.lookup_gate[0]=asyncio.Event()
+    body=question()
+    task=asyncio.create_task(client.post(URL+'/answer',headers=HEADERS,json=body))
+    try:
+        await asyncio.wait_for(app.state.both_lookups.wait(),3)
+        assert set(app.state.lookup_started)=={'search_meeting','search_shared_documents'}
+        assert not [r for r in calls if r.url.path.endswith('/answer')]
+        if stop:
+            result=await client.request('DELETE',URL+'/turn',headers=HEADERS,json={'request_id':body['request_id']})
+            assert result.status_code==200,result.text
+            assert (await asyncio.wait_for(task,3)).status_code==409
+            assert not [r for r in calls if r.url.path.endswith('/answer')]
+        else:
+            app.state.lookup_gate[0].set()
+            result=await asyncio.wait_for(task,3)
+            assert result.status_code==200,result.text
+            operations=[json.loads(r.content)['operation'] for r in calls if r.url.path.endswith('/agent')]
+            assert operations==['context','plan','lookup','lookup','plan']
+            assert len([r for r in calls if r.url.path.endswith('/answer')])==1
+        assert set(app.state.lookup_closed)==set(app.state.lookup_started)
+    finally:
+        app.state.lookup_gate[0].set()
+        if not task.done():task.cancel()
+        await asyncio.gather(task,return_exceptions=True)
+
+
+@pytest.mark.parametrize('mode', ['partial', 'empty', 'unavailable', 'revoked', 'uncommitted_error'])
+async def test_actual_session_distinguishes_empty_temporary_and_revoked_lookups(service, mode):
+    import json
+    client,calls,state,app=service;state['two_tools']=True
+    empty={'source_count':0,'sources':[],'lookup_status':'empty'}
+    unavailable={'source_count':0,'sources':[],'lookup_status':'unavailable',
+                 'skipped':True,'retrieval_unavailable':True}
+    if mode=='partial':state['lookup_results']={'search_shared_documents':unavailable}
+    elif mode=='empty':state['lookup_results']={name:empty for name in ('search_meeting','search_shared_documents')}
+    elif mode=='unavailable':state['lookup_results']={name:unavailable for name in ('search_meeting','search_shared_documents')}
+    else:state['lookup_http_status']={'search_shared_documents':409 if mode=='revoked' else 503}
+    result=await client.post(URL+'/answer',headers=HEADERS,json=question())
+    answers=[r for r in calls if r.url.path.endswith('/answer')]
+    operations=[json.loads(r.content)['operation'] for r in calls if r.url.path.endswith('/agent')]
+    if mode in ('partial','empty'):
+        assert result.status_code==200,result.text
+        assert len(answers)==1
+        assert operations.count('plan')==(1 if mode=='partial' else 2)
+    else:
+        assert result.status_code==503 and not answers
+        assert operations.count('plan')==1
+        assert 'PRIVATE' not in result.text
+    # HTTP 503 not committed by core is fatal: the worker cannot pretend that its reserved call settled.
+
+
+async def test_task_flow_uses_pipecat_once_without_running_livekit_tool_planning(service):
+    import json
+    client,calls,state,app=service;state['task_flow']=True
+    response=await client.post(URL+'/answer',headers=HEADERS|{'X-Voice-Speaker-Key':'a'*64},json=question()|{'question':'Tạo task demo'})
+    assert response.status_code==200,response.text
+    assert response.json()['workflow_runtime']=='pipecat-flows'
+    operations=[json.loads(r.content)['operation'] for r in calls if r.url.path.endswith('/agent')]
+    assert operations==['context','flow_plan','flow_apply']
+    assert len([r for r in calls if r.url.path.endswith('/answer')])==1
+
+
+async def test_decision_flow_uses_pipecat_without_running_normal_tool_planning(service):
+    import json
+    client,calls,state,app=service;state.update(task_flow=True,decision_flow=True,flow_node='decision_status')
+    response=await client.post(URL+'/answer',headers=HEADERS|{'X-Voice-Speaker-Key':'a'*64},json=question()|{'question':'đã chốt'})
+    assert response.status_code==200,response.text
+    assert response.json()['workflow_runtime']=='pipecat-flows'
+    assert [json.loads(r.content)['operation'] for r in calls if r.url.path.endswith('/agent')]==['context','flow_plan','flow_apply']
+
+
+async def test_task_flow_leaves_to_normal_qa_sequentially_and_stop_cancels_planning(service):
+    import json
+    client,calls,state,app=service;state.update(task_flow=True,flow_action='leave')
+    response=await client.post(URL+'/answer',headers=HEADERS,json=question())
+    assert response.status_code==200 and 'workflow_runtime' not in response.json()
+    operations=[json.loads(r.content)['operation'] for r in calls if r.url.path.endswith('/agent')]
+    assert operations[:3]==['context','flow_plan','flow_apply'] and 'plan' in operations[3:]
+    calls.clear();state['flow_action']='update';app.state.flow_gate[0]=asyncio.Event()
+    body=question();app.state.entered.clear()
+    running=asyncio.create_task(client.post(URL+'/answer',headers=HEADERS,json=body))
+    await asyncio.wait_for(app.state.entered.wait(),3)
+    stopped=await client.request('DELETE',URL+'/turn',headers=HEADERS,json={'request_id':body['request_id']})
+    assert stopped.status_code==200,stopped.text
+    assert (await running).status_code==409
+    assert not [r for r in calls if r.url.path.endswith('/answer')]
 
 
 async def test_capability_policy_revision_and_payload_guard_before_runtime_creation(service):
@@ -117,6 +301,18 @@ async def test_real_agents_answer_preserves_citations_and_speaker_scope(service)
     assert json.loads(answers[0].content)['agent_context']==[]
     assert len(app.state.rows)==1
     assert (await client.post(f'/bots/2/{uuid4()}/answer',headers=HEADERS,json=question())).status_code==200
+
+
+async def test_tts_uses_only_core_selected_speech_profile(service):
+    import json
+    client,calls,state,app=service;state['speech_profile']='core-approved-profile'
+    request=question()
+    response=await client.post(URL+'/v1/audio/speech',headers=HEADERS|{
+        'X-Voice-Revision':'1','X-Voice-Request-Id':request['request_id']},json={
+        'model':'tts-1','input':'synthetic','voice':'auto','meeting_id':1,'profile':'caller-forged-profile'})
+    assert response.status_code==200
+    speech=[r for r in calls if r.url.path.endswith('/v1/audio/speech')]
+    assert speech and all(json.loads(r.content)['profile']=='core-approved-profile' for r in speech)
 
 
 async def test_three_meetings_have_independent_sessions_answers_context_and_stop(service):
@@ -182,6 +378,9 @@ async def test_readiness_requires_authenticated_tts_without_synthesizing(monkeyp
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     token='synthetic-tts-'+'x'*40
+    monkeypatch.setenv('TINA_LIVEKIT_VAD_SHADOW','1')
+    def unavailable_observer():raise ValueError('synthetic missing observer asset')
+    monkeypatch.setattr('vad_shadow.verify_assets',unavailable_observer)
     monkeypatch.setenv('TTS_API_TOKEN',token)
     class LiveKit:
         room=SimpleNamespace(list_rooms=AsyncMock(return_value=None))
@@ -201,7 +400,9 @@ async def test_readiness_requires_authenticated_tts_without_synthesizing(monkeyp
             response=await client.get('/ready')
             assert response.status_code==(200 if tts_status==200 else 503)
             assert all(r.method=='GET' for r in calls)
-            if response.status_code==200:assert response.json()['capacity']==3 and response.json()['tts_ready'] is True
+            if response.status_code==200:
+                assert response.json()['capacity']==3 and response.json()['tts_ready'] is True
+                assert response.json()['vad_shadow_ready'] is False
 
 
 @pytest.mark.parametrize('token',['','short','encrypted:'+'x'*40,'x '*40,'ầ'*40])
@@ -516,3 +717,105 @@ async def test_sdk_executes_transcript_and_wiki_tools_before_one_verified_final(
     assert len([op for op in operations if op['operation']=='plan'])==2
     assert {op['lookup']['name'] for op in operations if op['operation']=='lookup'}=={'search_meeting','search_shared_documents'}
     assert len([r for r in calls if r.url.path.endswith('/answer')])==1
+
+
+async def test_real_disconnect_during_context_cancels_lookup_and_releases_room(service):
+    client,calls,state,app=service
+    gate=asyncio.Event();app.state.context_gate[0]=gate
+    sock=socket.socket();sock.bind(('127.0.0.1',0));sock.listen()
+    port=sock.getsockname()[1]
+    server=uvicorn.Server(uvicorn.Config(app,lifespan='off',access_log=False,log_level='critical',timeout_graceful_shutdown=1))
+    serving=asyncio.create_task(server.serve(sockets=[sock]))
+    try:
+        while not server.started:await asyncio.sleep(.01)
+        async with httpx.AsyncClient(base_url=f'http://127.0.0.1:{port}') as http:
+            pending=asyncio.create_task(http.post(URL+'/answer',headers=HEADERS,json=question()))
+            await asyncio.wait_for(app.state.entered.wait(),3)
+            pending.cancel()
+            with suppress(asyncio.CancelledError):await pending
+            row=next(iter(app.state.rows.values()))
+            async with asyncio.timeout(2):
+                while row.lock.locked():await asyncio.sleep(.02)
+            assert row.context_task is None and row.turn_done.is_set()
+            assert not gate.is_set(),'disconnect must not need the source lookup to finish'
+            assert [r for r in calls if r.url.path.endswith('/state')]
+            assert not [r for r in calls if r.url.path.endswith('/answer')]
+            gate.set()
+            replacement=await http.post(URL+'/answer',headers=HEADERS,json=question())
+            assert replacement.status_code==200,replacement.text
+    finally:
+        gate.set();server.should_exit=True;await serving
+
+
+async def test_disconnect_during_room_connect_cleans_admission_before_other_meeting(service):
+    client,calls,state,app=service
+    gate=asyncio.Event();app.state.connect_gate[0]=gate
+    sock=socket.socket();sock.bind(('127.0.0.1',0));sock.listen()
+    port=sock.getsockname()[1]
+    server=uvicorn.Server(uvicorn.Config(app,lifespan='off',access_log=False,log_level='critical',timeout_graceful_shutdown=1))
+    serving=asyncio.create_task(server.serve(sockets=[sock]));other=None
+    try:
+        while not server.started:await asyncio.sleep(.01)
+        async with httpx.AsyncClient(base_url=f'http://127.0.0.1:{port}') as http:
+            first=asyncio.create_task(http.post(URL+'/answer',headers=HEADERS,json=question()))
+            await asyncio.wait_for(app.state.connect_entered.wait(),3)
+            first.cancel()
+            with suppress(asyncio.CancelledError):await first
+            app.state.connect_gate[0]=None
+            other=asyncio.create_task(app.state.get_runtime(2,str(uuid4()),HEADERS['Authorization'],1))
+            await asyncio.wait_for(other,2)
+            assert not gate.is_set(),'new meeting must not wait for abandoned connector'
+            assert (1,SESSION) not in app.state.rows
+            assert len(app.state.rows)==1
+    finally:
+        gate.set()
+        if other:await asyncio.gather(other,return_exceptions=True)
+        server.should_exit=True;await serving
+
+
+async def test_policy_reaper_cancels_context_and_releases_turn_before_removal(service):
+    client,calls,state,app=service
+    gate=asyncio.Event();app.state.context_gate[0]=gate
+    running=asyncio.create_task(client.post(URL+'/answer',headers=HEADERS,json=question()))
+    await asyncio.wait_for(app.state.entered.wait(),3)
+    row=app.state.rows[(1,SESSION)]
+    state['enabled']=False
+    try:
+        async with asyncio.timeout(4):
+            while (1,SESSION) in app.state.rows:await asyncio.sleep(.02)
+        assert not row.lock.locked() and row.context_task is None
+        assert row.closing is not None and row.closing.done()
+        assert (await asyncio.wait_for(running,2)).status_code==409
+        assert [r for r in calls if r.url.path.endswith('/state')]
+        assert not [r for r in calls if r.url.path.endswith('/answer')]
+        assert not gate.is_set(),'disposal must cancel the lookup, not wait for its source'
+    finally:
+        gate.set();await asyncio.gather(running,return_exceptions=True)
+
+
+async def test_runtime_disposal_is_idempotent_and_releases_only_its_owned_turn(service,monkeypatch):
+    import json
+    client,calls,state,app=service
+    deleted=[]
+    async def delete(name):deleted.append(name)
+    monkeypatch.setattr(server,'delete_room',delete)
+    row=await app.state.get_runtime(1,SESSION,HEADERS['Authorization'],1)
+    rid=str(uuid4());row.current_id=rid
+    await asyncio.gather(row.close(),row.close())
+    assert deleted==[row.room_name]
+    assert [json.loads(r.content) for r in calls if r.url.path.endswith('/state')]==[{'state':'QUIET','request_id':rid}]
+    replacement=await app.state.get_runtime(1,SESSION,HEADERS['Authorization'],1)
+    assert replacement is not row and replacement.room_name!=row.room_name
+
+
+async def test_cancel_during_sdk_start_cleans_the_partial_room(service,monkeypatch):
+    client,calls,state,app=service
+    entered=asyncio.Event();deleted=[]
+    async def start(*args,**kwargs):entered.set();await asyncio.Event().wait()
+    async def delete(name):deleted.append(name)
+    monkeypatch.setattr(AgentSession,'start',start);monkeypatch.setattr(server,'delete_room',delete)
+    pending=asyncio.create_task(client.post(URL+'/answer',headers=HEADERS,json=question()))
+    await asyncio.wait_for(entered.wait(),2)
+    pending.cancel()
+    with suppress(asyncio.CancelledError):await asyncio.wait_for(pending,2)
+    assert not app.state.rows and len(deleted)==1

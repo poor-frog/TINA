@@ -36,6 +36,8 @@ flowchart LR
     asr_control["ASR host controller"]
     livekit_agent["Optional local LiveKit Agents pilot"]
     livekit_server["Self-hosted LiveKit server"]
+    agent_reach["Public Agent Reach retrieval worker"]
+    public_content_providers["Public content providers"]
   end
   transcription["transcription"]
   bot ==>|"audio -> tenant-hosted"| transcription

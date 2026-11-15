@@ -374,10 +374,10 @@ function ChatConversation({ turns, busy, empty, onApprovalDecision }: {
       {turns.map((t, i) => t.role === "user"
         ? (
             <div key={t.id} style={{ marginBottom: 18, borderLeft: "2px solid var(--line2)", paddingLeft: 12, marginLeft: 2 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--t3)", marginBottom: 4, display: "flex", alignItems: "center", gap: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              <div style={{ fontSize: "var(--ui-type-meta)", fontWeight: 600, color: "var(--t3)", marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
                 <span>You</span>
               </div>
-              <div style={{ fontSize: 13.5, color: "var(--t1)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+              <div style={{ fontSize: "var(--ui-type-label)", color: "var(--t1)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
                 <ReferenceText text={t.text} />
               </div>
             </div>
@@ -598,6 +598,7 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
   const groundTab = activeTab?.kind === THREAD_TAB_KIND ? lastRecord : activeTab;
   // the rail follows the store's active session (switched from the rail header or Sessions list); params override if ever passed.
   const session = typeof params.session === "string" && params.session.trim() ? params.session : activeSession;
+  const isVoiceHandoff = session.startsWith('voice-handoff-');
   const chatKey = chatStateKey(subject, session);
   const chatState = useSyncExternalStore(
     (cb) => subscribeChatState(chatKey, cb),
@@ -812,7 +813,7 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
   const send = async (text: string, prompt = text, referenceSource = text, opts: Omit<AskChatDetail, 'prompt'> = {}) => {
     // hidden → no visible user bubble (system kickoffs); ground:false → don't append the active
     // meeting/file context (onboarding must not inherit whatever meeting happens to be focused).
-    const { hidden = false, ground = true, focus: focusOverride } = opts;
+    const { hidden = false, ground = !isVoiceHandoff, focus: focusOverride } = opts;
     const sendContextRef: ActiveReference | null = focusOverride
       ? { kind: "meeting", value: focusOverride.native_id, raw: `@meeting:${focusOverride.native_id}` }
       : contextRef;
@@ -831,7 +832,7 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
     }
     const n = state.nextId;
     const agentId = `a-${n}`;
-    const displayText = appendReferenceToken(v, sendContextRef);
+    const displayText = ground ? appendReferenceToken(v, sendContextRef) : v;
     const ctrl = new AbortController();
     const newTurns = hidden
       ? [{ id: agentId, role: "agent" as const, text: "", ops: [] }]
@@ -985,18 +986,38 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
   // and stream the answer here. sendRef keeps the latest `send` closure so the listener stays stable.
   const sendRef = useRef(send);
   sendRef.current = send;
+  const handoffSessionRef = useRef<string | null>(null);
+  useEffect(()=>{if (!value.trim()) handoffSessionRef.current = null;},[value]);
+  const composeRef = useRef({value, busy, uploading, mic, attachments, center, session});
+  composeRef.current = {value, busy, uploading, mic, attachments, center, session};
   useEffect(() => {
     const onAsk = (e: Event) => {
       const detail = (e as CustomEvent<AskChatDetail>).detail;
       const prompt = detail?.prompt;
       if (!prompt || detail.handled) return;
+      if (detail.composeOnly) {
+        const current = composeRef.current;
+        if (current.center || typeof params.session === 'string') return;
+        detail.handled = true;
+        if (!detail.session || current.value.trim() || current.busy || current.uploading || current.mic !== 'idle' || current.attachments.length
+            || getChatState(chatStateKey(subject, detail.session)).busy) {
+          detail.onRejected?.('Finish or clear your current chat draft, then retry.'); return;
+        }
+        handoffSessionRef.current = detail.session;
+        layout.setActiveSession(detail.session);
+        setValue(prompt);
+        if (layout.store.getState().rightCollapsed) layout.toggleRight();
+        detail.onAccepted?.();
+        window.setTimeout(() => inputRef.current?.focus(), 0);
+        return;
+      }
       detail.handled = true;
       if (layout.store.getState().rightCollapsed) layout.toggleRight();
       void sendRef.current(prompt, prompt, prompt, detail);
     };
     window.addEventListener(ASK_CHAT_EVENT, onAsk);
     return () => window.removeEventListener(ASK_CHAT_EVENT, onAsk);
-  }, [layout]);
+  }, [layout, params.session, subject]);
 
   // Onboarding seeds a CACHED greeting (instant, no LLM) and arms the chat — the user's next reply carries
   // the discovery-loop grounding (applied in onSubmit), so the agent starts researching from one answer.
@@ -1025,6 +1046,9 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
     const v = value.trim();
     const hasAttachments = attachments.length > 0;
     if ((!v && !hasAttachments) || busy || uploading) return;
+    if (handoffSessionRef.current && handoffSessionRef.current !== session) {
+      setUploadError('Return to the voice handoff chat before sending, or clear this draft.'); return;
+    }
     setUploadError(null);
     const research = /^\/research(?:\s|$)/i.test(v);
     if (research && !v.slice('/research'.length).trim()) {
@@ -1097,14 +1121,15 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
         onDrop={onDrop}
         style={{ border: "1px solid var(--line2)", borderRadius: 12, background: "var(--panel)", padding: "9px 12px", display: "flex", flexDirection: "column", gap: 7 }}
       >
-        {(contextRef || ambientEligible || includeSchedule === true || (bundleFocus && (bundleFocus.kind === "workspace" || bundleFocus.kind === "today"))) && (
+        {isVoiceHandoff && <div title="Voice context is rechecked on Send and expires after 15 minutes." style={{fontSize:"var(--ui-type-meta)",color:'var(--t3)'}}>Voice handoff: private chat</div>}
+        {!isVoiceHandoff && (contextRef || ambientEligible || includeSchedule === true || (bundleFocus && (bundleFocus.kind === "workspace" || bundleFocus.kind === "today"))) && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flexWrap: "wrap" }}>
             {/* ambient schedule chip — the context bundle's always-visible half: on = the agent
                 sees today's schedule; × turns it off for this session; ghost chip re-adds */}
             {ambientOn ? (
               <span title="The agent sees your schedule (today, upcoming, live) on this surface"
                 style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--t2)", background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 999, padding: "2px 4px 2px 9px" }}>
-                <Icon name="cal" size={10} /> Schedule · today
+                <Icon name="cal" size={10} /> Schedule: today
                 <button aria-label="Remove schedule context" title="Remove schedule context for this session" onClick={() => setAmbient(false)}
                   style={{ background: "none", border: "none", color: "var(--t3)", cursor: "pointer", display: "flex", padding: 2 }}><Icon name="x" size={10} /></button>
               </span>
@@ -1124,7 +1149,7 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
                     fontWeight: 600, color: mode.color, background: mode.bg, borderRadius: 999,
                     padding: "2px 5px 2px 10px", maxWidth: 260, minWidth: 0 }}>
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                    {mode.label} · {meetingLabel(activeMeeting)}
+                    {mode.label}: {meetingLabel(activeMeeting)}
                   </span>
                   <button aria-label="Clear focus" title="Clear focus" onClick={() => setFocusCleared(true)}
                     style={{ background: "none", border: "none", color: mode.color, opacity: 0.7, cursor: "pointer", display: "flex", padding: 2, flex: "none" }}><Icon name="x" size={10} /></button>
@@ -1132,17 +1157,17 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
               );
             })() : contextRef ? (
               <>
-                <span style={{ color: "var(--t3)", fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em", flex: "none" }}>Focus</span>
+                <span style={{ color: "var(--t3)", fontSize: "var(--ui-type-meta)", flex: "none" }}>Focus</span>
                 <ReferenceChip refToken={contextRef} />
                 <button aria-label="Clear focus" title="Clear focus" onClick={() => setFocusCleared(true)} style={{ background: "none", border: "none", color: "var(--t3)", cursor: "pointer", display: "flex", padding: 0, marginLeft: 2, flex: "none" }}><Icon name="x" size={12} /></button>
               </>
             ) : null}
             {!contextRef && bundleFocus && (bundleFocus.kind === "workspace" || bundleFocus.kind === "today") && (
               <>
-                <span style={{ color: "var(--t3)", fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em", flex: "none" }}>Focus</span>
+                <span style={{ color: "var(--t3)", fontSize: "var(--ui-type-meta)", flex: "none" }}>Focus</span>
                 <span style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: bundleFocus.kind === "workspace" ? "var(--blue)" : "var(--t2)", background: bundleFocus.kind === "workspace" ? "var(--bluebg)" : "var(--panel2)", border: "1px solid var(--line)", borderRadius: 6, padding: "1px 7px" }}>
                   <Icon name={bundleFocus.kind === "workspace" ? "panel" : "cal"} size={10} />
-                  {bundleFocus.kind === "workspace" ? `Workspace · ${bundleFocus.slug}` : "Today"}
+                  {bundleFocus.kind === "workspace" ? `Workspace: ${bundleFocus.slug}` : "Today"}
                 </span>
                 <button aria-label="Clear focus" title="Clear focus" onClick={() => setFocusCleared(true)} style={{ background: "none", border: "none", color: "var(--t3)", cursor: "pointer", display: "flex", padding: 0, marginLeft: 2, flex: "none" }}><Icon name="x" size={12} /></button>
               </>
@@ -1157,8 +1182,8 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
           setValue(micCompose(micRestore.base, micRestore.raw, ""));
           setMicRestore(null);
           setMicError(null);
-        }} style={{ alignSelf: "flex-start", border: "1px solid var(--line2)", borderRadius: 6, background: "transparent", color: "var(--t2)", fontSize: 11, padding: "3px 7px", cursor: "pointer" }}>
-          Restore original transcript
+        }} style={{ alignSelf: "flex-start", border: "1px solid var(--line2)", borderRadius: 6, background: "transparent", color: "var(--t2)", fontSize: "var(--ui-type-meta)", padding: "4px 8px", cursor: "pointer" }}>
+          Restore original ASR
         </button>}
         <input
           ref={fileInputRef}
@@ -1173,7 +1198,7 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
           <textarea
             ref={inputRef}
             value={value}
-            onChange={(e) => { setValue(e.target.value); setMicRestore(null); }}
+            onChange={(e) => { setValue(e.target.value); if (!e.target.value.trim()) handoffSessionRef.current = null; setMicRestore(null); }}
             onInput={(e) => resizeComposerTextarea(e.currentTarget)}
             onPaste={onPaste}
             onKeyDown={(e) => {
@@ -1181,7 +1206,7 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
               e.preventDefault();
               void onSubmit();
             }}
-            placeholder={contextRef?.kind === "meeting" && activeMeeting
+            placeholder={!isVoiceHandoff && contextRef?.kind === "meeting" && activeMeeting
               ? MODE_PLACEHOLDER[meetingPhase(activeMeeting)]
               : "Type / for skills, or ask the agent…"}
             disabled={uploading || mic === "stt"}
@@ -1240,7 +1265,7 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
             </div>
             {!loading && (
               <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 24 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--t3)", marginBottom: 2 }}>
+                <div style={{ fontSize: "var(--ui-type-meta)", fontWeight: 600, color: "var(--t3)", marginBottom: 2 }}>
                   Quick starters
                 </div>
                 {[

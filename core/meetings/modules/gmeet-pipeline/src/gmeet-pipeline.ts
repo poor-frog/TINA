@@ -34,6 +34,9 @@ export interface VoiceHypothesis {
 }
 
 export interface GmeetPipelineOptions {
+  /** Continuous STT input; window policy and canonical confirmation remain in this lane. */
+  onStreamAudio?:(turn:string,pcm:Float32Array,captureMs:number)=>void;
+  onStreamClosed?:(turn:string)=>void;
   onAsrDiagnostic?: (event: AsrDiagnostic) => void;
   onHypothesis?: (value: VoiceHypothesis) => void;
   /** Optional content-free decision trace for latency diagnosis; never changes confirmation policy. */
@@ -134,8 +137,12 @@ export function createGmeetPipeline(opts: GmeetPipelineOptions): GmeetPipeline {
         if (channel !== undefined) asrDiagnostic({channel, request, stage:'started', at_ms:started,
           capture_age_ms: audioEndMs === undefined ? undefined : Math.max(0, started - audioEndMs)});
         const asrStartedAtMs = Date.now();
+        const timing:TranscriptionTiming={
+          ...(audioEndMs==null?{}:{capture_ms:Math.max(0,Date.now()-audioEndMs)}),
+          ...(opts.onStreamAudio?{stream:{id:speakerId,start_ms:audioStartMs}}:{}),
+        };
         const r = await opts.transcribe(audio, continuityPrompt(mgr.getLastConfirmedText(speakerId), audio, opts.config?.sampleRate ?? 16000),
-          audioEndMs == null ? undefined : { capture_ms: Math.max(0, Date.now() - audioEndMs) });
+          Object.keys(timing).length?timing:undefined);
         const asrCompletedAtMs = Date.now();
         if (channel !== undefined) asrDiagnostic({channel, request, stage:'completed', at_ms:asrCompletedAtMs,
           roundtrip_ms: asrCompletedAtMs - started, queue_ms:r?.queue_ms});
@@ -190,6 +197,7 @@ export function createGmeetPipeline(opts: GmeetPipelineOptions): GmeetPipeline {
       // Bounded windows may need several ASR calls; cleanup must wait for this turn's tail.
       await settle(key);
       mgr.removeSpeaker(key);
+      opts.onStreamClosed?.(key);
       participants.delete(key);
       sourceChannels.delete(key);
       endpoints.delete(key); lastHypotheses.delete(key);
@@ -256,6 +264,7 @@ export function createGmeetPipeline(opts: GmeetPipelineOptions): GmeetPipeline {
       if (voiced && (participantId === null || (participantId && participantId.length <= 512))) participants.set(st.key, participantId);
       st.lastMs = tsMs;
       if(voiced)st.lastSpeechMs=frame.captureMs+frame.samples.length/timeline.sampleRate*1000;
+      opts.onStreamAudio?.(st.key,pcm,tsMs);
       mgr.feedAudio(st.key, pcm, tsMs);
     },
     flush: async () => { for (const st of chan.values()) await mgr.flushSpeaker(st.key, true); await settle(); },

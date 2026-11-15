@@ -153,6 +153,7 @@ class Stack:
         if not 1024 <= self.control_port <= 65535:
             raise StackError("TINA_ASR_CONTROL_PORT must be between 1024 and 65535")
         if values.get("INTERNAL_API_SECRET"):
+            self.env['TINA_TTS_PROFILE_KEY']=hmac.new(values['INTERNAL_API_SECRET'].encode(),b'tina-tts-profile:v1','sha256').hexdigest()
             for backend in ("gipformer", "viegem"):
                 self.env[f"TINA_{backend.upper()}_DRAIN_KEY"] = hmac.new(
                     values["INTERNAL_API_SECRET"].encode(), f"tina-asr-drain:v1:{backend}".encode(), "sha256").hexdigest()

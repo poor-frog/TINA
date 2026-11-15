@@ -10,10 +10,13 @@ adding a second RAG store. ASR, KWS, voice capture and VieNeu playback are uncha
    other provider errors do not. Other adapters retain their current validation path.
 2. Queries with more than eight retrieved excerpts optionally call the selected LLM once to rank
    up to 12 IDs, with a four-second HTTP timeout. The generation prompt keeps the top results,
-   recent speech and heard-history references, up to 32 excerpts/24000 characters. Invalid/empty
-   rankings, timeout and oversized pinned context retain all original retrieved excerpts. The
-   numeric/entailment verifier and repair always receive the original evidence, so a dropped
-   correction cannot silently authorize an obsolete answer. Whole-meeting recap retains its
+   recent speech and heard-history references, up to 32 excerpts/24000 characters. A valid empty
+   ranking is `empty`, retaining only explicit recent/heard pins and no automatic comparison pins.
+   Invalid rankings, timeout and oversized pinned context retain the original excerpts as `fallback`.
+   Numeric/entailment review still sees original evidence, so a dropped correction cannot authorize
+   an obsolete answer. After `empty`, generation and format/semantic repair are restricted to the
+   retained pins; discarded excerpts cannot be restored by repair. A verified empty reply is
+   `retrieval_empty`, without relabeling real service errors. Whole-meeting recap retains its
    separate all-chunk map/reduce/verify flow.
 3. Meeting API forwards the validated bot request UUID as `X-Tina-Voice-Request-Id`. Agent API
    carries it into its internal worker dispatch envelope, separate from the model input.

@@ -93,6 +93,7 @@ def install_vad(directory):
         temporary = Path(out.name)
         out.write(content)
     try:
+        temporary.chmod(0o644)
         temporary.replace(directory / "silero_vad.onnx")
     finally:
         temporary.unlink(missing_ok=True)

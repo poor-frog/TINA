@@ -9,7 +9,7 @@ export interface TranslationGroup {
 }
 
 interface SourceSegment { id?: string; text: string; completed?: boolean; tsMs?: number; speakerId?: string; revision?: number }
-export interface PhraseTranslation { groupId: string; text: string | null; ready: boolean; memberIds: string[]; status?: TranslationGroup['status'] }
+export interface PhraseTranslation { groupId: string; text: string | null; ready: boolean; memberIds: string[]; sourceParts?:string[]; status?: TranslationGroup['status'] }
 
 export function projectTranslationGroups<T extends SourceSegment>(segments: T[], groups: TranslationGroup[]): (T & { translation?: PhraseTranslation })[] {
   const current = new Map(segments.filter(s => s.id).map(s => [s.id!, s]));
@@ -34,7 +34,8 @@ export function projectTranslationGroups<T extends SourceSegment>(segments: T[],
     seen.add(group.group_id);
     result.push({ ...segment, text: group.source_text,
       tsMs: group.start_ms > 100_000_000_000 ? group.start_ms : segment.tsMs,
-      translation: { groupId: group.group_id, text: group.translated_text, ready: group.ready, status: group.status, memberIds: group.members.map(m => m.segment_id) } });
+      translation: { groupId: group.group_id, text: group.translated_text, ready: group.ready, status: group.status,
+        sourceParts:group.members.map(m=>m.source_text), memberIds: group.members.map(m => m.segment_id) } });
   }
   return result;
 }

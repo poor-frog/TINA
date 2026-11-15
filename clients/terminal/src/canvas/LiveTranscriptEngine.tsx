@@ -10,13 +10,14 @@
  *  by kind, clickable → Research · Open entity doc) and copilot `signals` render as small
  *  actionable badges under the relevant block. RAW mode passes neither, so it stays plain text. */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { recordAsrTiming } from "../lib/asrTelemetry";
 import { splitTextIntoSpans, type SpanEntity } from "./inlineSpans";
 import { entityColor } from "../ui-kit/docLinks";
 import styles from "./MeetingTranscript.module.css";
 import type { TranscriptLanguage } from "./MeetingTranslation";
 import type { PhraseTranslation } from "./translationGroups";
+import {formatTranscript} from '../../../../packages/transcript-rendering/src/format';
 
 export interface EngineTag { label: string; kind: string }
 export interface EngineEntity { id?: string; label: string; kind: string; docPath?: string }
@@ -185,15 +186,16 @@ export function LiveTranscriptEngine({
   }, [segments]);
   // Confirmed (completed !== false) = stable. Merge consecutive same-speaker confirmed segments into
   // flowing blocks; every speaker's pending segment remains visible as a separate live tail.
+  const displaySegments=useMemo(()=>segments.map(s=>({...s,display:formatTranscript(s.text,s.completed!==false,s.translation?.sourceParts)})),[segments]);
   const blocks: { speakerId?: string; speakerKey?: string; speaker?: string; tsMs?: number; text: string; key: string; segmentIds: string[]; tags: EngineTag[]; stale: boolean; evidence: unknown[] }[] = [];
   const identity = (value: Pick<EngineSegment, "speakerId" | "speakerKey" | "speaker">) =>
     value.speakerId ? `id:${value.speakerId}` : value.speaker?.trim() ? `name:${value.speaker}` : value.speakerKey ? `key:${value.speakerKey}` : undefined;
-  for (const s of segments) {
+  for (const s of displaySegments) {
     if (s.completed === false) continue;
     const last = blocks[blocks.length - 1];
     const currentIdentity = identity(s);
-    if (last && currentIdentity && identity(last) === currentIdentity && last.stale === !!s.stale) { last.text += " " + s.text; if (s.id) last.segmentIds.push(s.id); if (s.tags) last.tags.push(...s.tags); last.evidence.push(...(s.evidence ?? [])); }
-    else blocks.push({ speakerId: s.speakerId, speakerKey: s.speakerKey, speaker: s.speaker, tsMs: s.tsMs, text: s.text, key: s.id ?? `b${blocks.length}`, segmentIds: s.id ? [s.id] : [], tags: [...(s.tags ?? [])], stale: !!s.stale, evidence: [...(s.evidence ?? [])] });
+    if (last && currentIdentity && identity(last) === currentIdentity && last.stale === !!s.stale) { last.text += " " + s.display.text; if (s.id) last.segmentIds.push(s.id); if (s.tags) last.tags.push(...s.tags); last.evidence.push(...(s.evidence ?? [])); }
+    else blocks.push({ speakerId: s.speakerId, speakerKey: s.speakerKey, speaker: s.speaker, tsMs: s.tsMs, text: s.display.text, key: s.id ?? `b${blocks.length}`, segmentIds: s.id ? [s.id] : [], tags: [...(s.tags ?? [])], stale: !!s.stale, evidence: [...(s.evidence ?? [])] });
   }
   const pending = segments.filter((s) => s.completed === false && s.text.trim());
 
@@ -213,7 +215,7 @@ export function LiveTranscriptEngine({
 
   if (language !== "vi") {
     return <div className={styles.flow}>
-      {segments.map((segment, index) => {
+      {displaySegments.map((segment, index) => {
         const translated = segment.translation?.text;
         const draft = segment.completed === false;
         const originalVisible = language === "bilingual" || !translated;
@@ -225,7 +227,7 @@ export function LiveTranscriptEngine({
           {head(segment.speaker, segment.tsMs)}
           {originalVisible && <div className={styles.original} data-draft={draft}>
             {playable ? <button type="button" onClick={() => onSegmentClick?.(segment.id!)} aria-label="Play transcript segment"
-              className={styles.play} aria-current={segment.id === activeSegmentId ? "true" : undefined}>{segment.text}</button> : segment.text}
+              className={styles.play} aria-current={segment.id === activeSegmentId ? "true" : undefined}>{segment.display.text}</button> : segment.display.text}
           </div>}
           <div lang="en" className={styles.english}>
             <span className={styles.languageLabel}>EN</span>
@@ -247,7 +249,7 @@ export function LiveTranscriptEngine({
   // When a saved recording is available, keep the original ASR turns separate so each click maps to
   // that exact audio timestamp. The regular live transcript still merges same-speaker fragments.
   if (onSegmentClick && playableSegmentIds?.size) {
-    const turns = segments.filter((segment) => segment.completed !== false);
+    const turns = displaySegments.filter((segment) => segment.completed !== false);
     let previousIdentity: string | undefined;
     return (
       <div className={styles.flow} style={{ gap: 5 }}>
@@ -272,11 +274,11 @@ export function LiveTranscriptEngine({
                   <button type="button" aria-label={`Play transcript from ${timestamp || "this segment"}`} aria-current={active ? "true" : undefined}
                     title="Play audio from this transcript segment" onClick={() => onSegmentClick(id)}
                     style={{ flex: 1, minWidth: 0, padding: "4px 7px", margin: "0 0 1px -7px", border: 0, borderLeft: active ? "2px solid var(--accent)" : "2px solid transparent", borderRadius: 4, background: active ? "color-mix(in srgb, var(--accent) 12%, transparent)" : "transparent", color: "var(--t1)", font: "inherit", fontSize: 14, lineHeight: 1.65, textAlign: "left", cursor: "pointer" }}>
-                    <BlockText text={segment.text} entities={entities} actions={actions} />
+                    <BlockText text={segment.display.text} entities={entities} actions={actions} />
                   </button>
                 ) : (
                   <div style={{ flex: 1, minWidth: 0, padding: "4px 0", color: "var(--t1)", fontSize: 14, lineHeight: 1.65 }}>
-                    <BlockText text={segment.text} entities={entities} actions={actions} />
+                    <BlockText text={segment.display.text} entities={entities} actions={actions} />
                   </div>
                 )}
               </div>

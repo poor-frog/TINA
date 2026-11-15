@@ -50,6 +50,12 @@ class VoiceActionReview(BaseModel):
         return value.strip()
 
 
+class VoiceActionDraftPage(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    drafts:list[VoiceActionDraft]=Field(max_length=20)
+    next_offset:int|None=Field(default=None,ge=0)
+
+
 def action_intent(question):
     text = question.strip()
     text = re.sub(r'^(?:hey tina|tina ơi|tina)\s*[,!:]?\s*', '', text, flags=re.I)
@@ -117,17 +123,21 @@ def create_draft(directory, *, request_id, meeting_id, owner, policy_revision, k
     return draft
 
 
-def draft_list(directory, *, owner, meeting_id, policy_revision, replies):
+def draft_list(directory, *, owner, meeting_id, policy_revision, replies, draft_id=None, offset=0, limit=20):
+    if draft_id is not None and not re.fullmatch(r'[0-9a-f]{32}',draft_id):
+        raise HTTPException(404,'Voice draft unavailable')
     heard = {r['request_id']: r for r in replies if r.get('state') == 'completed'}
-    result = []
-    for path in sorted(directory.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True):
+    result = [];skipped=0
+    paths=[directory/f'{draft_id}.json'] if draft_id is not None else sorted(directory.glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True)
+    for path in paths:
         if not re.fullmatch(r'[0-9a-f]{32}', path.stem): continue
         draft = _read(path)
         receipt = heard.get(str(draft.request_id), {})
         if (draft.owner == str(owner) and draft.meeting_id == meeting_id
                 and draft.policy_revision == policy_revision and receipt.get('text') == draft.readback):
-            result.append(draft.model_dump(mode='json'))
-        if len(result) == 20: break
+            if skipped<offset:skipped+=1
+            else:result.append(draft.model_dump(mode='json'))
+        if len(result) == limit: break
     return result
 
 

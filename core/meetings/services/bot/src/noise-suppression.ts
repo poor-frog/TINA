@@ -6,6 +6,37 @@ interface Worker { send(value:object):boolean; close():void }
 type Event = {ready?:boolean;seq?:number;audio?:string};
 export type NoiseFactory = (event:(value:Event)=>void, failed:()=>void) => Worker;
 
+/** Private LiveKit audio preprocessing. Credentials travel in handshake headers, never URL query. */
+export function livekitNoiseFactory(base:string,token:string):NoiseFactory {
+  return (event,failed)=>{
+    const url=new URL(base+'/noise');url.protocol=url.protocol==='https:'?'wss:':'ws:';
+    const socket=new WebSocket(url,['tina-audio-v1','cap.'+token]);
+    let closed=false;const queued:string[]=[];
+    const close=()=>{if(closed)return;closed=true;queued.length=0;socket.close();};
+    const fail=()=>{if(!closed){close();failed();}};
+    socket.addEventListener('error',fail);socket.addEventListener('close',fail);
+    socket.addEventListener('open',()=>{
+      if(closed)return;
+      try{for(const line of queued)socket.send(line);queued.length=0;}catch{fail();}
+    });
+    socket.addEventListener('message',message=>{
+      if(closed)return;
+      try{
+        if(typeof message.data!=='string'||message.data.length>100000)throw Error('Invalid filter reply');
+        event(JSON.parse(message.data));
+      }catch{fail();}
+    });
+    return {close,send(value){
+      if(closed||queued.length>=64||socket.bufferedAmount>128000)return false;
+      const line=JSON.stringify(value);
+      if(socket.readyState===WebSocket.OPEN)socket.send(line);
+      else if(socket.readyState===WebSocket.CONNECTING)queued.push(line);
+      else return false;
+      return true;
+    }};
+  };
+}
+
 export const nativeNoiseWorker: NoiseFactory = (event, failed) => {
   const child=spawn(process.env.TINA_VOICE_PYTHON||'/opt/tina-voice/bin/python', ['-m','tina_meeting_voice.denoise_worker'],
     {stdio:['pipe','pipe','pipe'],env:{PATH:process.env.PATH,PYTHONUNBUFFERED:'1'}});
@@ -29,6 +60,7 @@ export class NoiseSuppressor {
   private worker?:Worker;
   private generation=0;
   private seq=0;
+  private retryAt=0;
   private timer?:ReturnType<typeof setInterval>;
   private finish?:()=>void;
   private pending=new Map<number,{frame:NoiseFrame;deliver:(pcm:Float32Array)=>void;at:number}>();
@@ -36,6 +68,7 @@ export class NoiseSuppressor {
     private log:(state:NoiseState)=>void=state=>console.log(JSON.stringify({type:'noise_suppression',state,at_ms:Date.now()}))){}
   private mode(state:NoiseState){if(this.state!==state){this.state=state;try{this.log(state);}catch{ /* Metrics cannot block audio. */ }}}
   private drain(state:NoiseState){
+    this.retryAt=state==='failed'?Date.now()+5000:0;
     this.generation++;this.worker?.close();this.worker=undefined;clearInterval(this.timer);this.mode(state);
     const frames=[...this.pending.values()];this.pending.clear();
     for(const item of frames){try{item.deliver(item.frame.pcm);}catch{console.error('[bot] audio delivery failed');}}
@@ -47,10 +80,11 @@ export class NoiseSuppressor {
     if(!enabled)this.drain('off');else this.mode('starting');
   }
   feed(frame:NoiseFrame,deliver:(pcm:Float32Array)=>void){
-    if(!this.enabled||this.state==='failed'){deliver(frame.pcm);return;}
+    if(!this.enabled||this.state==='failed'&&Date.now()<this.retryAt){deliver(frame.pcm);return;}
     if(!Number.isInteger(frame.channel)||frame.channel<0||frame.channel>=65536||!Number.isFinite(frame.stamp)
       ||!frame.pcm.length||frame.pcm.length>16000||!frame.pcm.every(Number.isFinite)){deliver(frame.pcm);return;}
     if(!this.worker){
+      this.mode('starting');
       const generation=++this.generation;
       try { this.worker=this.factory(event=>{
         if(generation!==this.generation)return;

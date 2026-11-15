@@ -1,0 +1,17 @@
+{
+  "tool": {
+    "name": "reach.web.search",
+    "scope": "public:read",
+    "grant": "auto",
+    "transport": "mcp",
+    "mcp_server": "tina-reach"
+  },
+  "mcp": {
+    "command": "python",
+    "args": [
+      "-m",
+      "llm.reach_mcp"
+    ],
+    "tool_name": "reach_web_search"
+  }
+}

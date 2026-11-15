@@ -1,0 +1,302 @@
+{
+  "kind": "synthetic-vietnamese-conversation-regression",
+  "segments": [
+    {
+      "segment_id": "demo",
+      "text": "Lan phụ trách bản demo. Hạn bàn giao đã chốt là thứ Sáu.",
+      "offset_ms": -600000
+    },
+    {
+      "segment_id": "budget",
+      "text": "Ngân sách demo đã được duyệt là 100 triệu đồng.",
+      "offset_ms": -599000
+    },
+    {
+      "segment_id": "proposal",
+      "text": "Minh đề xuất chuyển hạn production sang thứ Hai. Nhóm chưa chốt thay đổi này.",
+      "offset_ms": -598000
+    },
+    {
+      "segment_id": "testing",
+      "text": "Huy phụ trách kiểm thử bản production.",
+      "offset_ms": -597000
+    },
+    {
+      "segment_id": "correction",
+      "text": "Lan nói: hạn demo thứ Sáu vẫn giữ nguyên. Không đổi sang thứ Hai.",
+      "offset_ms": -596000
+    },
+    {
+      "segment_id": "cancel",
+      "text": "Nhóm đã hủy kế hoạch chạy quảng cáo trên TikTok.",
+      "offset_ms": -595000
+    },
+    {
+      "segment_id": "infra",
+      "text": "Môi trường staging dùng PostgreSQL 17. Production dùng PostgreSQL 16.",
+      "offset_ms": -594000
+    },
+    {
+      "segment_id": "next",
+      "text": "Buổi họp tiếp theo đã chốt vào 9 giờ sáng thứ Ba.",
+      "offset_ms": -593000
+    },
+    {
+      "segment_id": "owner",
+      "text": "Người phê duyệt phát hành là Mai. Huy chỉ thực hiện kiểm thử.",
+      "offset_ms": -592000
+    },
+    {
+      "segment_id": "risk",
+      "text": "Rủi ro còn mở là lỗi mất kết nối khi thanh toán. Chưa có ngày sửa xong.",
+      "offset_ms": -591000
+    }
+  ],
+  "documents": {
+    "wiki/shared.md": "Dự án có mã Aster. SLA được chốt là 99.9 phần trăm."
+  },
+  "cases": [
+    {
+      "id": 1,
+      "title": "Chỉ gọi TINA ơi: xác nhận rồi nhận câu hỏi của đúng người",
+      "layer": "runtime",
+      "runtime_test": "a standalone name is acknowledged, then the same caller can ask without repeating the name",
+      "review_focus": "Chỉ gọi TINA ơi: xác nhận rồi nhận câu hỏi của đúng người"
+    },
+    {
+      "id": 2,
+      "title": "Gọi kèm câu hỏi: không phát câu xác nhận gọi tên",
+      "layer": "runtime",
+      "runtime_test": "a complete Hey TINA question gets a waiting phrase then its answer, not a name acknowledgment",
+      "review_focus": "Gọi kèm câu hỏi: không phát câu xác nhận gọi tên"
+    },
+    {
+      "id": 3,
+      "title": "Trả lời người phụ trách bằng một câu",
+      "layer": "answer",
+      "question": "Ai phụ trách demo?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Lan"
+      ],
+      "history": [],
+      "review_focus": "Trả lời người phụ trách bằng một câu"
+    },
+    {
+      "id": 4,
+      "title": "Hỏi tiếp hạn: chỉ trả lời ý mới",
+      "layer": "answer",
+      "question": "Còn hạn bàn giao?",
+      "mode": "meeting",
+      "expected_terms": [
+        "thứ Sáu"
+      ],
+      "history": [
+        {
+          "question": "Ai phụ trách demo?",
+          "answer": "Phần demo đã giao cho Lan.",
+          "segment_ids": [
+            "demo"
+          ]
+        }
+      ],
+      "review_focus": "Hỏi tiếp hạn: chỉ trả lời ý mới"
+    },
+    {
+      "id": 5,
+      "title": "Hỏi tiếp ngân sách: giữ đúng chủ đề",
+      "layer": "answer",
+      "question": "Còn ngân sách đã duyệt?",
+      "mode": "meeting",
+      "expected_terms": [
+        "100"
+      ],
+      "history": [
+        {
+          "question": "Ai phụ trách demo?",
+          "answer": "Phần demo đã giao cho Lan.",
+          "segment_ids": [
+            "demo"
+          ]
+        }
+      ],
+      "review_focus": "Hỏi tiếp ngân sách: giữ đúng chủ đề"
+    },
+    {
+      "id": 6,
+      "title": "Sửa đối tượng: production thay cho demo",
+      "layer": "answer",
+      "question": "Ý tôi là ai kiểm thử bản production?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Huy"
+      ],
+      "history": [
+        {
+          "question": "Ai phụ trách demo?",
+          "answer": "Phần demo đã giao cho Lan.",
+          "segment_ids": [
+            "demo"
+          ]
+        }
+      ],
+      "review_focus": "Sửa đối tượng: production thay cho demo"
+    },
+    {
+      "id": 7,
+      "title": "Chủ đề chưa rõ: hỏi lại một ý",
+      "layer": "answer",
+      "question": "Tóm tắt phần đó.",
+      "mode": "meeting",
+      "expected_terms": [],
+      "history": [],
+      "review_focus": "Chủ đề chưa rõ: hỏi lại một ý",
+      "expected_reasons": [
+        "clarification",
+        "retrieval_empty",
+        "insufficient_evidence"
+      ],
+      "expect_evidence": false
+    },
+    {
+      "id": 8,
+      "title": "Công việc chưa rõ: không đoán người phụ trách",
+      "layer": "answer",
+      "question": "Task này giao cho ai rồi?",
+      "mode": "meeting",
+      "expected_terms": [],
+      "history": [],
+      "review_focus": "Công việc chưa rõ: không đoán người phụ trách",
+      "expected_reasons": [
+        "clarification",
+        "retrieval_empty",
+        "insufficient_evidence"
+      ],
+      "expect_evidence": false
+    },
+    {
+      "id": 9,
+      "title": "Thiếu dữ liệu: không bịa số điện thoại",
+      "layer": "answer",
+      "question": "Số điện thoại của Lan là gì?",
+      "mode": "meeting",
+      "expected_terms": [],
+      "history": [],
+      "review_focus": "Thiếu dữ liệu: không bịa số điện thoại",
+      "expected_reasons": [
+        "retrieval_empty",
+        "insufficient_evidence",
+        "verification_rejected"
+      ],
+      "expect_evidence": false
+    },
+    {
+      "id": 10,
+      "title": "Trả lời phần biết, để trống phần chưa biết",
+      "layer": "answer",
+      "question": "Ai phụ trách demo và số điện thoại của người đó?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Lan"
+      ],
+      "history": [],
+      "review_focus": "Trả lời phần biết, để trống phần chưa biết"
+    },
+    {
+      "id": 11,
+      "title": "Đề xuất khác quyết định",
+      "layer": "answer",
+      "question": "Nhóm đã chốt hạn production sang thứ Hai chưa?",
+      "mode": "meeting",
+      "expected_terms": [
+        "chưa"
+      ],
+      "history": [],
+      "review_focus": "Đề xuất khác quyết định"
+    },
+    {
+      "id": 12,
+      "title": "Giữ nguyên số và đơn vị",
+      "layer": "answer",
+      "question": "Ngân sách demo đã duyệt bao nhiêu?",
+      "mode": "meeting",
+      "expected_terms": [
+        "100",
+        "triệu"
+      ],
+      "history": [],
+      "review_focus": "Giữ nguyên số và đơn vị"
+    },
+    {
+      "id": 13,
+      "title": "Tra tài liệu Wiki được chia sẻ",
+      "layer": "answer",
+      "question": "Mã dự án trong tài liệu là gì?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Aster"
+      ],
+      "history": [],
+      "review_focus": "Tra tài liệu Wiki được chia sẻ"
+    },
+    {
+      "id": 14,
+      "title": "Sửa tiền đề sai ngắn gọn",
+      "layer": "answer",
+      "question": "Demo đã đổi hạn sang thứ Hai rồi đúng không?",
+      "mode": "meeting",
+      "expected_terms": [
+        "thứ Sáu"
+      ],
+      "history": [],
+      "review_focus": "Sửa tiền đề sai ngắn gọn"
+    },
+    {
+      "id": 15,
+      "title": "Giữ nghĩa phủ định",
+      "layer": "answer",
+      "question": "Nhóm còn chạy quảng cáo TikTok không?",
+      "mode": "meeting",
+      "expected_terms": [
+        "hủy"
+      ],
+      "history": [],
+      "review_focus": "Giữ nghĩa phủ định"
+    },
+    {
+      "id": 16,
+      "title": "Công cụ chậm: chỉ báo bước tra tài liệu thật một lần",
+      "layer": "runtime",
+      "runtime_test": "a slow answer announces its actual document lookup once and then plays the verified answer",
+      "review_focus": "Công cụ chậm: chỉ báo bước tra tài liệu thật một lần"
+    },
+    {
+      "id": 17,
+      "title": "Stop khi đang nghĩ: bỏ kết quả cũ đến muộn",
+      "layer": "runtime",
+      "runtime_test": "Stop cancels thought, drops late answer and fences previously captured ASR results",
+      "review_focus": "Stop khi đang nghĩ: bỏ kết quả cũ đến muộn"
+    },
+    {
+      "id": 18,
+      "title": "Hai người nói: không trộn câu hỏi hoặc ngữ cảnh",
+      "layer": "runtime",
+      "runtime_test": "independently identified speakers do not cancel or contaminate the caller during overlapping speech",
+      "review_focus": "Hai người nói: không trộn câu hỏi hoặc ngữ cảnh"
+    },
+    {
+      "id": 19,
+      "title": "Tiếng ừ không được coi là lệnh ngắt lời",
+      "layer": "runtime",
+      "runtime_test": "explicit Stop cancels thinking; ordinary acknowledgments and late ASR cannot interrupt",
+      "review_focus": "Tiếng ừ không được coi là lệnh ngắt lời"
+    },
+    {
+      "id": 20,
+      "title": "Tiếng TTS vọng lại không chiếm lượt tiếp theo",
+      "layer": "runtime",
+      "runtime_test": "a pure echo of any fixed notice cannot consume the pending question slot",
+      "review_focus": "Tiếng TTS vọng lại không chiếm lượt tiếp theo"
+    }
+  ]
+}

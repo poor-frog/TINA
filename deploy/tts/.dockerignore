@@ -3,6 +3,8 @@
 !engine.py
 !server.py
 !speech_text.py
+!voice_profile.py
+!benchmark.py
 !pronunciations.json
 !install_models.py
 !model-assets.json

@@ -6,6 +6,33 @@ import {mkdtempSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
+test('a stalled renderer bounds Stop and fences late unmute until mute is verified', async context => {
+  context.mock.timers.enable({apis:['setTimeout']});
+  let release!: (on:boolean)=>void, evaluations=0, played=0, stopped=0;
+  const page={evaluate(_fn:unknown,args:{desiredOn:boolean}){
+    evaluations++;
+    return evaluations===1 ? new Promise<boolean>(resolve=>{release=resolve;}) : Promise.resolve(args.desiredOn);
+  }};
+  const controller=createSpeakController(page as never,{platform:'google_meet',voiceAgentEnabled:true} as never,
+    ()=>({async speak(){played++;return 'completed';},stop(){stopped++;}}));
+  const speaking=controller.speak('Synthetic probe');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(evaluations,1);
+  const stop=assert.rejects(controller.stop(),/mute could not be verified/);
+  await new Promise(resolve=>setImmediate(resolve));
+  context.mock.timers.tick(5000);
+  await stop;
+  assert.equal(await speaking,'stopped');
+  assert(stopped>0);assert.equal(played,0);
+  assert.equal(evaluations,1,'timed-out evaluations stay serialized');
+  release(true);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(evaluations,2,'the queued mute runs after the old evaluate resolves');
+  assert.equal(played,0,'late unmute cannot start the cancelled audio');
+  assert.equal(await controller.speak('Fresh request'),'completed');
+  assert.equal(played,1);
+});
+
 test('stopping TTS mutes its sink but keeps the system microphone available to Meet', () => {
   const dir=mkdtempSync(join(tmpdir(),'tina-mic-gate-')),before=process.env.PATH;
   const log=join(dir,'calls');

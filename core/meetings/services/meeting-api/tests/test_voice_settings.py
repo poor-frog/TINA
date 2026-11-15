@@ -39,6 +39,24 @@ async def test_service_metadata_is_authenticated_safe_and_reports_the_actual_voi
     assert requests[0].headers['X-API-Key']=='synthetic-secret'
 
 
+async def test_services_reports_selected_filter_without_forwarding_tts_key_to_livekit(monkeypatch):
+    monkeypatch.setenv('LIVEKIT_AGENT_URL','http://livekit.test')
+    monkeypatch.setenv('TTS_SERVICE_URL','http://tts.test');monkeypatch.setenv('TTS_API_TOKEN','synthetic-secret')
+    def upstream(request):
+        if request.url.host=='livekit.test':
+            assert 'X-API-Key' not in request.headers
+            return httpx.Response(200,json={'audio_bridge_ready':True,'noise_filter':{'id':'dtln','label':'DTLN','device':'cpu'}})
+        return httpx.Response(200,json={'status':'ok'})
+    def factory(**kw):return httpx.AsyncClient(transport=httpx.MockTransport(upstream),**kw)
+    redis=FakeRedis();app=FastAPI();app.include_router(build_voice_settings_router(redis,factory))
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
+            result=await client.get('/bots/voice/services',headers={'X-User-Id':'7'})
+            assert result.json()['noise_filter']=={'id':'dtln','label':'DTLN','device':'cpu','ready':True}
+            assert 'synthetic-secret' not in result.text and 'livekit.test' not in result.text
+    finally:await redis.aclose()
+
+
 async def test_preview_uses_fixed_text_returns_wav_and_never_publishes_to_a_meeting(settings):
     import json
     client,requests,redis=settings

@@ -16,8 +16,9 @@ from shared.voice_knowledge import validate_voice_answer, voice_tool_calls
 
 @pytest.mark.parametrize('adapter_type,parameter', [
     (OpenAIResponsesCompletion, 'text.format'), (OpenAICompatCompletion, 'response_format')])
-def test_adapters_send_strict_schema_only_on_explicit_structured_calls(adapter_type, parameter):
-    schema = voice_schema('answer', [{'id': 's0'}])
+@pytest.mark.parametrize('mode', ['answer', 'plan'])
+def test_adapters_send_strict_schema_only_on_explicit_structured_calls(adapter_type, parameter, mode):
+    schema = voice_schema(mode, [{'id': 's0'}], tools=['search_meeting', 'calculate', 'read_source_context'] if mode == 'plan' else ())
     seen = []
     def handler(request):
         seen.append(json.loads(request.content))
@@ -61,6 +62,26 @@ def test_voice_schema_accepts_null_optionals_but_rejects_forged_citations_and_ex
     assert validate_voice_answer(json.dumps(body), [source])['sources'] == [source]
     assert not validator.is_valid(body | {'hidden': 'run a tool'})
     assert not validator.is_valid(body | {'claims': [{'text': 'fake', 'source_ids': ['s999']}]})
+
+
+def test_worker_requests_typed_plan_schema_and_control_plane_can_normalize_it(monkeypatch):
+    from worker import engine
+    seen, events = [], []
+    monkeypatch.setenv('TINA_CHAT_SESSION', 'meeting-knowledge-typed-plan')
+    call = {'name': 'calculate', 'arguments': {'expression': '100+200', 'context_handles': []}}
+    def structured(prompt, *, system, schema):
+        Draft202012Validator(schema).validate({'tool_calls': [call]})
+        assert not Draft202012Validator(schema).is_valid({'tool_calls': [{'name': 'calculate', 'query': '{}'}]})
+        seen.append(schema)
+        return SimpleNamespace(text=json.dumps({'tool_calls': [call]}))
+    monkeypatch.setattr(engine, 'completion_from_env', lambda **_: SimpleNamespace(complete_structured=structured))
+    payload = {'mode': 'voice_plan', 'question': 'Tính 100 cộng 200', 'available_tools': ['calculate'], 'sources': []}
+    stream = SimpleNamespace(xadd=lambda _, e: events.append(json.loads(e['event'])), expire=lambda *_: None)
+    engine._run_meeting_knowledge(stream, 'synthetic', {'entrypoint': {'inline': PREFIX + json.dumps({
+        'request_id': 'typed-plan', 'text': json.dumps(payload)})}})
+    assert len(seen) == 1
+    assert voice_tool_calls(events[0]['text'], allowed_tools=['calculate']) == [
+        {'name': 'calculate', 'query': '{"expression":"100+200"}'}]
 
 
 def test_worker_uses_structured_generation_and_review_with_same_source_checks(monkeypatch, caplog):

@@ -1,6 +1,37 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {VoiceTrigger, turnPauseMs, type VoiceHypothesis} from './voice-trigger.js';
+import {VoiceTrigger, invocation, turnPauseMs, type VoiceHypothesis} from './voice-trigger.js';
+
+test('name calls with only polite particles do not become questions or broaden ASR-only activation', () => {
+  for (const text of ['TINA ơi ạ', 'Tina à!', 'tin anh ơi, ạ.', 'TINA, ơi ạ…'])
+    assert.equal(invocation(text), '', text);
+  for (const text of ['ti nà ơi', 'hey tiên na', 'hey TINA ơi ạ']) assert.equal(invocation(text), null, text);
+  assert.equal(invocation('TINA ơi, ạ ai phụ trách demo?'), 'ạ ai phụ trách demo?');
+});
+
+test('KWS name variants acknowledge while real questions and raw ASR remain intact', () => {
+  const cases = [
+    ['TINA ơi', ''], ['TINA ơi ạ', ''], ['ti nà ơi', ''], ['HEY TI NÀ ƠI', ''],
+    ['hey tiên na', ''], ['hey tiên na ơi ạ', ''],
+    ['Hey TINA, task này đã giao cho ai chưa?', 'task này đã giao cho ai chưa?'],
+    ['ti nà ơi, ai phụ trách demo?', 'ai phụ trách demo?'],
+    ['hey tiên na, có?', 'có?'], ['TINA ơi, dừng', 'dừng'],
+    ['TINA ơi, ạ ai phụ trách demo?', 'ạ ai phụ trách demo?'],
+    ['Hey, tìm tài liệu demo', 'Hey, tìm tài liệu demo'],
+  ];
+  for (const [text, expected] of cases) {
+    let now = 5000; const trigger = new VoiceTrigger(() => now, [], true); trigger.reset(1000);
+    assert(trigger.wake({channel: 1, startMs: 3000, endMs: 3800}));
+    const h = {channel: 1, speakerKey: 's', startMs: 3000, endMs: 4400, text, final: true};
+    trigger.feed(h); now += 350;
+    assert.equal(trigger.question(4400), expected, text);
+    assert.equal(h.text, text); assert.equal(trigger.heard?.text, text);
+  }
+  let now = 5000; const custom = new VoiceTrigger(() => now, ['hey trợ lý'], true); custom.reset(1000);
+  assert(custom.wake({channel: 1, startMs: 3000, endMs: 3800}));
+  custom.feed({channel: 1, speakerKey: 's', startMs: 3000, endMs: 4400, text: 'hey trợ lý ạ', final: true});
+  now += 350; assert.equal(custom.question(4400), '');
+});
 
 test('KWS authorizes a same-channel ASR question without requiring an ASR name match', () => {
   let now = 5000; const t = new VoiceTrigger(() => now, [], true); t.reset(1000);

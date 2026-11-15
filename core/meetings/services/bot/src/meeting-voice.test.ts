@@ -2,11 +2,22 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MeetingVoice, voiceApi, type VoiceApi, type VoiceWorker, type VoiceDiagnostic, type WorkerFactory } from './meeting-voice.js';
 import type { SpeakController } from './capture-bridge.js';
-import { invocation, VoiceTrigger, speechSentences, summaryWaitNotice, SUMMARY_NOTICE, VOICE_NOTICES, isFixedVoiceNotice } from './voice-trigger.js';
+import { invocation, VoiceTrigger, speechSentences, summaryWaitNotice, SUMMARY_NOTICE, VOICE_NOTICES, VOICE_SERVICE_ERROR, VOICE_PROGRESS_NOTICES, voiceProgressNotice, isFixedVoiceNotice } from './voice-trigger.js';
 import { createBotPipeline, type BotPipeline } from './pipeline.js';
 import type { AudioSnapshot } from './audio-diagnostics.js';
 function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 const tick = (ms = 350) => new Promise(resolve => setTimeout(resolve, ms));
+test('spoken tool progress requires a fresh matching turn, revision and known stage',()=>{
+  const now=Date.now(), base={request_id:'turn',revision:2,observed_at_ms:now,stage:'reading_documents'};
+  for(const [stage,text] of Object.entries(VOICE_PROGRESS_NOTICES)){
+    assert.equal(voiceProgressNotice({...base,stage},'turn',2,now),text);
+    assert(isFixedVoiceNotice(text));
+  }
+  for(const bad of [null,{}, {...base,request_id:'old'}, {...base,revision:1},
+    {...base,observed_at_ms:now-15_000},{...base,observed_at_ms:now+1},
+    {...base,observed_at_ms:'now'},{...base,stage:'invented_tool'},{...base,stage:'__proto__'}])
+    assert.equal(voiceProgressNotice(bad,'turn',2,now),undefined);
+});
 test('native cancellation waits for core acknowledgment and rejects an invalid success response',async()=>{
   const response=deferred<Response>();const calls:object[]=[];
   const api=voiceApi('http://core.test/bots/voice/1/session','synthetic',async(_url,init)=>{
@@ -18,7 +29,7 @@ test('native cancellation waits for core acknowledgment and rejects an invalid s
   const invalid=voiceApi('http://core.test','synthetic',async()=>Response.json({ready:true}));
   await assert.rejects(async()=>{await invalid.cancelTurn!('old');});
 });
-function fixture(answer: () => Promise<{text: string; clarification?: boolean; evidence_available?: boolean}> = async () => ({ text: 'Lan phụ trách demo. Hạn là thứ Sáu.' }), player?: SpeakController, shadowFactory?: WorkerFactory) {
+function fixture(answer: () => Promise<{text: string; clarification?: boolean; evidence_available?: boolean}> = async () => ({ text: 'Lan phụ trách demo. Hạn là thứ Sáu.' }), player?: SpeakController, shadowFactory?: WorkerFactory, turnFactory?: WorkerFactory,vadFactory?:WorkerFactory) {
   const diagnostics: VoiceDiagnostic[] = [], logs: string[] = [];
   const audio: AudioSnapshot[] = [];
   const endpoints:Array<{channel:number;endMs:number|null}>=[];
@@ -32,7 +43,7 @@ function fixture(answer: () => Promise<{text: string; clarification?: boolean; e
   const api: VoiceApi = { config: async () => config, answer: async (question, _id, _rev, _signal, speaker) => { questions.push(question); speakerKeys.push(speaker); return answer(); }, state: async (state, _, detail, snapshot) => { states.push(state); if (detail) diagnostics.push(detail); if(snapshot)audio.push(snapshot); } };
   const voice = new MeetingVoice(api, player || { async speak(text, _, started, deadline) { spoken.push(text); speechDeadlines.push(deadline); started?.(); return 'completed'; }, async stop() {} },
     async (_, state, text) => { if(text!==undefined)progress.push({state,text});else reports.push(state); }, onEvent => { event = onEvent; return worker; }, value => { logs.push(value); }, undefined,
-    (channel,endMs)=>{endpoints.push({channel,endMs});}, shadowFactory);
+    (channel,endMs)=>{endpoints.push({channel,endMs});}, shadowFactory,turnFactory,undefined,vadFactory);
   const emit = (v: object) => event({ generation: 0, ...v });
   const capture = async (text = 'Tina ơi, ai phụ trách demo?') => {
     emit({ event: 'state', state: 'LISTENING' });
@@ -44,6 +55,116 @@ function fixture(answer: () => Promise<{text: string; clarification?: boolean; e
   };
   return { voice, api, states, diagnostics, logs, audio, endpoints, progress, spoken, speechDeadlines, questions, speakerKeys, reports, sent, capture, emit, setConfig: (v: typeof config) => { config = v; } };
 }
+
+test('server cancellation and heard-prefix receipt do not wait for stalled microphone control',async()=>{
+  const local=deferred<void>();const calls:string[]=[];
+  const api:VoiceApi={config:async()=>({enabled:true,ready:true,revision:1,wake_variants:[]}),
+    answer:async()=>({text:'unused'}),state:async()=>{},cancelTurn:async()=>{calls.push('cancel');}};
+  const voice=new MeetingVoice(api,{async speak(){return 'completed';},stop(){calls.push('local-stop');return local.promise;}},
+    async(_id,state,text)=>{calls.push(`receipt:${state}:${text}`);});
+  Object.assign(voice,{requestId:'00000000-0000-4000-8000-000000000123',playbackStarted:true,playedText:'Đã phát.'});
+  const cancelled=(voice as any).cancel();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert(calls.includes('local-stop'));assert(calls.includes('cancel'));
+  assert(calls.indexOf('receipt:stopped:Đã phát.')<calls.indexOf('cancel'));
+  local.resolve();await cancelled;
+});
+
+for(const probe of ['configuration','asr'])test(`healthy polling rearms after consecutive transient ${probe} probe errors without reviving retired workers`,async()=>{
+  let fail=false,starts=0;const events:Array<(event:Record<string,unknown>)=>void>=[];
+  const states:string[]=[];
+  const voice=new MeetingVoice({config:async()=>{
+    if(probe==='configuration'&&fail)throw Error('synthetic temporary configuration failure');
+    return {enabled:true,ready:true,revision:1};
+  },answer:async()=>({text:'unused'}),state:async state=>{states.push(state);}},
+  {speak:async()=> 'completed',stop:async()=>{}},async()=>{},callback=>{
+    starts++;events.push(callback);return {send:()=>true,close(){}};
+  },()=>{},async()=>{if(probe==='asr'&&fail)throw Error('synthetic temporary ASR health failure');return true;});
+  const poll=async()=>{clearTimeout((voice as any).pollTimer);await (voice as any).poll();clearTimeout((voice as any).pollTimer);};
+  try{
+    await voice.start();clearTimeout((voice as any).pollTimer);
+    events[0]({event:'state',state:'LISTENING',generation:0});
+    fail=true;await poll();await poll();assert.equal(starts,1);
+    fail=false;await poll();assert.equal(starts,2);
+    assert.notEqual(states.at(-1),'ERROR');
+    const count=states.length;events[0]({event:'state',state:'LISTENING',generation:0});
+    assert.equal(states.length,count,'retired callbacks cannot arm listening');
+    events[1]({event:'state',state:'LISTENING',generation:0});assert.equal(states.at(-1),'LISTENING');
+  }finally{await voice.stop();}
+});
+
+test('worker construction failures are not treated as transient readiness probe failures',async()=>{
+  let constructions=0;const states:string[]=[];
+  const voice=new MeetingVoice({config:async()=>({enabled:true,ready:true,revision:1}),
+    answer:async()=>({text:'unused'}),state:async state=>{states.push(state);}},
+    {speak:async()=> 'completed',stop:async()=>{}},async()=>{},()=>{
+      constructions++;throw Error('synthetic worker startup failure');
+    },()=>{});
+  try{
+    await voice.start();clearTimeout((voice as any).pollTimer);
+    await (voice as any).poll();clearTimeout((voice as any).pollTimer);
+    assert.equal(constructions,1);assert.equal(states.at(-1),'ERROR');
+  }finally{await voice.stop();}
+});
+
+for(const failure of ['microphone','lease','receipt','existing-error','manual-speaking'])test(`probe recovery preserves ${failure} error fences`,async()=>{
+  let configFails=false,cleanupFails=true,starts=0;
+  const states:string[]=[];
+  const voice=new MeetingVoice({config:async()=>{
+    if(configFails)throw Error('synthetic temporary probe failure');
+    return {enabled:true,ready:true,revision:1};
+  },answer:async()=>({text:'unused'}),state:async state=>{states.push(state);},
+  cancelTurn:async()=>{if(failure==='lease'&&cleanupFails)throw Error('Unconfirmed core release');}},
+  {speak:async()=> 'completed',stop:async()=>{if(failure==='microphone'&&cleanupFails)throw Error('Unconfirmed mute');}},
+  async()=>{if(failure==='receipt'&&cleanupFails)throw Error('Unconfirmed receipt');},
+  ()=>{starts++;return {send:()=>true,close(){}};},()=>{});
+  const poll=async()=>{clearTimeout((voice as any).pollTimer);await (voice as any).poll();clearTimeout((voice as any).pollTimer);};
+  try{
+    await voice.start();clearTimeout((voice as any).pollTimer);
+    if(failure==='lease'||failure==='receipt')Object.assign(voice,{requestId:'00000000-0000-4000-8000-000000000123',playbackStarted:failure==='receipt'});
+    if(failure==='existing-error')(voice as any).setState('ERROR');
+    if(failure==='manual-speaking')Object.assign(voice,{externalSpeaking:true});
+    configFails=true;await poll();cleanupFails=false;configFails=false;await poll();
+    assert.equal(starts,1);assert.equal(states.at(-1),'ERROR');
+  }finally{cleanupFails=false;await voice.stop();}
+});
+
+test('hosted VAD disagreement or failure cannot delay or replace primary question dispatch',async()=>{
+  for(const unavailable of [false,true]){
+    let remote!:(event:Record<string,unknown>)=>void;let fail!:()=>void;
+    const f=fixture(undefined,undefined,undefined,undefined,(event,failed)=>{
+      remote=event;fail=failed;
+      return {close(){},send(value:any){
+        if(value.type==='endpoint')remote({event:'endpoint',id:value.id,generation:value.generation,channel:value.channel,ready:false});
+        return true;
+      }};
+    });
+    await f.voice.start();remote({event:'vad-ready'});if(unavailable)fail();
+    await f.capture();
+    assert.deepEqual(f.questions,['ai phụ trách demo?']);
+    assert(!f.states.includes('ERROR'));
+    assert(f.logs.some(value=>value.includes('livekit_vad_shadow')));
+    await f.voice.stop();
+  }
+});
+
+test('pending shadow inference never delays question dispatch',async()=>{
+  let event!:(value:Record<string,unknown>)=>void;
+  const observations:object[]=[];
+  const f=fixture(undefined,undefined,undefined,callback=>{event=callback;return{
+    send(value){observations.push(value);return true;},close(){}};});
+  await f.voice.start();event({event:'turn-ready'});f.emit({event:'state',state:'LISTENING'});
+  const start=Date.now()+1;await tick(5);
+  f.voice.feed(0,new Float32Array(1600),start);
+  f.voice.hypothesis({channel:0,speakerKey:'ch-0:1',startMs:start,endMs:start+10,
+    text:'Tina ơi, ai phụ trách demo?',final:true});
+  f.emit({event:'activity',channel:0,speech:false,endMs:start+10,stamp:start+20});
+  await tick(450);
+  assert.equal(observations.length,1);
+  assert.deepEqual(f.questions,['ai phụ trách demo?']);
+  assert(f.states.includes('THINKING'));
+  await f.voice.stop();
+});
 
 function acousticFixture(answer?: () => Promise<{text: string; clarification?: boolean; evidence_available?: boolean}>) {
   let event!: (value: Record<string, unknown>) => void, fail!: () => void;
@@ -130,6 +251,22 @@ test('slow question notices rotate once per turn and never claim a specific tool
   } finally {for (const result of replies) result.resolve({text: 'Lan.'}); await f.voice.stop();}
 });
 
+test('a slow answer announces its actual document lookup once and then plays the verified answer',async()=>{
+  const reply=deferred<{text:string}>(),f=fixture(()=>reply.promise);
+  const config=f.api.config;
+  f.api.answer=async(_question,id,revision)=>{
+    f.api.config=async signal=>({...await config(signal),progress:{request_id:id,revision,stage:'reading_documents',observed_at_ms:Date.now()}});
+    return reply.promise;
+  };
+  try{
+    await f.voice.start();await f.capture();await tick(1000);
+    assert.deepEqual(f.spoken,[VOICE_PROGRESS_NOTICES.reading_documents]);
+    reply.resolve({text:'Lan phụ trách demo.'});await tick(40);
+    assert.deepEqual(f.spoken,[VOICE_PROGRESS_NOTICES.reading_documents,'Lan phụ trách demo.']);
+    assert.deepEqual(f.reports,['started','completed']);
+  }finally{reply.resolve({text:'Lan phụ trách demo.'});await f.voice.stop();}
+});
+
 test('an answer that arrives during the notice policy check skips filler and preserves the reply', async () => {
   const result = deferred<{text: string}>(), checking = deferred<void>(), release = deferred<void>();
   const f = fixture(() => result.promise); const config = f.api.config; let reads = 0;
@@ -158,11 +295,11 @@ test('a slow recap announces once then automatically plays the verified result w
   try {
     await f.voice.start(); await f.capture('TINA ơi, tổng hợp toàn bộ quyết định trong cuộc họp.');
     await tick(1000);
-    assert.deepEqual(f.spoken, [SUMMARY_NOTICE]);
+    assert.deepEqual(f.spoken, [VOICE_NOTICES.wait[0]]);
     assert.equal(f.speechDeadlines[0], 6000, 'A 1.84s cached notice still needs time to open the meeting microphone.');
     assert(!f.reports.includes('completed'));
     result.resolve({text: 'Lan phụ trách demo.'}); await tick(40);
-    assert.deepEqual(f.spoken, [SUMMARY_NOTICE, 'Lan phụ trách demo.']);
+    assert.deepEqual(f.spoken, [VOICE_NOTICES.wait[0], 'Lan phụ trách demo.']);
     assert.equal(f.questions.length, 1);
     assert.deepEqual(f.reports, ['started', 'completed']);
   } finally {result.resolve({text: 'Lan phụ trách demo.'}); await f.voice.stop();}
@@ -173,12 +310,12 @@ test('Stop, departure and policy changes fence late recap results and do not rep
     const result = deferred<{text: string}>(); const f = fixture(() => result.promise);
     try {
       await f.voice.start(); await f.capture('TINA ơi, tóm tắt cuộc họp.'); await tick(1000);
-      assert.deepEqual(f.spoken, [SUMMARY_NOTICE]);
+      assert.deepEqual(f.spoken, [VOICE_NOTICES.wait[0]]);
       if (change === 'stop') await f.voice.external({action: 'speak_stop'}, async () => {});
       else if (change === 'depart') await f.voice.stop();
       else f.setConfig({enabled: true, ready: true, revision: 2, wake_variants: []});
       result.resolve({text: 'Kết quả cũ phải bỏ.'}); await tick(40);
-      assert.deepEqual(f.spoken, [SUMMARY_NOTICE]);
+      assert.deepEqual(f.spoken, [VOICE_NOTICES.wait[0]]);
       assert(!f.reports.includes('completed'));
     } finally {result.resolve({text: 'Kết quả cũ phải bỏ.'}); await f.voice.stop();}
   }
@@ -198,7 +335,7 @@ test('a recap cancelled for a new question cannot speak its late result over the
     await tick(450);
     assert.equal(requests, 2);
     old.resolve({text: 'Bản tổng hợp cũ.'}); await tick(40);
-    assert.deepEqual(f.spoken, [SUMMARY_NOTICE, 'Câu trả lời mới.']);
+    assert.deepEqual(f.spoken, [VOICE_NOTICES.wait[0], 'Câu trả lời mới.']);
   } finally {old.resolve({text: 'Bản tổng hợp cũ.'}); await f.voice.stop();}
 });
 
@@ -243,22 +380,24 @@ test('ASR arriving before KWS is replayed once, without any ASR name match', asy
 });
 
 test('a standalone KWS call acknowledges and accepts only its caller continuation', async () => {
-  const f = acousticFixture();
-  try {
-    await f.voice.start(); f.emit({event: 'state', state: 'LISTENING'}); f.ready();
-    const start = Date.now()+1; await tick(5); f.wake(start);
-    f.voice.hypothesis({channel: 2, participant: 'transport-id', speakerKey: 's', startMs: start,
-      endMs: start+100, text: 'tin anh ơi', final: true});
-    f.emit({event: 'activity', channel: 2, speech: false, endMs: start+100, stamp: start+100});
-    await tick(450); assert.deepEqual(f.spoken, ['Dạ, em nghe.']); assert.equal(f.questions.length, 0);
-    f.emit({event: 'state', state: 'LISTENING'}); const next = Date.now()+1; await tick(5);
-    f.voice.hypothesis({channel: 3, speakerKey: 'other', startMs: next, endMs: next+10, text: 'TINA ơi câu của người khác', final: true});
-    f.voice.hypothesis({channel: 2, participant: 'transport-id', speakerKey: 's', startMs: next,
-      endMs: next+10, text: 'Ai phụ trách demo?', final: true});
-    f.emit({event: 'activity', channel: 2, speech: false, endMs: next+10, stamp: next+10});
-    await tick(450); assert.deepEqual(f.questions, ['Ai phụ trách demo?']);
-    assert.equal(f.spoken.filter(s => s === 'Dạ, em nghe.').length, 1);
-  } finally {await f.voice.stop();}
+  for (const name of ['tin anh ơi', 'TINA ơi ạ', 'ti nà ơi', 'hey tiên na']) {
+    const f = acousticFixture();
+    try {
+      await f.voice.start(); f.emit({event: 'state', state: 'LISTENING'}); f.ready();
+      const start = Date.now()+1; await tick(5); f.wake(start);
+      f.voice.hypothesis({channel: 2, participant: 'transport-id', speakerKey: 's', startMs: start,
+        endMs: start+100, text: name, final: true});
+      f.emit({event: 'activity', channel: 2, speech: false, endMs: start+100, stamp: start+100});
+      await tick(450); assert.deepEqual(f.spoken, ['Dạ, em nghe.']); assert.equal(f.questions.length, 0);
+      f.emit({event: 'state', state: 'LISTENING'}); const next = Date.now()+1; await tick(5);
+      f.voice.hypothesis({channel: 3, speakerKey: 'other', startMs: next, endMs: next+10, text: 'TINA ơi câu của người khác', final: true});
+      f.voice.hypothesis({channel: 2, participant: 'transport-id', speakerKey: 's', startMs: next,
+        endMs: next+10, text: 'Ai phụ trách demo?', final: true});
+      f.emit({event: 'activity', channel: 2, speech: false, endMs: next+10, stamp: next+10});
+      await tick(450); assert.deepEqual(f.questions, ['Ai phụ trách demo?']);
+      assert.equal(f.spoken.filter(s => s === 'Dạ, em nghe.').length, 1);
+    } finally {await f.voice.stop();}
+  }
 });
 
 test('failed KWS refuses ASR-only activation and stale worker events cannot wake', async () => {
@@ -434,7 +573,7 @@ test('unknown identity and failed playback never open post-answer follow-up', as
   }
 });
 
-test('new requests acknowledge once while brief follow-up waits, fast errors and Stop leave no delayed speech', async () => {
+test('new requests acknowledge once while brief follow-up waits and fast errors get one recovery notice', async () => {
   const pending=deferred<{text:string}>(),nextPending=deferred<{text:string}>();let requests=0;
   const f=acousticFixture(()=>++requests===1?pending.promise:nextPending.promise);
   try {
@@ -451,8 +590,59 @@ test('new requests acknowledge once while brief follow-up waits, fast errors and
     assert.equal(f.spoken.at(-1),'Thứ Sáu.');
   }finally{pending.resolve({text:'Lan.'});nextPending.resolve({text:'Thứ Sáu.'});await f.voice.stop();}
   const g=fixture(async()=>{throw new Error('no result');});
-  try{await g.voice.start();await g.capture();await tick(1000);assert.deepEqual(g.spoken,[]);}
+  try{await g.voice.start();await g.capture();await tick(1000);assert.deepEqual(g.spoken,[VOICE_SERVICE_ERROR]);assert.deepEqual(g.reports,[]);}
   finally{await g.voice.stop();}
+});
+
+test('no input ends the idle wait silently and distinguishes capture gaps from speech without ASR',async(t)=>{
+  const wallNow=Date.now.bind(Date);let advance=0;t.mock.method(Date,'now',()=>wallNow()+advance);
+  for (const mode of ['quiet','speech','missing']) {
+    advance=0;const f=acousticFixture();
+    try {
+      await f.voice.start();f.emit({event:'state',state:'LISTENING'});f.ready();
+      const start=Date.now()+1;await tick(5);f.wake(start);
+      f.voice.hypothesis({channel:2,participant:'transport-id',speakerKey:'s',startMs:start,endMs:start+100,text:'TINA ơi ai làm?',final:true});
+      f.emit({event:'activity',channel:2,speech:false,endMs:start+100,stamp:start+100});await tick(450);
+      f.emit({event:'state',state:'LISTENING'});const count=f.spoken.length;advance=5001;
+      if(mode!=='missing')f.voice.feed(2,new Float32Array(1024),Date.now()-64,'transport-id',4096);
+      if(mode==='speech')f.emit({event:'activity',channel:2,speech:false,endMs:Date.now(),stamp:Date.now()});
+      await tick(150);
+      assert(f.diagnostics.some(d=>d.code===(mode==='quiet'?'no_input':mode==='speech'?'question_timeout':'services_unavailable')));
+      assert.equal(f.spoken.length,count);
+    }finally{await f.voice.stop();}
+  }
+});
+
+test('paused clarification and service failures never arm an automatic same-person follow-up',async()=>{
+  for(const reason of ['clarification_exhausted','llm_unavailable','draft_unavailable']){
+    const f=acousticFixture(async()=>({text:'Em tạm dừng lượt này.',reason,evidence_available:false}));
+    try{
+      await f.voice.start();f.emit({event:'state',state:'LISTENING'});f.ready();
+      const start=Date.now()+1;await tick(5);f.wake(start);
+      f.voice.hypothesis({channel:2,participant:'transport-id',speakerKey:'s',startMs:start,endMs:start+100,text:'TINA ơi ai làm?',final:true});
+      f.emit({event:'activity',channel:2,speech:false,endMs:start+100,stamp:start+100});await tick(450);
+      f.emit({event:'state',state:'LISTENING'});const after=Date.now()+1;await tick(5);
+      f.voice.hypothesis({channel:2,participant:'transport-id',speakerKey:'s',startMs:after,endMs:after+100,text:'Lan',final:true});
+      await tick(350);assert.equal(f.questions.length,1);
+    }finally{await f.voice.stop();}
+  }
+});
+
+test('recovery audio is attempted once and failed TTS cannot trigger another spoken error',async()=>{
+  let plays=0;
+  const f=fixture(async()=>{throw Error('service unavailable');},{async speak(){plays++;return 'failed';},async stop(){}});
+  try{
+    await f.voice.start();await f.capture();await tick(150);
+    assert.equal(plays,1);assert(f.diagnostics.some(d=>d.code==='playback_failed'));assert.deepEqual(f.reports,[]);
+  }finally{await f.voice.stop();}
+  const g=fixture(async()=>{throw Error('service unavailable');});
+  const config=g.api.config,checking=deferred<void>(),release=deferred<void>();let reads=0;
+  g.api.config=async signal=>{if(++reads===2){checking.resolve();await release.promise;}return config(signal);};
+  try{
+    await g.voice.start();await g.capture();await checking.promise;
+    await g.voice.external({action:'speak_stop'},async()=>{});release.resolve();await tick(30);
+    assert.deepEqual(g.spoken,[]);
+  }finally{release.resolve();await g.voice.stop();}
 });
 
 test('an explicit caller correction interrupts TTS, preserves completed sentences and opens the corrected turn', async()=>{

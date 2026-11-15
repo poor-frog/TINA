@@ -32,6 +32,8 @@ def voice(tmp_path, monkeypatch):
         return json.dumps({'claims': [{'text': 'The budget is 100.', 'source_ids': ['s0']}]})
     monkeypatch.setenv('TINA_INTERNAL_API_SECRET', 'test-internal')
     monkeypatch.setattr(api, 'meeting_get', meeting_get)
+    # Routing/fallback fixtures must not depend on whether the developer cached real E5 weights.
+    monkeypatch.setattr(api, 'semantic_rank', lambda *_: [])
     app = FastAPI()
     api.register(app, lambda r: r.headers['x-user-id'], lambda r, slug: root,
                  WorkspaceReader(str(tmp_path)), 'http://meeting.test', complete)
@@ -100,6 +102,133 @@ def test_only_explicit_shared_sources_enter_voice_prompt(voice):
     assert 'PRIVATE TRANSCRIPT' not in encoded and 'PRIVATE WORKSPACE SECRET' not in encoded
     assert all(s['path'] == 'wiki/shared.md' for s in prompts[0]['sources'])
     assert not (root / '.meeting-knowledge').exists()
+
+
+@pytest.mark.parametrize('linked', ['direct', 'linked_first', 'linked_late'])
+def test_selected_voice_document_survives_unselected_documents_filling_the_load_budget(voice, linked):
+    client, row, root, _, _ = voice
+    row['data']['voice_assistant']['engine'] = 'livekit'
+    body = {'operation':'lookup','question':'Budget?', 'revision':1,
+            'lookup':{'name':'search_shared_documents','query':'budget'}}
+    path = '/api/internal/meeting-voice/1/agent'
+    assert client.post(path, headers=HEADERS, json=body).status_code == 200
+    for i in range(8):
+        name = f'wiki/a-{i}.md'
+        (root/name).write_text('Unshared budget note.')
+        row['data']['docs'].append({'path':name})
+    if linked != 'direct':
+        row['data']['docs'] = [d for d in row['data']['docs'] if d['path'] != 'wiki/shared.md']
+        anchor = 'wiki/a-0.md' if linked == 'linked_first' else 'wiki/z-anchor.md'
+        (root/anchor).write_text('[[shared]]')
+        if linked == 'linked_late': row['data']['docs'].append({'path':anchor})
+    result = client.post(path, headers=HEADERS, json=body)
+    assert result.status_code == 200, result.text
+    assert {s['path'] for s in result.json()['sources']} == {'wiki/shared.md'}
+    assert 'Unshared budget note' not in result.text
+    ready = client.get('/api/internal/meeting-voice/1/ready', headers=HEADERS)
+    assert ready.status_code == 200 and len(ready.json()['documents']) <= 8
+    assert 'wiki/shared.md' in ready.json()['documents']
+    if linked != 'direct': (root/anchor).write_text('Link removed.')
+    else: row['data']['docs'] = [d for d in row['data']['docs'] if d['path'] != 'wiki/shared.md']
+    assert client.post(path, headers=HEADERS, json=body).status_code == 409
+
+
+def test_document_priority_does_not_grant_an_unlinked_workspace_file(voice):
+    client, row, root, _, _ = voice
+    row['data']['voice_assistant']['documents'] = ['wiki/private.md']
+    assert (root/'wiki/private.md').is_file()
+    assert client.post(URL, headers=HEADERS, json={'question':'Budget?', 'revision':1}).status_code == 409
+
+
+def test_all_eight_selected_linked_documents_fit_the_voice_evidence_budget(voice):
+    client, row, root, _, _ = voice
+    row['data']['voice_assistant']['engine'] = 'livekit'
+    chosen = [f'wiki/z-selected-{i}.md' for i in range(8)]
+    row['data']['voice_assistant']['documents'] = chosen
+    row['data']['docs'] = []
+    for i, selected in enumerate(chosen):
+        (root/selected).write_text(f'Approved budget note {i}.')
+        anchor = f'wiki/a-anchor-{i}.md'
+        (root/anchor).write_text(f'[[z-selected-{i}]]')
+        row['data']['docs'].append({'path':anchor})
+    result = client.post('/api/internal/meeting-voice/1/agent', headers=HEADERS, json={
+        'operation':'lookup','question':'Budget?', 'revision':1,
+        'lookup':{'name':'search_shared_documents','query':'budget'}})
+    assert result.status_code == 200, result.text
+    assert {s['path'] for s in result.json()['sources']} == set(chosen)
+    ready = client.get('/api/internal/meeting-voice/1/ready', headers=HEADERS)
+    assert set(ready.json()['documents']) == set(chosen)
+
+
+@pytest.mark.parametrize('operation', ['plan', 'lookup', 'answer', 'ready'])
+@pytest.mark.parametrize('failure', ['utf8', 'read'])
+def test_optional_unselected_document_failure_does_not_disable_voice(voice, monkeypatch, operation, failure):
+    from pathlib import Path
+    client, row, root, _, _ = voice
+    row['data']['voice_assistant']['engine'] = 'livekit'
+    optional = root/'wiki/unselected.md'
+    optional.write_bytes(b'PRIVATE OPTIONAL DETAIL \xff' if failure == 'utf8' else b'Unselected note.')
+    row['data']['docs'].append({'path':'wiki/unselected.md'})
+    original = Path.open
+    def open_file(path, *args, **kwargs):
+        if failure == 'read' and path == optional: raise PermissionError('PRIVATE FILE DETAIL')
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'open', open_file)
+    body = {'question':'Budget?', 'revision':1}
+    if operation == 'ready': result = client.get('/api/internal/meeting-voice/1/ready',headers=HEADERS)
+    elif operation == 'answer': result = client.post(URL,headers=HEADERS,json=body)
+    else:
+        body['operation'] = operation
+        if operation == 'lookup': body['lookup'] = {'name':'search_shared_documents','query':'budget'}
+        result = client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json=body)
+    assert result.status_code == 200,result.text
+    assert 'PRIVATE' not in result.text
+
+
+@pytest.mark.parametrize('origin', [False, True])
+def test_required_document_or_unknown_link_proof_failure_remains_a_service_error(voice, origin):
+    client, row, root, prompts, _ = voice
+    if origin:
+        row['data']['docs'] = [{'path':'wiki/anchor.md'}]
+        (root/'wiki/anchor.md').write_bytes(b'PRIVATE UNREADABLE ORIGIN \xff')
+    else: (root/'wiki/shared.md').write_bytes(b'PRIVATE SELECTED DOCUMENT \xff')
+    response = client.post(URL,headers=HEADERS,json={'question':'Budget?','revision':1})
+    assert response.status_code == 503 and not prompts
+    assert 'PRIVATE' not in response.text
+
+
+def test_empty_voice_selection_ignores_optional_errors_without_relaxing_generic_knowledge(voice):
+    client, row, root, _, _ = voice
+    row['data']['voice_assistant']['documents'] = []
+    (root/'wiki/unselected.md').write_bytes(b'PRIVATE BAD DOCUMENT \xff')
+    row['data']['docs'].append({'path':'wiki/unselected.md'})
+    ready = client.get('/api/internal/meeting-voice/1/ready',headers=HEADERS)
+    assert ready.status_code == 200
+    assert 'wiki/unselected.md' not in ready.json()['documents']
+    assert client.get('/api/workspace/meeting-knowledge/1',headers=HEADERS).status_code == 503
+
+
+@pytest.mark.parametrize('failure_site', ['late_root', 'unselected_target'])
+def test_optional_discovery_failures_do_not_hide_an_independently_verified_selected_link(voice, failure_site):
+    client, row, root, _, _ = voice
+    row['data']['voice_assistant']['engine'] = 'livekit'
+    if failure_site == 'late_root':
+        row['data']['docs'] = []
+        for i in range(8):
+            path = f'wiki/a-{i}.md';(root/path).write_text('Unselected note.');row['data']['docs'].append({'path':path})
+        (root/'wiki/y-bad.md').write_bytes(b'PRIVATE BAD ROOT \xff')
+        (root/'wiki/z-origin.md').write_text('[[shared]]')
+        row['data']['docs'] += [{'path':'wiki/y-bad.md'},{'path':'wiki/z-origin.md'}]
+    else:
+        (root/'wiki/anchor.md').write_text('[[unused]]')
+        (root/'wiki/unused.md').write_bytes(b'PRIVATE UNUSED TARGET \xff')
+        row['data']['docs'].append({'path':'wiki/anchor.md'})
+    result = client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json={
+        'operation':'lookup','question':'Budget?','revision':1,
+        'lookup':{'name':'search_shared_documents','query':'budget'}})
+    assert result.status_code == 200,result.text
+    assert {source['path'] for source in result.json()['sources']} == {'wiki/shared.md'}
+    assert 'PRIVATE' not in result.text
 
 
 def test_missing_internal_secret_or_substituted_owner_is_denied(voice):
@@ -277,6 +406,93 @@ def test_agents_plan_and_lookup_use_only_approved_sources_and_no_nested_tool_loo
     assert client.post(path,headers=HEADERS,json=base|{'operation':'plan'}).status_code==409
 
 
+def test_typed_llm_plan_normalizes_to_existing_api_and_still_refuses_scope_changes(voice):
+    client, row, root, prompts, mutate = voice
+    row['data']['voice_assistant']['engine'] = 'livekit'
+    path = '/api/internal/meeting-voice/1/agent'
+    base = {'question': 'Compare the budget against the shared document', 'revision': 1}
+    mutate[0] = lambda: json.dumps({'tool_calls': [{'name': 'search_shared_documents',
+        'arguments': {'query': 'budget'}}]}) if prompts[-1].get('mode') == 'voice_plan' else None
+    plan = client.post(path, headers=HEADERS, json=base | {'operation': 'plan'})
+    assert plan.status_code == 200 and plan.json()['tool_calls'] == [{'name': 'search_shared_documents', 'query': 'budget'}]
+    lookup = client.post(path, headers=HEADERS, json=base | {'operation': 'lookup', 'lookup': plan.json()['tool_calls'][0]})
+    assert lookup.status_code == 200 and {s['path'] for s in lookup.json()['sources']} == {'wiki/shared.md'}
+    mutate[0] = lambda: json.dumps({'tool_calls': [{'name': 'search_shared_documents',
+        'arguments': {'query': 'budget', 'path': 'wiki/private.md'}}]})
+    assert client.post(path, headers=HEADERS, json=base | {'operation': 'plan'}).status_code == 502
+
+
+def test_v2_lookup_pack_refs_match_quotes_and_filters_never_widen_linked_sources(voice):
+    client, row, root, prompts, mutate = voice
+    row['data']['voice_assistant']['engine'] = 'livekit'
+    path = '/api/internal/meeting-voice/1/agent'
+    base = {'question': 'What is the approved budget?', 'revision': 1, 'operation': 'lookup'}
+    (root/'retrieval-domain.json').write_text(json.dumps({'version':1,'aliases':{'budget':['cost']}}))
+    call = {'name':'search_shared_documents','query':'cost'}
+    result = client.post(path, headers=HEADERS, json=base | {'lookup':call})
+    assert result.status_code == 200,result.text
+    body = result.json(); pack = body['evidence_pack']
+    assert pack['version'] == 'retrieval-evidence.v2' and pack['selected'] == len(body['sources']) == 1
+    assert pack['items'][0]['id'] == body['sources'][0]['id']
+    assert pack['items'][0]['fingerprint'] == body['sources'][0]['fingerprint']
+    assert body['sources'][0]['quote'] == 'The approved budget is 100.'
+    assert body['sources'][0]['retrieval']['version'] == 'v2'
+    assert 'PRIVATE' not in result.text
+    filters = {'speaker_id':'unknown','start_ms':None,'end_ms':None,'entities':[]}
+    scoped = {'name':'search_shared_documents','query':json.dumps({'query':'cost','filters':filters},separators=(',',':'))}
+    empty = client.post(path,headers=HEADERS,json=base | {'lookup':scoped})
+    assert empty.status_code == 200 and empty.json()['source_count'] == 0 and not empty.json()['sources']
+    assert not empty.json()['evidence_pack']['items']
+    filters['owner_id'] = 99
+    scoped['query'] = json.dumps({'query':'cost','filters':filters},separators=(',',':'))
+    assert client.post(path,headers=HEADERS,json=base | {'lookup':scoped}).status_code == 422
+
+
+@pytest.mark.parametrize('nested', [False, True])
+def test_final_voice_prompt_cannot_restore_sources_outside_lookup_filters(voice, monkeypatch, nested):
+    from shared.voice_tools import normalize_tool_call
+    client, row, _, prompts, mutate = voice
+    row['data']['voice_assistant']['include_transcript'] = True
+    original = api.meeting_get
+    def fetch(base, subject, mid, path):
+        if path.endswith('/canonical'):
+            return {'segments': [
+                {'segment_id': key, 'revision': 1, 'text': 'Demo budget ' + key,
+                 'speaker_id': speaker, 'start_ms': start, 'end_ms': start+1000}
+                for key, speaker, start in [('a','s1',1000), ('b','s2',1000), ('c','s1',50000)]]}
+        return original(base, subject, mid, path)
+    monkeypatch.setattr(api, 'meeting_get', fetch)
+    call = normalize_tool_call({'name':'search_meeting','arguments':{'query':'demo','filters':{
+        'speaker_id':'s1','start_ms':0,'end_ms':3000,'entities':[]}}})
+    def completion():
+        if nested and len(prompts) == 1: return json.dumps({'tool_calls':[call]})
+        sources = prompts[-1]['sources']
+        assert sources and all(s.get('speaker_id') == 's1' and s['end_ms'] <= 3000 for s in sources)
+        assert [s['key'] for s in prompts[-1]['evidence_pack']['items']] == [s['key'] for s in sources]
+        return json.dumps({'claims':[{'text':'Demo budget a','source_ids':[sources[0]['id']]}]})
+    mutate[0] = completion
+    response = client.post(URL, headers=HEADERS, json={'question':'Demo budget?', 'revision':1}
+        | ({} if nested else {'lookups':[call]}))
+    assert response.status_code == 200, response.text
+    assert response.json()['reason'] == 'answered'
+    assert len(prompts) == (2 if nested else 1)
+
+
+@pytest.mark.parametrize('route', ['answer', 'plan', 'lookup'])
+@pytest.mark.parametrize('content', ['{PRIVATE DICTIONARY',
+    pytest.param('[' * 15000 + '0' + ']' * 15000, id='deep-json')])
+def test_bad_optional_dictionary_keeps_voice_routes_available(voice, route, caplog, content):
+    client, row, root, _, _ = voice
+    row['data']['voice_assistant']['engine'] = 'livekit'
+    (root/'retrieval-domain.json').write_text(content)
+    body = {'question':'Budget?', 'revision':1}
+    if route != 'answer': body['operation'] = route
+    if route == 'lookup': body['lookup'] = {'name':'search_shared_documents','query':'budget'}
+    response = client.post(URL if route == 'answer' else '/api/internal/meeting-voice/1/agent', headers=HEADERS, json=body)
+    assert response.status_code == 200, response.text
+    assert 'using built-in aliases' in caplog.text and 'PRIVATE DICTIONARY' not in caplog.text
+
+
 def test_agents_web_query_is_explicit_opt_in_and_cannot_contain_room_context(voice):
     client,row,root,prompts,mutate=voice
     policy=row['data']['voice_assistant'];policy['engine']='livekit'
@@ -339,7 +555,23 @@ def test_repair_metadata_and_partial_answer_survive_source_checked_api(voice):
     assert response.json()['verification']==['unsupported_claim','approved'] and response.json()['sources']
     mutate[0]=lambda:json.dumps({'claims':[],'reason':'verification_rejected','verification':['contradiction','contradiction']})
     response=client.post(URL,headers=HEADERS,json={'question':'Budget?','revision':1})
-    assert response.json()['verification']==['contradiction','contradiction'] and response.json()['text'].endswith('?')
+    assert response.json()['verification']==['contradiction','contradiction']
+    assert response.json()['reason']=='verification_rejected' and '?' not in response.json()['text']
+
+
+def test_repeated_heard_clarifications_pause_but_a_resolved_answer_is_still_allowed(voice):
+    import time
+    client,row,root,prompts,mutate=voice
+    history=[{'question':'Phần đó.', 'answer':'Bạn muốn phần nào?', 'clarification':True,
+        'created_at_ms':int(time.time()*1000)-1000+i,'sources':[]} for i in range(3)]
+    mutate[0]=lambda:json.dumps({'claims':[],'clarification':'Bạn muốn phần nào?'})
+    response=client.post(URL,headers=HEADERS,json={'question':'Như trước.','revision':1,'history':history})
+    assert response.status_code==200 and response.json()['reason']=='clarification_exhausted'
+    assert response.json()['clarification'] is False and response.json()['sources']==[]
+    assert any(p.get('clarification_attempt')==3 for p in prompts)
+    mutate[0]=lambda:json.dumps({'claims':[{'text':'The budget is 100.','source_ids':['s0']}]})
+    resolved=client.post(URL,headers=HEADERS,json={'question':'Budget?','revision':1,'history':history})
+    assert resolved.status_code==200 and resolved.json()['reason']=='answered'
 
 
 def test_worker_repairs_one_rejected_draft_with_a_shared_deadline_and_rechecks(monkeypatch):

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Optional
 
@@ -237,6 +238,18 @@ class ClaudeCodeHarness:
             "deepseek" if os.environ.get("ANTHROPIC_BASE_URL", "").rstrip("/") == "https://api.deepseek.com/anthropic"
             else "custom" if os.environ.get("ANTHROPIC_BASE_URL") else "subscription")
         effort = normalized_effort(mode, model or os.environ.get("TINA_AGENT_MODEL", ""), os.environ.get("TINA_AGENT_EFFORT"))
+        reach = (mcp_servers or {}).get('tina-reach')
+        if (mcp_config is None and isinstance(reach, dict) and 'mcp__tina-reach' in allowed_tools
+                and 'tina-reach' not in gated_mcp_servers and (mcp_tools or {}).get('tina-reach')):
+            # Public retrieval has no secret environment and its bridge advertises only granted tools.
+            with tempfile.TemporaryDirectory(prefix='tina-reach-mcp-') as directory:
+                config = Path(directory) / 'mcp.json'
+                config.write_text(json.dumps({'mcpServers': {'tina-reach': {
+                    'command': reach['command'], 'args': reach['args']}}}))
+                argv = build_argv(prompt, allowed_tools=allowed_tools, session=session, model=model,
+                                  effort=effort or None, mcp_config=str(config))
+                yield from parse_stream_json(self._exec(argv, str(work)))
+            return
         argv = build_argv(prompt, allowed_tools=allowed_tools, session=session, model=model,
                           effort=effort or None,
                           mcp_config=mcp_config)

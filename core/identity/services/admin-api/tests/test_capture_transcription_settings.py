@@ -85,15 +85,29 @@ def test_voice_preference_is_account_scoped_and_delivered_in_existing_spawn_cont
     from sqlalchemy.orm import attributes
     monkeypatch.setattr(attributes,'flag_modified',lambda *a:None)
     c,_=client;headers={'X-API-Key':'valid-key'}
-    assert c.get('/user/voice',headers=headers).json()=={'prepare_new_bots':None}
-    assert c.put('/user/voice',headers=headers,json={'prepare_new_bots':False}).json()=={'prepare_new_bots':False}
+    defaults={'speech_voice':'auto','pronunciations':{}}
+    assert c.get('/user/voice',headers=headers).json()=={'prepare_new_bots':None,**defaults}
+    assert c.put('/user/voice',headers=headers,json={'prepare_new_bots':False}).json()=={'prepare_new_bots':False,**defaults}
     context=c.get('/internal/users/7/bot-context',headers={'X-Internal-Secret':'internal-test-secret'}).json()
-    assert context['voice']=={'prepare_new_bots':False}
+    assert context['voice']=={'prepare_new_bots':False,**defaults}
     assert c.get('/user/voice').status_code==401
     assert c.put('/user/voice',headers=headers,json={'prepare_new_bots':'false'}).status_code==422
     assert c.put('/user/voice',headers=headers,json={'prepare_new_bots':False,'user_id':8}).status_code==422
     assert c.fixture_user.data['transcription_prefs']=={'backend':'funasr'}
-    assert c.put('/user/voice',headers=headers,json={'prepare_new_bots':None}).json()=={'prepare_new_bots':None}
+    assert c.put('/user/voice',headers=headers,json={'prepare_new_bots':None}).json()=={'prepare_new_bots':None,**defaults}
+
+
+def test_voice_profile_partial_updates_are_account_scoped_and_reject_markup(client,monkeypatch):
+    from sqlalchemy.orm import attributes
+    monkeypatch.setattr(attributes,'flag_modified',lambda *a:None)
+    c,_=client;headers={'X-API-Key':'valid-key'}
+    response=c.put('/user/voice',headers=headers,json={'speech_voice':'Mai Anh','pronunciations':{'PostgreSQL':'pốt gờ rét'}})
+    assert response.status_code==200,response.text
+    c.put('/user/voice',headers=headers,json={'prepare_new_bots':False})
+    profile=c.get('/user/voice',headers=headers).json()
+    assert profile['speech_voice']=='Mai Anh' and profile['pronunciations']=={'PostgreSQL':'pốt gờ rét'}
+    assert c.put('/user/voice',headers=headers,json={'pronunciations':{'TINA':'<script>'}}).status_code==422
+    assert c.put('/user/voice',headers=headers,json={'speech_voice':'http://private/model'}).status_code==422
 
 
 def test_managed_viegem_uses_only_platform_credentials_and_does_not_leak_them(client, monkeypatch):

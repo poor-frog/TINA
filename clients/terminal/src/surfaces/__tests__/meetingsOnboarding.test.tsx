@@ -50,7 +50,7 @@ describe("connectOutcome", () => {
     expect(connectOutcome({ counts: { created: 1 } }).text).toContain("1 upcoming meeting imported");
   });
   it("zero found → honest, not silent", () => {
-    expect(connectOutcome({ counts: {} }).text).toContain("no upcoming meetings with joinable links");
+    expect(connectOutcome({ counts: {} }).text).toMatch(/no upcoming meetings with joinable links/i);
   });
 });
 
@@ -111,8 +111,8 @@ describe("connect modal — teaches the secret address and answers on connect", 
   it("walkthrough + paste → POST /user/calendars + sync-now → reports what it found", async () => {
     const calls = stubCalendarApi({ connected: false, syncCounts: { created: 3 } });
     render(<MeetingsOnboarding variant="slim" />);
-    await waitFor(() => screen.getByText("Connect calendar →"));
-    fireEvent.click(screen.getByText("Connect calendar →"));
+    await waitFor(() => screen.getByRole("button", { name: "Connect calendar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect calendar" }));
 
     // the explainer is THERE — secret-address step + the Workspace-admin trap
     expect(screen.getByText(/Secret address in iCal format/)).toBeTruthy();
@@ -135,8 +135,8 @@ describe("connect modal — teaches the secret address and answers on connect", 
   it("first-sync failure is loud, with the server's reason", async () => {
     stubCalendarApi({ connected: false, syncError: "HTTP 401 fetching the feed — that looks like the public address, not the secret one" });
     render(<MeetingsOnboarding variant="slim" />);
-    await waitFor(() => screen.getByText("Connect calendar →"));
-    fireEvent.click(screen.getByText("Connect calendar →"));
+    await waitFor(() => screen.getByRole("button", { name: "Connect calendar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect calendar" }));
     fireEvent.change(screen.getByPlaceholderText(/basic\.ics/), {
       target: { value: "https://calendar.google.com/calendar/ical/x/private-abc/basic.ics" },
     });

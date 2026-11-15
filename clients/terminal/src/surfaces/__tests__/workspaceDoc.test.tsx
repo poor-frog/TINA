@@ -28,7 +28,7 @@ it('researches the document in its exact active mount with an explicit save requ
     const container = createContainer([reg(LayoutServiceId, () => createLayoutService('files'))]);
     render(<ServicesProvider container={container}><Comp id="doc:repo" params={{ path: 'docs/design.md', slug: 'repo' }} active /></ServicesProvider>);
     await screen.findByText('REPO_SOURCE');
-    fireEvent.click(screen.getByRole('button', { name: 'Nghiên cứu & lưu' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Research & save' }));
     await waitFor(() => expect(received?.research).toBe(true));
     expect(received?.prompt).toContain('/workspaces/.attached/u/repo/docs/design.md');
   } finally { window.removeEventListener(ASK_CHAT_EVENT, accept); }

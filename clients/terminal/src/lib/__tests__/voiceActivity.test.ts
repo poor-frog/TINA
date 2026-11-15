@@ -23,6 +23,15 @@ describe.each([['Terminal',voiceActivity],['Extension',extensionActivity]] as co
 });
 
 describe.each([['Terminal',voiceActivityStatus],['Extension',extensionStatus]] as const)('%s tool progress',(_name,status)=>{
+  it('shows recovery only for a fresh matching-session diagnostic after returning to idle',()=>{
+    const value={...snapshot('LISTENING'),runtime:{...snapshot('LISTENING').runtime,session_uid:'session',diagnostic:{
+      code:'no_input',session_uid:'session',observed_at_ms:now,expires_at_ms:now+30000}}};
+    expect(status(value,now).label).toBe('Chờ bạn gọi lại');
+    for(const patch of [{session_uid:'old'},{observed_at_ms:now-15001},{observed_at_ms:now+1},{expires_at_ms:now}])
+      expect(status({...value,runtime:{...value.runtime,diagnostic:{...value.runtime.diagnostic,...patch}}},now).label).toBe('Chờ gọi tên');
+    expect(status({...value,runtime:{...value.runtime,state:'SPEAKING'}},now).label).toBe('Đang trả lời');
+    expect(status({...value,runtime:{...value.runtime,diagnostic:{...value.runtime.diagnostic,code:'playback_failed'}}},now).label).toBe('Không phát được audio');
+  });
   it('only presents allowlisted progress for the active request/session/revision',()=>{
     const value = {...snapshot('THINKING'), policy:{enabled:true,revision:2},runtime:{...snapshot('THINKING').runtime,
       request_id:'turn',session_uid:'session',progress:{request_id:'turn',session_uid:'session',revision:2,

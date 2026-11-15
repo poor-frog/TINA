@@ -6,7 +6,6 @@ import http from 'node:http';
 import type { ClientRequest, IncomingMessage } from 'node:http';
 
 const PAPLAY_ARGS = ['--raw', '--format=s16le', '--rate=24000', '--channels=1', '--device=tts_sink'];
-const PREBUFFER = 24000 * 2 * .15;
 const MAX_BYTES = 24000 * 2 * 120;
 function setTtsMute(muted: boolean): void {
   execSync(`pactl set-sink-mute tts_sink ${muted ? '1' : '0'}`, { stdio: 'pipe' });
@@ -33,6 +32,8 @@ export interface TtsPlayback {
   stop(): void;
 }
 export interface TtsPlaybackOptions {
+  prebufferMs?:number;
+  profile?:()=>string|undefined;
   meetingId?: number;
   setMute?: (muted: boolean) => void;
   spawnProcess?: () => ChildProcess;
@@ -41,6 +42,8 @@ export interface TtsPlaybackOptions {
 }
 
 export function createTtsPlayback(log: (m: string) => void = () => {}, options: TtsPlaybackOptions = {}): TtsPlayback {
+  const configured=options.prebufferMs??Number(process.env.TINA_TTS_PREBUFFER_MS??150);
+  const prebuffer=24000*2*(Number.isFinite(configured)&&configured>=80&&configured<=1000?configured:150)/1000;
   const mute = (value: boolean): boolean => {
     try { (options.setMute ?? setTtsMute)(value); return true; }
     catch { log('[tts] microphone control failed'); return false; }
@@ -117,6 +120,7 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
     try { if (!base) throw new Error(); url = new URL(base.replace(/\/$/, '') + '/v1/audio/speech'); }
     catch { finish('failed'); return handle; }
     const data = JSON.stringify({ model: 'tts-1', input: text, voice, response_format: 'pcm',
+      ...(options.profile?.()?{profile:options.profile()}:{}),
       ...(Number.isSafeInteger(options.meetingId) && options.meetingId! > 0 ? { meeting_id: options.meetingId } : {}) });
     const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(data)) };
     if (service) {
@@ -140,7 +144,7 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
           if (bytes > MAX_BYTES) finish('failed');
         });
         const buffered = () => { timing.readyAtMs ??= Date.now(); readyResolve(true); };
-        buffer.on('readable', () => { if (buffer.readableLength >= PREBUFFER) buffered(); });
+        buffer.on('readable', () => { if (buffer.readableLength >= prebuffer) buffered(); });
         res.on('end', () => {
           ended = true;
           if (!bytes || bytes % 2) finish('failed'); else buffered();

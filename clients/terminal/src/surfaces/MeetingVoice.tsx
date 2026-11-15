@@ -18,6 +18,8 @@ interface VoiceReply { request_id: string; text: string; played_text?:string|nul
   source_count?:number;answer_kind?:string;reason?:string;links?:Array<{url:string;title:string}> }
 const replyLabel: Record<string, string> = { queued: 'Đang chuẩn bị đọc', started: 'Đang đọc', completed: 'Đã đọc', stopped: 'Đã dừng', failed: 'Phát thất bại', unconfirmed: 'Chưa xác nhận phát xong' };
 const diagnosticLabel: Record<string, string> = {
+  no_input: 'Chưa nhận thêm câu trả lời trong lượt chờ. Bot đã trở về chờ gọi tên.',
+  dialogue_paused: 'Đã hỏi lại hai lần. Lượt hỏi tạm dừng; gọi TINA khi muốn tiếp tục.',
   waiting_asr: 'Bot đã nhận tiếng nói; đang chờ ASR trả text để nhận tên TINA.',
   tts_unavailable: 'TTS chưa sẵn sàng hoặc xác thực không thành công. Kiểm tra dịch vụ giọng nói.',
   sources_unavailable: 'Chưa đọc được nguồn meeting được chia sẻ. Kiểm tra tài liệu và dịch vụ Knowledge.',
@@ -151,7 +153,7 @@ export function MeetingVoice({ meetingId, nativeId }: { meetingId: string; nativ
   return <><details onToggle={event => setOpen(event.currentTarget.open)} style={{ margin: '0 24px 10px', padding: '9px 12px', border: '1px solid var(--line2)', borderRadius: 8 }}>
     <summary style={{ cursor: 'pointer', fontSize: 13 }}>Voice assistant · {summary}</summary>
     <div style={{ display: 'grid', gridTemplateColumns:'minmax(0, 1fr)', minWidth:0, gap: 10, paddingTop: 12, maxWidth: 600, fontSize: 13 }}>
-      <p style={{ margin: 0, color: 'var(--t3)', lineHeight: 1.5 }}>Tên gọi có sẵn: TINA, TINA ơi, tin ơi, ti na ơi, tiên na ơi, tinh anh ơi, tin anh ơi — ở đầu câu, không phân biệt hoa/thường. Meeting Google Meet mới mặc định bật Voice assistant và NS Low, dùng transcript của chính meeting; bạn có thể tắt hoặc đổi nguồn bên dưới.</p>
+      <p style={{ margin: 0, color: 'var(--t3)', lineHeight: 1.5 }}>Tên gọi có sẵn: TINA, TINA ơi, tin ơi, ti na ơi, tiên na ơi, tinh anh ơi, tin anh ơi — ở đầu câu, không phân biệt hoa/thường. Meeting Google Meet mới mặc định bật Voice assistant và lọc tạp âm, dùng transcript của chính meeting; bạn có thể tắt hoặc đổi nguồn bên dưới.</p>
       <details style={{minWidth:0}}>
         <summary style={{cursor:'pointer'}}>Audio theo kênh{audio ? ` · ${audio.channels.length}` : ''}</summary>
         {!audio?.channels.length ? <p role="status" style={{color:'var(--t3)'}}>Chưa có số đo audio mới. Cần bot mới có hỗ trợ chẩn đoán.</p> : <>
@@ -191,9 +193,9 @@ export function MeetingVoice({ meetingId, nativeId }: { meetingId: string; nativ
             : 'Chưa có chẩn đoán mới. Khi bạn nói, kết quả nhận tên và bước xử lý sẽ hiện ở đây.'}</div>}
       </div>}
       <label><input type="checkbox" checked={policy.enabled} disabled={!loaded || busy || (!available && !policy.enabled)} onChange={e => edit({ enabled: e.target.checked })} /> Bật Voice assistant cho meeting này</label>
-      <label><input type="checkbox" checked={!!policy.noise_suppression} disabled={!loaded||busy||!available} onChange={e=>edit({noise_suppression:e.target.checked})}/> Thử nghiệm lọc tạp âm WebRTC NS Low</label>
+      <label><input type="checkbox" checked={!!policy.noise_suppression} disabled={!loaded||busy||!available} onChange={e=>edit({noise_suppression:e.target.checked})}/> Lọc tạp âm</label>
       <div style={{fontSize:12,color:'var(--t3)',lineHeight:1.5}}>Mặc định bật cho meeting mới · CPU · cần bot mới sau cập nhật. Áp dụng cho cả ASR và VAD, giữ bản audio nhận về. Lọc có thể làm sai tên/phụ âm; chưa bật AGC, HPF hoặc AEC.
-        <div role="status">Trạng thái lọc: {({off:'Tắt',starting:'Đang khởi động / chờ audio',low:'Đang dùng NS Low',failed:'Bộ lọc lỗi — đang dùng audio gốc'} as Record<string,string>)[audio?.noise_suppression||'']||'Chưa có số đo từ bot'}</div>
+        <div role="status">Trạng thái lọc: {({off:'Tắt',starting:'Đang khởi động / chờ audio',low:'Đang lọc tạp âm',failed:'Bộ lọc lỗi — đang dùng audio gốc'} as Record<string,string>)[audio?.noise_suppression||'']||'Chưa có số đo từ bot'}</div>
       </div>
       <label style={{ display: 'grid', gap: 6 }}>Biến thể tên TINA mà ASR thường nhận được
         <input aria-label="Biến thể tên TINA" disabled={!loaded || busy} value={variantInput}

@@ -27,7 +27,7 @@
   "core/meetings/contracts/lifecycle.v1": "458d9701d9b835deb3873c1fc96e0f42a439445fa9c2e90a515e8bc8b980772d",
   "core/meetings/contracts/meeting-memory-revision.v1": "c46424b023e37e0ab42d2e49d100e6ad8d1f1d2172b94f667eb457b79d0a0778",
   "core/meetings/contracts/meeting-memory.v1": "fd3572eccbba501ea8feb2e53a02743b1e1fe523675c423909e27764b3088b85",
-  "core/meetings/contracts/meeting-voice.v1": "4080136ed887c750aa023f18a087168c74a9c56c859cc6bdc4beeac1ce849deb",
+  "core/meetings/contracts/meeting-voice.v1": "6386b0e4c395ea26c364945a6acf101c35eb2de2631378d2d78b595a36fc0e3d",
   "core/meetings/contracts/service-authority.v1": "1b4121fa004b0963963b45caa9266c29d8f6c5276af66a879e7c7678f5495c1b",
   "core/meetings/contracts/speaker-revision.v1": "714d3f424452b1c2d06d2f68640324b71dc1eea177bf6546c16c197ef27bf62c",
   "core/meetings/contracts/speech-room.v1": "b1481664aceccb15cb73251b69e9b4f503921a7e17c71d4604ba4ba4bbe37a58",

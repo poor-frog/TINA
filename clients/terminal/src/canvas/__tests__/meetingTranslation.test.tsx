@@ -12,6 +12,16 @@ function group(members: TranslationGroup['members'], translated_text: string | n
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+it('translation groups preserve original ASR boundaries during display-only formatting',()=>{
+  const segments=[{id:'a',text:'mười',completed:true},{id:'b',text:'chín phần trăm',completed:true}];
+  const groups=[group(segments.map(s=>({segment_id:s.id,source_text:s.text})),'nineteen percent')];
+  const paired=projectTranslationGroups(segments,groups);
+  render(<LiveTranscriptEngine segments={paired} language="bilingual"/>);
+  expect(screen.getByText('mười 9%')).toBeTruthy();
+  expect(screen.queryByText('mười chín phần trăm')).toBeNull();
+  expect(paired[0].text).toBe('mười chín phần trăm');
+});
+
 it("pairs translations with exact source text and retains Vietnamese on errors, drafts and edits", () => {
   const segments = [{ id: "s1", text: "Xin chào.", speaker: "Nam" }, { id: "s2", text: "Vừa sửa." }, { id: "draft", text: "Đang nói", completed: false }];
   const groups = [group([{ segment_id: 's1', source_text: 'Xin chào.' }], 'Hello.'),

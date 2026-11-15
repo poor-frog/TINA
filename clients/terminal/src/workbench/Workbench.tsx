@@ -59,7 +59,7 @@ import { SettingsDialog } from "../surfaces/settings";
 import { resolveDocRef } from "../ui-kit/docLinks";
 import { liveMeetingsNow } from "../surfaces/liveMeetings";
 import { ContextRail } from "../surfaces/context";
-import { shellStore, setShellVersion, isShellV2, THREAD_TAB_KIND } from "./shell";
+import { shellStore, THREAD_TAB_KIND } from "./shell";
 import { firstViewPlan } from "./firstView";
 import { isOwnedPath, meetingIdFromPath, meetingPath } from "../app/meetingRoute";
 import { OPEN_ENTITY_EVENT } from "../canvas/actions";
@@ -114,8 +114,17 @@ function TabHeader(props: IDockviewPanelHeaderProps) {
   const pinned = Boolean(params.pinned);
   const [title, setTitle] = useState<string>(props.api.title ?? "");
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const tabRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const d = props.api.onDidTitleChange((e: { title: string }) => setTitle(e.title));
+    return () => d.dispose();
+  }, [props.api]);
+  useEffect(() => {
+    const reveal = () => window.requestAnimationFrame(() => {
+      if (props.api.isActive) tabRef.current?.closest(".dv-tab")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+    reveal();
+    const d = props.api.onDidActiveChange((e) => { if (e.isActive) reveal(); });
     return () => d.dispose();
   }, [props.api]);
   const path = typeof params.p?.path === "string" ? params.p.path : null;
@@ -133,6 +142,7 @@ function TabHeader(props: IDockviewPanelHeaderProps) {
       : [];
   return (
     <div
+      ref={tabRef}
       className="dv-default-tab"
       onMouseDown={(e) => {
         if (e.button !== 1) return;
@@ -205,7 +215,7 @@ function LeftPane({ onSelect }: { onSelect?: (listId?: string) => void }) {
         display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: 36,
         padding: "0 9px", border: 0, borderRadius: 6, textAlign: "left", cursor: "pointer",
         color: selected ? "var(--t1)" : "var(--t2)", background: selected ? "color-mix(in srgb, var(--t1) 5.5%, transparent)" : "transparent",
-        fontSize: 13, fontWeight: selected ? 600 : 430, transition: "background .12s ease, color .12s ease",
+        fontSize: "var(--ui-type-label)", fontWeight: selected ? 600 : 400, transition: "background .12s ease, color .12s ease",
       }} onClick={() => {
         layout.setActiveList(list.id);
         if (list.centerTab) layout.openTab(list.centerTab);
@@ -220,19 +230,19 @@ function LeftPane({ onSelect }: { onSelect?: (listId?: string) => void }) {
       </button>
     );
   };
-  const groupLabel: CSSProperties = { padding: "9px 10px 5px", color: "var(--t3)", fontSize: 10, fontWeight: 650, letterSpacing: ".09em", textTransform: "uppercase" };
+  const groupLabel: CSSProperties = { padding: "var(--space-2) var(--space-2) var(--space-1)", color: "var(--t3)", fontSize: "var(--ui-type-meta)", fontWeight: 600, letterSpacing: "normal", textTransform: "none" };
   return (
     <div aria-hidden={leftCollapsed || undefined} inert={leftCollapsed}
       style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--sidebar)", borderRight: "1px solid var(--line)", minHeight: 0 }}>
       <div style={{ height: 60, display: "flex", alignItems: "center", gap: 10, padding: "0 18px", flex: "none", borderBottom: "1px solid var(--line)" }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/tina-logo.svg" alt="TINA" width={25} height={27} style={{ borderRadius: 7, display: "block", flex: "none" }} />
-        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--t1)", letterSpacing: "-0.01em" }}>TINA <span style={{ fontWeight: 400, color: "var(--t3)" }}>terminal</span></span>
+        <span style={{ fontSize: "var(--ui-type-label)", fontWeight: 600, color: "var(--t1)", letterSpacing: "-0.01em" }}>TINA <span style={{ fontWeight: 400, color: "var(--t3)" }}>terminal</span></span>
       </div>
       <nav aria-label="Workspace sections" style={{ flex: "none", padding: "5px 9px 8px" }}>
         {workspaceLists.length > 0 && <div style={groupLabel}>Workspace</div>}
         <div style={{ display: "grid", gap: 2 }}>{workspaceLists.map(renderList)}</div>
-        {toolLists.length > 0 && <div style={{ ...groupLabel, paddingTop: 13 }}>Tools</div>}
+        {toolLists.length > 0 && <div style={{ ...groupLabel, paddingTop: "var(--space-3)" }}>Tools</div>}
         <div style={{ display: "grid", gap: 2 }}>{toolLists.map(renderList)}</div>
       </nav>
       {!leftCollapsed && activeList === "meetings" && <SidebarMeetingCapture />}
@@ -471,7 +481,7 @@ function UserProfile({ compact = false }: { compact?: boolean }) {
               background: "transparent",
               border: "none",
               borderRadius: 6,
-              color: "var(--danger, #f43f5e)",
+              color: "var(--danger)",
               fontSize: 12.5,
               cursor: "pointer",
               textAlign: "left",
@@ -647,17 +657,18 @@ function ListDrawer({ width = 240, onClose, knowledgeOnly = false }: { width?: n
   useSyncExternalStore(registry.subscribe, registry.version, registry.version);
   const active = registry.list(activeList) ?? registry.lists()[0];
   const Comp = active?.component;
+  const isKnowledge = knowledgeOnly && activeList === "files";
   return (
-    <aside aria-label={active?.label ?? "Library"} style={{ width, flex: "none", height: "100%", display: "flex", flexDirection: "column", background: "var(--sidebar)", borderRight: "1px solid var(--line)", minHeight: 0 }}>
-      <div style={{ height: 40, flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "0 6px 0 14px", borderBottom: "1px solid var(--line)" }}>
-        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--t1)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active?.label}</span>
-        <button type="button" className="panel-toggle-btn" style={{ marginLeft: "auto" }} aria-label={`Close ${active?.label ?? "library"}`} title={`Close ${active?.label ?? "library"} (⌘B)`} onClick={() => onClose ? onClose() : layout.toggleLeft()}>
-          <Icon name="x" size={11} />
-        </button>
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-        {knowledgeOnly && activeList === "files" ? <FilesList showSourceControl={false} /> : Comp && <Comp />}
-      </div>
+    <aside aria-label={isKnowledge ? "Knowledge" : active?.label ?? "Library"} style={{ width, flex: "none", height: "100%", display: "flex", flexDirection: "column", background: "var(--sidebar)", borderRight: "1px solid var(--line)", minHeight: 0 }}>
+      {isKnowledge ? <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}><FilesList /></div> : <>
+        <div style={{ height: 40, flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "0 6px 0 14px", borderBottom: "1px solid var(--line)" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--t1)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active?.label}</span>
+          <button type="button" className="panel-toggle-btn" style={{ marginLeft: "auto" }} aria-label={`Close ${active?.label ?? "library"}`} title={`Close ${active?.label ?? "library"} (⌘B)`} onClick={() => onClose ? onClose() : layout.toggleLeft()}>
+            <Icon name="x" size={11} />
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>{Comp && <Comp />}</div>
+      </>}
     </aside>
   );
 }
@@ -918,6 +929,10 @@ export function Workbench() {
     firstViewDone.current = true;
     void resolveFirstView(e.api.panels.length === 0);
   };
+  const resetLayout = () => {
+    try { localStorage.removeItem(PANES_KEY); localStorage.removeItem(SHELL_PANES_KEY); } catch {}
+    layout.resetLayout();
+  };
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "var(--bg)", color: "var(--t1)" }}>
@@ -960,12 +975,12 @@ export function Workbench() {
             </button>
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 12, minWidth: 0 }}>
               {tier === "single" && mobileTab === "left" ? (
-                <span style={{ fontSize: 12, fontWeight: 500, color: "var(--t2)", letterSpacing: "-0.01em" }}>Navigation</span>
+                <span className="shell-context-label">Navigation</span>
               ) : tier === "single" && mobileTab === "right" ? (
-                <span style={{ fontSize: 12, fontWeight: 500, color: "var(--t2)", letterSpacing: "-0.01em" }}>TINA Agent</span>
+                <span className="shell-context-label">TINA Agent</span>
               ) : (
-                <span style={{ color: "var(--t3)", fontSize: 11, letterSpacing: ".04em", whiteSpace: "nowrap" }}>
-                  TINA TERMINAL <span style={{ color: "var(--line2)", margin: "0 6px" }}>/</span> WORKSPACE
+                <span className="shell-context-label">
+                  TINA Terminal <span className="shell-context-separator">/</span> Workspace
                 </span>
               )}
               <OpsNotice />
@@ -996,6 +1011,10 @@ export function Workbench() {
                 <AgentRailIcon open={isRightActive} />
               </button>
             )}
+            <button type="button" className="panel-toggle-btn shell-topbar-toggle"
+              aria-label="Reset layout" title="Reset layout" onClick={resetLayout}>
+              <Icon name="rotateCcw" size={16} />
+            </button>
           </div>
         );
       })()}
@@ -1123,14 +1142,6 @@ export function Workbench() {
         </>
         )}
       </div>
-
-      <footer style={{ height: 24, flex: "none", background: "var(--sidebar)", borderTop: "1px solid var(--line)", display: "flex", alignItems: "center", fontSize: 11.5, color: "var(--t2)" }}>
-        <div style={{ flex: 1 }} />
-        {v2 && (
-          <button onClick={() => setShellVersion(isShellV2() ? "v1" : "v2")} style={{ padding: "0 10px", height: "100%", background: "none", border: "none", color: "var(--t3)", cursor: "pointer" }} title="Switch shell (v1 = 3-pane chat-right, v2 = agent chat first)">shell v2</button>
-        )}
-        <button onClick={() => { try { localStorage.removeItem(PANES_KEY); localStorage.removeItem(SHELL_PANES_KEY); } catch {} layout.resetLayout(); }} style={{ padding: "0 10px", height: "100%", background: "none", border: "none", color: "var(--t3)", cursor: "pointer" }} title="Reset layout">reset layout</button>
-      </footer>
 
       <CommandPalette />
       {settingsOpen && <SettingsDialog onClose={layout.closeSettings} />}

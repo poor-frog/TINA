@@ -510,6 +510,8 @@ def build_unit_env(settings: Settings, invocation: dict, *, unit_id: str, token:
         value = (os.environ.get(key) or "").strip()
         if value and key not in env:
             env[key] = value
+    if value := os.environ.get('TINA_AGENT_REACH_URL', '').strip():
+        env['TINA_AGENT_REACH_URL'] = value
     return env
 
 

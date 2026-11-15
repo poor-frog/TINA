@@ -73,3 +73,15 @@ LiveTranscriptEngine exposes focusable source segment anchors, including IDs in 
 VoiceActivity also presents allowlisted current-request tool progress in its existing badge; stale, mismatched or failed snapshots return to the generic phase. No tool arguments or source content enter progress labels.
 
 useVoiceSourceNavigation consumes only fresh same-room owner hints from VoiceActivity polling. It claims once, revalidates runtime identity and uses existing document/layout handlers or original transcript reveal. Background/reloaded/hidden views cannot replay navigation.
+Document navigation accepts the backend-authorized exact root `README.md` as well as supported
+Markdown directories; other root files, traversal, hidden paths and mismatched/expired hints remain rejected.
+
+Final transcript rendering uses the pure shared `packages/transcript-rendering/src/format.ts`
+display formatter for explicit Vietnamese quantities, calendar/time, phones and technical versions/
+codes. Drafts and ambiguous forms stay literal. No original-ASR disclosure is shown; playback IDs,
+timestamps and citation excerpts are unchanged. Formatting happens before speaker merging and
+respects source-member boundaries in bilingual groups. Search accepts both raw and formatted text.
+
+`VoiceActivity` shows a small **Continue in chat** action only for an owner-scoped voice handoff. It claims fresh bounded context and opens a separate composer without sending. Existing drafts remain intact; stale transfers surface an inline error. The server revalidates the handoff session when Send is pressed.
+
+Decision handoffs preserve the requested discussion status and source-check outcome in the private composer; they do not display task assignee/deadline fields or imply an owner approval. Existing draft review displays the decision content and quoted source in its editable details.

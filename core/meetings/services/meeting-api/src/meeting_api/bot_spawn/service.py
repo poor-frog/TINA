@@ -542,6 +542,14 @@ async def request_bot(
             "no transcription backend configured — set it in Settings or environment variables "
             "TRANSCRIPTION_SERVICE_URL + TRANSCRIPTION_SERVICE_TOKEN"
         )
+    audio_bridge = platform=='google_meet' and transcribe_enabled and env_flag('TINA_LIVEKIT_AUDIO',False)
+    if audio_bridge:
+        from ..lifecycle.audio import issue_audio_capability
+        agent_url=os.environ.get('LIVEKIT_AGENT_URL','').rstrip('/')
+        if not agent_url: raise TranscriptionNotConfigured('LiveKit audio bridge is not configured')
+        # Validate before inserting a requested meeting, so a config error cannot strand its retry.
+        try:issue_audio_capability(0,'preflight',transcription_service_url,transcription_service_token,transcription_model)
+        except ValueError:raise TranscriptionNotConfigured('LiveKit audio capability is not configured') from None
     # 1b-ii. SET-but-MISCONFIGURED is the other half of the same gate (#511 C3): a URL/token that is
     #     present but rejected (or points at a 404) used to spawn a bot that joined, captured, and
     #     transcribed NOTHING. Refuse it here, with the probe's own named reason, before the DB
@@ -797,6 +805,14 @@ async def request_bot(
     token = mint_meeting_token(
         meeting_id, user_id, platform, native_meeting_id, secret=token_secret, ttl_seconds=token_ttl_seconds
     )
+    audio_env={}
+    if audio_bridge:
+        audio_token=issue_audio_capability(meeting_id,connection_id,transcription_service_url,
+                                           transcription_service_token,transcription_model)
+        transcription_service_url=f'{agent_url}/audio/{meeting_id}/{connection_id}'
+        transcription_service_token=audio_token
+        audio_env={'TINA_AUDIO_BRIDGE_URL':transcription_service_url,'TINA_AUDIO_BRIDGE_TOKEN':audio_token,
+                   'TINA_LIVEKIT_VAD_SHADOW':'1' if env_flag('TINA_LIVEKIT_VAD_SHADOW',False) else '0'}
     invocation = build_invocation(
         meeting_id=meeting_id,
         platform=platform,
@@ -856,7 +872,7 @@ async def request_bot(
     # 5. Spawn over runtime.v1. The workload id PREFIX is the routing key the composite runtime
     #    client uses for delete/get (create routes on `profile`): `dc-` is the long-lived Discord
     #    connector, `mtg-` the per-meeting container kernel.
-    tts_env = {}
+    tts_env = dict(audio_env)
     if voice_agent_enabled:
         tts_url = os.getenv("TTS_SERVICE_URL", "").strip()
         tts_token = os.getenv("TTS_API_TOKEN", "").strip()
@@ -868,7 +884,9 @@ async def request_bot(
         from ..lifecycle.voice import voice_token
         tts_env.update(TINA_VOICE_URL=f'{meeting_api_url}/bots/voice/{meeting_id}/{connection_id}',
                        TINA_VOICE_TOKEN=voice_token(token_secret, meeting_id, connection_id),
-                       TINA_VOICE_MODEL_DIR='/models/meeting-voice')
+                       TINA_VOICE_MODEL_DIR='/models/meeting-voice',
+                       TINA_VOICE_TURN_SHADOW='1' if env_flag('TINA_VOICE_TURN_SHADOW',True) else '0',
+                       TINA_TTS_PREBUFFER_MS=os.environ.get('TINA_TTS_PREBUFFER_MS','150'))
     spec = build_workload_spec(
         workload_id=f"{'dc' if is_discord else 'mtg'}-{meeting_id}-{connection_id[:8]}",
         profile="discord-bot" if is_discord else "meeting-bot",

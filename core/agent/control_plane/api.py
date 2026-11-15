@@ -1509,7 +1509,9 @@ def create_app(
         # from the meeting's redis Stream (tc:meeting:{native} — the SAME stream the copilot tails) into
         # the prompt, fresh on every turn. The transcript stays inside the trusted control plane and
         # rides the prompt to the worker — no file, no cross-domain HTTP, no user key in the worker (P15).
-        ctx, tools, prompt = _context_grounding(
+        from control_plane.voice_handoff import grounding as handoff_grounding
+        handoff = handoff_grounding(settings.meeting_api_url if settings else '',subject,session,body.prompt)
+        ctx, tools, prompt = handoff if handoff is not None else _context_grounding(
             body, session, redis_url,
             schedule_rows=lambda: _schedule_source(subject),
             workspace_mounts=lambda: (active_workspaces(wsr.root, subject)

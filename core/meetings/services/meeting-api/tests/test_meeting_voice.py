@@ -637,6 +637,48 @@ async def test_conversation_history_requires_completed_playback_and_same_speaker
         assert bad.status_code == 422
 
 
+@pytest.mark.parametrize('livekit', [False, True])
+@pytest.mark.parametrize('unheard_state', ['failed', 'stopped'])
+async def test_unheard_answers_cannot_evict_the_three_last_heard_turns(setup, livekit, unheard_state):
+    import json
+    _, repo, redis, *_ = setup
+    if livekit: repo.row['data']['voice_assistant']['engine'] = 'livekit'
+    seen = []
+    async def upstream(request):
+        body = json.loads(request.content)
+        if body.get('operation') == 'context':
+            return httpx.Response(200,json={'history':[{k:t[k] for k in ('question','answer','created_at_ms')} for t in body['history']]})
+        if body.get('operation') == 'plan': return httpx.Response(200,json={'tool_calls':[]})
+        seen.append(body['history'])
+        return httpx.Response(200,json={'text':'Lan owns demo.',
+            'sources':[{'key':'segment:demo','fingerprint':'a'*64}]})
+    def factory(**kwargs): return httpx.AsyncClient(transport=httpx.MockTransport(upstream),**kwargs)
+    store = PlaybackStore(redis,repo.save_voice_reply)
+    app = FastAPI();app.include_router(build_voice_router(repo,redis,redis,store,client_factory=factory))
+    h = headers() | {'X-Voice-Speaker-Key':'a'*64};base = '/bots/voice/1/current'
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
+        heard = []
+        for index in range(8):
+            body = question() | {'question':f'Demo owner question {index}?'}
+            if livekit:
+                context = await client.post(base+'/agent',headers=h,json=body|{'operation':'context'})
+                assert context.status_code == 200,context.text
+                body['agent_context'] = context.json()['history']
+                plan = await client.post(base+'/agent',headers=h,json=body|{'operation':'plan'})
+                assert plan.status_code == 200,plan.text
+            answer = await client.post(base+'/answer',headers=h,json=body)
+            assert answer.status_code == 200,answer.text
+            assert [t['question'] for t in seen[-1]] == heard[-3:]
+            cached = json.loads(await redis.get('meeting:voice:1:current:history:1:'+'a'*64))
+            assert len(cached) <= 4
+            if index < 4:
+                await store.report(1,body['request_id'],'current','started')
+                await store.report(1,body['request_id'],'current','completed')
+                heard.append(body['question'])
+            else: await store.report(1,body['request_id'],'current',unheard_state)
+            await client.post(base+'/state',headers=h,json={'state':'QUIET','request_id':body['request_id']})
+
+
 @pytest.mark.parametrize('refs', [[], [{'key': 'segment:demo', 'fingerprint': 'a' * 64}]])
 async def test_completed_clarification_is_context_only_and_internal_refs_are_not_returned(setup, refs):
     import json
@@ -812,6 +854,135 @@ async def test_concurrent_agents_tools_retry_redis_contention_without_losing_com
     assert (await client.post('/bots/voice/1/current/answer',headers=headers(),json=body|{'agent_context':[]})).status_code==200
 
 
+@pytest.mark.parametrize('change', ['none', 'stop', 'policy'])
+async def test_parallel_lookup_completion_preserves_plan_order_budget_and_revocation(setup, change):
+    import json
+    _, repo, redis, *_ = setup
+    repo.row['data']['voice_assistant'].update(engine='livekit', documents=['wiki/shared.md'])
+    calls = [{'name': 'search_meeting', 'query': 'demo'}, {'name': 'search_shared_documents', 'query': 'demo'}]
+    started, finished = set(), set()
+    both = asyncio.Event()
+    gates = {c['name']: asyncio.Event() for c in calls}
+    plans = []
+    async def upstream(request):
+        body = json.loads(request.content)
+        if body['operation'] == 'context': return httpx.Response(200, json={'history': []})
+        if body['operation'] == 'plan':
+            plans.append(body)
+            return httpx.Response(200, json={'tool_calls': calls if len(plans) == 1 else []})
+        name = body['lookup']['name']; started.add(name)
+        if len(started) == 2: both.set()
+        await gates[name].wait(); finished.add(name)
+        return httpx.Response(200, json={'tool': name, 'source_count': 1, 'sources': [],
+            'context_handles': ['ctx-' + ('a' if name == 'search_meeting' else 'b') * 64]})
+    def factory(**kwargs): return httpx.AsyncClient(transport=httpx.MockTransport(upstream), **kwargs)
+    app = FastAPI(); app.include_router(build_voice_router(repo, redis, redis, client_factory=factory))
+    body = question(); path = '/bots/voice/1/current/agent'
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        async def op(operation, **extra):
+            return await client.post(path, headers=headers(), json=body | {'operation': operation, 'agent_context': []} | extra)
+        assert (await client.post(path, headers=headers(), json=body | {'operation': 'context'})).status_code == 200
+        assert (await op('plan')).status_code == 200
+        tasks = [asyncio.create_task(op('lookup', lookup=c)) for c in calls]
+        try:
+            await asyncio.wait_for(both.wait(), 2)
+            key = f'meeting:voice:1:current:{body["request_id"]}:agent'
+            saved = json.loads(await redis.get(key))
+            assert len(saved['lookups']) == 2 and saved['plan_round'] == 1
+            assert not saved['executed'] and not saved['completed']
+            if change == 'stop':
+                assert (await client.post('/bots/voice/1/current/state', headers=headers(),
+                    json={'state': 'QUIET', 'request_id': body['request_id']})).status_code == 200
+            elif change == 'policy': repo.row['data']['voice_assistant']['revision'] = 2
+            gates['search_shared_documents'].set()
+            document = await asyncio.wait_for(tasks[1], 2)
+            gates['search_meeting'].set()
+            transcript = await asyncio.wait_for(tasks[0], 2)
+            assert finished == started
+            if change == 'none':
+                assert document.status_code == transcript.status_code == 200
+                saved = json.loads(await redis.get(key))
+                assert saved['completed'] == saved['executed'] == saved['planned'] == calls
+                assert len(saved['lookups']) == 2 and len(saved['context_handles']) == 2
+                assert (await op('plan')).status_code == 200
+                assert plans[1]['lookups'] == calls and len(plans[1]['context_handles']) == 2
+            else:
+                assert document.status_code == transcript.status_code == 409
+                assert (await op('plan')).status_code == 409
+        finally:
+            for gate in gates.values(): gate.set()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.parametrize('failed_status,other_found', [(503, True), (429, True), (500, True),
+    (503, False), (403, True), (404, True), (409, True)])
+async def test_read_failure_is_reserved_without_execution_but_access_changes_always_stop(setup, failed_status, other_found):
+    import json
+    _, repo, redis, *_ = setup
+    repo.row['data']['voice_assistant'].update(engine='livekit', documents=['wiki/shared.md'])
+    calls = [{'name': 'search_meeting', 'query': 'demo'}, {'name': 'search_shared_documents', 'query': 'demo'}]
+    final_payloads = []
+    async def upstream(request):
+        body = json.loads(request.content)
+        if request.url.path.endswith('/answer'):
+            final_payloads.append(body)
+            return httpx.Response(200, json={'text': 'Verified result from remaining source', 'sources': []})
+        if body['operation'] == 'context': return httpx.Response(200, json={'history': []})
+        if body['operation'] == 'plan': return httpx.Response(200, json={'tool_calls': calls})
+        if body['lookup']['name'] == 'search_meeting':
+            return httpx.Response(failed_status, json={'detail': 'PRIVATE upstream detail'})
+        return httpx.Response(200, json={'tool': 'search_shared_documents', 'source_count': int(other_found), 'sources': []})
+    def factory(**kwargs): return httpx.AsyncClient(transport=httpx.MockTransport(upstream), **kwargs)
+    app = FastAPI(); app.include_router(build_voice_router(repo, redis, redis, client_factory=factory))
+    body = question(); path = '/bots/voice/1/current/agent'
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        async def op(operation, **extra):
+            return await client.post(path, headers=headers(), json=body | {'operation': operation, 'agent_context': []} | extra)
+        assert (await client.post(path, headers=headers(), json=body | {'operation': 'context'})).status_code == 200
+        assert (await op('plan')).status_code == 200
+        # Failure arrives first: it must not release a concurrent successful read's lease.
+        failed = await op('lookup', lookup=calls[0])
+        remaining = await op('lookup', lookup=calls[1])
+        if failed_status in (403, 404, 409):
+            assert failed.status_code == failed_status and remaining.status_code == 409
+            assert 'PRIVATE' not in failed.text
+        else:
+            assert failed.status_code == 200 and failed.json()['lookup_status'] == 'unavailable'
+            assert failed.json()['retrieval_unavailable'] is True
+            assert remaining.status_code == 200
+            assert remaining.json()['lookup_status'] == ('found' if other_found else 'empty')
+            saved = json.loads(await redis.get(f'meeting:voice:1:current:{body["request_id"]}:agent'))
+            assert saved['completed'] == calls and len(saved['lookups']) == 2
+            assert saved['executed'] == [calls[1]]
+        result = await client.post('/bots/voice/1/current/answer', headers=headers(), json=body | {'agent_context': []})
+        if failed_status not in (403, 404, 409) and other_found:
+            assert result.status_code == 200,result.text
+            assert len(final_payloads) == 1 and final_payloads[0]['lookups'] == [calls[1]]
+        else:
+            assert result.status_code in (409, 503) and not final_payloads
+
+
+async def test_empty_lookup_is_successful_not_a_service_error(setup):
+    import json
+    _,repo,redis,*_=setup;repo.row['data']['voice_assistant']['engine']='livekit'
+    call={'name':'search_meeting','query':'missing'}
+    async def upstream(request):
+        body=json.loads(request.content)
+        if body['operation']=='context':return httpx.Response(200,json={'history':[]})
+        if body['operation']=='plan':return httpx.Response(200,json={'tool_calls':[call]})
+        return httpx.Response(200,json={'tool':'search_meeting','source_count':0,'sources':[]})
+    app=FastAPI();app.include_router(build_voice_router(repo,redis,redis,
+        client_factory=lambda **kw:httpx.AsyncClient(transport=httpx.MockTransport(upstream),**kw)))
+    body=question();path='/bots/voice/1/current/agent'
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
+        assert (await client.post(path,headers=headers(),json=body|{'operation':'context'})).status_code==200
+        assert (await client.post(path,headers=headers(),json=body|{'operation':'plan','agent_context':[]})).status_code==200
+        result=await client.post(path,headers=headers(),json=body|{'operation':'lookup','lookup':call,'agent_context':[]})
+        assert result.json()['lookup_status']=='empty' and not result.json().get('retrieval_unavailable')
+        saved=json.loads(await redis.get(f'meeting:voice:1:current:{body["request_id"]}:agent'))
+        assert saved['executed']==[call] and not saved.get('retrieval_unavailable')
+
+
 async def test_voice_reply_persists_content_free_verification_trace_and_assistant_kind(setup):
     client,repo,redis,*_=setup
     async def upstream(request):
@@ -888,3 +1059,29 @@ async def test_parallel_new_turns_have_one_winner_after_retired_session_crash(se
     finally:
         release.set()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def test_bot_config_exposes_only_live_session_and_revision_fenced_tool_progress(setup):
+    import json
+    import time
+    client, repo, redis, *_ = setup
+    request_id = str(uuid4())
+    value = {'request_id': request_id, 'session_uid': 'current', 'revision': 1,
+             'stage': 'reading_documents', 'observed_at_ms': int(time.time()*1000)}
+    await redis.set('meeting:voice:1:lock', 'current:' + request_id)
+    await redis.set('meeting:voice:1:progress', json.dumps(value))
+    path = '/bots/voice/1/current/config'
+    response = await client.get(path, headers=headers())
+    assert response.status_code == 200 and response.json()['progress'] == value
+    assert (await client.get(path)).status_code in (401, 403)
+    for invalid in [value | {'session_uid': 'retired'}, value | {'revision': 2},
+                    value | {'request_id': str(uuid4())}, value | {'stage': 'invented'},
+                    value | {'observed_at_ms': int(time.time()*1000) - 181000},
+                    value | {'observed_at_ms': int(time.time()*1000) + 10000}]:
+        await redis.set('meeting:voice:1:progress', json.dumps(invalid))
+        assert (await client.get(path, headers=headers())).json().get('progress') is None
+    await redis.set('meeting:voice:1:progress', 'invalid-json')
+    assert (await client.get(path, headers=headers())).json().get('progress') is None
+    await redis.set('meeting:voice:1:progress', json.dumps(value))
+    await redis.delete('meeting:voice:1:lock')
+    assert (await client.get(path, headers=headers())).json().get('progress') is None

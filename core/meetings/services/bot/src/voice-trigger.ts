@@ -9,11 +9,30 @@ export interface VoiceHypothesis {
 export const VOICE_NAMES = ['TINA', 'Tina', 'TINA ơi', 'tin ơi', 'ti na ơi', 'tiên na ơi', 'tinh anh ơi','tin anh ơi'] as const;
 export const VOICE_NOTICES = {
   wake: ['Dạ, em nghe.', 'Em đây, bạn nói đi.', 'Dạ, bạn cứ nói nhé.', 'Dạ, em đây.'],
-  wait: ['Đợi em chút nhé.', 'Để em kiểm tra nhé.', 'Em đang kiểm tra thông tin nhé.', 'Chờ em một lát nhé.'],
+  wait: ['Đợi em chút nhé.', 'Em đang xử lý yêu cầu nhé.', 'Em cần thêm một chút thời gian nhé.', 'Chờ em một lát nhé.'],
   summary: ['Em đang tổng hợp, bạn chờ một chút nhé.', 'Em đang tổng hợp thông tin nhé.', 'Em tổng hợp lại một chút nhé.', 'Em gom lại các ý chính nhé.'],
 } as const;
+export const VOICE_PROGRESS_NOTICES = {
+  searching_transcript: 'Em đang tìm trong nội dung cuộc họp nhé.',
+  reading_documents: 'Em đang tìm trong tài liệu được chia sẻ nhé.',
+  searching_web: 'Em đang tìm thông tin trên web nhé.',
+  reading_context: 'Em đang đọc kỹ phần liên quan nhé.',
+  drafting: 'Em đang soạn bản nháp nhé.',
+  answering: VOICE_NOTICES.summary[1],
+} as const;
+export function voiceProgressNotice(value: unknown, requestId: string, revision: number, now = Date.now()): string | undefined {
+  if (!value || typeof value !== 'object') return;
+  const progress = value as Record<string, unknown>;
+  if (progress.request_id !== requestId || progress.revision !== revision
+      || typeof progress.observed_at_ms !== 'number' || !Number.isSafeInteger(progress.observed_at_ms)
+      || now - progress.observed_at_ms < 0 || now - progress.observed_at_ms >= 15_000
+      || typeof progress.stage !== 'string' || !Object.hasOwn(VOICE_PROGRESS_NOTICES, progress.stage)) return;
+  return VOICE_PROGRESS_NOTICES[progress.stage as keyof typeof VOICE_PROGRESS_NOTICES];
+}
 export const SUMMARY_NOTICE = VOICE_NOTICES.summary[0];
-const fixedNotices = new Set<string>(Object.values(VOICE_NOTICES).flat());
+export const VOICE_SERVICE_ERROR = 'Em chưa lấy được câu trả lời lúc này. Bạn có thể xem trạng thái trên TINA Terminal.';
+const fixedNotices = new Set<string>([...Object.values(VOICE_NOTICES).flat(), ...Object.values(VOICE_PROGRESS_NOTICES),
+  VOICE_SERVICE_ERROR, 'Để em kiểm tra nhé.', 'Em đang kiểm tra thông tin nhé.']);
 export function isFixedVoiceNotice(text?: string): boolean { return text !== undefined && fixedNotices.has(text); }
 const echoKey = (text: string) => text.normalize('NFKC').toLocaleLowerCase('vi').replace(/[^\p{L}]/gu, '');
 const noticeEchoes = new Set([...fixedNotices].map(echoKey));
@@ -28,7 +47,11 @@ export function invocation(text: string, variants: string[] = []): string | null
     const escaped = name.trim().normalize('NFKC').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     if (!escaped) continue;
     const match = new RegExp(`^${escaped}(?=$|[^\\p{L}\\p{N}_])(?:[\\s,.!?:;…—–-]*)`, 'iu').exec(value);
-    if (match) return value.slice(match[0].length).trim();
+    if (match) {
+      const rest = value.slice(match[0].length).trim();
+      // A vocative/polite particle alone is still a name call, not a question.
+      return /^(?:(?:ạ|à|ơi)[\s,.!?:;…—–-]*)+$/iu.test(rest) ? '' : rest;
+    }
   }
   return null;
 }
@@ -60,7 +83,7 @@ export class VoiceTrigger {
   private candidate?: Candidate;
   private acoustic?: AcousticWake & {started: number};
   private after = 0;
-  private continuation?: {channel: number; participant?: string | null; expires: number};
+  private continuation?: {channel: number; participant?: string | null; expires: number; after: number};
   heard?: VoiceHypothesis;
   reason: 'waiting' | 'invalid_asr' | 'stale_asr' | 'name_not_matched' | 'name_unconfirmed' | 'ambiguous_window' | 'other_channel' = 'waiting';
   constructor(private now: () => number = Date.now, private variants: string[] = [], private acousticOnly = false) {}
@@ -74,11 +97,15 @@ export class VoiceTrigger {
     return true;
   }
   continueAfter(after: number, caller: {channel: number; participant?: string | null}, expires = this.now() + 10000) {
-    this.reset(after); this.continuation = {...caller, expires};
+    this.reset(after); this.continuation = {...caller, expires, after};
   }
   get answeringContinuation() { return this.candidate?.direct === true && !this.candidate.acoustic; }
   get hasContinuation() { return this.continuation !== undefined && this.now() < this.continuation.expires; }
   get continuationCaller() { return this.hasContinuation ? {...this.continuation!} : undefined; }
+  takeExpiredContinuation() {
+    if (this.candidate || !this.continuation || this.now()<this.continuation.expires) return;
+    const value=this.continuation;this.continuation=undefined;return value;
+  }
   get acceptAfter() { return this.after; }
   get caller() {
     const first = this.candidate?.parts[0];
@@ -130,7 +157,8 @@ export class VoiceTrigger {
     const acoustic = this.acoustic !== undefined;
     // Acoustic evidence authorizes the call; removing a recognized prefix changes only this copy.
     if (acoustic && (!c || c.parts.length === 1 && value.startMs === c.parts[0].startMs)) {
-      text = invocation(text, [...this.variants, 'hey TINA', 'hey ti na', 'hây ti na', 'ti na', 'anh ơi']) ?? text;
+      const names = [...this.variants, 'hây ti na', 'ti na', 'ti nà ơi', 'ti nà', 'tiên na', 'anh ơi'];
+      text = invocation(text, names) ?? invocation(text.replace(/^hey\s+/iu, ''), names) ?? text;
     }
     if (!c) {
       if (this.acousticOnly && !acoustic && (!this.hasContinuation || value.channel !== this.continuation!.channel
@@ -173,7 +201,7 @@ export class VoiceTrigger {
     return 'update';
   }
   private discard(reason: 'ambiguous_window' | 'name_not_matched' = 'ambiguous_window'): 'discard' { this.reset(this.now()); this.reason = reason; return 'discard'; }
-  question(quietEndMs: number | undefined): string | null {
+  question(quietEndMs: number | undefined, observeBeforeLexicalPause = false): string | null {
     const c = this.candidate;
     if (!c || !c.confirmed || quietEndMs === undefined) return null;
     const last = c.parts.at(-1)!;
@@ -182,7 +210,7 @@ export class VoiceTrigger {
     const text = c.parts.map(p => p.text).join(' ');
     const question = c.direct ? text : invocation(text, this.variants);
     const pause = question ? turnPauseMs(question) : 0;
-    if (pause > 0 && this.now() - quietEndMs < pause) return null;
+    if (!observeBeforeLexicalPause && pause > 0 && this.now() - quietEndMs < pause) return null;
     return question !== null && question.length <= 2000 ? question : null;
   }
   expired() {

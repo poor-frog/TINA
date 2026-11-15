@@ -3,6 +3,13 @@
 !pyproject.toml
 !uv.lock
 !adapters.py
+!rag.py
+!task_flow.py
+!audio.py
+!audio_stream.py
+!vad_shadow.py
+!dtln.py
+!dtln_assets.py
 !server.py
 !smoke.py
 !production_smoke.py

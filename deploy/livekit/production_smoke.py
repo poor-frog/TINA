@@ -48,7 +48,7 @@ class Authority(httpx.AsyncBaseTransport):
         rid = body.get('request_id')
         if parts[-1] == 'state':
             if self.current.get((mid, session)) == rid: self.current.pop((mid, session), None)
-            return httpx.Response(200, json={})
+            return httpx.Response(200, json={'accepted': True})
         operation = body.get('operation')
         if operation == 'context':
             self.current[(mid, session)] = rid
@@ -144,7 +144,7 @@ async def main():
                 assert response.status_code == 503
                 authority.quota = None
                 await ask(quota_mid, body())
-                report.update(real_livekit_rooms=True, actual_agent_sessions=3, native_sdk_tools=True,
+                report.update(real_livekit_rooms=True, actual_agent_sessions=3, langgraph_rag=True,
                               separate_room_context=True, concurrent_pcm_streams=3, streams_verified=len(samples),
                               fourth_room_rejected=True, stop_isolated=True, quota_failure_recovered=True)
         finally:

@@ -55,3 +55,25 @@ it('records decisions only after confirmation and discards without approval',asy
   const request=fetch.mock.calls.find(([,init])=>init?.method==='POST')!;
   expect(JSON.parse(request[1]!.body as string).status).toBe('discarded');
 });
+
+it('reaches older pending drafts and retains edits by blocking page changes',async()=>{
+  const fetch=vi.fn(async(url:string)=>Response.json(url.includes('offset=20')
+    ?{drafts:[draft]}:{drafts:[{...draft,id:'b'.repeat(32),status:'discarded'}],next_offset:20}));
+  vi.stubGlobal('fetch',fetch);
+  const view=render(<MeetingVoiceDrafts meetingId="42"/>);
+  await screen.findByText('Task · Đã bỏ');
+  fireEvent.click(screen.getByText(/Bản nháp từ voice/));
+  fireEvent.click(screen.getByRole('button',{name:'Cũ hơn'}));
+  await screen.findByText('Task · Chờ chủ meeting xác nhận');
+  expect(fetch.mock.calls.some(([url])=>url.endsWith('/voice-drafts?offset=20'))).toBe(true);
+  expect(screen.getByText('Trang 2')).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Tiêu đề bản nháp voice'),{target:{value:'Đang sửa'}});
+  expect((screen.getByRole('button',{name:'Mới hơn'}) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByLabelText('Tiêu đề bản nháp voice') as HTMLInputElement).value).toBe('Đang sửa');
+  fireEvent.change(screen.getByLabelText('Tiêu đề bản nháp voice'),{target:{value:draft.title}});
+  expect((screen.getByRole('button',{name:'Mới hơn'}) as HTMLButtonElement).disabled).toBe(false);
+  view.rerender(<MeetingVoiceDrafts meetingId="43"/>);
+  await screen.findByText('Task · Đã bỏ');
+  expect(fetch.mock.calls.some(([url])=>url.endsWith('/43/voice-drafts'))).toBe(true);
+  expect(screen.getByText('Trang 1')).toBeTruthy();
+});

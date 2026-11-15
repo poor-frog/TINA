@@ -32,15 +32,36 @@ def build_voice_settings_router(redis, client_factory=httpx.AsyncClient, repo=No
                         raw = bytearray()
                         async for chunk in response.aiter_bytes():
                             raw.extend(chunk)
-                            if len(raw) > 4096: raise ValueError('Oversized readiness response')
+                            if len(raw) > 8192: raise ValueError('Oversized readiness response')
                         info = json.loads(raw) if response.status_code == 200 else {}
                         if not isinstance(info,dict): raise ValueError('Invalid readiness response')
                         tts.update(ready=info.get('status') == 'ok', busy=info.get('busy') is True)
                         for key in ['model', 'voice', 'device']:
                             value = info.get(key)
                             if isinstance(value,str) and 0 < len(value) <= 100: tts[key] = value
+                        tts['profiles_supported']=info.get('profiles_supported') is True
+                        voices=info.get('voices') or []
+                        tts['voices']=[{k:item[k] for k in ('id','label','region') if isinstance(item.get(k),str) and len(item[k])<=64}
+                            for item in voices[:32] if isinstance(item,dict) and isinstance(item.get('id'),str) and isinstance(item.get('label'),str)] if isinstance(voices,list) else []
             except (httpx.HTTPError, ValueError, TypeError):
                 pass
+        noise_filter=None
+        audio_url=os.environ.get('LIVEKIT_AGENT_URL','').rstrip('/')
+        if audio_url:
+            try:
+                async with client_factory(timeout=3,follow_redirects=False) as client:
+                    async with client.stream('GET',audio_url+'/ready') as response:
+                        raw=bytearray()
+                        async for chunk in response.aiter_bytes():
+                            raw.extend(chunk)
+                            if len(raw)>4096:raise ValueError('Oversized audio readiness')
+                        info=json.loads(raw) if response.status_code==200 else {}
+                        selected=info.get('noise_filter') or {}
+                        if selected.get('id') in ('dtln','webrtc'):
+                            choice=selected['id']
+                            noise_filter={'id':choice,'label':'DTLN' if choice=='dtln' else 'WebRTC NS Low',
+                                          'device':'cpu','ready':info.get('audio_bridge_ready') is True}
+            except (httpx.HTTPError,ValueError,TypeError,AttributeError):pass
         wake = {'method':'livekit_wakeword', 'engine':'LiveKit WakeWord', 'version':'2.1.1', 'device':'cpu',
                 'names':['TINA ơi','hey TINA'], 'platforms':['google_meet'], 'status':'no_active_bot', 'sessions':[]}
         if repo is not None and store is not None:
@@ -67,19 +88,27 @@ def build_voice_settings_router(redis, client_factory=httpx.AsyncClient, repo=No
         return {'wake':wake,
                 'new_meeting_policy':new_meeting_voice_policy(),
                 'voice_pipeline_configured':os.environ.get('TINA_MEETING_VOICE', '').lower() in ('1','true','yes','on'),
-                'default_prepare_new_bots':bool(url), 'tts':tts}
+                'default_prepare_new_bots':bool(url), 'tts':tts,'noise_filter':noise_filter}
 
     @router.post('/bots/voice/preview')
-    async def preview(x_user_id: str | None = Header(default=None)):
+    async def preview(body:dict | None = None,x_user_id: str | None = Header(default=None)):
         user = _resolve_user_id(x_user_id)
         url, token = connection()
         if not url or not token: raise HTTPException(503, 'TTS chưa được cấu hình trên máy chủ.')
+        supplied=body or {};voice=supplied.get('voice','auto');glossary=supplied.get('pronunciations',{})
+        try:
+            from .speech_profile import sign_profile
+            if not isinstance(voice,str) or not isinstance(glossary,dict):raise ValueError()
+            profile=sign_profile(voice,glossary) if glossary else None
+        except ValueError:raise HTTPException(422,'Use a preset voice and bounded pronunciation words') from None
+        sample=PREVIEW_TEXT+(' Ví dụ cách đọc: '+', '.join(list(glossary)[:3])+'.' if glossary else '')
         if not await redis.set(f'voice:preview:{user}', '1', nx=True, ex=10):
             raise HTTPException(429, 'Vui lòng đợi vài giây trước khi nghe thử lại.')
         try:
             async with client_factory(timeout=35, follow_redirects=False) as client:
                 async with client.stream('POST', url + '/v1/audio/speech', headers={'X-API-Key':token},
-                    json={'model':'tts-1','voice':'auto','response_format':'pcm','input':PREVIEW_TEXT}) as response:
+                    json={'model':'tts-1','voice':voice,'response_format':'pcm','input':sample,
+                          **({'profile':profile} if profile else {})}) as response:
                     if response.status_code != 200: raise ValueError('TTS unavailable')
                     if response.headers.get('X-Audio-Sample-Rate') != '24000' or response.headers.get('X-Audio-Channels') != '1':
                         raise ValueError('Unexpected PCM format')

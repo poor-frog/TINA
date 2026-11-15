@@ -1,0 +1,25 @@
+{
+  "version": "tina-turn-shadow-v1",
+  "files": {
+    "smart-turn-v3.2-cpu.onnx": {
+      "url": "https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/f766f81d3cfdf7737ac64aad813d91bbfd56bf93/smart-turn-v3.2-cpu.onnx",
+      "bytes": 8679182,
+      "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f"
+    },
+    "namo-multilingual.onnx": {
+      "url": "https://huggingface.co/videosdk-live/Namo-Turn-Detector-v1-Multilingual/resolve/59245aac1f0a0f170277ebecc32ddaea418083b4/model_quant.onnx",
+      "bytes": 308985714,
+      "sha256": "67be31dac7c49abd43a277a105222c9031a0e22ac37f0e22dab395f68b318fc9"
+    },
+    "namo-tokenizer.json": {
+      "url": "https://huggingface.co/videosdk-live/Namo-Turn-Detector-v1-Multilingual/resolve/59245aac1f0a0f170277ebecc32ddaea418083b4/tokenizer.json",
+      "bytes": 34363286,
+      "sha256": "b7cc6d8599efc7f57ee2fe874a7e29b82038c5dfd03a442652c2afea13fe41e5"
+    },
+    "namo.LICENSE": {
+      "url": "https://huggingface.co/videosdk-live/Namo-Turn-Detector-v1-Multilingual/resolve/59245aac1f0a0f170277ebecc32ddaea418083b4/LICENSE",
+      "bytes": 11339,
+      "sha256": "7ecbb9c5ba3cc22056ffc55eee42feadd7e7b9f185f9cbe1abdd584bdc6e548a"
+    }
+  }
+}

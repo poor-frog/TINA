@@ -8,6 +8,23 @@ from shared.voice_knowledge import voice_sources, current_history, validate_voic
 NOW = 1800000000000
 
 
+def test_clarification_retry_count_stops_at_a_real_answer_and_never_counts_service_errors():
+    from shared.voice_recovery import clarification_attempts
+    assert clarification_attempts([])==0
+    assert clarification_attempts([{'clarification':True}]*5)==3
+    assert clarification_attempts([{'clarification':True},{'clarification':False}])==0
+    assert clarification_attempts([{'reason':'llm_unavailable'},{'clarification':True}])==1
+
+
+def test_missing_evidence_does_not_masquerade_as_a_question_about_an_ambiguous_request():
+    from shared.voice_knowledge import voice_failure
+    for reason in ('insufficient_evidence', 'verification_rejected', 'verification_unavailable', 'llm_unavailable'):
+        result = voice_failure(reason)
+        assert result['reason'] == reason and result['sources'] == [] and result['answer_kind'] == 'meeting'
+        assert '?' not in result['text']
+    assert voice_failure('retrieval_empty')['text'].endswith('?')
+
+
 def test_pending_clarification_keeps_original_goal_and_corrections_but_expires():
     first = {'question': 'Tóm tắt phần đó.', 'answer': 'Bạn muốn tóm tắt chủ đề nào?',
              'clarification': True, 'created_at_ms': NOW - 2000, 'sources': []}

@@ -37,7 +37,7 @@ export function navigationSource(value:unknown,hint:Hint):Source {
     ||source.meeting_id!=null&&(!Number.isSafeInteger(source.meeting_id)||(source.meeting_id as number)<=0)
     ||source.meeting_title!=null&&(typeof source.meeting_title!=='string'||source.meeting_title.length>300))throw Error('Source changed');
   if(source.kind==='document'&&typeof source.path==='string'&&source.path.length<=512&&source.path.endsWith('.md')
-    &&/^(kg|wiki|notes|docs|sources|concepts)\//.test(source.path)&&!source.path.includes('\\')
+    &&(source.path==='README.md'||/^(kg|wiki|notes|docs|sources|concepts)\//.test(source.path))&&!source.path.includes('\\')
     &&!source.path.split('/').some(part=>part.startsWith('.')))return source as Source;
   if(source.kind==='transcript'&&typeof source.segment_id==='string'&&source.segment_id.length>0&&source.segment_id.length<=512)return source as Source;
   throw Error('Unsupported navigation source');

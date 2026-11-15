@@ -1,5 +1,21 @@
 # meeting-voice.v1
 
+LLM planning uses internal per-tool `arguments` schemas and a shared normalizer. The wire contract
+here remains `{name, query}` for `VoiceLookupQuery`: typed expression/date/handle/request fields are
+validated and converted before reaching HTTP/Redis. Legacy query calls and existing golden payloads
+remain valid; tool-specific argument validation does not expand source permissions or query budgets.
+
+Independent LangGraph local read pairs may execute concurrently; the existing lookup shape and
+two-round/four-call budget do not change. TINA reserves each call atomically, rechecks policy and
+keeps executed/completed calls in planned order for deterministic follow-up retrieval. Both calls
+must settle before the next plan/final. Stop and revoked sources still fence late completions.
+
+The internal local-read operation response optionally reports `lookup_status`: found/empty/unavailable.
+Unavailable reads are completed but excluded from executed queries and consume the same budget.
+Core retains a turn for sibling completion but refuses final answer dispatch if no successful evidence
+lookup remains after a read failure. This additive internal result metadata does not change the
+published lookup request or golden payloads. Source/session permission failures remain fatal.
+
 `VoiceReply` describes an owner-only validated TINA answer, its generated request ID, receipt state
 and server timestamps. Durable meeting history is separate from participant `transcript.v1`; stopped,
 failed or unconfirmed answers may contain unspoken text. Terminal and Extension render the same
@@ -159,3 +175,41 @@ VoicePolicy.include_approved_actions is optional/default false and shares only o
 VoicePolicy.shared_meeting_ids defaults empty (max four distinct positive other-owned IDs). Saving and querying recheck ownership/artifact deletion. search_shared_meetings is an additional read-only tool; current-only tool semantics remain unchanged. VoiceSource optionally carries meeting_id, meeting_title and meeting_start_time for attributed evidence. See docs/tina-voice-shared-meetings.md.
 
 open_source is a server-selected cited-handle tool for same-caller recently completed answers. VoiceNavigationHint is optional owner runtime metadata and VoiceNavigation is the once-claimed, freshly reauthorized target; claims require owner auth and completed acknowledgment. See docs/tina-voice-open-source.md.
+
+`VoiceAgentQuestion.operation` additionally accepts `flow_plan` and `flow_apply` for Pipecat task
+draft conversations. The existing capability, request UUID, revision and caller hash fence both.
+Context optionally returns `task_flow.node` for an explicit task request or a same-caller flow
+whose last exact prompt completed playback. Slot state and cached model proposals stay core-owned;
+workers cannot submit fields, authorize sources or approve/publish a draft. Plan/apply run once per
+reserved turn before the normal final answer, which preserves playback receipts and owner review.
+State expires after five minutes, is limited to eight user turns, and is not RAG or source evidence.
+
+Recovery adds `no_input`/`dialogue_paused` diagnostics and `clarification_exhausted`/`draft_unavailable`
+reply reasons. Paused clarification and service failures do not arm a follow-up. A completed
+source-free terminal-history marker closes a clarification chain; history updates are lease-CAS
+fenced. Failed TTS can recover retained task fields only by re-asking the missing prompt, without
+interpreting new slot data or writing a draft. Stopped/queued prompts cannot resume a flow.
+
+## Private voice-to-chat handoff
+
+An identified caller's paused clarification or answer-service failure can expose optional `runtime.handoff` (`VoiceHandoffHint`) alongside the existing voice status. Normal answers expose no handoff. Only the meeting owner can POST `/meetings/{meeting_id}/voice-assistant/handoff/{request_id}` to claim `VoiceHandoff`; a subsequent GET revalidates it for each private chat turn. No caller name or speaker hash grants account identity.
+
+Claims require completed/failed playback, an idle room lease, unchanged task state, current sharing revision and fresh source fingerprints. Stop, a new unclaimed voice turn/session, expiry, source revocation or artifact deletion invalidates the transfer. A successful task claim atomically detaches that voice task flow; it does not create a draft. Hints expire after five minutes; claimed contexts after fifteen. Only collected fields, up to three heard turns and eight current source excerpts transfer, never the full transcript or credentials.
+
+Terminal shows **Continue in chat** beside voice status only when a handoff is available. The action prepares a separate private chat composer; the owner reviews and presses Send. A nonempty composer is preserved. `voice-handoff-{meeting_id}-{request_id}` chat sessions resolve the owner snapshot server-side on every send/reconnect and omit ambient meeting grounding. Requested task fields remain proposals; uncertain draft writes must be checked before retrying.
+
+## Pipecat Decision Flow
+
+The existing internal `task_flow` envelope can additionally carry `kind: decision` and the nodes `title`, `decision_status`, `decision_evidence`, `review`. `flow_plan`/`flow_apply` keep the same caller, active-session, revision and lease checks. Core calls owner-authenticated `/api/internal/meeting-voice/{meeting_id}/decision-flow` with `DecisionFlowQuestion`; SDK callers cannot submit decision fields or evidence. Unknown speaker identity refuses decision-flow admission rather than creating an unchecked one-shot decision.
+
+`DecisionState` separates requested discussion status (`proposed`/`decided`) from source verdict (`unchecked`/`supported`/`missing`/`conflict`) and from the draft's existing review status (`pending`/`approved`/`discarded`). User-provided content/status/locator must be literal. Up to three exact current source quotes support decided status, followed by independent verification. Source snapshots and policy are rechecked before readback/creation, and a current-turn permit is required immediately before the pending draft write. No voice instruction approves the draft. Original ASR and selected audio backends are unchanged.
+
+`VoiceHandoff` and `VoiceHandoffHint.kind` additionally support `decision`, with optional `decision` fields carrying title, requested status, evidence verdict and missing field. Current proof references are revalidated on claim/read; chat cannot treat a speaker's assertion as verified consensus. Existing task handoffs remain compatible.
+
+## Draft recovery fixes
+
+TaskState and HandoffTask additionally accept optional `save_uncertain` (default false), matching Decision Flow. An unknown finish response preserves that marker; voice cannot blindly retry creating a second draft under a new turn UUID. The owner inspects existing drafts or continues in private chat. Definite upstream request/source rejection statuses remain typed: a decision finish conflict returns to source clarification without claiming the write is uncertain. Stop/session/policy fences still apply before playback.
+
+At eight retained inputs or the 8,000-character boundary, draft input history compacts to the original request and exact user-input snippets proving current fields plus the new input. This is bounded ephemeral field provenance, not a full conversational audit or canonical ASR rewrite. Explicit cancel/leave do not consume capacity; confirmation and corrections remain valid.
+
+VoiceActionDraftPage bounds owner list responses to20 drafts with optional next_offset; GET voice-drafts accepts a nonnegative offset. Direct review and its pre-write reauthorization resolve the requested ID independently of list pagination, retaining owner/meeting/policy/completed-readback fences. Missing next_offset means the last page. Legacy first-page response keys remain compatible.

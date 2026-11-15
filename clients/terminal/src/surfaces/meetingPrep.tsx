@@ -9,6 +9,7 @@
  *  with the people you're meeting → the bot auto-joins at start → notes land on the same row.
  *  Once the row leaves the intent statuses the row click routes to the live meeting tab instead. */
 import { useEffect, useMemo, useRef, useState } from "react";
+import styles from "./meetingPrep.module.css";
 import { registerTab, type TabProps } from "../contributions";
 import { useService } from "../platform";
 import { LayoutServiceId } from "../workbench/layout";
@@ -29,12 +30,6 @@ import { manageTabDescriptor } from "./workspaceManage";
 import { defaultBotName } from "./defaultBotName";
 import { meetingUrlFor } from "./meetingId";
 import { requestChat } from "../canvas/actions";
-
-const field = {
-  fontSize: 12.5, padding: "6px 8px", background: "var(--panel)", border: "1px solid var(--line)",
-  borderRadius: 7, color: "var(--t1)", outline: "none",
-} as const;
-const label = { fontSize: 10.5, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 600 } as const;
 
 /** THE BRIEF (prep-v3, owner-locked): the workspace README rendered as the page's stage — ONE doc,
  *  team-facing, always the next occurrence's brief. A SEEDED stub never renders as content (bloat
@@ -79,38 +74,37 @@ function Brief({ slug, title, meeting }: { slug: string; title: string; meeting:
       setError('');
     } catch (e) { setError((e as Error).message); }
   };
-  if (state === "loading") return error ? <p role="alert">{error}</p> : null;
+  if (state === "loading") return error ? <p className={styles.error} role="alert">{error}</p> : null;
   if (state === "none" || !text) {
     return (
-      <div style={{ margin: "18px 0 0", padding: "16px 18px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--subtle)", fontSize: 12.5, color: "var(--t3)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        {error && <p role="alert">{error}</p>}
-        <span style={{ flex: 1, minWidth: 200, color: "var(--t2)" }}>No brief yet.</span>
-        <button onClick={askForBrief} style={{ background: "var(--accent)", color: "var(--on-accent)", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", flex: "none", boxShadow: "0 2px 8px rgba(67, 210, 121, 0.25)" }}>
-          Draft the brief — attendees, last time, open items, agenda
-        </button>
+      <div className={styles.briefEmpty}>
+        {error && <p className={styles.error} role="alert">{error}</p>}
+        <div className={styles.briefEmptyCopy}>
+          <strong>No brief yet.</strong>
+          <span>Draft it with attendee context, last time, open items, and an agenda.</span>
+        </div>
+        <button type="button" onClick={askForBrief} className={styles.briefAction}>Draft the brief</button>
       </div>
     );
   }
   return (
-    <div style={{ margin: "18px 0 0", border: "1px solid var(--line)", borderRadius: 6, background: "var(--panel)" }}>
-      {error && <p role="alert">{error}</p>}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px 0" }}>
-        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", flex: "none" }} />
-        <span style={{ fontSize: 10, color: "var(--t3)", letterSpacing: ".08em", fontFamily: "var(--mono)" }}>
-          team brief · workspace README
+    <div className={styles.briefDocument}>
+      {error && <p className={styles.error} role="alert">{error}</p>}
+      <div className={styles.briefHeader}>
+        <span className={styles.briefSource}>
+          Team brief in workspace README
         </span>
-        <span style={{ flex: 1 }} />
-        <button onClick={() => layout.openTab(wsDocTab(slug, "README.md"))}
-          title="Open as a document" style={{ background: "none", border: "none", color: "var(--t3)", fontSize: 11, cursor: "pointer", padding: 0 }}>
+        <span className={styles.briefHeaderSpacer} />
+        <button type="button" onClick={() => layout.openTab(wsDocTab(slug, "README.md"))}
+          title="Open as a document" className={styles.briefLink}>
           open
         </button>
-        <button onClick={askForBrief} title="Steer the brief in chat"
-          style={{ background: "none", border: "none", color: "var(--t3)", fontSize: 11, cursor: "pointer", padding: 0 }}>
+        <button type="button" onClick={askForBrief} title="Steer the brief in chat" className={styles.briefLink}>
           update via chat
         </button>
       </div>
-      <div style={{ padding: "4px 16px 12px", maxHeight: 460, overflow: "auto" }}>
-        <MdxDoc style={{ fontSize: 13, lineHeight: 1.55 }}>{text}</MdxDoc>
+      <div className={styles.briefBody}>
+        <MdxDoc style={{ fontSize: "var(--ui-type-label)", lineHeight: 1.6 }}>{text}</MdxDoc>
       </div>
     </div>
   );
@@ -162,24 +156,22 @@ function useOwnBriefNote(enabled: boolean, title: string, nativeId?: string | nu
 function OwnBrief({ note, onSteer }: { note: OwnBriefNote; onSteer: () => void }) {
   const layout = useService(LayoutServiceId);
   return (
-    <div style={{ margin: "18px 0 0", border: "1px solid var(--line)", borderRadius: 6, background: "var(--panel)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px 0" }}>
-        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", flex: "none" }} />
-        <span style={{ fontSize: 10, color: "var(--t3)", letterSpacing: ".08em", fontFamily: "var(--mono)" }}>
-          your brief · this meeting&rsquo;s note
+    <div className={styles.briefDocument}>
+      <div className={styles.briefHeader}>
+        <span className={styles.briefSource}>
+          Your brief for this meeting
         </span>
-        <span style={{ flex: 1 }} />
-        <button onClick={() => layout.openTab(wsDocTab(note.slug, note.path))}
-          title="Open as a document" style={{ background: "none", border: "none", color: "var(--t3)", fontSize: 11, cursor: "pointer", padding: 0 }}>
+        <span className={styles.briefHeaderSpacer} />
+        <button type="button" onClick={() => layout.openTab(wsDocTab(note.slug, note.path))}
+          title="Open as a document" className={styles.briefLink}>
           open
         </button>
-        <button onClick={onSteer} title="Steer the brief in chat"
-          style={{ background: "none", border: "none", color: "var(--t3)", fontSize: 11, cursor: "pointer", padding: 0 }}>
+        <button type="button" onClick={onSteer} title="Steer the brief in chat" className={styles.briefLink}>
           update via chat
         </button>
       </div>
-      <div style={{ padding: "4px 16px 12px", maxHeight: 460, overflow: "auto" }}>
-        <MdxDoc style={{ fontSize: 13, lineHeight: 1.55 }}>{note.text}</MdxDoc>
+      <div className={styles.briefBody}>
+        <MdxDoc style={{ fontSize: "var(--ui-type-label)", lineHeight: 1.6 }}>{note.text}</MdxDoc>
       </div>
     </div>
   );
@@ -383,92 +375,80 @@ function MeetingPrepTab({ params }: TabProps) {
   }, [rowGone, layout, meetingId]);
 
   if (!m) {
-    return <div style={{ padding: 32, fontSize: 13, color: "var(--t3)" }}>Loading meeting…</div>;
+    return <div className={styles.loadingNotice}>Loading meeting…</div>;
   }
   if (!isIntent) {
     return (
-      <div style={{ padding: 32, fontSize: 13, color: "var(--t2)", lineHeight: 1.6 }}>
-        This meeting has started — open it from the Meetings list to see the live view.
+      <div className={styles.loadingNotice}>
+        This meeting has started. Open it from Meetings to see the live view.
       </div>
     );
   }
 
   return (
-    <div style={{ width: "100%", height: "100%", overflow: "auto", boxSizing: "border-box", padding: "28px 32px" }}>
-      <div style={{ maxWidth: 760, margin: "0 auto" }}>
-        {/* TITLE SECTION */}
-        <div style={{ marginBottom: 24 }}>
-          <span style={{ display: "block", fontFamily: "var(--mono)", fontSize: 10, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--t3)", marginBottom: 8, fontWeight: 600 }}>
-            Meeting Subject & Objective
-          </span>
+    <div className={styles.surface}>
+      <main className={styles.content}>
+        <div className={styles.subjectBlock}>
           {readOnly ? (
-            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: "var(--t1)" }}>{headline}</h2>
+            <div className={styles.subjectField}>
+              <span className={styles.subjectLabel}>Meeting subject and objective</span>
+              <h1 className={styles.subjectReadonly}>{headline}</h1>
+            </div>
           ) : (
-            <input value={title} disabled={busy} placeholder="What's this meeting about?"
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={() => { if ((m.title_custom ?? "") !== title.trim()) void patch({ title: title.trim() || null }); }}
-              onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-              style={{ display: "block", width: "100%", boxSizing: "border-box", margin: 0, padding: "4px 0 10px",
-                fontSize: 22, fontWeight: 600, color: "var(--t1)", background: "transparent", border: "none",
-                borderBottom: "1px solid var(--line)", outline: "none" }} />
+            <div className={styles.subjectField}>
+              <h1 className={styles.subjectLabel}>Meeting subject and objective</h1>
+              <input className={styles.subjectInput} type="text" aria-label="Meeting subject and objective"
+                value={title} disabled={busy} placeholder="What's this meeting about?"
+                onChange={(e) => setTitle(e.target.value)}
+                onBlur={() => { if ((m.title_custom ?? "") !== title.trim()) void patch({ title: title.trim() || null }); }}
+                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} />
+            </div>
           )}
         </div>
 
         {m.auto_join_error && (
-          <div role="alert" style={{ margin: "0 0 14px", padding: "8px 12px", borderRadius: 8, background: "var(--dangerbg)", color: "var(--danger)", fontSize: 12.5, lineHeight: 1.5 }}>
-            ⚠ Auto-join failed: {m.auto_join_error}
+          <div className={styles.error} role="alert">
+            Auto-join failed: {m.auto_join_error}
           </div>
         )}
 
-        {/* ── 2-Column Instrument Cards: Meeting Link & Scheduled Time ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 18 }}>
-          {/* Card 1: Meeting Link */}
-          <div style={{ background: "var(--subtle)", border: "1px solid var(--line)", borderRadius: 6, padding: "16px 18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid var(--line)" }}>
-              <span style={{ fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: ".06em", color: "var(--t2)", fontWeight: 600, textTransform: "uppercase" }}>Meeting Link</span>
-              {m.native_id && (
-                <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: "var(--accent)", display: "flex", alignItems: "center", gap: 5 }}>
-                  <Icon name="check" size={12} style={{ color: "var(--accent)" }} />
-                  DETECTED
-                </span>
-              )}
+        <div className={styles.setupGrid}>
+          <section className={styles.setting}>
+            <div className={styles.settingHeading}>
+              <h2 className={styles.settingTitle}>Meeting link</h2>
+              {m.native_id && <span className={styles.detected}><Icon name="check" size={14} />Detected</span>}
             </div>
+            <input id={`meeting-link-${m.id || "draft"}`} className={styles.linkInput} type="url"
+              aria-label="Meeting link" value={link} disabled={busy || readOnly}
+              placeholder="https://meet.google.com/…"
+              onChange={(e) => setLink(e.target.value)}
+              onBlur={() => { if ((m.meeting_url ?? "") !== link.trim()) void patch({ meeting_url: link.trim() || null }); }} />
 
-            <div style={{ marginBottom: 12 }}>
-              <input value={link} disabled={busy || readOnly} placeholder="https://meet.google.com/…"
-                onChange={(e) => setLink(e.target.value)}
-                onBlur={() => { if ((m.meeting_url ?? "") !== link.trim()) void patch({ meeting_url: link.trim() || null }); }}
-                style={{ width: "100%", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 6, color: "var(--t1)", fontFamily: "var(--sans)", fontSize: 12.5, padding: "7px 10px", outline: "none", boxSizing: "border-box" }}
-              />
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 4 }}>
+            <div className={styles.settingFooter}>
               {!readOnly && (
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12, color: "var(--t2)", cursor: "pointer", userSelect: "none" }}>
+                <label className={styles.autoJoin}>
                   <input type="checkbox" checked={autoJoin} disabled={busy}
                     onChange={(e) => void patch({ auto_join: e.target.checked })} />
-                  Auto-join{!m.native_id && <span style={{ color: "var(--t3)", fontSize: 11 }}>(needs a link)</span>}
+                  <span>Auto-join</span>{!m.native_id && <span className={styles.helper}>(needs a link)</span>}
                 </label>
               )}
               {m.meeting_url && (
-                <a href={m.meeting_url} target="_blank" rel="noreferrer"
-                  style={{ background: "var(--accent)", color: "var(--on-accent)", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <a className={styles.openMeeting} href={m.meeting_url} target="_blank" rel="noreferrer">
                   Open meeting
                 </a>
               )}
             </div>
-          </div>
+          </section>
 
-          {/* Card 2: Scheduled Time */}
-          <div style={{ background: "var(--subtle)", border: "1px solid var(--line)", borderRadius: 6, padding: "16px 18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, paddingBottom: 8, borderBottom: "1px solid var(--line)" }}>
-              <span style={{ fontFamily: "var(--mono)", fontSize: 10.5, letterSpacing: ".06em", color: "var(--t2)", fontWeight: 600, textTransform: "uppercase" }}>Scheduled Time</span>
-              <span style={{ fontFamily: "var(--mono)", fontSize: 10, color: m.scheduled_at ? "var(--accent)" : "var(--t3)" }}>
-                {m.scheduled_at ? "SCHEDULED" : "IMMEDIATE JOIN"}
+          <section className={`${styles.setting} ${styles.scheduledSetting}`}>
+            <div className={styles.settingHeading}>
+              <h2 className={styles.settingTitle}>Scheduled time</h2>
+              <span className={m.scheduled_at ? styles.scheduledStatus : styles.immediateStatus}>
+                {m.scheduled_at ? "Scheduled" : "Immediate join"}
               </span>
             </div>
 
-            <div style={{ marginBottom: 12 }}>
+            <div className={styles.datePicker}>
               <DateTimePicker
                 value={m.scheduled_at}
                 disabled={readOnly || busy}
@@ -478,21 +458,17 @@ function MeetingPrepTab({ params }: TabProps) {
               />
             </div>
 
-            <div style={{ fontSize: 11, color: "var(--t3)", fontFamily: "var(--mono)", display: "flex", alignItems: "center", gap: 6, paddingTop: 4 }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: m.scheduled_at ? "var(--accent)" : "var(--t3)", flexShrink: 0 }} />
-              <span>{m.scheduled_at ? "Auto-joins when meeting starts" : "No schedule set — joins immediately when ready"}</span>
+            <div className={styles.scheduleStatus}>
+              {m.scheduled_at ? "Auto-joins when meeting starts" : "No schedule set. Joins immediately when ready."}
             </div>
-          </div>
+          </section>
         </div>
 
         {/* ── attendees (calendar ATTENDEE lines → data.attendees, prep-v3 slice b) ── */}
         {(m.attendees?.length ?? 0) > 0 && (
-          <div style={{ margin: "0 0 22px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 8px" }}>
-              <span style={label}>Attendees</span>
-              <span style={{ flex: 1, height: 1, background: "var(--line)" }} />
-            </div>
-            <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center" }}>
+          <section className={styles.attendees}>
+            <h2 className={styles.settingTitle}>Attendees</h2>
+            <div className={styles.attendeeList}>
               {m.attendees!.map((a) => {
                 const display = a.name || a.email;
                 const initials = (a.name
@@ -500,72 +476,57 @@ function MeetingPrepTab({ params }: TabProps) {
                   : a.email.slice(0, 2)).toUpperCase();
                 const declined = a.partstat === "declined";
                 return (
-                  <span key={a.email} title={a.email + (a.partstat ? ` · ${a.partstat}` : "")}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 7,
-                      border: "1px solid var(--line)", borderRadius: 14, padding: "2px 11px 2px 3px",
-                      fontSize: 12.5, color: declined ? "var(--t3)" : "var(--t1)",
-                      textDecoration: declined ? "line-through" : undefined }}>
-                    <span style={{ width: 19, height: 19, borderRadius: "50%", background: "var(--panel2)",
-                      color: "var(--t2)", display: "inline-flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 8.5, fontWeight: 700 }}>{initials}</span>
+                  <span key={a.email} title={a.email + (a.partstat ? ` (${a.partstat})` : "")}
+                    className={`${styles.attendee} ${declined ? styles.declinedAttendee : ""}`}>
+                    <span className={styles.attendeeInitials}>{initials}</span>
                     {display}
                   </span>
                 );
               })}
             </div>
-          </div>
+          </section>
         )}
 
-        {/* ── ONE quiet utility row: workspace · share · send notetaker · ⋯ ── */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0 14px", marginBottom: 14, borderBottom: "1px solid var(--line)", fontSize: 12, color: "var(--t3)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div className={styles.workspaceBar}>
+          <div className={styles.workspaceDetails}>
+            <span className={styles.workspaceLabel}>Workspace</span>
             {m.workspace_id ? (
-              <span style={{ display: "inline-flex", gap: 6, alignItems: "baseline" }}>
-                workspace{" "}
-                <button onClick={() => layout.openTab(manageTabDescriptor(m.workspace_id!, { shared: true }))}
+              <span className={styles.workspaceName}>
+                <button type="button" onClick={() => layout.openTab(manageTabDescriptor(m.workspace_id!, { shared: true }))}
                   title={m.workspace_id}
-                  style={{ background: "none", border: "none", color: "var(--t1)", fontWeight: 600, fontSize: 12, cursor: "pointer", padding: 0 }}>
+                  className={styles.workspaceLink}>
                   {m.workspace_id.replace(/-[0-9a-f]{4,}$/i, "")}
                 </button>
                 {!readOnly && (
-                  <button onClick={() => setRebindOpen((v) => !v)}
-                    style={{ background: "none", border: "none", color: "var(--t3)", fontSize: 11.5, cursor: "pointer", padding: 0, textDecoration: "underline" }}>
-                    change
+                  <button type="button" onClick={() => setRebindOpen((v) => !v)}
+                    className={styles.workspaceChange}>
+                    Change
                   </button>
                 )}
               </span>
             ) : (
-              <span style={{ fontSize: 11.5, color: "var(--t3)" }}>No shared workspace bound</span>
+              <span className={styles.workspaceEmpty}>No shared workspace bound</span>
             )}
-            {readOnly && <span style={{ fontSize: 11.5 }}>· shared with you</span>}
+            {readOnly && <span className={styles.sharedBadge}>Shared with you</span>}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className={styles.utilityActions}>
             {!readOnly && m.workspace_id && (
-              <button disabled={busy} onClick={() => void share()}
-                style={{ background: "none", border: "none", color: "var(--t2)", fontSize: 12, cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+              <button type="button" disabled={busy} onClick={() => void share()} className={styles.shareButton}>
                 Share with attendees{(m.attendees?.length ?? 0) > 0 ? ` (${m.attendees!.length})` : ""}
               </button>
             )}
             {!readOnly && (
-              <button disabled={busy || !m.native_id} onClick={() => void sendNow()}
+              <button type="button" disabled={busy || !m.native_id} onClick={() => void sendNow()}
                 title={m.native_id ? "Send the bot now instead of waiting" : "Attach a meeting link first"}
-                style={{
-                  background: m.native_id ? "var(--accentbg)" : "var(--panel)",
-                  border: `1px solid ${m.native_id ? "var(--accent)" : "var(--line)"}`,
-                  color: m.native_id ? "var(--accent)" : "var(--t3)",
-                  borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600,
-                  cursor: m.native_id ? "pointer" : "default",
-                  display: "inline-flex", alignItems: "center", gap: 6,
-                  transition: "all .15s",
-                }}>
+                className={styles.sendNow} data-ready={m.native_id ? "true" : "false"}>
                 <Icon name="send" size={12} style={{ color: m.native_id ? "var(--accent)" : "var(--t3)" }} />
                 Send notetaker now
               </button>
             )}
             {!readOnly && (
-              <button onClick={() => setMoreOpen((v) => !v)} title="More — edit link, unbind, delete"
-                style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--t3)", borderRadius: 6, width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 14, cursor: "pointer", padding: 0 }}>
+              <button type="button" onClick={() => setMoreOpen((v) => !v)} title="More meeting actions" aria-label="More meeting actions" aria-expanded={moreOpen}
+                className={styles.moreButton}>
                 ⋯
               </button>
             )}
@@ -573,10 +534,10 @@ function MeetingPrepTab({ params }: TabProps) {
         </div>
 
         {rebindOpen && !readOnly && shares.length > 0 && (
-          <div style={{ marginBottom: 10 }}>
-            <select defaultValue="" disabled={busy}
+          <div className={styles.rebindRow}>
+            <select aria-label="Bind a different workspace" defaultValue="" disabled={busy}
               onChange={(e) => { if (e.target.value) { void patch({ workspace_id: e.target.value }); setRebindOpen(false); } }}
-              style={{ ...field, minWidth: 200 }}>
+              className={styles.select}>
               <option value="" disabled>Bind a different workspace…</option>
               {shares.map((s) => <option key={s.workspace_id} value={s.workspace_id}>{s.workspace_id}</option>)}
             </select>
@@ -584,24 +545,24 @@ function MeetingPrepTab({ params }: TabProps) {
         )}
 
         {moreOpen && !readOnly && (
-          <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 6, padding: "8px 12px" }}>
+          <div className={styles.moreActions}>
             {m.workspace_id && (
-              <button disabled={busy} onClick={() => { void patch({ workspace_id: null }); setMoreOpen(false); }}
-                style={{ background: "transparent", border: "1px solid var(--line)", color: "var(--t3)", borderRadius: 6, padding: "4px 10px", fontSize: 12, cursor: "pointer" }}>
+              <button type="button" disabled={busy} onClick={() => { void patch({ workspace_id: null }); setMoreOpen(false); }}
+                className={styles.moreAction}>
                 Unbind workspace
               </button>
             )}
-            <button disabled={busy} onClick={() => void remove()}
-              style={{ background: "transparent", border: "1px solid var(--danger)", color: "var(--danger)", borderRadius: 6, padding: "4px 10px", fontSize: 12, cursor: "pointer" }}>
+            <button type="button" disabled={busy} onClick={() => void remove()}
+              className={`${styles.moreAction} ${styles.deleteAction}`}>
               Delete meeting
             </button>
           </div>
         )}
 
         {inviteLink && (
-          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-            <input readOnly value={inviteLink} onFocus={(e) => e.currentTarget.select()} style={{ ...field, flex: 1, fontSize: 11.5 }} />
-            <button onClick={() => void copyText(inviteLink)} style={{ fontSize: 12, padding: "4px 12px", background: "var(--accent)", color: "var(--on-accent)", border: "none", borderRadius: 6, cursor: "pointer" }}>Copy</button>
+          <div className={styles.inviteRow}>
+            <input readOnly aria-label="Workspace invite link" value={inviteLink} onFocus={(e) => e.currentTarget.select()} className={styles.inviteInput} />
+            <button type="button" onClick={() => void copyText(inviteLink)} className={styles.copyButton}>Copy</button>
           </div>
         )}
 
@@ -609,68 +570,54 @@ function MeetingPrepTab({ params }: TabProps) {
         {m.workspace_id ? (
           <Brief key={m.workspace_id} slug={m.workspace_id} title={headline} meeting={m} />
         ) : readOnly ? (
-          <div style={{ margin: "18px 0 0", fontSize: 12.5, color: "var(--t3)" }}>No workspace bound.</div>
+          <div className={styles.readonlyNotice}>No workspace bound.</div>
         ) : ownBrief ? (
           /* the own-workspace note IS the brief — rendered live while the chat writes it */
           <OwnBrief note={ownBrief} onSteer={() => startBriefChat()} />
         ) : briefChatStarted ? (
-          <div style={{ margin: "18px 0 0", padding: "14px 18px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--subtle)", display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, color: "var(--t2)" }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", flex: "none" }} />
-            Brief chat started — the brief renders here once the agent writes it. Follow progress in chat.
+          <div className={styles.briefNotice} role="status">
+            Brief chat started. The brief appears here as the agent writes it. Follow progress in chat.
           </div>
         ) : (
           /* No-brief state (first-run-onboarding frame 6, owner-ruled): two REAL actions. Brief chat
              = the agent interviews you here (the prep tab's meeting grounding rides the turn) and the
              brief lands in YOUR default workspace, reused across the series. Shared workspace = the
              existing collaborative flow, repositioned as the explicit sharing choice. */
-          <div style={{ margin: "18px 0 0", padding: "18px 20px", background: "var(--subtle)", border: "1px solid var(--line)", borderRadius: 6, display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--t3)", flex: "none" }} />
-              <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--t1)" }}>No brief yet</span>
+          <section className={styles.briefSection}>
+            <div className={styles.briefIntro}>
+              <h2 className={styles.briefTitle}>No brief yet</h2>
+              <p className={styles.briefDescription}>
+                A brief helps the notetaker prepare: who&rsquo;s in the room, what you want from the meeting, and what to listen for.
+              </p>
+              <p className={styles.briefExplanation}>
+                <span><strong>Brief chat</strong> interviews you and writes in your own workspace, where it can be reused across this series.</span>
+                <span><strong>Shared workspace</strong> lets invited people see the brief and live transcript.</span>
+              </p>
             </div>
-            <div style={{ fontSize: 12.5, color: "var(--t2)", lineHeight: 1.55 }}>
-              A brief makes the notetaker useful — who&rsquo;s in the room, what you want out of it, what
-              to listen for.
-            </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
-              <button disabled={busy} onClick={() => startBriefChat()}
-                style={{
-                  background: "var(--accent)", color: "var(--on-accent)", border: "none", borderRadius: 6,
-                  padding: "8px 18px", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                  display: "inline-flex", alignItems: "center", gap: 7,
-                  boxShadow: "0 2px 10px rgba(67, 210, 121, 0.25)",
-                }}>
-                <Icon name="msg" size={13} style={{ color: "var(--on-accent)" }} />
+            <div className={styles.briefActions}>
+              <button type="button" disabled={busy} onClick={() => startBriefChat()} className={styles.primaryAction}>
+                <Icon name="msg" size={15} />
                 Start brief chat
               </button>
-              <button disabled={busy} onClick={() => void createAndBind()}
-                style={{
-                  background: "transparent", color: "var(--accent)", border: "1px solid var(--accent)",
-                  borderRadius: 6, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer",
-                }}>
-                + Create a workspace to share
+              <button type="button" disabled={busy} onClick={() => void createAndBind()} className={styles.secondaryAction}>
+                Create shared workspace
               </button>
               {shares.length > 0 && (
-                <select defaultValue="" disabled={busy} onChange={(e) => { if (e.target.value) void patch({ workspace_id: e.target.value }); }}
-                  style={{ ...field, minWidth: 190, color: "var(--t3)", padding: "7px 10px", borderRadius: 6 }}>
-                  <option value="" disabled>or bind an existing one…</option>
+                <select aria-label="Bind an existing workspace" defaultValue="" disabled={busy}
+                  onChange={(e) => { if (e.target.value) void patch({ workspace_id: e.target.value }); }}
+                  className={styles.select}>
+                  <option value="" disabled>Bind an existing workspace…</option>
                   {shares.map((s) => <option key={s.workspace_id} value={s.workspace_id}>{s.workspace_id}</option>)}
                 </select>
               )}
             </div>
-            <div style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.55, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
-              <b style={{ color: "var(--t2)", fontWeight: 600 }}>Brief chat</b> — the agent interviews you and
-              writes the brief into your own workspace, reused across this series.{" "}
-              <b style={{ color: "var(--t2)", fontWeight: 600 }}>Shared workspace</b> — everyone you invite sees
-              the brief and the live transcript the moment they join.
-            </div>
-          </div>
+          </section>
         )}
 
         {denial && <ServiceDenialPanel presentation={denial} onRetry={() => void sendNow()} />}
-        {err && <div role="alert" style={{ marginTop: 12, fontSize: 12, color: "var(--danger)" }}>⚠ {err}</div>}
-        {briefError && <div role="alert" style={{ marginTop: 12, fontSize: 12, color: "var(--danger)" }}>{briefError}</div>}
-      </div>
+        {err && <div className={styles.error} role="alert">{err}</div>}
+        {briefError && <div className={styles.error} role="alert">{briefError}</div>}
+      </main>
     </div>
   );
 }

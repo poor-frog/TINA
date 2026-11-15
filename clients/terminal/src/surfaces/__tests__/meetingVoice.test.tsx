@@ -50,7 +50,7 @@ it('renders server-seeded new room defaults without adding documents or requirin
   vi.stubGlobal('fetch',fetch);render(<MeetingVoice meetingId="42"/>);
   const voice=await screen.findByLabelText('Bật Voice assistant cho meeting này');
   await waitFor(()=>expect((voice as HTMLInputElement).checked).toBe(true));
-  expect((screen.getByLabelText('Thử nghiệm lọc tạp âm WebRTC NS Low') as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText('Lọc tạp âm') as HTMLInputElement).checked).toBe(true);
   expect((screen.getByLabelText('Transcript của meeting này') as HTMLInputElement).checked).toBe(true);
   expect(fetch.mock.calls.every(([,init])=>init?.method!=='PUT')).toBe(true);
 });
@@ -60,7 +60,7 @@ it('noise suppression is off by default and saving the trial does not enable roo
     policy:init?.method==='PUT'?{...JSON.parse(init.body as string),revision:2}:{enabled:false,include_transcript:false,documents:[],revision:1,wake_variants:[],noise_suppression:false},
     runtime:{state:'OFF'},documents:[]})}));vi.stubGlobal('fetch',fetch);
   render(<MeetingVoice meetingId="42"/>);
-  const checkbox=await screen.findByLabelText('Thử nghiệm lọc tạp âm WebRTC NS Low');
+  const checkbox=await screen.findByLabelText('Lọc tạp âm');
   await waitFor(()=>expect((checkbox as HTMLInputElement).disabled).toBe(false));
   expect((checkbox as HTMLInputElement).checked).toBe(false);fireEvent.click(checkbox);
   fireEvent.click(screen.getByText('Lưu cấu hình'));

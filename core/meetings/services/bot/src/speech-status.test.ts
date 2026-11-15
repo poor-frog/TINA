@@ -13,6 +13,22 @@ import type { Invocation } from './config.js';
 
 const id = '00000000-0000-4000-8000-000000000001';
 
+test('configured prebuffer waits for enough PCM and sends only the signed profile',async()=>{
+  let response!:import('node:http').ServerResponse;let body='';
+  const server=createServer((request,res)=>{request.on('data',chunk=>body+=chunk);request.on('end',()=>{response=res;res.write(Buffer.alloc(9600));});});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const old=process.env.TTS_SERVICE_URL;process.env.TTS_SERVICE_URL=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const playback=createTtsPlayback(()=>{},{setMute(){},prebufferMs:300,profile:()=> 'signed-profile'});
+  const prepared=playback.prepare!('synthetic');let ready=false;void prepared.ready.then(value=>{ready=value;});
+  try{
+    const limit=Date.now()+2000;
+    while(prepared.timing?.firstPcmAtMs===undefined&&Date.now()<limit)await new Promise(resolve=>setTimeout(resolve,5));
+    assert(prepared.timing?.firstPcmAtMs);assert.equal(ready,false);
+    assert.equal(JSON.parse(body).profile,'signed-profile');
+    response.write(Buffer.alloc(6000));assert.equal(await prepared.ready,true);
+  }finally{prepared.cancel();response?.destroy();playback.stop();if(old===undefined)delete process.env.TTS_SERVICE_URL;else process.env.TTS_SERVICE_URL=old;await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
 test('speech timing separates first PCM, prebuffer and actual player input; Stop fences a delayed write', async () => {
   const previous=process.env.TTS_SERVICE_URL;
   const server=createServer((req,res)=>{req.resume();req.on('end',()=>res.end(Buffer.alloc(8000)));});

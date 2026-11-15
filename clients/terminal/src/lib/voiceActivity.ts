@@ -46,6 +46,13 @@ const voiceProgress = {
   preparing_speech: { label: 'Đang chuẩn bị giọng nói', title: 'Câu trả lời đã sẵn sàng; bot đang chuẩn bị phát.' },
 } as const;
 
+const voiceRecovery = {
+  no_input: { label: 'Chờ bạn gọi lại', title: 'Chưa nhận thêm câu trả lời trong lượt chờ. TINA đã trở về chờ gọi tên.' },
+  dialogue_paused: { label: 'Tạm dừng hỏi lại', title: 'Đã hỏi lại hai lần. Gọi TINA kèm thông tin cụ thể khi muốn tiếp tục.' },
+  answer_failed: { label: 'Chưa lấy được câu trả lời', title: 'Kiểm tra model, dịch vụ trả lời và quyền nguồn. Câu hỏi rõ không cần nói lại chỉ vì dịch vụ gặp lỗi.' },
+  playback_failed: { label: 'Không phát được audio', title: 'Câu trả lời có thể đã được tạo. Kiểm tra mic/TTS của bot; audio không tự phát lại.' },
+} as const;
+
 export function voiceActivityStatus(value: unknown, now = Date.now(), ended = false): { label: string; title: string } {
   const phase = voiceActivity(value, now, ended);
   const body = record(value), runtime = record(body.runtime), policy = record(body.policy), progress = record(runtime.progress);
@@ -57,6 +64,15 @@ export function voiceActivityStatus(value: unknown, now = Date.now(), ended = fa
       && typeof progress.observed_at_ms === 'number' && Number.isFinite(progress.observed_at_ms)
       && now - progress.observed_at_ms >= 0 && now - progress.observed_at_ms < 180_000) {
     return voiceProgress[progress.stage as keyof typeof voiceProgress];
+  }
+  const diagnostic = record(runtime.diagnostic);
+  if ((phase === 'LISTENING' || phase === 'QUIET') && typeof diagnostic.code === 'string'
+      && Object.prototype.hasOwnProperty.call(voiceRecovery, diagnostic.code)
+      && typeof diagnostic.session_uid === 'string' && diagnostic.session_uid === runtime.session_uid
+      && typeof diagnostic.observed_at_ms === 'number' && Number.isFinite(diagnostic.observed_at_ms)
+      && now - diagnostic.observed_at_ms >= 0 && now - diagnostic.observed_at_ms < VOICE_ACTIVITY_TTL
+      && typeof diagnostic.expires_at_ms === 'number' && Number.isFinite(diagnostic.expires_at_ms) && diagnostic.expires_at_ms > now) {
+    return voiceRecovery[diagnostic.code as keyof typeof voiceRecovery];
   }
   return voiceActivities[phase];
 }

@@ -1,6 +1,7 @@
 import { groupSegments, type TranscriptSegment } from './transcript-rendering';
 import { translationSegments, type TranscriptLanguage, type TranslationGroup, type PhraseTranslation } from './translation';
 import { replyLabel, type VoiceReply, type VoiceSources } from './voice-replies';
+import {formatTranscript} from '../../../packages/transcript-rendering/src/format';
 
 type Segment = TranscriptSegment & { speaker_key?: string; translation?: PhraseTranslation };
 const identity = (s: Segment): string => s.segment_id || `${s.speaker_key || s.speaker || ''}:${s.absolute_start_time}`;
@@ -105,8 +106,12 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
         for (const segment of group.segments) {
           const id = identity(segment); activeSpans.add(id);
           let span = spans.get(id); if (!span) { span = element('span', 'transcript-segment'); spans.set(id, span); }
+          const display=formatTranscript(segment.text,segment.completed!==false,segment.translation?.sourceParts);
+          if(display.changes.length){span.dataset.asrFormat=display.version;span.dataset.asrFormatChanges=JSON.stringify(display.changes);}
+          else {delete span.dataset.asrFormat;delete span.dataset.asrFormatChanges;}
           if (language === 'vi') {
-            text(span, segment.text.trim() + ' ');
+            if(span.classList.contains('segment-bilingual'))span.replaceChildren();
+            text(span, display.text.trim() + ' ');
             originals.delete(id); translations.delete(id);
             span.classList.remove('segment-bilingual');
           } else {
@@ -120,7 +125,7 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
             let pendingTranslation = segment.completed === false ? 'Chờ đoạn nói hoàn tất…' : paused ? 'Chưa dịch được · bản gốc vẫn được giữ' : segment.translation?.ready ? 'Đang dịch…' : 'Đang gom câu…';
             if (segment.completed !== false && segment.translation?.status === 'failed') pendingTranslation = 'Chưa dịch được đoạn này · bấm Thử lại';
             if (segment.completed !== false && segment.translation?.status === 'retrying') pendingTranslation = 'Đoạn này đang chờ thử lại…';
-            text(original, segment.text.trim()); original.hidden = language === 'en' && !!result;
+            text(original, display.text.trim()); original.hidden = language === 'en' && !!result;
             text(english, `EN  ${result || pendingTranslation}`);
           }
           (segment.completed === false ? pending : confirmed).push(span);
