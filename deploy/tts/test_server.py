@@ -16,6 +16,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from server import SpeechServer
+import engine
+import server as tts_server
+
+# Model-free tests exercise voice allowlisting without installing the VieNeu SDK.
+_test_voices = lambda: [
+    {"id": name, "label": name, "region": ""} for name in ("Trúc Ly", "Mai Anh")
+]
+engine.preset_voices = tts_server.preset_voices = _test_voices
 
 TOKEN = "test-only-" + "x" * 40
 
