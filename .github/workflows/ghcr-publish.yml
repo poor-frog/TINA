@@ -1,21 +1,47 @@
 name: TINA - Build and Push GHCR
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - demo/aws
-    paths:
-      - ".github/workflows/ghcr-publish.yml"
+  workflow_run:
+    workflows: [gates]
+    types: [completed]
+    branches: [main]
 
-permissions:
-  contents: read
-  packages: write
+permissions: {}
 
 jobs:
-  publish:
-    if: github.ref == 'refs/heads/demo/aws'
+  revision:
+    if: >-
+      github.repository == 'poor-frog/TINA' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.main.outputs.sha }}
+    steps:
+      - name: Select tested main commit
+        id: main
+        env:
+          BUILD_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$BUILD_SHA" == "$main_sha" ]]; then
+            echo "sha=$BUILD_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipping $BUILD_SHA because main is at $main_sha."
+          fi
+
+  build:
+    needs: revision
+    if: needs.revision.outputs.sha != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     strategy:
       fail-fast: false
@@ -70,6 +96,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.revision.outputs.sha }}
           persist-credentials: false
 
       - name: Prepare Docker build source
@@ -101,7 +128,67 @@ jobs:
           build-args: ${{ matrix.build_args }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          tags: |
-            ghcr.io/poor-frog/tina-${{ matrix.name }}:demo
-            ghcr.io/poor-frog/tina-${{ matrix.name }}:${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.revision.outputs.sha }}
+          tags: ghcr.io/poor-frog/tina-${{ matrix.name }}:${{ needs.revision.outputs.sha }}
+
+  extras:
+    needs: revision
+    if: needs.revision.outputs.sha != ''
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/ghcr-publish-extras.yml
+    with:
+      revision: ${{ needs.revision.outputs.sha }}
+
+  promote:
+    name: Update GHCR demo tags
+    needs: [revision, build, extras]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: tina-ghcr-demo
+      queue: max
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag the complete image set
+        env:
+          BUILD_SHA: ${{ needs.revision.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          services=(
+            terminal gateway meeting-api agent-api admin-api runtime agent-worker
+            mcp flows dashboard agent-reach bot gipformer viegem
+          )
+          sources=()
+          for service in "${services[@]}"; do
+            image="ghcr.io/poor-frog/tina-$service"
+            digest=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$image:$BUILD_SHA")
+            if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo "::error::Could not resolve $image:$BUILD_SHA"
+              exit 1
+            fi
+            sources+=("$image@$digest")
+          done
+
+          main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$BUILD_SHA" != "$main_sha" ]]; then
+            echo "Skipping demo tags for $BUILD_SHA because main is at $main_sha."
+            exit 0
+          fi
+
+          for source in "${sources[@]}"; do
+            docker buildx imagetools create --prefer-index=false --tag "${source%@*}:demo" "$source"
+          done

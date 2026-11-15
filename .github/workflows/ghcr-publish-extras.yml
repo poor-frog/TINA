@@ -1,11 +1,11 @@
 name: TINA - GHCR Bot and ASR
 
 on:
-  workflow_dispatch:
-  push:
-    branches: [demo/aws]
-    paths:
-      - '.github/workflows/ghcr-publish-extras.yml'
+  workflow_call:
+    inputs:
+      revision:
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,11 +13,11 @@ permissions:
 
 jobs:
   bot:
-    if: github.ref == 'refs/heads/demo/aws'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.revision }}
           persist-credentials: false
       - name: Free disk space for Playwright bot
         run: |
@@ -35,22 +35,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build base and Meeting Bot (same local Docker daemon)
+        env:
+          BUILD_SHA: ${{ inputs.revision }}
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/tina-source"
           docker build -f core/meetings/modules/join/Dockerfile.env \
             -t tina/meet-join-env:dev core/meetings/modules/join
           docker build -f core/meetings/services/bot/Dockerfile \
-            --build-arg TINA_IMAGE_VERSION="$GITHUB_SHA" \
+            --build-arg TINA_IMAGE_VERSION="$BUILD_SHA" \
             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
-            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-            -t ghcr.io/poor-frog/tina-bot:"$GITHUB_SHA" .
-          docker tag ghcr.io/poor-frog/tina-bot:"$GITHUB_SHA" ghcr.io/poor-frog/tina-bot:demo
-          docker push ghcr.io/poor-frog/tina-bot:"$GITHUB_SHA"
-          docker push ghcr.io/poor-frog/tina-bot:demo
+            --label "org.opencontainers.image.revision=$BUILD_SHA" \
+            -t ghcr.io/poor-frog/tina-bot:"$BUILD_SHA" .
+          docker push ghcr.io/poor-frog/tina-bot:"$BUILD_SHA"
 
   asr:
-    if: github.ref == 'refs/heads/demo/aws'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -63,6 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.revision }}
           persist-credentials: false
       - name: Prepare source without env secrets
         run: |
@@ -84,7 +84,5 @@ jobs:
           push: true
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          tags: |
-            ghcr.io/poor-frog/tina-${{ matrix.name }}:demo
-            ghcr.io/poor-frog/tina-${{ matrix.name }}:${{ github.sha }}
+            org.opencontainers.image.revision=${{ inputs.revision }}
+          tags: ghcr.io/poor-frog/tina-${{ matrix.name }}:${{ inputs.revision }}
