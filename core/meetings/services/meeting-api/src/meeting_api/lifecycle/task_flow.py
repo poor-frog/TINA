@@ -12,7 +12,7 @@ class TaskFlowStore:
     def __init__(self, redis, playback):
         self.redis, self.playback = redis, playback
 
-    async def context(self, mid, session, revision, speaker, requested):
+    async def context(self, mid, session: str, revision, speaker, requested):
         if not speaker or self.playback is None:
             return None
         key = f'meeting:voice:{mid}:{session}:task-flow:{revision}:{speaker}'

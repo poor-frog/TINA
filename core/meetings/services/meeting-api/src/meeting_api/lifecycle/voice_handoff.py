@@ -61,7 +61,7 @@ class VoiceHandoffs:
     def key(self,mid,rid): return f'meeting:voice:{mid}:handoff:{rid}'
     def index(self,mid): return f'meeting:voice:{mid}:handoff-latest'
 
-    async def stage(self,mid,session,revision,request_id,question,result,history,flow,proposal,lock,holder):
+    async def stage(self,mid,session: str,revision,request_id,question,result,history,flow,proposal,lock,holder):
         if result.get('reason') not in ELIGIBLE or self.playback is None:return
         state=proposal['state'] if flow else None
         if state and not state.get('utterances'):return
@@ -85,7 +85,7 @@ class VoiceHandoffs:
                 await pipe.execute()
             except WatchError:raise HTTPException(409,'Voice turn changed') from None
 
-    async def read(self,mid,rid,revision,session=None):
+    async def read(self,mid,rid,revision,session: str | None = None):
         raw=await self.redis.get(self.key(mid,rid))
         if not raw:raise HTTPException(409,'Voice handoff expired')
         value=json.loads(raw)
@@ -107,7 +107,7 @@ class VoiceHandoffs:
                     raise HTTPException(409,'Task conversation changed')
         return value
 
-    async def hint(self,mid,revision,session,runtime):
+    async def hint(self,mid,revision,session: str | None,runtime):
         if runtime.get('state') not in ('LISTENING','QUIET','ERROR'):return None
         rid=await self.redis.get(self.index(mid))
         if isinstance(rid,bytes):rid=rid.decode()

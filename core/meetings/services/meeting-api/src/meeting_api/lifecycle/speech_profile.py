@@ -25,7 +25,7 @@ def sign_profile(voice='auto',pronunciations=None,meeting_id=None,session=None):
     return payload+'.'+hmac.new(key.encode(),b'tina-speech.v1:'+payload.encode(),'sha256').hexdigest()
 
 
-async def room_profile(row,session,redis,client_factory):
+async def room_profile(row,session: str,redis,client_factory):
     key=f'meeting:voice:{row["id"]}:{session}:speech-profile'
     cached=await redis.get(key)
     if cached is not None:
