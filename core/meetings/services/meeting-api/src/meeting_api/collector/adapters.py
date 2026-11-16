@@ -64,7 +64,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _build_share_grant(mode: str, allowed_emails, expires_in_sec: int) -> "tuple[dict, str]":
+def _build_share_grant(mode: str, allowed_emails, expires_in_sec: int, include_recordings=False) -> "tuple[dict, str]":
     """The share-grant record and its one-time secret. ONE definition, because there are now two
     ways to address the meeting it is minted on — the (platform, native) pair and the ROW id — and
     two copies of the hash-at-rest shape would be two places to get the hashing wrong."""
@@ -78,8 +78,26 @@ def _build_share_grant(mode: str, allowed_emails, expires_in_sec: int) -> "tuple
         "allowed_emails": list(allowed_emails or []),
         "expires_at": (_now() + timedelta(seconds=int(expires_in_sec))).isoformat(),
         "revoked": False,
+        "include_recordings": include_recordings,
     }
     return grant, secret
+
+
+def recording_share_allows(data: dict, user_id: int) -> bool:
+    """Recording access requires a redeemed, live, explicitly recording-enabled grant."""
+    for grant in data.get("share_grants", []):
+        if not isinstance(grant, dict):
+            continue
+        if (grant.get("include_recordings") is not True or grant.get("mode") != "restricted"
+                or grant.get("revoked") or user_id not in grant.get("recording_viewers", [])):
+            continue
+        try:
+            expires = datetime.fromisoformat(grant["expires_at"].replace("Z", "+00:00"))
+            if expires.tzinfo is not None and expires > _now():
+                return True
+        except (KeyError, TypeError, ValueError):
+            continue
+    return False
 
 
 def _iso_utc(dt) -> Optional[str]:
@@ -1166,7 +1184,7 @@ class SqlAlchemyTranscriptStore:
             await db.commit()
             return workspace_id
 
-    async def _mint_share_on(self, stmt, *, mode, allowed_emails, expires_in_sec) -> "Optional[dict]":
+    async def _mint_share_on(self, stmt, *, mode, allowed_emails, expires_in_sec, include_recordings=False) -> "Optional[dict]":
         """Mint a grant onto whichever ONE row ``stmt`` selects. The two public mints differ only in
         how they address the meeting; everything after the row is identical."""
         from sqlalchemy.orm.attributes import flag_modified
@@ -1175,7 +1193,7 @@ class SqlAlchemyTranscriptStore:
             meeting = (await db.execute(stmt)).scalars().first()
             if not meeting:
                 return None
-            grant, secret = _build_share_grant(mode, allowed_emails, expires_in_sec)
+            grant, secret = _build_share_grant(mode, allowed_emails, expires_in_sec, include_recordings)
             data = dict(meeting.data) if isinstance(meeting.data, dict) else {}
             data["share_grants"] = list(data.get("share_grants", [])) + [grant]
             meeting.data = data
@@ -1185,7 +1203,7 @@ class SqlAlchemyTranscriptStore:
                     "mode": mode, "expires_at": grant["expires_at"]}
 
     async def mint_transcript_share(self, user_id, platform, native_meeting_id, *,
-                                    mode="open", allowed_emails=None, expires_in_sec=86400) -> "Optional[dict]":
+                                    mode="open", allowed_emails=None, expires_in_sec=86400, include_recordings=False) -> "Optional[dict]":
         """OWNER-scoped: mint an INDEPENDENT transcript share grant (no workspace needed). Stored in
         ``data.share_grants[]`` as {id, secret_hash, mode, allowed_emails, expires_at, revoked} — only the
         HASH, never the token. Returns {id, token, ...} ONCE (token = ``<meeting_id>.<secret>`` so redeem
@@ -1205,10 +1223,10 @@ class SqlAlchemyTranscriptStore:
                 Meeting.user_id == user_id, Meeting.platform == platform,
                 Meeting.platform_specific_id == native_meeting_id,
             ).order_by(Meeting.created_at.desc()).limit(1).with_for_update(),
-            mode=mode, allowed_emails=allowed_emails, expires_in_sec=expires_in_sec)
+            mode=mode, allowed_emails=allowed_emails, expires_in_sec=expires_in_sec, include_recordings=include_recordings)
 
     async def mint_transcript_share_by_id(self, user_id, meeting_id, *,
-                                          mode="open", allowed_emails=None, expires_in_sec=86400) -> "Optional[dict]":
+                                          mode="open", allowed_emails=None, expires_in_sec=86400, include_recordings=False) -> "Optional[dict]":
         """OWNER-scoped mint addressed by the ROW's primary key — the identity that always exists.
 
         Same grant, same hash-at-rest, same one-time token shape as the pair-keyed mint above; the
@@ -1228,7 +1246,7 @@ class SqlAlchemyTranscriptStore:
             select(Meeting).where(
                 Meeting.id == mid, Meeting.user_id == user_id,
             ).limit(1).with_for_update(),
-            mode=mode, allowed_emails=allowed_emails, expires_in_sec=expires_in_sec)
+            mode=mode, allowed_emails=allowed_emails, expires_in_sec=expires_in_sec, include_recordings=include_recordings)
 
     async def redeem_transcript_share(self, user_id, user_email, token) -> "Optional[dict]":
         """Redeem a transcript share token (any authenticated user) → grants THIS user subscribe access to
@@ -1265,6 +1283,10 @@ class SqlAlchemyTranscriptStore:
             if user_id not in viewers:
                 viewers.append(user_id)
             data["transcript_viewers"] = viewers
+            if grant.get("include_recordings") is True:
+                recording_viewers = grant.setdefault("recording_viewers", [])
+                if user_id not in recording_viewers:
+                    recording_viewers.append(user_id)
             meeting.data = data
             flag_modified(meeting, "data")
             await db.commit()
@@ -1831,6 +1853,8 @@ class SqlAlchemyTranscriptStore:
             # puts it. Both writes therefore go through `data`, and both need flag_modified.
             data = dict(meeting.data) if isinstance(meeting.data, dict) else {}
             touched = False
+            if data.get("artifact_deletion") and metadata and "tina_summary" in metadata:
+                return None
 
             if title is not None:
                 cleaned = (title or "").strip()[:512]
@@ -2059,6 +2083,10 @@ class SqlAlchemyTranscriptStore:
             data = dict(meeting.data) if isinstance(meeting.data, dict) else {}
             for key in ("canonical_transcript", "meeting_memory", "canonical_notes", "stt_replicas", "stt_foundation", "stt_instance_id", "recordings", "processed", "notes", "share_grants", "transcript_viewers", "transcript_refinement", "transcript_diarization", "transcript_alignment", "transcript_revision_sequences", "transcript_outbox", "speaker_registry", "voice_replies"):
                 data.pop(key, None)
+            metadata = dict(data.get("metadata") or {})
+            metadata.pop("tina_summary", None)
+            if "metadata" in data:
+                data["metadata"] = metadata
             data["artifact_deletion"] = {
                 "state": "completed",
                 "completed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),

@@ -23,6 +23,7 @@ interface MeetingRowDTO {
     docs?: { workspace: string; path: string; title?: string; kind?: string }[];
     participants?: string[];
     notes?: string;
+    metadata?: { tina_summary?: string };
     languages?: string[];
     calendar_sources?: { name?: string }[];
     status_transition?: { from?: string; to?: string; timestamp?: string; reason?: string }[];
@@ -221,6 +222,7 @@ function toMock(d: MeetingRowDTO): MeetingMock {
     calendar_uid: d.data?.calendar_uid ?? undefined,
     attendees: d.data?.attendees ?? undefined,
     notes: d.data?.notes ?? undefined,
+    summary: typeof d.data?.metadata?.tina_summary === "string" ? d.data.metadata.tina_summary : undefined,
     languages: d.data?.languages ?? undefined,
     calendar_sources: (d.data?.calendar_sources ?? []).filter((source): source is { name: string } => !!source && typeof source.name === "string").map((source) => ({ name: source.name })),
     status_transition: statusTransitions,
@@ -272,6 +274,7 @@ async function snapshot() {
       attendees: item.attendees,
       participants: item.participants,
       notes: item.notes,
+      summary: item.summary,
       languages: item.languages,
       calendarSources: item.calendar_sources,
       statusTransitions: item.status_transition,

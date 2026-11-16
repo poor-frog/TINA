@@ -49,3 +49,5 @@ flowchart LR
   agent_worker ==>|"transcript -> external-saas"| completion_provider
   transcription["transcription"]
   discord_connector ==>|"audio -> tenant-hosted"| transcription
+  mail_relay["configured SMTP relay"]
+  flows_worker ==>|"notification -> operator-configured"| mail_relay

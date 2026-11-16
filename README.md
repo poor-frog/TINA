@@ -20,6 +20,10 @@ Run the complete system on infrastructure you control. TINA has no hosted API or
 
 ## Transcript translation
 
+After a meeting ends and its summary is ready, the optional automation stack can email each known
+attendee a Vietnamese thank-you message with links to the saved summary and recording. Access is
+bound to the recipient's signed-in email. See [post-meeting email setup](core/flows/README.md#email-after-a-meeting).
+
 Meeting Bot transcripts in Terminal and the Chrome extension share a language dropdown:
 **Tiếng Việt**, **English**, and **Song ngữ** (the default). English/bilingual views use the
 saved **Meeting model** in Settings → Models. Provider credentials remain on the server.

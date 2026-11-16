@@ -34,6 +34,7 @@ export interface MeetingMock {
   calendar_uid?: string;      // calendar-import provenance (data.calendar_uid)
   attendees?: Attendee[];     // invited humans from the calendar (data.attendees)
   notes?: string;
+  summary?: string;
   languages?: string[];
   calendar_sources?: { name: string }[];
   status_transition?: MeetingStatusTransition[];

@@ -1216,6 +1216,16 @@ def build_router(
         )
         return JSONResponse(content={"workspace_id": bound})
 
+    def _recording_share_payload(payload, mode) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        value = payload.get("include_recordings", False)
+        if not isinstance(value, bool):
+            raise HTTPException(422, "include_recordings must be a boolean")
+        if value and mode != "restricted":
+            raise HTTPException(422, "Recording shares must be restricted to recipient emails")
+        return value
+
     def _share_payload(payload) -> "tuple[str, list, int]":
         """mode | allowed_emails | ttl out of a share-mint body, defaulted and VALIDATED the same
         way for both address shapes.
@@ -1300,8 +1310,10 @@ def build_router(
         except Exception:
             payload = {}
         mode, emails, ttl = _share_payload(payload)
+        include_recordings = _recording_share_payload(payload, mode)
         minted = await store.mint_transcript_share_by_id(
             user_id, meeting_id, mode=mode, allowed_emails=emails, expires_in_sec=ttl,
+            include_recordings=include_recordings,
         )
         if minted is None:
             log_event(
@@ -1332,8 +1344,10 @@ def build_router(
         except Exception:
             payload = {}
         mode, emails, ttl = _share_payload(payload)
+        include_recordings = _recording_share_payload(payload, mode)
         minted = await store.mint_transcript_share(
             user_id, platform, native_meeting_id, mode=mode, allowed_emails=emails, expires_in_sec=ttl,
+            include_recordings=include_recordings,
         )
         if minted is None:
             log_event(

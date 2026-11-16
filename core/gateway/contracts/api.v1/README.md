@@ -42,6 +42,13 @@ Clients should treat **401 = re-authenticate** (key bad/absent/expired) and **40
 permitted** (wrong scope, or admin route). The stack-test conformance suite asserts these.
 
 ## Re-verify / re-capture
+
+The owner-scoped `/meetings/{meeting_id}/share` extension and its platform/native alias accept
+`include_recordings: true` only with `mode: restricted`. The additive request contract is
+[`meeting-share.schema.json`](meeting-share.schema.json); it does not change the frozen 1.5.0
+capture below. The recipient must sign in with an allowed email and redeem the token before reading
+recordings. Recording reads recheck that redeemed grant's expiry/revocation; delete and upload
+remain owner/producer-only. Omitted/false preserves transcript-only access.
 Compare the frozen document with the local self-hosted gateway to check for drift:
 
 ```bash

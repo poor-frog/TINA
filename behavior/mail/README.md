@@ -18,8 +18,22 @@ mails correctly before anyone has edited anything.
     ---
     <the body, substitutions allowed>
 
-Plain text. One link at most, and the step appends it — a template never writes a URL, because a
+Plain text. Legacy templates have one link at most, and the step appends it — a template never writes a URL, because a
 link that a template could write is a link anyone who can edit a file can point anywhere.
+
+`meeting-followup.md` is the post-meeting notification used by flow version 5. It thanks the recipient
+and receives `{{meeting}}`, `{{summary_link}}` and `{{recording_link}}`. Both links are constructed by
+the step from the configured Terminal origin and the same recipient-restricted share. The template
+places them under separate labels. Its matching baked default is in `mailtext.DEFAULTS`.
+
+The same copy is also rendered as branded HTML for the follow-up. Paragraphs stay escaped text;
+the two known link paragraphs become labelled buttons. The shell is
+`core/flows/src/flows_steps/templates/meeting-followup.html`; SMTP includes both the HTML and the
+original plain-text body as alternatives. The display name is Tina; the original logo is included
+as an inline PNG attachment, with no external image requests. The light shell uses white space,
+Tina green and two simple buttons. Its React Email source and export commands live in
+`core/flows/email-design/README.md`. Editing this Markdown still
+changes the visible prose; the two artifact links use fixed, descriptive button labels.
 
 ## The template this cut ships
 
@@ -27,7 +41,8 @@ link that a template could write is a link anyone who can edit a file can point 
 |---|---|---|
 | `attendee-head.md` | **a stranger** — an attendee who is not a user | after the meeting, above the shared report |
 
-**One file, and that is the whole directory.** Two others are named throughout this README and
+The two files are `attendee-head.md` (legacy flows) and `meeting-followup.md` (version 5).
+Two others are named throughout this README and
 neither is here, because neither is a template in this cut — said plainly rather than left for the
 next reader to discover:
 
