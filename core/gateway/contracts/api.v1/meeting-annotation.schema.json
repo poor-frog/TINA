@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:api.v1:meeting-annotation",
+  "title": "Owner-scoped meeting annotation extension",
+  "description": "Additive request shape for POST /meetings/{meeting_id}/annotate and its platform/native alias. Existing title and metadata semantics are preserved.",
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string",
+      "maxLength": 6000,
+      "description": "Report text saved at data.summary, outside the merged metadata budget. Empty string clears it. Writes after artifact deletion are refused."
+    }
+  }
+}

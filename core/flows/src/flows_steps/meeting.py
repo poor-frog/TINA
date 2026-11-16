@@ -22,8 +22,13 @@ from .common import http, meetings_door, setting, user_api_key
 
 
 def meeting_row(uid: str, meeting_id, native: str | None = None):
-    """This user's meeting row from the gateway, or None. One read, several callers."""
+    """Read a row directly by id; legacy native references fall back to the list."""
     try:
+        if str(meeting_id or "").isdigit():
+            status, row = http("GET", f"{meetings_door()}/meetings/{int(meeting_id)}",
+                               {"X-API-Key": user_api_key(str(uid))})
+            if status == 200 and isinstance(row, dict) and str(row.get("id")) == str(meeting_id):
+                return row
         _st, body = http("GET", f"{meetings_door()}/meetings", {"X-API-Key": user_api_key(str(uid))})
     except StepError:
         return None

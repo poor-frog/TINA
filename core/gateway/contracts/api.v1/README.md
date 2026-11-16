@@ -41,7 +41,7 @@ The gateway authenticates `X-API-Key` against admin-api and **fails closed**. Th
 Clients should treat **401 = re-authenticate** (key bad/absent/expired) and **403 = authorized but not
 permitted** (wrong scope, or admin route). The stack-test conformance suite asserts these.
 
-## Re-verify / re-capture
+## Meeting artifact extensions
 
 The owner-scoped `/meetings/{meeting_id}/share` extension and its platform/native alias accept
 `include_recordings: true` only with `mode: restricted`. The additive request contract is
@@ -49,6 +49,15 @@ The owner-scoped `/meetings/{meeting_id}/share` extension and its platform/nativ
 capture below. The recipient must sign in with an allowed email and redeem the token before reading
 recordings. Recording reads recheck that redeemed grant's expiry/revocation; delete and upload
 remain owner/producer-only. Omitted/false preserves transcript-only access.
+
+Both owner-scoped annotate routes accept optional `summary` text, bounded to 6000 characters and
+stored at `data.summary`. An empty string clears it; null, other types and longer text return 422.
+This report field is separate from arbitrary `metadata`, whose merged 16 KiB limit is unchanged.
+Artifact deletion clears the summary and rejects subsequent summary writes. See
+[`meeting-annotation.schema.json`](meeting-annotation.schema.json) for this additive request shape.
+
+## Re-verify / re-capture
+
 Compare the frozen document with the local self-hosted gateway to check for drift:
 
 ```bash

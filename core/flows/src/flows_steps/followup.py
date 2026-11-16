@@ -32,13 +32,15 @@ def send(ctx):
     title = " ".join(str(data.get("title") or ctx.refs.get("title") or ctx.refs.get("native") or "Cuộc họp").split())[:512]
     participants = [organizer]
     attendees = list(data.get("attendees") or []) + list(ctx.refs.get("participants") or [])
+    declined = {_address(a.get("email")) for a in attendees
+                if isinstance(a, dict) and str(a.get("partstat", "")).upper() == "DECLINED"}
     for attendee in attendees:
         if isinstance(attendee, dict):
             if str(attendee.get("partstat", "")).upper() == "DECLINED":
                 continue
             attendee = attendee.get("email")
         address = _address(attendee)
-        if address and address not in participants:
+        if address and address not in declined and address not in participants:
             participants.append(address)
     mailbox = _address(mailtext.mailbox_address())
     participants = [a for a in participants if a != mailbox]
@@ -53,7 +55,7 @@ def send(ctx):
     if not ctx.scratch.get("summary_saved"):
         status, _ = common.http(
             "POST", f"{common.meetings_door()}/meetings/{mid}/annotate",
-            {"X-API-Key": common.user_api_key(uid)}, {"metadata": {"tina_summary": report}})
+            {"X-API-Key": common.user_api_key(uid)}, {"summary": report})
         if status != 200:
             raise StepError("Cannot save meeting summary", retryable=status >= 500)
         ctx.scratch["summary_saved"] = True

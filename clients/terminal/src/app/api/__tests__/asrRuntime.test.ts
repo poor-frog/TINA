@@ -8,6 +8,7 @@ beforeEach(() => {
   vi.mocked(currentUser).mockResolvedValue({ ok: true, userId: "7", apiKey: "private" } as never);
   vi.stubEnv("TINA_ASR_CONTROL_URL", "http://host.test:18007");
   vi.stubEnv("TINA_INTERNAL_API_SECRET", "internal-private");
+  vi.stubEnv("NEXTAUTH_URL", "");
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
 const request = (payload: object, origin = "http://terminal.test") => new NextRequest("http://terminal.test/api/transcription/runtime", {
@@ -37,6 +38,23 @@ it("accepts the browser's public loopback port behind Docker while refusing a di
   expect((await POST(make("http://localhost:23000"))).status).toBe(200);
   expect((await POST(make("http://127.0.0.1:23001"))).status).toBe(403);
 });
+it("accepts the configured HTTPS origin through an HTTP proxy", async () => {
+  vi.stubEnv("NEXTAUTH_URL", "https://terminal.test");
+  const fetch = vi.fn().mockImplementation(() => Promise.resolve(Response.json({ account: { backend: "viegem" } })));
+  vi.stubGlobal("fetch", fetch);
+  const make = (origin: string, host = "terminal.test", site = "same-origin") =>
+    new NextRequest("http://0.0.0.0:3000/api/transcription/runtime", {
+      method: "POST", headers: { host, origin, "sec-fetch-site": site },
+      body: JSON.stringify({ backend: "viegem", enabled: true, revision: 0 }),
+    });
+  expect((await POST(make("https://terminal.test"))).status).toBe(200);
+  expect((await POST(make("http://terminal.test"))).status).toBe(403);
+  expect((await POST(make("https://attacker.test"))).status).toBe(403);
+  expect((await POST(make("https://terminal.test", "other.test"))).status).toBe(403);
+  expect((await POST(make("https://terminal.test", "terminal.test", "cross-site"))).status).toBe(403);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
 it("bounds streamed request bodies before parsing them", async () => {
   const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
   const request = new NextRequest("http://terminal.test/api/transcription/runtime", { method: "POST",

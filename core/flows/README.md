@@ -3,11 +3,17 @@
 ## Email after a meeting
 
 New `meeting.completed` events use `post_meeting` version 5. Once the existing summary job succeeds,
-`email_meeting_followup` saves its report as the meeting annotation `metadata.tina_summary`, then
+`email_meeting_followup` saves its report as the bounded meeting annotation `data.summary`, then
 sends a Vietnamese thank-you email with separate summary and recording links. Each calendar/invite
 email is notified individually, including other domains. Duplicates, declined invitations, invalid
 addresses and the service mailbox are excluded. No participant emails are inferred from speaker
 names; an ad hoc meeting without stored invite emails can notify only its owner.
+
+The report has a separate 6000-character field so a Vietnamese summary cannot consume the existing
+16 KiB metadata budget. Meeting lookup uses the row-id detail endpoint rather than the first list
+page. Declined invite addresses stay excluded even if the completion event repeats them.
+Terminal can still read legacy `metadata.tina_summary`; the next summary write removes that old
+copy while preserving unrelated metadata, so clearing the summary cannot reveal stale text again.
 
 Recipients sign in using the email that received the message. Attendee links use recipient-restricted
 shares with explicit read-only recording access; existing transcript-only links gain no recording

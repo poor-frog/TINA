@@ -48,7 +48,7 @@ def test_all_known_emails_get_thanks_and_two_working_meeting_links(world):
     assert isinstance(result, Done) and result.result["sent"] == 2
     assert [m["to"] for m in channel.sent] == ["anna@bank.test", "ben@outside.test"]
     assert shares == ["ben@outside.test"]
-    assert writes == [{"metadata": {"tina_summary": ctx.prior["process_meeting"]["report"]}}]
+    assert writes == [{"summary": ctx.prior["process_meeting"]["report"]}]
     for message in channel.sent:
         assert "Cảm ơn bạn đã sử dụng Tina" in message["body"]
         assert 'lang="vi"' in message["html_body"]
@@ -108,6 +108,32 @@ def test_no_email_is_sent_when_the_summary_cannot_be_saved(world, monkeypatch):
     with pytest.raises(StepError, match="save meeting summary"):
         reg.steps["email_meeting_followup"](ctx)
     assert channel.sent == [] and shares == []
+
+
+def test_declined_attendee_cannot_be_reintroduced_by_event_participants(world):
+    reg, channel, ctx, _, shares = world
+    row = meeting.meeting_row("7", 41)
+    row["data"]["attendees"][1]["partstat"] = "DECLINED"
+    ctx.refs["participants"] = ["ben@outside.test"]
+    result = reg.steps["email_meeting_followup"](ctx)
+    assert result.result["sent"] == 1
+    assert [message["to"] for message in channel.sent] == ["anna@bank.test"]
+    assert shares == []
+
+
+def test_meeting_row_does_not_depend_on_the_first_meetings_page(monkeypatch):
+    monkeypatch.setattr(meeting, "meetings_door", lambda: "http://gateway.test")
+    monkeypatch.setattr(meeting, "user_api_key", lambda _: "test-key")
+    target = {"id": 41, "data": {"title": "Older meeting"}}
+    calls = []
+
+    def http(method, url, headers):
+        calls.append(url)
+        return (200, target) if url.endswith("/meetings/41") else (200, {"meetings": [{"id": 42}]})
+
+    monkeypatch.setattr(meeting, "http", http)
+    assert meeting.meeting_row("7", 41) == target
+    assert calls == ["http://gateway.test/meetings/41"]
 
 
 def test_new_post_meeting_version_sends_before_workspace_delivery(world):

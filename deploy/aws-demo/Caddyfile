@@ -1,0 +1,21 @@
+tinabot.duckdns.org {
+    encode zstd gzip
+
+    @extension {
+        path /extension-api/meetings
+        path /extension-api/meetings/*
+        path /extension-api/bots
+        path /extension-api/bots/*
+        path /extension-api/transcripts/*
+        path /extension-api/agent/meeting-translations/*
+    }
+
+    handle @extension {
+        uri strip_prefix /extension-api
+        reverse_proxy 127.0.0.1:18056
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:13000
+    }
+}

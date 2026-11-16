@@ -799,14 +799,14 @@ class InMemoryTranscriptStore:
         which is exactly the property that makes skipping the real build safe."""
         return {"status": "skipped", "reason": "in-memory store"}
 
-    async def annotate_meeting(self, user_id, meeting_id, *, title=None, metadata=None):
+    async def annotate_meeting(self, user_id, meeting_id, *, title=None, metadata=None, summary=None):
         """Caller-owned annotations on a row in ANY status — mirrors the adapter. No status check:
         nothing written here is read by the dispatch pipeline, so there is no FSM to fight."""
         m = self._meetings.get(meeting_id)
         if m is None or m["user_id"] != user_id:
             return None
         data = m["data"]
-        if data.get("artifact_deletion") and metadata and "tina_summary" in metadata:
+        if data.get("artifact_deletion") and (summary is not None or (metadata and "tina_summary" in metadata)):
             return None
         # `title` lives in the data blob, NOT as a top-level field — mirrors the adapter and
         # update_planned_meeting. Writing it anywhere else persists nothing.
@@ -833,6 +833,14 @@ class InMemoryTranscriptStore:
             if reason:
                 return {"error": "metadata_too_large", "detail": reason}
             data["metadata"] = merged
+        if summary is not None:
+            if isinstance(data.get("metadata"), dict) and "tina_summary" in data["metadata"]:
+                data["metadata"] = dict(data["metadata"])
+                data["metadata"].pop("tina_summary")
+            if summary:
+                data["summary"] = summary
+            else:
+                data.pop("summary", None)
         return self._planned_row(meeting_id)
 
     async def update_planned_meeting(self, user_id, meeting_id, updates):
@@ -960,6 +968,7 @@ class InMemoryTranscriptStore:
         for key in ("canonical_transcript", "meeting_memory", "canonical_notes", "stt_replicas", "stt_foundation", "stt_instance_id", "recordings", "processed", "notes", "share_grants", "transcript_viewers", "transcript_refinement", "transcript_diarization", "transcript_alignment", "transcript_revision_sequences", "transcript_outbox", "speaker_registry", "voice_replies"):
             data.pop(key, None)
         metadata = dict(data.get("metadata") or {})
+        data.pop("summary", None)
         metadata.pop("tina_summary", None)
         if "metadata" in data:
             data["metadata"] = metadata

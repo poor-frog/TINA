@@ -18,7 +18,8 @@ const postBuild = {
       cpSync('assets', `${outdir}/assets`, { recursive: true });
       cpSync(resolve(__dirname, '../../branding/tokens.css'), `${outdir}/assets/tina-tokens.css`);
       const now = new Date();
-      const version = `0.${now.getMonth() + 1}.${now.getDate()}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+      const minuteOfDay = now.getHours() * 60 + now.getMinutes();
+      const version = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}.${minuteOfDay}`;
       const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
       manifest.version = version;
       manifest.version_name = `viewer ${now.toLocaleString('en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}`;

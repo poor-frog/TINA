@@ -352,6 +352,7 @@ class TranscriptStore(Protocol):
         self, user_id: int, meeting_id: int, *,
         title: Optional[str] = None,
         metadata: "Optional[dict]" = None,
+        summary: Optional[str] = None,
     ) -> Optional[dict]:
         """Attach the CALLER's own annotations to a row in ANY status — including one the bot FSM
         owns, and including one already completed.
@@ -365,6 +366,8 @@ class TranscriptStore(Protocol):
         re-arm, re-dispatch or re-route anything — and the moments a description is most worth
         writing are exactly the ones the FSM owns: mid-meeting, and after it ends.
 
+        ``summary`` is bounded report text (6000 characters), stored separately at ``data.summary``;
+        an empty string clears it. Artifact deletion prevents later report writes.
         ``metadata`` is arbitrary caller-owned JSON stored at ``data.metadata``. It ALWAYS merges
         key-wise; a key set to ``None`` deletes that one key. There is deliberately NO whole-object
         replace: every writer shares one API key, so a replace would let a caller destroy keys

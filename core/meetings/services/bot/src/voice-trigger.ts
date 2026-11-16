@@ -157,7 +157,8 @@ export class VoiceTrigger {
     const acoustic = this.acoustic !== undefined;
     // Acoustic evidence authorizes the call; removing a recognized prefix changes only this copy.
     if (acoustic && (!c || c.parts.length === 1 && value.startMs === c.parts[0].startMs)) {
-      const names = [...this.variants, 'hây ti na', 'ti na', 'ti nà ơi', 'ti nà', 'tiên na', 'anh ơi'];
+      const names = [...this.variants, 'hây ti na', 'ti na', 'ti nà ơi', 'ti nà',
+        'tiên na', 'anh ơi', 'kina ơi', 'khi na ơi', 'pina ơi', 'kỳ na ơi'];
       text = invocation(text, names) ?? invocation(text.replace(/^hey\s+/iu, ''), names) ?? text;
     }
     if (!c) {

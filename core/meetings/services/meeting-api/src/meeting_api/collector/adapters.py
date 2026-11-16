@@ -1828,7 +1828,7 @@ class SqlAlchemyTranscriptStore:
             return {"status": "created", "index": name}
 
     async def annotate_meeting(self, user_id, meeting_id, *, title=None,
-                               metadata=None) -> "Optional[dict]":
+                               metadata=None, summary=None) -> "Optional[dict]":
         """Caller-owned annotations on a row in ANY status (see ports.annotate_meeting).
 
         Modelled on ``attach_calendar_source``, not on ``update_planned_meeting``: nothing written
@@ -1853,7 +1853,7 @@ class SqlAlchemyTranscriptStore:
             # puts it. Both writes therefore go through `data`, and both need flag_modified.
             data = dict(meeting.data) if isinstance(meeting.data, dict) else {}
             touched = False
-            if data.get("artifact_deletion") and metadata and "tina_summary" in metadata:
+            if data.get("artifact_deletion") and (summary is not None or (metadata and "tina_summary" in metadata)):
                 return None
 
             if title is not None:
@@ -1885,6 +1885,15 @@ class SqlAlchemyTranscriptStore:
                     return {"error": "metadata_too_large", "detail": reason}
                 data["metadata"] = merged
 
+            if summary is not None:
+                touched = True
+                if isinstance(data.get("metadata"), dict) and "tina_summary" in data["metadata"]:
+                    data["metadata"] = dict(data["metadata"])
+                    data["metadata"].pop("tina_summary")
+                if summary:
+                    data["summary"] = summary
+                else:
+                    data.pop("summary", None)
             if touched:
                 meeting.data = data
                 flag_modified(meeting, "data")
@@ -2084,6 +2093,7 @@ class SqlAlchemyTranscriptStore:
             for key in ("canonical_transcript", "meeting_memory", "canonical_notes", "stt_replicas", "stt_foundation", "stt_instance_id", "recordings", "processed", "notes", "share_grants", "transcript_viewers", "transcript_refinement", "transcript_diarization", "transcript_alignment", "transcript_revision_sequences", "transcript_outbox", "speaker_registry", "voice_replies"):
                 data.pop(key, None)
             metadata = dict(data.get("metadata") or {})
+            data.pop("summary", None)
             metadata.pop("tina_summary", None)
             if "metadata" in data:
                 data["metadata"] = metadata

@@ -39,6 +39,33 @@ Production Terminal sign-in requires configured Google or Microsoft OAuth; see
 [Terminal login](#terminal-login-google-or-microsoft). The deployment mints and prints an API key
 when it is ready; treat it as a secret.
 
+## AWS EC2 demo
+
+The [AWS demo kit](https://github.com/poor-frog/TINA/blob/main/deploy/aws-demo/README.md)
+uses two EC2 instances. Core runs the application services and Caddy. Speech runs
+Gipformer and downloads its model assets on first deployment. Prepare the SSM Parameter
+Store settings and confirm that Speech can reach GHCR and the model repository before
+running the deployment scripts.
+
+The GHCR workflows build the 14 Linux amd64 demo images from the tested `main` commit
+after `gates` succeeds. Each image is published under the full commit SHA. The workflow
+updates the `:demo` tags once all 14 images are available. Run the EC2 deployment scripts
+after that job succeeds to pull the new images.
+
+### Connect the Chrome extension
+
+On the demo instance, Caddy serves Terminal at `https://tinabot.duckdns.org` and forwards
+the selected `/extension-api` paths to the authenticated Gateway on port `18056`. Apply
+the demo Caddyfile on Core, then rebuild and reload the extension in Chrome.
+
+- **Meeting Bot API gateway** defaults to `https://tinabot.duckdns.org/extension-api`.
+- **TINA Terminal URL** defaults to `https://tinabot.duckdns.org`.
+- **API key** uses a key issued by the same TINA instance. The key needs the `bot` scope
+  to send a bot to a meeting.
+
+Saved endpoint settings take precedence. Update them in the extension Settings when
+switching an existing installation to the demo.
+
 ## The stack
 
 | Service | Role |

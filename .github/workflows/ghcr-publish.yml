@@ -1,0 +1,194 @@
+name: TINA - Build and Push GHCR
+
+on:
+  workflow_run:
+    workflows: [gates]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  revision:
+    if: >-
+      github.repository == 'poor-frog/TINA' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.main.outputs.sha }}
+    steps:
+      - name: Select tested main commit
+        id: main
+        env:
+          BUILD_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$BUILD_SHA" == "$main_sha" ]]; then
+            echo "sha=$BUILD_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipping $BUILD_SHA because main is at $main_sha."
+          fi
+
+  build:
+    needs: revision
+    if: needs.revision.outputs.sha != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: terminal
+            context: .
+            dockerfile: clients/terminal/Dockerfile
+
+          - name: gateway
+            context: .
+            dockerfile: core/gateway/services/gateway/Dockerfile
+
+          - name: meeting-api
+            context: .
+            dockerfile: core/meetings/services/meeting-api/Dockerfile
+
+          - name: agent-api
+            context: .
+            dockerfile: core/agent/services/agent-api/Dockerfile
+
+          - name: admin-api
+            context: core/identity/services/admin-api
+            dockerfile: core/identity/services/admin-api/Dockerfile
+
+          - name: runtime
+            context: core/runtime
+            dockerfile: core/runtime/Dockerfile
+
+          - name: agent-worker
+            context: .
+            dockerfile: core/agent/worker/Dockerfile
+
+          - name: mcp
+            context: core/meetings/services/mcp
+            dockerfile: core/meetings/services/mcp/Dockerfile
+
+          - name: flows
+            context: .
+            dockerfile: core/flows/Dockerfile
+
+          - name: dashboard
+            context: .
+            dockerfile: services/dashboard/Dockerfile
+            build_args: TINA_API_URL=http://gateway:8000
+
+          - name: agent-reach
+            context: deploy/agent-reach
+            dockerfile: deploy/agent-reach/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.revision.outputs.sha }}
+          persist-credentials: false
+
+      - name: Prepare Docker build source
+        env:
+          BUILD_SOURCE: ${{ runner.temp }}/tina-build
+        run: |
+          set -euo pipefail
+          mkdir -p "$BUILD_SOURCE"
+          git archive --format=tar HEAD |
+            tar --extract --directory="$BUILD_SOURCE" --exclude='.env' --exclude='.env.*'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ runner.temp }}/tina-build/${{ matrix.context }}
+          file: ${{ runner.temp }}/tina-build/${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          build-args: ${{ matrix.build_args }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.revision.outputs.sha }}
+          tags: ghcr.io/poor-frog/tina-${{ matrix.name }}:${{ needs.revision.outputs.sha }}
+
+  extras:
+    needs: revision
+    if: needs.revision.outputs.sha != ''
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/ghcr-publish-extras.yml
+    with:
+      revision: ${{ needs.revision.outputs.sha }}
+
+  promote:
+    name: Update GHCR demo tags
+    needs: [revision, build, extras]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: tina-ghcr-demo
+      queue: max
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag the complete image set
+        env:
+          BUILD_SHA: ${{ needs.revision.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          services=(
+            terminal gateway meeting-api agent-api admin-api runtime agent-worker
+            mcp flows dashboard agent-reach bot gipformer viegem
+          )
+          sources=()
+          for service in "${services[@]}"; do
+            image="ghcr.io/poor-frog/tina-$service"
+            digest=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$image:$BUILD_SHA")
+            if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo "::error::Could not resolve $image:$BUILD_SHA"
+              exit 1
+            fi
+            sources+=("$image@$digest")
+          done
+
+          main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$BUILD_SHA" != "$main_sha" ]]; then
+            echo "Skipping demo tags for $BUILD_SHA because main is at $main_sha."
+            exit 0
+          fi
+
+          for source in "${sources[@]}"; do
+            docker buildx imagetools create --prefer-index=false --tag "${source%@*}:demo" "$source"
+          done

@@ -226,22 +226,26 @@ export function createGmeetPipeline(opts: GmeetPipelineOptions): GmeetPipeline {
       try{opts.onAudioFrame?.(accepted.frame);}catch(error){opts.onError?.({source:"archive",kind:"write-failed",detail:String(error)});}
       if(!opts.transcribe)return;
       const frame=accepted.frame;
+      const captureMs = frame.sourceCaptureMs;
       const existing=chan.get(channel);
       let energy=0;for(const value of frame.samples)energy+=value*value;
       const voiced=Math.sqrt(energy/frame.samples.length)>=(opts.config?.silenceRmsThreshold ?? .0001);
-      if(!voiced && (!existing || frame.captureMs-existing.lastSpeechMs>300))return;
-      const onset=!existing || frame.captureMs-existing.lastSpeechMs>ONSET_GAP;
+      if(!voiced && (!existing || captureMs-existing.lastSpeechMs>300))return;
+      const onset=!existing || captureMs-existing.lastSpeechMs>ONSET_GAP;
       let readStart=Math.max(0,frame.startSample-(onset?Math.round(timeline.sampleRate*.2):0),frame.endSample-timeline.capacity);
       if(!timeline.read(session,String(channel),readStart,frame.endSample).samples)readStart=frame.startSample;
       const read=timeline.read(session,String(channel),readStart,frame.endSample);
       if(!read.samples||read.captureMs===null)return;
-      pcm=read.samples;tsMs=read.captureMs;
+      pcm=read.samples;
+      // The archive indexes a fixed sample clock. Live ASR must share VAD's
+      // capture clock, including device-clock drift, to finalize the speech tail.
+      tsMs = captureMs - (frame.startSample - readStart) / timeline.sampleRate * 1000;
       let st = chan.get(channel);
       // A channel-turn ends on EITHER a silence gap OR a confident glow-name CHANGE.
       // The glow-change case is the one overlap breaks: a channel rotates to a new
       // speaker mid-stream with NO silence gap, so the gap alone would hold the stale
       // name (the Галина→Зоя mislabel). A different single glow IS the rotation signal.
-      const gapOnset=!!st && frame.captureMs-st.lastSpeechMs>ONSET_GAP;
+      const gapOnset=!!st && captureMs-st.lastSpeechMs>ONSET_GAP;
       const identityRotation = voiced && !!st && participantId !== undefined && participants.has(st.key) && participants.get(st.key) !== participantId;
       const glowRotation = voiced && !!st && !!glowName && st.name !== UNKNOWN && glowName !== st.name;
       if (!st || gapOnset || glowRotation || identityRotation) {
@@ -252,7 +256,7 @@ export function createGmeetPipeline(opts: GmeetPipelineOptions): GmeetPipeline {
         const key = `ch-${channel}:${turn}`;
         if(!mgr.addSpeaker(key,glowName || UNKNOWN))return;
         sourceChannels.set(key, channel);
-        st = { key, name: glowName || UNKNOWN, onsetMs: frame.captureMs, lastMs:tsMs,lastSpeechMs:frame.captureMs,turn };
+        st = { key, name: glowName || UNKNOWN, onsetMs: captureMs, lastMs:tsMs,lastSpeechMs:captureMs,turn };
         chan.set(channel, st);
 
       } else if (voiced && st.name === UNKNOWN && glowName) {
@@ -263,7 +267,7 @@ export function createGmeetPipeline(opts: GmeetPipelineOptions): GmeetPipeline {
       }
       if (voiced && (participantId === null || (participantId && participantId.length <= 512))) participants.set(st.key, participantId);
       st.lastMs = tsMs;
-      if(voiced)st.lastSpeechMs=frame.captureMs+frame.samples.length/timeline.sampleRate*1000;
+      if(voiced)st.lastSpeechMs=captureMs+frame.samples.length/timeline.sampleRate*1000;
       opts.onStreamAudio?.(st.key,pcm,tsMs);
       mgr.feedAudio(st.key, pcm, tsMs);
     },
