@@ -85,6 +85,7 @@ class VoicePolicy(BaseModel):
     allow_web_search: StrictBool = False
     engine: Literal['tina', 'livekit'] = 'tina'
 
+
     @field_validator('shared_meeting_ids')
     @classmethod
     def unique_shared_meetings(cls, values):
@@ -249,7 +250,10 @@ def new_meeting_voice_policy():
 
 
 def policy_of(row):
-    return VoicePolicy.model_validate((row.get('data') or {}).get('voice_assistant') or {})
+    saved=dict((row.get('data') or {}).get('voice_assistant') or {})
+    # Ignore the retired selector in saved rows; source grants and strict incoming validation stay intact.
+    saved.pop('agent_runtime',None)
+    return VoicePolicy.model_validate(saved)
 
 
 def build_voice_router(repo, redis, publisher, playback=None, client_factory=httpx.AsyncClient):
@@ -308,6 +312,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         value = VoiceProgress(request_id=body.request_id, session_uid=session,
                               revision=body.revision, stage=stage, observed_at_ms=int(time.time()*1000))
         await redis.set(f'meeting:voice:{mid}:progress', value.model_dump_json(), ex=180)
+
 
     async def reserve(mid, session: str, request):
         lock, _ = keys(mid, session, request)
@@ -381,6 +386,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         held = await redis.get(f'meeting:voice:{mid}:lock')
         if isinstance(held, bytes): held = held.decode()
         return {'current': held == f'{session}:{request_id}'}
+
 
     @router.get('/meetings/{meeting_id}/voice-assistant')
     async def get_policy(meeting_id: int, x_user_id: str | None = Header(default=None)):
@@ -682,9 +688,10 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         for turn in stored:
             reply = replies.get(turn['request_id'], {})
             if reply.get('session_uid') != session: continue
-            if reply.get('state') == 'completed': history.append(turn)
+            if reply.get('state') == 'completed':
+                history.append(turn | {'created_at_ms': reply.get('ended_at_ms') or turn['created_at_ms']})
             elif reply.get('state') == 'stopped' and reply.get('played_text'):
-                history.append(turn | {'answer': reply['played_text'], 'clarification': False})
+                history.append(turn | {'answer': reply['played_text'], 'clarification': False, 'follow_up': None})
         history = history[-3:]
         return key, history, [{k: v for k, v in t.items() if k != 'request_id'} for t in history]
 
@@ -848,6 +855,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                     result['task_flow']={'node':flow['node'],**({'kind':'decision'} if flow.get('kind')=='decision' else {})}
                     result['available_tools']=[]
             else:
+                payload['retrieval_deadline_ms']=saved['retrieval_deadline_ms']
                 remaining=(saved['retrieval_deadline_ms']-int(time.time()*1000))/1000
                 try:
                     if remaining<=0: raise TimeoutError()
@@ -1034,12 +1042,13 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 await redis.set(f'meeting:voice:{mid}:navigation',json.dumps(hint|{
                     'target_id':saved['navigation']['target_id'],'source_refs':saved['navigation']['source_refs']}),ex=60)
             await progress(mid, session, body, 'preparing_speech')
-            refs = result.pop('context_refs', []) if result.get('clarification') else []
+            refs = result.pop('context_refs', []) if result.get('clarification') or result.get('follow_up') else []
             result.pop('context_refs', None)
             refs = refs or [{'key': s['key'], 'fingerprint': s['fingerprint']} for s in result.get('sources', [])]
-            if history_key and (refs or result.get('clarification') is True or result.get('reason')=='clarification_exhausted'):
+            if history_key and (refs or result.get('clarification') is True or result.get('follow_up') or result.get('reason')=='clarification_exhausted'):
                 turn = {'request_id': str(body.request_id), 'question': body.question, 'answer': result['text'],
                         'clarification': result.get('clarification') is True,
+                        'follow_up': result.get('follow_up'),
                         'created_at_ms': int(time.time() * 1000),
                         'sources': refs}
                 async with redis.pipeline(transaction=True) as pipe:

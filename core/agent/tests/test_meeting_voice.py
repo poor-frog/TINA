@@ -44,6 +44,49 @@ HEADERS = {'X-Internal-Secret': 'test-internal', 'X-User-Id': '7'}
 URL = '/api/internal/meeting-voice/1/answer'
 
 
+def test_natural_social_reply_uses_selected_classifier_without_exporting_room_context(voice):
+    client, row, _, prompts, mutate = voice
+    mutate[0]=lambda:json.dumps({'intent':'thanks'})
+    response=client.post(URL,headers=HEADERS,json={'question':'Cảm ơn TINA nha, được rồi.','revision':1})
+    assert response.status_code==200
+    assert response.json()['answer_kind']=='assistant' and response.json()['reason']=='answered'
+    assert response.json()['sources']==[]
+    assert prompts==[{'mode':'voice_intent','question':'Cảm ơn TINA nha, được rồi.'}]
+
+
+def test_social_classifier_outage_preserves_evidence_path_and_compound_request_never_uses_it(voice):
+    client, _, _, prompts, mutate = voice
+    def unavailable():
+        if prompts[-1]['mode']=='voice_intent':raise HTTPException(503)
+    mutate[0]=unavailable
+    response=client.post(URL,headers=HEADERS,json={'question':'Cảm ơn TINA nha.','revision':1})
+    assert response.status_code==200 and response.json()['answer_kind']=='meeting'
+    assert [p['mode'] for p in prompts]==['voice_intent','voice']
+    prompts.clear()
+    response=client.post(URL,headers=HEADERS,json={'question':'Cảm ơn, deadline của chúng ta là gì?','revision':1})
+    assert response.status_code==200 and response.json()['answer_kind']=='meeting'
+    assert [p['mode'] for p in prompts]==['voice']
+
+
+def test_heard_topic_note_reaches_both_livekit_plan_and_final_and_disappears_when_revoked(voice):
+    import time
+    from shared.meeting_knowledge import sources_for
+    client,row,_,prompts,_=voice
+    row['data']['voice_assistant']['engine']='livekit'
+    source=sources_for({'segments':[]},{'wiki/shared.md':'The approved budget is 100.'})[0]
+    history=[{'question':q,'answer':'The budget is 100.','created_at_ms':int(time.time()*1000)-1000,
+        'sources':[{k:source[k] for k in ('key','fingerprint')}]} for q in ('Budget for demo?', 'What about it?')]
+    body={'question':'Còn hạn?','revision':1,'history':history}
+    response=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json=body|{'operation':'plan'})
+    assert response.status_code==200
+    assert prompts[-1]['dialogue_context']=={'goal':'Budget for demo?','refinements':['What about it?']}
+    response=client.post(URL,headers=HEADERS,json=body)
+    assert response.status_code==200 and prompts[-1]['dialogue_context']['goal']=='Budget for demo?'
+    for turn in history: turn['sources'][0]['fingerprint']='0'*64
+    response=client.post(URL,headers=HEADERS,json=body)
+    assert response.status_code==200 and prompts[-1]['dialogue_context'] is None
+
+
 def test_voice_request_uuid_correlates_retrieval_and_answer_without_logging_sources(voice, caplog):
     import logging
     client, *_ = voice
@@ -280,6 +323,32 @@ def test_short_answer_to_a_recent_clarification_keeps_its_topic_but_expired_ques
     assert prompts[-1]['pending_clarification'] is None
 
 
+def test_short_reply_to_a_heard_follow_up_keeps_goal_for_livekit_plan_and_answer(voice):
+    import time
+    from shared.meeting_knowledge import sources_for
+    client,row,_,prompts,_=voice
+    row['data']['voice_assistant']['engine']='livekit'
+    now=int(time.time()*1000)
+    source=sources_for({'segments':[]},{'wiki/shared.md':'The approved budget is 100.'})[0]
+    history=[{'question':'Budget for which project?', 'answer':'The budget is 100. Demo or production?',
+              'follow_up':'Demo or production?', 'created_at_ms':now-1000,
+              'sources':[{k:source[k] for k in ('key','fingerprint')}]}]
+    body={'question':'Production.', 'revision':1,'history':history}
+    expected={'question':history[0]['question'],'asked':'Demo or production?','replies':[]}
+    r=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json=body|{'operation':'plan'})
+    assert r.status_code==200 and prompts[-1]['pending_clarification']==expected
+    r=client.post(URL,headers=HEADERS,json=body)
+    assert r.status_code==200 and prompts[-1]['pending_clarification']==expected
+    assert prompts[-1]['dialogue_context']['goal']==history[0]['question']
+    history[0]['created_at_ms']=now-31000
+    client.post(URL,headers=HEADERS,json=body)
+    assert prompts[-1]['pending_clarification'] is None
+    history[0]['created_at_ms']=now-1000
+    history[0]['sources'][0]['fingerprint']='0'*64
+    client.post(URL,headers=HEADERS,json=body)
+    assert prompts[-1]['pending_clarification'] is None and not prompts[-1]['history']
+
+
 def test_clarification_is_spoken_but_rechecks_all_context_sources(voice, monkeypatch):
     client, row, root, prompts, mutate = voice
     def complete(request, raw):
@@ -404,6 +473,64 @@ def test_agents_plan_and_lookup_use_only_approved_sources_and_no_nested_tool_loo
     assert client.post(path,headers=HEADERS,json=base|{'operation':'lookup','lookup':{'name':'search_meeting','query':'private'}}).status_code==403
     row['data']['voice_assistant']['revision']=2
     assert client.post(path,headers=HEADERS,json=base|{'operation':'plan'}).status_code==409
+
+
+def test_plan_deadline_is_forwarded_and_expired_plans_do_not_dispatch(voice):
+    import time
+    client,row,_,prompts,_=voice
+    row['data']['voice_assistant']['engine']='livekit'
+    deadline=int(time.time()*1000)+6000
+    base={'question':'Compare the budget','revision':1,'operation':'plan','retrieval_deadline_ms':deadline}
+    path='/api/internal/meeting-voice/1/agent'
+    assert client.post(path,headers=HEADERS,json=base).status_code==200
+    assert prompts[-1]['retrieval_deadline_ms']==deadline
+    count=len(prompts)
+    expired=client.post(path,headers=HEADERS,json=base|{'retrieval_deadline_ms':1})
+    assert expired.status_code==200 and expired.json()=={'tool_calls':[]}
+    assert len(prompts)==count
+    for invalid in (True,'6000',0):
+        assert client.post(path,headers=HEADERS,json=base|{'retrieval_deadline_ms':invalid}).status_code==422
+
+
+@pytest.mark.parametrize('approved',[True,False])
+def test_plan_timeout_uses_completion_api_shared_sources_and_still_requires_verification(voice,monkeypatch,approved):
+    from types import SimpleNamespace
+    from shared.meeting_knowledge import PREFIX
+    from shared.voice_knowledge import VERIFY_SYSTEM
+    from worker import engine
+    client,row,_,prompts,mutate=voice
+    row['data']['voice_assistant']['engine']='livekit'
+    monkeypatch.setenv('TINA_RUNNER','codex');monkeypatch.setenv('TINA_CODEX_AUTH_MODE','chatgpt-plan')
+    seen=[];reviews=[]
+    def generate(prompt,system):
+        source=json.loads(prompt);seen.append(source)
+        if source.get('mode')=='voice_plan':raise TimeoutError('synthetic plan timeout')
+        rows=source['sources']
+        assert all(r.get('path')=='wiki/shared.md' for r in rows)
+        return json.dumps({'claims':[{'text':'The approved budget is 100.','source_ids':[rows[0]['id']]}]})
+    def complete(prompt,*,system):
+        if system==VERIFY_SYSTEM:
+            reviews.append(json.loads(prompt));return SimpleNamespace(text=json.dumps({'approved':approved}))
+        return SimpleNamespace(text=generate(prompt,system))
+    monkeypatch.setattr(engine,'completion_from_env',lambda **_:SimpleNamespace(complete=complete))
+    def dispatch():
+        monkeypatch.setenv('TINA_CHAT_SESSION','meeting-knowledge-api-timeout')
+        events=[];stream=SimpleNamespace(xadd=lambda _,e:events.append(json.loads(e['event'])),expire=lambda *_:None)
+        engine._run_meeting_knowledge(stream,'test',{'entrypoint':{'inline':PREFIX+json.dumps({
+            'request_id':'api-timeout','text':json.dumps(prompts[-1])})}})
+        return next(e['text'] for e in events if e['type']=='message-delta')
+    mutate[0]=dispatch
+    base={'question':'What is the approved budget?','revision':1}
+    plan=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json=base|{'operation':'plan'})
+    assert plan.status_code==200 and plan.json()=={'tool_calls':[]}
+    reply=client.post(URL,headers=HEADERS,json=base|{'lookups':[]})
+    assert reply.status_code==200 and reviews
+    if approved:
+        assert reply.json()['reason']=='answered' and reply.json()['text']=='The approved budget is 100.'
+        assert {s['path'] for s in reply.json()['sources']}=={'wiki/shared.md'}
+    else:
+        assert reply.json()['reason']=='verification_rejected' and reply.json()['sources']==[]
+    assert 'PRIVATE' not in json.dumps(seen)
 
 
 def test_typed_llm_plan_normalizes_to_existing_api_and_still_refuses_scope_changes(voice):
@@ -552,6 +679,9 @@ def test_repair_metadata_and_partial_answer_survive_source_checked_api(voice):
     response=client.post(URL,headers=HEADERS,json={'question':'Budget and deadline?','revision':1})
     assert response.status_code==200,response.text
     assert response.json()['text']=='The budget is 100. Can you confirm the deadline?'
+    assert response.json()['follow_up']=='Can you confirm the deadline?'
+    assert response.json()['clarification'] is False and response.json()['context_refs']
+    assert {s['key'] for s in response.json()['sources']} <= {s['key'] for s in response.json()['context_refs']}
     assert response.json()['verification']==['unsupported_claim','approved'] and response.json()['sources']
     mutate[0]=lambda:json.dumps({'claims':[],'reason':'verification_rejected','verification':['contradiction','contradiction']})
     response=client.post(URL,headers=HEADERS,json={'question':'Budget?','revision':1})

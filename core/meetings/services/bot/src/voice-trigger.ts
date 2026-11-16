@@ -83,7 +83,7 @@ export class VoiceTrigger {
   private candidate?: Candidate;
   private acoustic?: AcousticWake & {started: number};
   private after = 0;
-  private continuation?: {channel: number; participant?: string | null; expires: number; after: number};
+  private continuation?: {channel: number; participant?: string | null; expires: number; after: number; speechStarted?: number};
   heard?: VoiceHypothesis;
   reason: 'waiting' | 'invalid_asr' | 'stale_asr' | 'name_not_matched' | 'name_unconfirmed' | 'ambiguous_window' | 'other_channel' = 'waiting';
   constructor(private now: () => number = Date.now, private variants: string[] = [], private acousticOnly = false) {}
@@ -100,10 +100,19 @@ export class VoiceTrigger {
     this.reset(after); this.continuation = {...caller, expires, after};
   }
   get answeringContinuation() { return this.candidate?.direct === true && !this.candidate.acoustic; }
-  get hasContinuation() { return this.continuation !== undefined && this.now() < this.continuation.expires; }
+  get hasContinuation() { return this.continuation !== undefined
+    && this.now() < (this.continuation.speechStarted === undefined ? this.continuation.expires : this.continuation.speechStarted + 20_000); }
+  continuationSpeech(channel: number, participant: string | null | undefined, stamp: number) {
+    const c = this.continuation;
+    if (!c || c.speechStarted !== undefined || this.now() >= c.expires
+        || !Number.isFinite(stamp) || stamp < c.after || stamp >= c.expires || stamp > this.now() + 1000
+        || channel !== c.channel || !c.participant || participant !== c.participant) return false;
+    c.speechStarted = this.now();
+    return true;
+  }
   get continuationCaller() { return this.hasContinuation ? {...this.continuation!} : undefined; }
   takeExpiredContinuation() {
-    if (this.candidate || !this.continuation || this.now()<this.continuation.expires) return;
+    if (this.candidate || !this.continuation || this.hasContinuation) return;
     const value=this.continuation;this.continuation=undefined;return value;
   }
   get acceptAfter() { return this.after; }
@@ -141,7 +150,7 @@ export class VoiceTrigger {
         text: fresh.map(s => s.text).join(' '), segments: fresh };
     }
     this.heard = value;
-    let text = value.text.trim();
+    const text = value.text.trim();
     if (!text) return 'ignore';
     if (this.acoustic && (value.channel !== this.acoustic.channel
         || this.acoustic.participant && value.participant && value.participant !== this.acoustic.participant)) {
@@ -155,11 +164,6 @@ export class VoiceTrigger {
       this.candidate = undefined; c = undefined;
     }
     const acoustic = this.acoustic !== undefined;
-    // Acoustic evidence authorizes the call; removing a recognized prefix changes only this copy.
-    if (acoustic && (!c || c.parts.length === 1 && value.startMs === c.parts[0].startMs)) {
-      const names = [...this.variants, 'hây ti na', 'ti na', 'ti nà ơi', 'ti nà', 'tiên na', 'anh ơi'];
-      text = invocation(text, names) ?? invocation(text.replace(/^hey\s+/iu, ''), names) ?? text;
-    }
     if (!c) {
       if (this.acousticOnly && !acoustic && (!this.hasContinuation || value.channel !== this.continuation!.channel
           || this.continuation!.participant && value.participant !== this.continuation!.participant)) {
@@ -167,14 +171,15 @@ export class VoiceTrigger {
       }
       const direct = acoustic || invocation(text, this.variants) === null;
       if (direct && this.continuation && noticeEchoes.has(echoKey(text))) return 'ignore';
-      if (direct && !acoustic && (!this.continuation || this.now() >= this.continuation.expires
+      if (direct && !acoustic && (!this.continuation || !this.hasContinuation
           || value.channel !== this.continuation.channel
           || (this.continuation.participant && value.participant !== this.continuation.participant))) {
         this.reason = 'name_not_matched'; return 'ignore';
       }
+      const started = this.continuation?.speechStarted;
       this.continuation = undefined;
       this.candidate = { parts: [{ ...value, text }], confirmed: value.final, matches: 1, seen: this.now(),
-        started: this.acoustic?.started ?? this.now(), direct, acoustic };
+        started: this.acoustic?.started ?? started ?? this.now(), direct, acoustic };
       this.reason = value.final ? 'waiting' : 'name_unconfirmed';
       return value.final ? 'wake' : 'update';
     }
@@ -201,14 +206,20 @@ export class VoiceTrigger {
     return 'update';
   }
   private discard(reason: 'ambiguous_window' | 'name_not_matched' = 'ambiguous_window'): 'discard' { this.reset(this.now()); this.reason = reason; return 'discard'; }
+  private questionText(c: Candidate): string | null {
+    const text=c.parts.map(p=>p.text).join(' ').trim();
+    if(!c.acoustic)return c.direct?text:invocation(text,this.variants);
+    // ASR may split the wake phrase across windows; clean only the assembled question copy.
+    const names=[...this.variants,'hây ti na','ti na','ti nà ơi','ti nà','tiên na','anh ơi'];
+    return invocation(text,names)??invocation(text.replace(/^(?:hey|hây)[\s,.!?:;…—–-]+/iu,''),names)??text;
+  }
   question(quietEndMs: number | undefined, observeBeforeLexicalPause = false): string | null {
     const c = this.candidate;
     if (!c || !c.confirmed || quietEndMs === undefined) return null;
     const last = c.parts.at(-1)!;
     // Both clocks come from capture samples; only rounding slack is safe for a short final word.
     if (last.endMs < quietEndMs - 2 || this.now() - c.seen < 300) return null;
-    const text = c.parts.map(p => p.text).join(' ');
-    const question = c.direct ? text : invocation(text, this.variants);
+    const question = this.questionText(c);
     const pause = question ? turnPauseMs(question) : 0;
     if (!observeBeforeLexicalPause && pause > 0 && this.now() - quietEndMs < pause) return null;
     return question !== null && question.length <= 2000 ? question : null;
@@ -216,8 +227,7 @@ export class VoiceTrigger {
   expired() {
     const c = this.candidate;
     if (!c) return this.acoustic !== undefined && this.now() - this.acoustic.started > 20_000;
-    const joined = c.parts.map(p => p.text).join(' ');
-    const text = c.direct ? joined : invocation(joined, this.variants);
+    const text = this.questionText(c);
     return this.now() - c.started > (text ? 20_000 : 5000);
   }
 }

@@ -213,3 +213,15 @@ TaskState and HandoffTask additionally accept optional `save_uncertain` (default
 At eight retained inputs or the 8,000-character boundary, draft input history compacts to the original request and exact user-input snippets proving current fields plus the new input. This is bounded ephemeral field provenance, not a full conversational audit or canonical ASR rewrite. Explicit cancel/leave do not consume capacity; confirmation and corrections remain valid.
 
 VoiceActionDraftPage bounds owner list responses to20 drafts with optional next_offset; GET voice-drafts accepts a nonnegative offset. Direct review and its pre-write reauthorization resolve the requested ID independently of list pagination, retaining owner/meeting/policy/completed-readback fences. Missing next_offset means the last page. Legacy first-page response keys remain compatible.
+
+Previously recorded replies may retain optional `detail_text` and `answer_complete` metadata.
+The API keeps these fields readable so switching runtimes does not discard historical answers;
+new replies follow the existing single verified-answer flow.
+
+
+`VoiceHistoryTurn.follow_up` is an optional nullable question (1–200 characters). It preserves a
+verified answer's follow-up as pending intent, without changing its `clarification: false` or source
+evidence. Only completed playback can keep it; interrupted playback clears it. Existing session,
+caller, revision, source fingerprint and pending-expiry checks continue to apply.
+Heard history timestamps completed turns at playback completion, so synthesis/playback latency
+does not consume the 30-second pending-intent lifetime.

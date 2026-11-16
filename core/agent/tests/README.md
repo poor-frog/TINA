@@ -99,6 +99,10 @@ and bounded clarifications; `test_meeting_voice.py` checks approved-source isola
 voice CompletionPort prompt. These use synthetic sources and no provider credentials.
 Conversation tests retain authorized clarification context for short answers, expire pending
 clarification hints, and reject history whose source fingerprints changed.
+Social-routing regressions cover natural thanks, compound questions, malformed classifier output,
+provider failure, the selected worker's four-second structured completion and private-source isolation.
+Dialogue-note regressions cover chained follow-ups, corrections, expiry/revocation and propagation
+to both LiveKit tool planning and final answers; these notes are intent only, not evidence.
 Missing-evidence regressions keep verifier diagnostics and empty evidence while avoiding an
 unnecessary clarification question for an already clear request. Delivery guidance stays inside
 the same JSON and source-verification path; synthetic routing is not a naturalness listening score.
@@ -121,6 +125,9 @@ restored source text again without returning the previous revision's translation
 `test_meeting_voice.py` covers LiveKit tool planning, authorized retrieval, explicit public-query isolation, heard-history revocation and final generation without a nested tool loop.
 
 Voice regression cases cover conservative assistant intents, partial replies, one-repair limits, forged citations, verifier outages and bounded completion timeouts.
+
+Voice regression tests require the selected CompletionPort even when the chat runner is Codex;
+no voice CLI process may start. The existing chat Codex harness tests remain unchanged.
 
 test_llm_openai_responses_voice.py covers valid JSON generation/verdict deltas followed by early EOF, [DONE], incomplete/failed events, or invalid terminal status, plus successful completion with/without deltas and existing web citation validation. All provider calls are synthetic.
 

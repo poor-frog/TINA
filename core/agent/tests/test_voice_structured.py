@@ -130,3 +130,29 @@ def test_worker_only_falls_back_for_schema_capability_and_still_verifies(monkeyp
         assert len(ordinary) == 2 and answers[0]['verification'] == ['approved']
     else:
         assert not ordinary and not answers
+
+
+@pytest.mark.parametrize('mode',['voice_plan','voice','voice_general'])
+def test_voice_uses_completion_port_even_when_chat_runner_is_codex(monkeypatch,mode):
+    from worker import engine
+    from shared.voice_knowledge import VERIFY_SYSTEM
+    calls=[];events=[]
+    monkeypatch.setenv('TINA_RUNNER','codex');monkeypatch.setenv('TINA_CODEX_AUTH_MODE','chatgpt-plan')
+    monkeypatch.setenv('TINA_CHAT_SESSION','meeting-knowledge-api-only')
+    def no_harness(*_args,**_kwargs):pytest.fail('Voice must not start a CLI harness')
+    monkeypatch.setattr(engine,'harness_from_env',no_harness)
+    def complete(prompt,*,system):
+        calls.append(system)
+        if system==VERIFY_SYSTEM:value={'approved':True}
+        elif mode=='voice_plan':value={'tool_calls':[]}
+        elif mode=='voice_general':value={'text':'A direct API answer.'}
+        else:value={'claims':[{'text':'Lan làm demo.','source_ids':['s0']}]}
+        return SimpleNamespace(text=json.dumps(value))
+    monkeypatch.setattr(engine,'completion_from_env',lambda **_:SimpleNamespace(complete=complete))
+    source={'mode':mode,'question':'Ai làm demo?','available_tools':[],
+        'sources':[{'id':'s0','quote':'Lan làm demo.'}] if mode=='voice' else []}
+    stream=SimpleNamespace(xadd=lambda _,e:events.append(json.loads(e['event'])),expire=lambda *_:None)
+    engine._run_meeting_knowledge(stream,'synthetic',{'entrypoint':{'inline':PREFIX+json.dumps({
+        'request_id':'api-only','text':json.dumps(source)})}})
+    assert calls and events[0]['type']=='message-delta' and events[-1]['type']=='turn-complete'
+    if mode=='voice':assert VERIFY_SYSTEM in calls and json.loads(events[0]['text'])['verification']==['approved']

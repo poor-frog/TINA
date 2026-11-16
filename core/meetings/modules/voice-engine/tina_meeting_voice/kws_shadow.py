@@ -97,6 +97,8 @@ class KwsMonitor:
         # Meet's glow metadata can disappear within a word; only a conflicting known ID changes identity.
         row.update(participant=participant if participant is not None else row['participant'], stamp=stamp, seen=started,
                    next_sample=None if start_sample is None else start_sample + len(samples))
+        if participant is not None:
+            row['identified_ms'] = stamp
         # LiveKit keeps a bounded remainder, assembling unchanged 64 ms packets into 80 ms steps.
         for name, stream in row['streams'].items():
             score = stream.feed(samples)
@@ -108,7 +110,7 @@ class KwsMonitor:
                 self.emit({'event': 'kws', 'status': 'wake', 'model': name, 'channel': channel,
                            'score': round(score, 6), 'source_frame_end_ms': stamp + len(samples) / 16,
                            'source_start_ms': max(row['start_ms'], stamp + len(samples) / 16 - 2000),
-                           'participant': participant,
+                           'participant': row['participant'] if stamp - row.get('identified_ms', -math.inf) <= 1500 else None,
                            'processing_ms': round((self.clock() - started) * 1000, 3)})
         if started - health['reported'] >= 3:
             self.emit({'event': 'kws', 'status': 'metrics', 'channel': channel,

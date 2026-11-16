@@ -453,6 +453,25 @@
           ],
           "default": null,
           "title": "Ended At Ms"
+        },
+        "detail_text": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail Text"
+        },
+        "answer_complete": {
+          "default": true,
+          "title": "Answer Complete",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1895,6 +1914,20 @@
           "default": false,
           "title": "Clarification",
           "type": "boolean"
+        },
+        "follow_up": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Follow Up"
         }
       },
       "required": [

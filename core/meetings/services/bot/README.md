@@ -7,6 +7,10 @@ the notice's policy check is pending. Slow new questions receive at most one not
 ordinary follow-ups keep their existing no-extra-ack behavior. Every fixed phrase bypasses the busy
 Agents session and pure normalized notice echoes are ignored during caller continuation. The TTS
 `WAKE_TEXTS`/`WAIT_TEXTS`/`SUMMARY_TEXTS` catalog must match these phrases. No LLM chooses filler.
+After acoustic KWS confirmation, wake-prefix cleanup runs on the assembled ASR question copy,
+including names split across windows and punctuation after “hey”. A name-only call stays in the
+wake acknowledgment path and never dispatches an answer or waiting notice. Original ASR text,
+source timing, caller ownership and the requirement for acoustic confirmation stay unchanged.
 
 `voice_timing` logs retain only request UUID/channel, timestamps and durations. Speech timing is
 split into `ack_*` (name acknowledgment), `notice_*` (question/recap wait) and `answer_*`.
@@ -76,6 +80,10 @@ in `src/contracts.ts` and validated against the sealed registry goldens (`contra
 
 ## Isolated evaluation
 
+Voice diagnostics and `voice_timing` outcomes distinguish service failures (`answer_failed`) from
+missing or unverifiable evidence (`no_evidence`), even when the spoken recovery audio completes.
+The playback receipt still records the audio as completed; it does not imply a factual answer.
+
 Unit/integration: `pnpm test` (chained `tsx` runs — no build step). Levels:
 **L1** config ajv goldens · **L2** orchestrator `lifecycle.v1` state machine (fake ports) — incl. the
 #530 reachability gate (both-channels-down ⇒ no join, exit 3, `control_plane_unreachable`; either-channel
@@ -117,5 +125,10 @@ original playback/replay path, but cannot claim exact sample-index recovery thro
 Voice audio uses separate PulseAudio sinks: meeting_rx receives browser playback, while tts_sink
 feeds virtual_mic. The source stays unmuted so Meet sees a usable device; TTS sink mute plus the
 verified meeting UI gate speech. This does not change captured PCM or either ASR backend.
+The TTS sink starts at 70% volume for all bot speech, independently of meeting receive audio.
 
 VoiceInterruption uses caller identity, source-clock/ASR agreement, final soft-correction timing and a bounded recent-playback text echo fence. MeetingVoice mutes locally and persists the completed-sentence prefix before remote cancellation; failed receipt/release prevents automatic continuation. See docs/tina-voice-speaking-interruption.md.
+
+After a spoken prompt, the same caller has five seconds to begin a reply. A primary VAD onset
+with matching recent transport identity reserves that reply while ASR completes, bounded by the
+existing 20-second capture limit. Other callers, stale audio, Stop and policy changes cannot extend it.

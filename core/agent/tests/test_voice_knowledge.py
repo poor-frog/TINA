@@ -8,6 +8,39 @@ from shared.voice_knowledge import voice_sources, current_history, validate_voic
 NOW = 1800000000000
 
 
+def test_semantic_social_fallback_accepts_only_bounded_intents_and_skips_compound_requests():
+    from shared.voice_knowledge import semantic_assistant_intent
+    calls=[]
+    def classify(question):
+        calls.append(question)
+        return json.dumps({'intent':'thanks'})
+    assert semantic_assistant_intent('Cảm ơn TINA nha, được rồi.',classify)=='thanks'
+    for question in ('Cảm ơn, deadline của chúng ta là gì?', 'Chào TINA và ai phụ trách demo?',
+                     'Gửi email cảm ơn nhóm', 'TINA ơi', 'Ngân sách?', 'chào ' * 100):
+        assert semantic_assistant_intent(question,classify) is None
+    assert len(calls)==1
+    for raw in ('bad json', '[]', '{"intent":"web"}', '{"intent":"thanks","answer":"invented"}'):
+        assert semantic_assistant_intent('Cảm ơn TINA nha.',lambda _:raw) is None
+
+
+def test_dialogue_note_keeps_chained_topic_and_latest_correction_without_answer_facts():
+    from shared.voice_knowledge import dialogue_context
+    rows=sources_for({'segments':[segment('demo','Demo giao Lan, hạn thứ Sáu.',NOW-1000)]},{})
+    refs=[{k:rows[0][k] for k in ('key','fingerprint')}]
+    history=[{'question':q,'answer':'ANSWER IS NOT EVIDENCE','created_at_ms':NOW-1000,'sources':refs}
+             for q in ('Ai phụ trách demo?', 'Còn hạn?', 'Sprint trước cơ.')]
+    valid=current_history(history,rows,NOW)
+    note=dialogue_context('Còn ngày bàn giao?',valid,NOW)
+    assert note=={'goal':'Ai phụ trách demo?','refinements':['Còn hạn?','Sprint trước cơ.']}
+    assert 'ANSWER' not in json.dumps(note)
+    queries=[]
+    voice_sources(rows,'Còn ngày bàn giao?',valid,NOW,semantic=lambda q,_:queries.append(q) or [])
+    assert all(q in queries[0] for q in ('demo','Sprint trước cơ.','Còn ngày bàn giao?'))
+    assert dialogue_context('ASR là gì?',valid,NOW) is None
+    assert dialogue_context('Còn hạn?',valid,NOW+120001) is None
+    assert dialogue_context('Còn hạn?',current_history(history,[],NOW),NOW) is None
+
+
 def test_clarification_retry_count_stops_at_a_real_answer_and_never_counts_service_errors():
     from shared.voice_recovery import clarification_attempts
     assert clarification_attempts([])==0
@@ -186,6 +219,32 @@ def test_worker_dispatches_voice_plan_to_selected_completion_without_treating_it
     engine._run_meeting_knowledge(stream,'synthetic-out',{})
     assert seen[0][1]['system']==VOICE_PLAN_SYSTEM
     assert json.loads(events[0]['text'])=={'tool_calls':[{'name':'search_meeting','query':'demo'}]}
+    assert events[-1]['type']=='turn-complete'
+
+
+def test_worker_social_classification_is_structured_short_and_has_no_tools_or_room_sources(monkeypatch):
+    from types import SimpleNamespace
+    from worker import engine
+    from shared.meeting_knowledge import PREFIX
+    from shared.voice_knowledge import VOICE_INTENT_SYSTEM
+    identifier='synthetic-intent';events=[];seen=[];timeouts=[]
+    monkeypatch.setenv('TINA_CHAT_SESSION','meeting-knowledge-'+identifier)
+    prompt=json.dumps({'mode':'voice_intent','question':'Cảm ơn TINA nha.','sources':['DO NOT PASS']})
+    monkeypatch.setattr(engine,'start_prompt',lambda _:PREFIX+json.dumps({'request_id':identifier,'text':prompt}))
+    def complete(text,schema,**kwargs):
+        seen.append((json.loads(text),schema,kwargs))
+        return SimpleNamespace(text='{"intent":"thanks"}')
+    def provider(**kwargs):
+        timeouts.append(kwargs['timeout'])
+        return SimpleNamespace(complete_structured=complete)
+    monkeypatch.setattr(engine,'completion_from_env',provider)
+    stream=SimpleNamespace(xadd=lambda _,entry:events.append(json.loads(entry['event'])),expire=lambda *_:None)
+    engine._run_meeting_knowledge(stream,'synthetic-out',{})
+    assert timeouts==[4]
+    assert seen[0][0]=={'question':'Cảm ơn TINA nha.'}
+    assert seen[0][1]['properties']['intent']['enum']==['greeting','thanks','identity','capabilities','meeting']
+    assert seen[0][2]['system']==VOICE_INTENT_SYSTEM
+    assert json.loads(events[0]['text'])=={'intent':'thanks'}
     assert events[-1]['type']=='turn-complete'
 
 

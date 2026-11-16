@@ -105,6 +105,25 @@ voice_calculate.py evaluates bounded Decimal arithmetic and signed calendar-day 
 
 `voice_recovery.py` counts only heard, source-valid clarification context; delivery guidance varies repair prompts and a terminal marker closes an exhausted chain.
 
+`voice_knowledge.py` keeps exact assistant intents as the fast path. Unrecognized social-looking
+utterances may use the selected LLM's `voice_intent` mode with a four-second completion timeout.
+Only identity/capabilities/greeting/thanks enums are accepted and spoken through existing fixed
+replies; mixed action/questions, malformed output and classifier outages retain the evidence path.
+The classifier receives only the current utterance, with no tools, documents or meeting history.
+It is an optional final-answer routing step, not an additional autonomous agent or public-search grant.
+
+`dialogue_context` derives an intent note from at most three caller-scoped, actually heard,
+source-valid turns. Follow-up chains retain their goal and two literal refinements for up to
+120 seconds; clarification prompts keep the existing 30-second expiry. Standalone questions get
+no note. Retrieval V2, planning, reranking and final verification share this scope; original
+questions/quotes remain intact. The note contains no generated answer facts, creates no new
+memory store, and never enters the isolated public web/general-knowledge path.
+
 `voice_decision_flow.py` defines literal decision fields, bounded reprompts, correction/cancel/leave and exact evidence-quote checks. Proposed/decided describes discussion evidence; owner approval remains the separate existing voice-draft review. The worker extracts structured patches and independently verifies decided evidence before the control plane can stage a review prompt.
 
 At draft-history capacity, Task/Decision Flow retains the original request and literal snippets proving current fields plus the newest input. Cancel/leave do not append input; confirm remains explicit with the same final-turn check. This bounds retained history without discarding current-field provenance or trapping control commands at eight entries. TaskState.save_uncertain, like DecisionState.save_uncertain, pauses blind reconfirmation after an unknown write; cancellation and private chat handoff remain available.
+
+
+Voice history preserves an optional `follow_up` question separately from verified answer facts.
+Completed, source-valid follow-ups use the existing 30-second pending clarification context for
+short replies in retrieval and LiveKit planning. An acknowledgment does not become source evidence.

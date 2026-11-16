@@ -21,7 +21,7 @@ from shared.adapters import WorkspaceBusyError, parse_entity, workspace_write_lo
 from shared.document_links import wikilink_paths
 from shared.voice_knowledge import (voice_sources, current_history, validate_voice_answer, voice_route,
     voice_failure, FAILURES, voice_tool_calls, lookup_voice_sources, assistant_reply, voice_chunks, context_handle,
-    pending_clarification)
+    pending_clarification, semantic_assistant_intent, dialogue_context)
 from llm import safe_web_source
 from control_plane.voice_retrieval import semantic_rank
 from shared.voice_lexical import domain_dictionary
@@ -68,6 +68,7 @@ class VoiceHistoryTurn(BaseModel):
     created_at_ms: int = Field(ge=0)
     sources: list[VoiceSourceRef] = Field(max_length=32)
     clarification: bool = False
+    follow_up: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class VoiceSourcesQuery(BaseModel):
@@ -102,6 +103,7 @@ class VoiceLookupQuery(BaseModel):
 
 class VoiceAgentQuery(VoiceQuestion):
     operation: Literal['context','plan','lookup']
+    retrieval_deadline_ms: int | None = Field(default=None,strict=True,gt=0)
     lookup: VoiceLookupQuery | None = None
     context_handles: list[str] = Field(default_factory=list,max_length=128)
 
@@ -559,7 +561,9 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                     'available_tools':tools, **({'task_flow_requested':True} if action_intent(body.question)=='task' else
                         {'decision_flow_requested':True} if action_intent(body.question)=='decision' else {})}
         elif body.operation=='plan':
-            if kind=='draft' and not tools:
+            if body.retrieval_deadline_ms is not None and body.retrieval_deadline_ms <= now_ms:
+                calls=[]
+            elif kind=='draft' and not tools:
                 calls=[]
             elif kind=='web':
                 if tools and len(public_query)>200: raise HTTPException(422,'Public tool query exceeds 200 characters')
@@ -575,7 +579,9 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                     selected,_=voice_sources(candidates,body.question,history,now_ms,semantic=semantic_for(row,policy),dictionary=domain_dictionary(base))
                 selected=[s|({'context_handle':context_handle(s)} if context_handle(s) in body.context_handles else {}) for s in selected]
                 raw=complete(request,json.dumps({'mode':'voice_plan','question':body.question,
+                    'retrieval_deadline_ms':body.retrieval_deadline_ms,
                     'available_tools':tools,'sources':selected,'evidence_pack':evidence_pack(selected,available=len(candidates)),'pending_clarification':pending_clarification(history,now_ms),
+                    'dialogue_context':dialogue_context(body.question,history,now_ms),
                     'previous_lookups':[c.model_dump() for c in body.lookups or []],
                     'history':[{k:t[k] for k in ('question','answer','created_at_ms')} for t in history]},ensure_ascii=False))
                 try:
@@ -761,6 +767,14 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         draft_kind, draft_details = action_context(body.question, pending_clarification(history,int(time.time()*1000))
             if kind == 'meeting' else None)
         if draft_kind: kind = 'draft'
+        social_intent = None
+        if kind == 'meeting' and not pending_clarification(history,int(time.time()*1000)):
+            try:
+                social_intent = semantic_assistant_intent(body.question, lambda utterance: complete(request,
+                    json.dumps({'mode':'voice_intent','question':utterance},ensure_ascii=False)))
+            except (HTTPException, TimeoutError):
+                pass  # Classification is optional; the evidence-backed path remains available.
+            if social_intent: kind = 'assistant'
         trace, selected, conversation = [], [], []
         summary_sources = None
         answer = None
@@ -775,7 +789,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                 answer={'text':'Bạn muốn tạo task gì?' if draft_kind == 'task' else 'Bạn muốn ghi lại nội dung quyết định nào?',
                     'sources':[],'answer_kind':'assistant','reason':'clarification','clarification':True}
         elif kind == 'assistant':
-            answer = {'text':assistant_reply(body.question,policy),'sources':[], 'answer_kind':'assistant','reason':'answered'}
+            answer = {'text':assistant_reply(body.question,policy,intent=social_intent),'sources':[], 'answer_kind':'assistant','reason':'answered'}
         elif kind != 'meeting':
             if not policy.get('allow_' + ('web_search' if kind == 'web' else 'general_knowledge')):
                 answer = voice_failure('web_disabled' if kind == 'web' else 'general_disabled', kind=kind)
@@ -840,6 +854,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                 ids = {s['key']: s['id'] for s in rows}
                 return [{'question': t['question'], 'answer': t['answer'],
                          'clarification': t.get('clarification', False) and now_ms - t['created_at_ms'] <= 30000,
+                         'follow_up': t.get('follow_up') if now_ms - t['created_at_ms'] <= 30000 else None,
                          'source_ids': [ids[r['key']] for r in t['sources']]}
                         for t in history if all(r['key'] in ids for r in t['sources'])]
             if not candidates:
@@ -851,11 +866,13 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                     # One lookup round (at most two tools), then a verified final answer.
                     for remaining in ((1,0) if body.lookups is None else (0,)):
                         conversation = conversation_for(selected)
-                        raw = complete(request, json.dumps({'mode': 'voice', 'question': body.question, 'sources': selected,
+                        raw = complete(request, json.dumps({'mode': 'voice', 'question': body.question,
+                            'sources':selected,
                             'evidence_pack':evidence_pack(selected,available=len(candidates)),
                             'clarification_attempt':clarification_attempts(history),
                             'recent_source_ids': [s['id'] for s in selected if s['key'] in recent_keys],
                             'history': conversation, 'pending_clarification':pending_clarification(history,now_ms),
+                            'dialogue_context':dialogue_context(body.question,history,now_ms),
                             'tools_remaining': remaining}, ensure_ascii=False))
                         calls = voice_tool_calls(raw)
                         if calls is not None:
@@ -874,6 +891,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                             answer = {'text': text, 'sources': validated['sources'], 'answer_kind': 'meeting',
                                       'reason': 'clarification' if validated.get('clarification') else 'answered',
                                       'clarification': bool(validated.get('clarification'))}
+                            if validated.get('follow_up'): answer['follow_up'] = validated['follow_up']
                         else:
                             answer = voice_failure(reason if reason in FAILURES else 'retrieval_empty' if not selected else 'insufficient_evidence')
                         answer['verification'] = verification
@@ -897,7 +915,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                 if len(answer['sources'])<32 and not any(s['key']==parent['key'] for s in answer['sources']):
                     answer['sources'].append(parent)
         history_ids = {identifier for turn in conversation for identifier in turn['source_ids']}
-        checked = selected if answer.get('clarification') else answer['sources'] + [s for s in selected if s['id'] in history_ids]
+        checked = selected if answer.get('clarification') or answer.get('follow_up') else answer['sources'] + [s for s in selected if s['id'] in history_ids]
         if summary_sources is not None: checked = summary_sources
         if stale({'sources': checked}, latest_sources):
             raise HTTPException(409, 'Shared evidence changed during the answer')
@@ -913,9 +931,10 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                 policy_revision=policy['revision'],kind=draft_kind,title=draft_query,details=draft_details)
         if kind=='web' and body.lookups:
             trace=[{'tool':'search_web','source_count':len(answer.get('links',[]))}]
+        context_sources = list({s['key']:s for s in answer.get('sources',[]) + selected}.values())
         return answer | {'lookups': trace,
-                'context_refs': [{'key': s['key'], 'fingerprint': s['fingerprint']} for s in selected[:32]]
-                                if answer.get('clarification') else []}
+                'context_refs': [{'key': s['key'], 'fingerprint': s['fingerprint']} for s in context_sources[:32]]
+                                if answer.get('clarification') or answer.get('follow_up') else []}
 
     @app.get('/api/workspace/meeting-knowledge/{meeting_id}')
     def knowledge(request: Request, meeting_id: int):

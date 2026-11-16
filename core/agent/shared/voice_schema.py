@@ -3,6 +3,9 @@ from shared.voice_tools import object_schema, tool_call_schema
 
 
 def voice_schema(mode, sources=(), *, tools=()):
+    if mode == 'intent':
+        return object_schema({'intent': {'type':'string',
+            'enum':['greeting','thanks','identity','capabilities','meeting']}})
     ids = list(dict.fromkeys(s['id'] for s in sources))
     source_id = {'type': 'string', **({'enum': ids} if ids else {})}
     if mode == 'verify':

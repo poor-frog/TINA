@@ -98,6 +98,8 @@ def test_voice_dispatch_preserves_trace_metadata_separately_from_model_input(tmp
 
 
 # ── SSE ownership gate (P0) test helpers ──────────────────────────────────────────────────────────
+
+
 # The live SSE feed now OWNER-SCOPES every request (subject_of → meeting-api ownership lookup) before it
 # opens the redis stream. In L2 we inject a fake owner-lookup: a map of {(user_id, row_id): native}, and
 # every /api/meeting/stream request carries an X-User-Id. `None` from the lookup == not-owned → 403.

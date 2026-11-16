@@ -559,6 +559,11 @@ export class MeetingVoice {
       if(event.speech && !wasSpeaking)this.turnShadow?.resume(channel);
       const interruptible=['THINKING','SPEAKING'].includes(this.state)&&this.turnCaller?.channel===channel;
       if (event.speech && !wasSpeaking && this.state === 'LISTENING') this.diagnose('waiting_asr');
+      if (event.speech && !wasSpeaking && this.state === 'LISTENING') {
+        const input = this.inputs.get(channel);
+        if (input && Math.abs(input.endMs - event.stamp) <= 1500)
+          this.trigger.continuationSpeech(channel, input.participant, event.stamp);
+      }
       if (event.speech && !wasSpeaking && (['LISTENING', 'CAPTURING'].includes(this.state)||interruptible)) {
         try { this.requestEndpoint(channel, null); } catch { /* ASR cadence remains the fallback. */ }
       }
@@ -812,7 +817,8 @@ export class MeetingVoice {
       let started = Promise.resolve();
       let didStart = false;
       const unanswered = answer.reason ? !['answered','clarification'].includes(answer.reason) : answer.evidence_available === false;
-      this.setState('SPEAKING'); this.diagnose(answer.clarification ? 'speaking' : unanswered ? 'no_evidence' : 'speaking');
+      const serviceFailure = ['llm_unavailable','verification_unavailable','draft_unavailable','web_unavailable'].includes(answer.reason??'');
+      this.setState('SPEAKING'); this.diagnose(answer.clarification ? 'speaking' : serviceFailure ? 'answer_failed' : unanswered ? 'no_evidence' : 'speaking');
       const sentences = speechSentences(answer.text);
       for (let index = 0; index < sentences.length; index++) {
         const sentence = sentences[index];
@@ -860,9 +866,9 @@ export class MeetingVoice {
       }
       await this.report(id, 'completed');
       if (!live()) return;
-      outcome = answer.clarification ? 'clarification' : unanswered ? 'no_evidence' : 'completed';
+      outcome = answer.clarification ? 'clarification' : serviceFailure ? 'answer_failed' : unanswered ? 'no_evidence' : 'completed';
       if (answer.reason==='clarification_exhausted') this.idleDiagnostic='dialogue_paused';
-      else if (['llm_unavailable','verification_unavailable','draft_unavailable'].includes(answer.reason??'')) this.idleDiagnostic='answer_failed';
+      else if (serviceFailure) this.idleDiagnostic='answer_failed';
       if (caller?.participant && speakerKey && (answer.clarification || !unanswered)) {
         this.waitingCaller = {...caller, after: Date.now(), expires: Date.now() + FOLLOW_UP_MS};
         this.continuationHypotheses = [];

@@ -74,6 +74,9 @@ class VoiceReply(BaseModel):
     model_config = ConfigDict(extra='forbid')
     request_id: UUID
     text: str = Field(min_length=1, max_length=4000)
+    # Legacy reply metadata is read-only; retain saved history when changing runtimes.
+    detail_text: str | None = Field(default=None,min_length=1,max_length=4000)
+    answer_complete: bool = True
     played_text: str | None = Field(default=None, max_length=4000)
     answer_kind: Literal['meeting', 'general', 'web', 'assistant'] = 'meeting'
     reason: Literal['answered', 'clarification', 'no_shared_sources', 'retrieval_empty', 'insufficient_evidence',

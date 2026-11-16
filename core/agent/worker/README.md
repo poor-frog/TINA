@@ -43,7 +43,13 @@ It calls the existing tool-less meeting CompletionPort using canonical text and 
 names, then emits a candidate result. It does not publish live notes, edit canonical text or
 overwrite workspace documents. Meeting API owns source/lease validation and final publication.
 
-Meeting voice planning uses a bounded read-only CompletionPort prompt (`voice_plan`). LiveKit executes the selected tools; the existing final voice completion still verifies every room claim.
+Meeting voice planning, answer generation and repairs use the selected CompletionPort directly.
+LiveKit/LangGraph executes the authorized TINA tools; workspace/chat turns retain their configured
+CLI harness. Voice does not start a CLI process or create a coding workspace. Source, numeric and
+independent semantic verification remain required before TTS.
+
+The server-owned retrieval deadline still bounds planning; exhausted internal planning budgets
+use the existing empty-plan verified-answer path. Other failures retain the normal error handling.
 
 Voice review and one optional repair share the remaining completion deadline. No repair runs after verifier outages; every corrected claim and follow-up is checked again.
 
@@ -52,7 +58,7 @@ Recap map jobs use the normal numeric/semantic review and repair; reduction jobs
 Malformed ordinary voice replies get at most one final JSON regeneration within the same
 50-second completion budget. This includes prose around JSON and unexpected tools in a final-only
 step. Regeneration receives the original sources/question and untrusted failed output, cannot
-execute tools, and must pass claim validation and semantic review. Invalid recovery and provider
+request additional TINA lookups/actions, and must pass claim validation and semantic review. Invalid recovery and provider
 failures still fail closed; private drafts are never logged.
 
 Meeting voice uses optional provider-side JSON Schema for generation, plans, review and repairs.

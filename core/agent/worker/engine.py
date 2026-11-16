@@ -652,11 +652,12 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
     from shared.voice_evidence import evidence_pack
     from shared.voice_trace import voice_span
     from shared.meeting_knowledge import PREFIX, SYSTEM, validate_answer
-    from shared.voice_knowledge import (VOICE_SYSTEM, VOICE_TOOLS, VOICE_PLAN_SYSTEM, VOICE_REPAIR_SYSTEM, VOICE_FORMAT_SYSTEM, GENERAL_SYSTEM, VERIFY_SYSTEM,
+    from shared.voice_knowledge import (VOICE_SYSTEM, VOICE_TOOLS, VOICE_PLAN_SYSTEM, VOICE_INTENT_SYSTEM, VOICE_REPAIR_SYSTEM, VOICE_FORMAT_SYSTEM, GENERAL_SYSTEM, VERIFY_SYSTEM,
         validate_voice_answer, verify_voice_reply, voice_tool_calls)
     from shared.voice_summary import MAP_SYSTEM, SELECT_SYSTEM
     from shared.voice_task_flow import TASK_FLOW_SYSTEM, TaskPatch
     from shared.voice_decision_flow import DECISION_SYSTEM, EVIDENCE_SYSTEM, DecisionPatch, EvidenceVerdict, checked_evidence
+    mode = None
     try:
         inline = start_prompt(start) or ''
         if not inline.startswith(PREFIX):
@@ -671,11 +672,17 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
         empty_rank = False
         voice = mode in ('voice', 'voice_summary_map', 'voice_summary_verify','voice_decision_evidence')
         voice_deadline = time.monotonic() + 50
+        if mode == 'voice_plan' and source.get('retrieval_deadline_ms') is not None:
+            deadline = source['retrieval_deadline_ms']
+            if type(deadline) is not int: raise ValueError('Invalid retrieval deadline')
+            voice_deadline = min(voice_deadline, time.monotonic() + deadline / 1000 - time.time())
+            if voice_deadline <= time.monotonic(): raise TimeoutError('Voice retrieval budget exhausted')
         def generate(provider, prompt, system, schema=None):
             if not str(mode).startswith('voice'):
                 return generate_text(provider, prompt, system, schema)
             stage = {VERIFY_SYSTEM: 'verify', VOICE_REPAIR_SYSTEM: 'repair',
                      VOICE_FORMAT_SYSTEM: 'format_repair', VOICE_PLAN_SYSTEM: 'plan',
+                     VOICE_INTENT_SYSTEM: 'intent',
                      RERANK_SYSTEM: 'rerank'}.get(system, 'generation')
             with voice_span(stage, trace_id):
                 return generate_text(provider, prompt, system, schema)
@@ -701,7 +708,11 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
             raw = generate(completion_from_env(timeout=min(10, remaining)), prompt, system, schema)
             if empty_rank and system != VERIFY_SYSTEM: validate_voice_answer(raw, answer_sources)
             return raw
-        provider = completion_from_env(timeout=10 if mode in ('voice_plan','voice_task_flow','voice_decision_flow') else 25 if voice or mode=='voice_general' else 45)
+        provider_timeout = 4 if mode=='voice_intent' else 10 if mode in ('voice_plan','voice_task_flow','voice_decision_flow') else 25 if voice or mode=='voice_general' else 45
+        if mode == 'voice_plan':
+            provider_timeout = min(provider_timeout, voice_deadline-time.monotonic())
+            if provider_timeout <= 0: raise TimeoutError('Voice retrieval budget exhausted')
+        provider = completion_from_env(timeout=provider_timeout)
         if mode == 'voice_summary_select':
             text = generate(completion_from_env(timeout=15), payload['text'], SELECT_SYSTEM)
             ids = {i for fact in source['summary_facts'] for i in fact['source_ids']}
@@ -726,6 +737,9 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                     lambda prompt:checked_completion(prompt,VERIFY_SYSTEM),diagnostics=True))
                 if 'unavailable' in verified.get('verification',[]):raise RuntimeError('Decision verification unavailable')
                 if not verified.get('claims'):text=json.dumps({'verdict':'missing','source_ids':[],'quotes':[]})
+        elif mode == 'voice_intent':
+            text = generate(provider, json.dumps({'question':source['question']},ensure_ascii=False),
+                            VOICE_INTENT_SYSTEM, voice_schema('intent'))
         elif mode == 'voice_plan':
             text = generate(provider, payload['text'], VOICE_PLAN_SYSTEM,
                             voice_schema('plan', tools=source['available_tools']))
@@ -756,7 +770,9 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
             if mode == 'voice':
                 with voice_span('source_selection', trace_id) as metrics:
                     pending = source.get('pending_clarification')
-                    intent = json.dumps({'question': source['question'], 'pending_clarification': pending}, ensure_ascii=False) if pending else source['question']
+                    dialogue = source.get('dialogue_context')
+                    intent = json.dumps({'question': source['question'], 'pending_clarification': pending,
+                        'dialogue_context':dialogue}, ensure_ascii=False) if pending or dialogue else source['question']
                     ranked, outcome = rerank_voice_sources(intent, source['sources'],
                         source.get('history', []), source.get('recent_source_ids', []),
                         lambda prompt: generate(completion_from_env(timeout=4), prompt, RERANK_SYSTEM,
@@ -782,6 +798,7 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                 except (ValueError, TypeError, AttributeError):
                     raw = checked_completion(json.dumps({'question': source['question'],
                         'sources': answer_sources, 'history': source.get('history', []),
+                        'dialogue_context':source.get('dialogue_context'),
                         'invalid_output': raw}, ensure_ascii=False), VOICE_FORMAT_SYSTEM)
                     validate_voice_answer(raw, answer_sources)
                     log.info('voice response format regenerated')
@@ -792,7 +809,9 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
             else:
                 (validate_voice_answer if voice else validate_answer)(raw, answer_sources)
                 pending = source.get('pending_clarification')
-                intent = json.dumps({'question': source['question'], 'pending_clarification': pending}, ensure_ascii=False) if pending else source['question']
+                dialogue = source.get('dialogue_context')
+                intent = json.dumps({'question': source['question'], 'pending_clarification': pending,
+                    'dialogue_context':dialogue}, ensure_ascii=False) if pending or dialogue else source['question']
                 text = verify_voice_reply(raw, intent, source['sources'],
                     lambda prompt: checked_completion(prompt, VERIFY_SYSTEM),
                     repair=lambda prompt: checked_completion(prompt, VOICE_REPAIR_SYSTEM),
@@ -804,6 +823,15 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                 if voice:
                     log.info('voice verification checks=%s', ','.join(json.loads(text).get('verification', [])))
         stream.xadd(out_topic, {'event': json.dumps({'type': 'message-delta', 'text': text})})
+    except TimeoutError:
+        if mode == 'voice_plan':
+            # An empty plan uses the existing verified-answer path without new tool authority.
+            log.warning('voice plan timed out; using verified-answer path')
+            with voice_span('plan',trace_id) as metrics:
+                metrics['outcome']='fallback'
+                stream.xadd(out_topic,{'event':json.dumps({'type':'message-delta','text':'{"tool_calls":[]}'})})
+        else:
+            log.warning('meeting knowledge failed error=TimeoutError')
     except Exception as exc:  # Never log questions, sources or provider responses.
         log.warning('meeting knowledge failed error=%s', type(exc).__name__)
     stream.xadd(out_topic, {'event': json.dumps({'type': 'turn-complete'})})

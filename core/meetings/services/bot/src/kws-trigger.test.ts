@@ -33,6 +33,21 @@ test('KWS name variants acknowledge while real questions and raw ASR remain inta
   now += 350; assert.equal(custom.question(4400), '');
 });
 
+test('fragmented acoustic wake phrases are cleaned after assembly without becoming a question',()=>{
+  for(const [parts,expected] of [
+    [['hey','TINA'],''],[['Hey,','TINA!'],''],[['ti','na','ơi'],''],[['TINA','ơi','ạ'],''],
+    [['hây','ti','na'],''],[['hey','TINA','ai phụ trách demo?'],'ai phụ trách demo?'],
+    [['Hey,','tìm tài liệu demo'],'Hey, tìm tài liệu demo'],
+  ] as Array<[string[],string]>){
+    let now=5000;const t=new VoiceTrigger(()=>now,[],true);t.reset(1000);
+    assert(t.wake({channel:1,startMs:3000,endMs:3800}));
+    parts.forEach((text,i)=>t.feed({channel:1,speakerKey:'s',startMs:3000+i*500,
+      endMs:3500+i*500,text,final:true}));
+    now+=350;assert.equal(t.question(3000+parts.length*500),expected,parts.join(' / '));
+    assert.equal(t.heard?.text,parts.at(-1));
+  }
+});
+
 test('KWS authorizes a same-channel ASR question without requiring an ASR name match', () => {
   let now = 5000; const t = new VoiceTrigger(() => now, [], true); t.reset(1000);
   const h: VoiceHypothesis = {channel: 2, participant: 'p', speakerKey: 's', startMs: 3000,
@@ -93,6 +108,25 @@ test('post-answer continuation has an absolute deadline even after waiting for r
   assert(!t.hasContinuation);
   assert.equal(t.feed({channel:1,participant:'p',speakerKey:'s',startMs:15000,endMs:16000,
     text:'Còn deadline?',final:true}),'ignore');
+});
+
+test('a timely VAD onset reserves the caller reply while ASR finishes, with a bounded capture deadline', () => {
+  let now=1000;const t=new VoiceTrigger(()=>now,[],true);
+  const arm=()=>t.continueAfter(1000,{channel:1,participant:'p'},6000);
+  const h={channel:1,participant:'p',speakerKey:'s',startMs:5500,endMs:6500,text:'Backend.',final:true};
+  arm();now=5500;
+  assert(!t.continuationSpeech(2,'p',5500));assert(!t.continuationSpeech(1,'other',5500));
+  assert(!t.continuationSpeech(1,undefined,5500));assert(!t.continuationSpeech(1,'p',999));
+  assert(t.continuationSpeech(1,'p',5500));now=7000;
+  assert.equal(t.takeExpiredContinuation(),undefined);assert(t.hasContinuation);
+  assert.equal(t.feed({...h,participant:'other'}),'ignore');
+  assert.equal(t.feed(h),'wake');now=7350;assert.equal(t.question(6500),'Backend.');
+  now=1000;arm();now=5500;t.continuationSpeech(1,'p',5500);now=25501;
+  assert(t.takeExpiredContinuation());assert.equal(t.feed(h),'ignore');
+  now=1000;arm();now=6001;assert(!t.continuationSpeech(1,'p',5500));
+  assert.equal(t.feed(h),'ignore');
+  now=1000;arm();now=5500;t.continuationSpeech(1,'p',5500);t.reset();
+  assert(!t.hasContinuation);
 });
 
 test('unfinished requests wait for thought pauses, complete questions and clarification replies do not', () => {
