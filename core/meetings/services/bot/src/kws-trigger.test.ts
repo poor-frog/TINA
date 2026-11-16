@@ -58,6 +58,22 @@ test('KWS prefix cleanup preserves raw ASR, accepts revisions and allows a stand
   assert.equal(t.question(4400), '');
 });
 
+test('verified KWS strips observed STT wake-name variants without changing raw ASR or authorizing ASR-only calls', () => {
+  for (const text of ['KINA ƠI MỘT CỘNG MỘT BẰNG MẤY', 'khi na ơi một cộng một bằng mấy']) {
+    let now = 5000;
+    const trigger = new VoiceTrigger(() => now, [], true);
+    const hypothesis = {channel: 1, participant: 'caller', speakerKey: 's', startMs: 3000,
+      endMs: 4400, text, final: true};
+    trigger.reset(1000);
+    assert.equal(trigger.feed(hypothesis), 'ignore');
+    assert(trigger.wake({channel: 1, participant: 'caller', startMs: 3000, endMs: 3800}));
+    assert.equal(trigger.feed(hypothesis), 'wake');
+    now += 350;
+    assert.equal(trigger.question(4400)?.toLocaleLowerCase('vi'), 'một cộng một bằng mấy');
+    assert.equal(hypothesis.text, text);
+  }
+});
+
 test('Stop/rearm fences old KWS and ASR; pending acoustic turns expire without ASR', () => {
   let now = 5000; const t = new VoiceTrigger(() => now, [], true); t.reset(4000);
   assert(!t.wake({channel: 1, startMs: 2000, endMs: 3800}));
