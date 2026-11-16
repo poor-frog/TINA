@@ -80,6 +80,11 @@ Punctuation-only output, known phrase-list artifacts and repetition loops remain
 
 ## Audio tail and long-session regression
 
+Live ASR windows and voice endpoints use each frame's `sourceCaptureMs` so device-clock
+corrections remain aligned with VAD. The audio archive retains its fixed indexed sample
+clock. `src/voice-endpoint.test.ts` exercises drift between these clocks and verifies that
+the final ASR result reaches the speech endpoint while all captured samples are retained.
+
 `npm test` includes `src/stream-integrity.test.ts`. It exercises the shipped pipeline at 16 kHz
 with 64 ms frames and unchanged window defaults: short/partial final frames, a delayed request
 missing its tail, repeated endpoints, the exact 30-second boundary, speaker rotations, and explicit

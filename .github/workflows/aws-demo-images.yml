@@ -9,6 +9,7 @@ on:
       - clients/terminal/**
       - core/meetings/services/bot/**
       - core/meetings/modules/gmeet-capture/**
+      - core/meetings/modules/gmeet-pipeline/**
   workflow_dispatch:
 
 permissions: {}
