@@ -89,3 +89,8 @@
 .connectButton { border-color: var(--calendar-color); color: var(--calendar-color); }
 .connectButton:hover { background: var(--calendar-tint); }
 .askAgent { color: var(--agent-color); }
+.greeting { margin: 0 0 12px; color: var(--t2); font-size: var(--today-title); font-weight: 500; line-height: 1.2; }
+.greeting strong { color: var(--t1); font-weight: 650; }
+.title { font-size: var(--ui-type-title); }
+.headingGroup { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 8px; min-width: 0; }
+.headingGroup .weekLabel { white-space: nowrap; font-variant-numeric: tabular-nums; }

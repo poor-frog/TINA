@@ -1045,9 +1045,7 @@ export function WorkspaceSwitcher({ onSwapped, focusedSlug, focusedName, onFocus
 const SS_GIT_OPEN = "ws.git.open";
 function GitSection() {
   const layout = useService(LayoutServiceId);
-  // Direction A, law #4 (browsing is on-demand): the recent-commit feed is the Fast path in Knowledge
-  // (the freshest thing a member pushed), so it now starts OPEN; the file tree below stays the fallback.
-  const [open, setOpen] = useState<boolean>(() => readSS(SS_GIT_OPEN) !== "0");  // default open
+  const [open, setOpen] = useState<boolean>(() => readSS(SS_GIT_OPEN) === "1");
   const [git, setGit] = useState<GitState>({ branch: "", changes: [], commits: [] });  // primary (branch + working changes)
   // RECENT ACTIVITY spans EVERY active workspace (primary + shared/other mounts), merged by recency — so
   // the freshest thing (a member's push to a shared ws) shows here, not a stale primary-only commit.
