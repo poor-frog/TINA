@@ -9,7 +9,7 @@ Agents session and pure normalized notice echoes are ignored during caller conti
 `WAKE_TEXTS`/`WAIT_TEXTS`/`SUMMARY_TEXTS` catalog must match these phrases. No LLM chooses filler.
 
 After native KWS verifies a call, question assembly removes observed STT spellings of the
-vocative, including `KINA ƠI` and `khi na ơi`. Cleanup preserves the raw transcript and keeps
+vocative, including `KINA ƠI`, `PINA ƠI`, `khi na ơi` and `kỳ na ơi`. Cleanup preserves the raw transcript and keeps
 the existing channel, participant, freshness and acoustic-activation requirements.
 
 `voice_timing` logs retain only request UUID/channel, timestamps and durations. Speech timing is

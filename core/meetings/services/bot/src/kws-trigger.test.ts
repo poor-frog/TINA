@@ -59,7 +59,8 @@ test('KWS prefix cleanup preserves raw ASR, accepts revisions and allows a stand
 });
 
 test('verified KWS strips observed STT wake-name variants without changing raw ASR or authorizing ASR-only calls', () => {
-  for (const text of ['KINA ƠI MỘT CỘNG MỘT BẰNG MẤY', 'khi na ơi một cộng một bằng mấy']) {
+  for (const text of ['KINA ƠI MỘT CỘNG MỘT BẰNG MẤY', 'khi na ơi một cộng một bằng mấy',
+    'PINA ƠI MỘT CỘNG MỘT BẰNG MẤY', 'kỳ na ơi một cộng một bằng mấy']) {
     let now = 5000;
     const trigger = new VoiceTrigger(() => now, [], true);
     const hypothesis = {channel: 1, participant: 'caller', speakerKey: 's', startMs: 3000,
