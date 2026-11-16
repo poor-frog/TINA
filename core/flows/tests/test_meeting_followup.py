@@ -2,14 +2,16 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from flows import Done, StepError
-from flows_defs import production
-from flows_steps import common, followup, mailtext, meeting
-from test_link_loop import _ctx, _rig
+from test_link_loop import FakeChannel, _ctx
 
 
 @pytest.fixture
-def world(monkeypatch):
-    reg, channel = _rig()
+def world(registry, monkeypatch):
+    # Resolve modules after the cold-start test clears flows_steps from sys.modules.
+    from flows_steps import common, mailtext, meeting, notify
+
+    reg, channel = registry, FakeChannel()
+    monkeypatch.setattr(notify, "channel", lambda: channel)
     row = {"id": 41, "data": {"title": "Họp dự án", "attendees": [
         {"email": "Anna@bank.test"}, {"email": "ben@outside.test"},
         {"email": "BEN@outside.test"}, {"email": "declined@bank.test", "partstat": "DECLINED"},
@@ -72,6 +74,8 @@ def test_all_known_emails_get_thanks_and_two_working_meeting_links(world):
 
 
 def test_retry_keeps_successes_and_minted_links_after_a_partial_failure(world, monkeypatch):
+    from flows_steps import followup
+
     reg, channel, ctx, writes, shares = world
     real_notify = followup.notify
     checkpoints = []
@@ -93,6 +97,8 @@ def test_retry_keeps_successes_and_minted_links_after_a_partial_failure(world, m
 
 
 def test_disabled_owner_email_and_meeting_sharing_are_respected(world, monkeypatch):
+    from flows_steps import common
+
     reg, channel, ctx, _, shares = world
     monkeypatch.setattr(common, "setting", lambda *_: False)
     ctx.refs["share"] = False
@@ -101,6 +107,8 @@ def test_disabled_owner_email_and_meeting_sharing_are_respected(world, monkeypat
 
 
 def test_no_email_is_sent_when_the_summary_cannot_be_saved(world, monkeypatch):
+    from flows_steps import common
+
     reg, channel, ctx, _, shares = world
     real_http = common.http
     monkeypatch.setattr(common, "http", lambda method, *a, **kw:
@@ -111,6 +119,8 @@ def test_no_email_is_sent_when_the_summary_cannot_be_saved(world, monkeypatch):
 
 
 def test_declined_attendee_cannot_be_reintroduced_by_event_participants(world):
+    from flows_steps import meeting
+
     reg, channel, ctx, _, shares = world
     row = meeting.meeting_row("7", 41)
     row["data"]["attendees"][1]["partstat"] = "DECLINED"
@@ -122,6 +132,8 @@ def test_declined_attendee_cannot_be_reintroduced_by_event_participants(world):
 
 
 def test_meeting_row_does_not_depend_on_the_first_meetings_page(monkeypatch):
+    from flows_steps import meeting
+
     monkeypatch.setattr(meeting, "meetings_door", lambda: "http://gateway.test")
     monkeypatch.setattr(meeting, "user_api_key", lambda _: "test-key")
     target = {"id": 41, "data": {"title": "Older meeting"}}
