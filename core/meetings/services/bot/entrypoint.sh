@@ -32,6 +32,7 @@ pactl load-module module-null-sink sink_name=meeting_rx \
 pactl set-default-sink meeting_rx 2>/dev/null || true
 pactl load-module module-null-sink sink_name=tts_sink \
   sink_properties=device.description="TTSAudioSink" 2>/dev/null || true
+pactl set-sink-volume tts_sink 70% 2>/dev/null || true
 pactl load-module module-remap-source master=tts_sink.monitor source_name=virtual_mic \
   source_properties=device.description="VirtualMicrophone" 2>/dev/null || true
 pactl set-default-source virtual_mic 2>/dev/null || true
