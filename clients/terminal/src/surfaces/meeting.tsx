@@ -1,6 +1,5 @@
 "use client";
 /** Meetings (mocked backend) — the differentiator flow.
- *  • SidebarMeetingCapture (left): global capture actions and entry points, present across sections.
  *  • "meetings" LIST: the live one auto-opens; the section link leads to Today in the center.
  *  • "meeting" TAB (center): fixed meeting chrome around the Meeting Canvas body.
  *    The generated canvas view consumes this meeting's live MeetingState. */
@@ -16,12 +15,12 @@ import { ContextMenu, copyText } from "../ui-kit/ContextMenu";
 import { MEETING_CANVAS_CONTENT_INSET, MeetingCanvasView } from "../canvas/MeetingCanvasView";
 import { meetingPhase, type MeetingMock } from "./meetingModel";
 import { ApiError, presentError, readApiFailure } from "./apiClient";
-import { resolveJoinError, serviceDenialFromError, type ServiceDenialPresentation } from "./serviceDenial";
+import { serviceDenialFromError, type ServiceDenialPresentation } from "./serviceDenial";
 import { ServiceDenialPanel } from "./ServiceDenialPanel";
 import { useLiveMeetings, useLiveMeetingsConnection, useLiveMeetingsLoaded, liveMeetingsNow, refreshMeetings } from "./liveMeetings";
 import { usePreviewPinTab } from "./previewPinTab";
 import { defaultBotName } from "./defaultBotName";
-import { discordChannelUrl, meetingUrlFor, parseMeetingInput } from "./meetingId";
+import { discordChannelUrl, meetingUrlFor } from "./meetingId";
 import { getJitsiHosts } from "./jitsiHosts";
 import { mintTranscriptShare, mintInvite, listSharedMemberships, type Membership } from "./workspaceApi";
 import { deletePlannedMeeting, MAX_CALENDARS, listCalendars, createCalendar, updateCalendar, syncCalendar, getCalendarSyncStatus, type CalendarConnection, type CalendarSyncStamp } from "./plannedApi";
@@ -750,79 +749,6 @@ function CalendarSyncButton({ variant = "icon" }: { variant?: "icon" | "row" }) 
         </div>
       )}
     </div>
-  );
-}
-
-// ── Always-available capture actions (Direction C: capture first, navigation below). ─────────────
-export function SidebarMeetingCapture() {
-  // 'add bot from URL': send OUR bot into a meeting; the watcher attaches the copilot once it transcribes
-  const [url, setUrl] = useState("");
-  const [sent, setSent] = useState<null | "sending" | "ok" | "err">(null);
-  const [errMsg, setErrMsg] = useState<string | null>(null);
-  const [denial, setDenial] = useState<ServiceDenialPresentation | null>(null);
-  const addBot = async () => {
-    const u = url.trim();
-    if (!u || sent === "sending") return;
-    // Parse + validate the pasted link/id against the platform formats (mirrors join-form).
-    const parsed = parseMeetingInput(u, await getJitsiHosts());
-    if (!parsed) { setSent("err"); setErrMsg("That doesn't look like a Meet / Zoom / Teams / Jitsi / Discord link."); setDenial(null); setTimeout(() => setSent(null), 5000); return; }
-    setSent("sending"); setErrMsg(null); setDenial(null);
-    let refused = false;
-    try {
-      // POST /bots through the authed gateway proxy (X-API-Key injected server-side from the cookie token).
-      const r = await fetch("/api/bots", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: parsed.platform, native_meeting_id: parsed.native_meeting_id, meeting_url: meetingUrlFor(parsed, u), bot_name: defaultBotName() }),
-      });
-      if (r.ok) {
-        setSent("ok"); setUrl("");
-        // The list has no background poll, so force a re-fetch now and again as the bot
-        // transitions requested → joining → active (else the meeting only shows on reload).
-        refreshMeetings(); setTimeout(refreshMeetings, 2000); setTimeout(refreshMeetings, 6000);
-      } else {
-        // Surface the REAL reason, not a generic "bad link" (the cap/dup/auth cases are common).
-        setSent("err");
-        if (r.status === 429) { setErrMsg("You're at your meeting limit — stop one first."); }
-        else if (r.status === 409) { setErrMsg("That meeting already has a bot."); }
-        else if (r.status === 401) { setErrMsg("Not signed in — sign in and retry."); }
-        else {
-          // 403 service_not_allowed / 503 service_authority_unavailable are the deciding service
-          // refusing, not an access fault: they get their own words and their own fix.
-          const state = resolveJoinError(await readFailure(r));
-          if (state.kind === "denial") { setDenial(state.presentation); setErrMsg(null); refused = true; }
-          else setErrMsg(state.headline);
-        }
-      }
-    } catch { setSent("err"); setErrMsg("Couldn't reach the server."); }
-    // The transient flash clears itself; a denial panel is sticky until the next attempt — a
-    // paywall the user has to act on must not vanish on a 5s timer.
-    if (!refused) setTimeout(() => setSent(null), 5000);
-  };
-  return (
-    <section aria-label="Start meeting capture" style={{ padding: "17px 17px 14px", borderBottom: "1px solid var(--line)", flex: "none" }}>
-      <div style={{ display: "flex", alignItems: "center", minHeight: 20, padding: "0 0 9px" }}>
-        <span style={{ fontSize: "var(--ui-type-meta)", color: "var(--t3)", fontWeight: 500, flex: 1 }}>Start capture</span>
-      </div>
-      <div>
-        <div style={{ display: "flex", gap: 7, minWidth: 0 }}>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void addBot(); }}
-            className="meeting-capture-input" placeholder="Paste a meeting link…" />
-          <button onClick={() => void addBot()} disabled={!url.trim() || sent === "sending"} title="Send the TINA bot to this meeting"
-            className="meeting-capture-add">
-            <span aria-hidden="true">+</span>{sent === "sending" ? "…" : "Add bot"}
-          </button>
-        </div>
-        {sent === "ok" && <div style={{ fontSize: 11, color: "var(--green)", marginTop: 5, lineHeight: 1.4 }}>Bot sent — admit it in the meeting; it appears here once it starts transcribing.</div>}
-        {denial
-          ? <ServiceDenialPanel presentation={denial} onRetry={() => void addBot()} />
-          : sent === "err" && <div style={{ fontSize: 11, color: "var(--danger)", marginTop: 5, lineHeight: 1.4 }}>{errMsg ?? "Couldn't send."}</div>}
-        <div style={{ display: "grid", gap: 1, marginTop: 7 }}>
-          <PlanMeetingButton />
-          <CalendarSyncButton variant="row" />
-        </div>
-      </div>
-    </section>
   );
 }
 

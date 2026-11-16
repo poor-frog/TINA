@@ -6,7 +6,8 @@
 #
 #   kubectl --context lke590708-ctx create namespace tina-v012-staging
 #   # create the tina-v012-secrets Secret (ADMIN_API_TOKEN, INTERNAL_API_SECRET,
-#   #   TRANSCRIPTION_SERVICE_TOKEN, TINA_DISPATCH_SIGNING_KEY) from tina-secrets (sops, in-memory)
+#   #   TRANSCRIPTION_SERVICE_TOKEN, TINA_DISPATCH_SIGNING_KEY; GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET
+#   #   when OAuth is enabled) from tina-secrets (sops, in-memory)
 #   # create the recordings bucket named under storage.s3 below, and the tina-v012-s3 Secret
 #   #   (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) holding a key pair scoped to it
 #   helm --kube-context lke590708-ctx upgrade --install tina deploy/helm/charts/tina \

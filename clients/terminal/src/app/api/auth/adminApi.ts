@@ -217,6 +217,37 @@ export function revokeToken(tokenId: string | number): Promise<AdminResult<void>
 // injects X-User-Id), never agent-api directly. Mirrors the workspace proxy route's GATEWAY_URL default.
 const GATEWAY_URL = (process.env.GATEWAY_URL || "http://127.0.0.1:18056").replace(/\/$/, "");
 
+export interface GoogleCalendarLinkPayload {
+  provider_account_id: string;
+  email: string;
+  refresh_token?: string | null;
+  calendars: Array<{ id: string; summary: string; primary: boolean; time_zone?: string | null }>;
+}
+
+/** Store a Google Calendar grant through the authenticated gateway; the refresh token never reaches the browser. */
+export async function linkGoogleCalendarAccount(
+  token: string,
+  account: GoogleCalendarLinkPayload,
+): Promise<AdminResult<{ google_account: { id: string; email: string } }>> {
+  try {
+    const response = await fetch(`${GATEWAY_URL}/user/calendars`, {
+      method: "POST",
+      headers: { "X-API-Key": token, "Content-Type": "application/json" },
+      body: JSON.stringify({ google_account: account }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) {
+      // Do not relay an upstream response body that could echo OAuth material.
+      return { ok: false, status: response.status, error: "Google Calendar account could not be saved" };
+    }
+    return { ok: true, status: response.status, data: await response.json() as { google_account: { id: string; email: string } } };
+  } catch (err) {
+    const e = err as Error;
+    return { ok: false, status: 0, error: e.name === "TimeoutError" ? "Calendar account save timed out" : "Calendar account save is unavailable" };
+  }
+}
+
 /** EAGERLY provision the user's agent workspace tiers (Personal baseline + private `_system`) so they
  *  exist from account creation instead of being lazily seeded on the first chat. BEST-EFFORT: the call is
  *  idempotent server-side and the lazy first-dispatch path is a full fallback, so any failure here (agent

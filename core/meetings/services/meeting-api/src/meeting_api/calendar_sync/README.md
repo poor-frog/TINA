@@ -1,10 +1,10 @@
-# calendar_sync — ICS feed → planned meetings
+# calendar_sync — calendar sources → planned meetings
 
-One concern: turn a user's secret ICS calendar feed into PLANNED meeting rows (intent status
+One concern: turn a user's secret ICS feed or selected Google Calendar into PLANNED meeting rows (intent status
 `scheduled`, complete `data.calendar_sources[].event` provenance) so the Meetings surface shows what's coming and the
-auto-join sweep sends the bot when each meeting starts. No OAuth — the user pastes the
-secret-address ICS URL Google Calendar / Outlook already provide (`PUT /user/calendar`, identity
-domain).
+auto-join sweep sends the bot when each meeting starts. ICS URLs and Google OAuth grants are managed
+by the identity domain. Google refresh tokens are encrypted at rest and cross only the internal
+calendar-config edge; new Google connections keep auto-join off until enabled per calendar.
 
 ## Public surface
 - `parse_ics(text, now, horizon_days=14)` → `{"events": [PlannedEvent], "cancelled_uids": […]}`
@@ -23,6 +23,9 @@ domain).
   which is also the one that may retire them.
 - `fetch_ics(url, client=None)` — **SSRF-pinned** (`webhooks/ssrf.build_pinned_transport`), 2 MB cap,
   no redirects; pass a `build_ics_client()` to share one connection pool across a sweep.
+- `fetch_google_events(config, now, client=None)` — refreshes the stored offline grant, reads a bounded
+  14-day event snapshot, and normalizes it to the same planned-event shape. Provider failures do not
+  become empty snapshots; one cancelled recurring instance does not cancel its series.
   `fetch_configs(admin_api_url, secret)` — the internal discovery hop.
 
 ## Wiring (entrypoint)
@@ -39,3 +42,14 @@ calendar leaves no meeting armed. Unset `ADMIN_API_URL`/`INTERNAL_API_SECRET` �
 ## Dependencies
 `icalendar` + `python-dateutil` (both FINOS Category A), imported lazily. Depends on
 `collector` (meeting_link + the planned-meeting store port) and `webhooks.ssrf` only.
+
+Google snapshots retain each source's current link and timed start in source metadata. A removed
+Google link disarms only a calendar-managed planned row when no other source still authorizes a
+link; manual plans and FSM-owned rows keep their ownership. An alternative timed source keeps its
+own room/time pair. Link-index updates prevent a new event from adopting a just-detached identity.
+
+Google all-day dates remain dates in provenance (`all_day`, `start_date`, exclusive `end_date`).
+They do not become midnight UTC join times: new entries are idle with no scheduled instant and
+no auto-join. A selected calendar's timezone is forwarded on the internal config edge for date
+windowing; date anchors are used only for occurrence comparison, so finished all-day instances
+are not repeatedly imported. Other timed sources and manually entered schedules stay authoritative.

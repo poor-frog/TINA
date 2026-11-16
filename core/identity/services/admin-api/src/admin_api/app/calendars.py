@@ -47,6 +47,10 @@ def _legacy_id(user_id: int) -> str:
     return str(uuid5(NAMESPACE_URL, f"tina:user:{user_id}:calendar:legacy"))
 
 
+def google_account_id(user_id: int, provider_account_id: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"tina:user:{user_id}:google-calendar:{provider_account_id}"))
+
+
 def connections_from_data(data: dict, user_id: int, *, include_deleted: bool = False) -> list[dict]:
     raw = data.get("calendar_connections")
     if isinstance(raw, list):
@@ -62,6 +66,43 @@ def connections_from_data(data: dict, user_id: int, *, include_deleted: bool = F
             "enabled": True,
         }] if legacy_url else [])
     return connections if include_deleted else [c for c in connections if not c.get("deleted")]
+
+
+def google_accounts_from_data(data: dict) -> list[dict]:
+    raw = data.get("google_calendar_accounts")
+    return [dict(item) for item in raw if isinstance(item, dict) and item.get("id")] if isinstance(raw, list) else []
+
+
+def public_google_accounts(data: dict, user_id: int) -> list[dict]:
+    """Only account identity + selectable calendar metadata crosses the user API."""
+    connections = connections_from_data(data, user_id, include_deleted=True)
+    out = []
+    for account in google_accounts_from_data(data):
+        calendars = account.get("calendars")
+        if not isinstance(calendars, list):
+            calendars = []
+        out.append({
+            "id": account["id"],
+            "email": account.get("email", ""),
+            "calendars": [
+                {
+                    "id": item["id"],
+                    "summary": item.get("summary") or item["id"],
+                    "primary": bool(item.get("primary")),
+                    "time_zone": item.get("time_zone"),
+                    "connected": any(
+                        c.get("provider") == "google"
+                        and c.get("google_account_id") == account["id"]
+                        and c.get("google_calendar_id") == item["id"]
+                        and not c.get("deleted")
+                        for c in connections
+                    ),
+                }
+                for item in calendars
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            ],
+        })
+    return out
 
 
 def new_connection(*, name: str, ics_url: str, auto_join: bool = True,
@@ -98,7 +139,7 @@ def store_connections(data: dict, connections: list[dict]) -> dict:
 def masked_connection(connection: dict) -> dict:
     url = connection.get("ics_url") or ""
     host = urlparse(url).hostname or ""
-    return {
+    out = {
         "id": connection["id"],
         "name": connection.get("name") or "Calendar",
         "ics_url_set": bool(url),
@@ -107,6 +148,14 @@ def masked_connection(connection: dict) -> dict:
         "bot_name": connection.get("bot_name") or "TINA",
         "enabled": bool(connection.get("enabled", True)),
     }
+    if connection.get("provider") == "google":
+        out.update(
+            provider="google",
+            google_account_id=connection.get("google_account_id"),
+            google_calendar_id=connection.get("google_calendar_id"),
+            google_account_email=connection.get("google_account_email"),
+        )
+    return out
 
 
 def legacy_connection_id(connections: list[dict], user_id: int) -> Optional[str]:
@@ -120,10 +169,11 @@ def legacy_connection_id(connections: list[dict], user_id: int) -> Optional[str]
     synthesized = _legacy_id(user_id)
     if any(connection.get("id") == synthesized for connection in connections):
         return synthesized
-    return connections[0]["id"] if connections else None
+    legacy = next((c for c in connections if c.get("provider") != "google"), None)
+    return legacy["id"] if legacy else None
 
 
-def internal_connections(data: dict, user_id: int) -> list[dict]:
+def internal_connections(data: dict, user_id: int, *, decrypt_google_token=None) -> list[dict]:
     """Flatten one user's connections for the secret-gated meeting-api edge.
 
     Three shapes cross the hop.  A LIVE connection carries its feed URL and syncs normally.  A
@@ -147,9 +197,26 @@ def internal_connections(data: dict, user_id: int) -> list[dict]:
             out.append({**entry, "deleted": True})
         elif not connection.get("enabled", True):
             out.append({**entry, "deleted": False, "paused": True})
+        elif connection.get("provider") == "google":
+            account = next((a for a in google_accounts_from_data(data)
+                           if a.get("id") == connection.get("google_account_id")), None)
+            encrypted = (account or {}).get("refresh_token_encrypted")
+            refresh_token = decrypt_google_token(encrypted) if encrypted and decrypt_google_token else None
+            calendars = (account or {}).get("calendars")
+            calendar = next((c for c in calendars if isinstance(c, dict)
+                             and c.get("id") == connection.get("google_calendar_id")), {}) if isinstance(calendars, list) else {}
+            out.append({
+                **entry,
+                "provider": "google",
+                "google_calendar_id": connection.get("google_calendar_id"),
+                "google_refresh_token": refresh_token,
+                "google_time_zone": calendar.get("time_zone"),
+                "auto_join": bool(connection.get("auto_join", False)),
+            })
         elif connection.get("ics_url"):
             out.append({
                 **entry,
+                "provider": "ics",
                 "ics_url": connection["ics_url"],
                 "auto_join": bool(connection.get("auto_join", True)),
             })

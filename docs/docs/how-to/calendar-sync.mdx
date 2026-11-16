@@ -1,18 +1,40 @@
 ---
 title: "Calendar sync"
-description: "Connect one or more calendars with secret ICS addresses — upcoming meetings import automatically and retain their source."
+description: "Connect Google Calendar with read-only OAuth or use a secret ICS feed; upcoming meetings sync into TINA."
 ---
 
-Connect your calendars once and TINA keeps your **Upcoming** meetings in sync: every calendar event
-with a Meet/Zoom/Teams link becomes a [planned meeting](/core/meetings#the-lifecycle--one-meeting-one-row),
-and the bot [auto-joins](/core/meetings#auto-join--scheduled-means-the-bot-comes) each one at start
-time. No OAuth, no calendar permissions — it works off the **secret ICS address** your calendar
-already provides.
+Connect Google Calendar from **Settings → Calendar → Connect Google Calendar**, then approve
+read-only Calendar access in Google and choose which calendars TINA should sync. TINA checks for
+upcoming events every five minutes and imports them as [planned meetings](/core/meetings#the-lifecycle--one-meeting-one-row).
+Auto-join starts **off** for Google calendars; enable it separately on each calendar after reviewing
+the imported meetings. TINA never edits calendar events.
+
+You can also connect a secret ICS feed for Google Calendar, Outlook, or another provider. ICS remains
+useful when you do not want to grant OAuth access.
 
 You can connect up to **ten** calendars, each with its own auto-join policy and bot name — see the
 [Calendar API](/api/calendar) for the endpoints.
 
-## 1. Find your secret ICS address
+## 1. Choose how to connect
+
+### Google Calendar with read-only access
+
+1. Sign in to TINA Terminal.
+2. Open **Settings → Calendar** and select **Connect Google Calendar**.
+3. Choose the Google account and approve Calendar read access.
+4. Add only the calendars TINA should follow. They appear in Meetings after the first sync.
+5. If you want a bot to join automatically, open that calendar's settings and turn on **Auto-join**.
+
+TINA reads event times, titles, attendee names/emails, and meeting links to prepare meetings. Event
+descriptions are checked for recognizable meeting links but are not stored in imported meeting
+provenance. The grant is read-only and can be removed from TINA's Calendar settings or revoked in
+your Google account's security settings.
+
+### ICS feed
+
+Use this option when you prefer not to grant Google OAuth access.
+
+#### Find your secret ICS address
 
 <Tabs>
   <Tab title="Google Calendar">
@@ -61,9 +83,9 @@ through the same server-side request guard as webhooks. Revoke it anytime from y
 settings ("Reset" in Google Calendar) — then reconnect with the new address.
 </Warning>
 
-## 2. Connect it — and get an answer immediately
+#### Connect it — and get an answer immediately
 
-Open **Calendar** in the self-hosted Terminal at `http://localhost:13000`. Give the connection a
+Open **Settings → Calendar** in the self-hosted Terminal at `http://localhost:13000`. Give the connection a
 recognizable name such as **Work** or **Personal**, paste the secret address, choose whether meetings
 from that calendar should auto-join, and click **Connect**. Repeat this for each feed you want TINA
 to follow (up to 10 active connections). The same operations are available through the
@@ -73,7 +95,7 @@ The same page groups **Upcoming auto-joins** by source calendar. Each calendar h
 **Default bot name**, used when that calendar arms an unattended join. For a meeting present in
 several calendars, the first source with auto-join enabled supplies the bot name.
 
-**Connecting runs a sync on the spot** — within seconds the panel answers with the result, not
+**Connecting an ICS feed runs a sync on the spot** — within seconds the panel answers with the result, not
 silence:
 
 - `✓ Synced just now — imported 3` — done; the meetings are under **Upcoming**.
@@ -94,9 +116,8 @@ preference.
 - **Bot scheduling:** checks due planned meetings every **30 seconds** by default. A bot becomes
   eligible **60 seconds before** `scheduled_at` and remains eligible until **10 minutes after** it.
 
-The calendar provider controls when an edit appears in its published ICS feed, so the practical
-delay is provider publication time plus up to one TINA polling interval. Sync now cannot make an
-edit visible before Google or Outlook has published it to the feed.
+For ICS, the calendar provider controls when an edit appears in its published feed. Google OAuth
+sync calls the Calendar API directly, so changes are picked up within one TINA polling interval.
 
 Over the API:
 
@@ -116,7 +137,7 @@ curl "$API_BASE/user/calendars/$CALENDAR_ID/sync" -H "X-API-Key: $API_KEY"
 ```
 
 `GET /user/calendars` lists the masked connections. The original `/user/calendar` endpoint remains
-available for single-calendar clients and refers to the first active connection. The singular
+available for single-calendar clients and refers to the first active ICS connection. The singular
 `/user/calendar/sync` compatibility endpoint synchronizes all active connections and returns an
 aggregate stamp. See the [Calendar API](/api/calendar) for exact schemas and statuses.
 
@@ -134,9 +155,9 @@ curl -X PUT "$API_BASE/user/calendar" \
 | Operation | Endpoint | Result |
 |---|---|---|
 | List connections | `GET /user/calendars` | Named connections with masked URLs; secret feed URLs are never returned. |
-| Connect | `POST /user/calendars` | Creates one connection from `name`, `ics_url`, `auto_join`, and optional `bot_name`. |
-| Rename or configure | `PATCH /user/calendars/{calendar_id}` | Updates `name`, `ics_url`, `auto_join`, `bot_name`, or `enabled` for only that connection. |
-| Disconnect | `DELETE /user/calendars/{calendar_id}` | Removes that source without changing other connections. |
+| Connect | `POST /user/calendars` | Creates an ICS connection. Google accounts are linked through the signed Terminal OAuth flow; selected calendars use this endpoint with their returned account/calendar IDs. |
+| Rename or configure | `PATCH /user/calendars/{calendar_id}` | Updates `name`, `auto_join`, `bot_name`, or `enabled`; ICS connections may also replace `ics_url`. |
+| Disconnect | `DELETE /user/calendars/{calendar_id}` | Removes one source. `google-account-{account_id}` disconnects all selected calendars for one Google account. |
 | Read sync state | `GET /user/calendars/{calendar_id}/sync` | Returns that connection's latest sync stamp. |
 | Sync now | `POST /user/calendars/{calendar_id}/sync` | Fetches and reconciles only that connection immediately. |
 
@@ -152,7 +173,8 @@ have separate storage responsibilities:
 
 | Data | Durable home | Notes |
 |---|---|---|
-| Named calendar connections, secret ICS URLs, per-feed auto-join, per-feed bot name | The user's `data` JSON document in Postgres | User-facing reads mask the feed URL. The full URL crosses only the authenticated internal sync edge. |
+| Named calendar connections, secret ICS URLs, per-calendar auto-join and bot name | The user's `data` JSON document in Postgres | User-facing reads mask the ICS URL. The full URL crosses only the authenticated internal sync edge. |
+| Google refresh token and selected-account calendar metadata | The user's `data` JSON document in Postgres | Refresh token is Fernet-encrypted with a key derived from `INTERNAL_API_SECRET`; it is decrypted only for the secret-gated meeting-api sync edge. Rotating that secret requires reconnecting Google Calendar. |
 | Imported events | Ordinary rows in the Postgres `meetings` table | A future event is a planned meeting with `status: "scheduled"`. |
 | Event and calendar provenance | The meeting's `data` JSON document | Includes scheduling, attendees, calendar source IDs/names, and provider event UIDs. |
 | Latest sync time, error, and created/updated/cancelled counts | Redis | Operational status under the user/connection sync key; this is not the durable event authority. |

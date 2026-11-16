@@ -47,7 +47,7 @@ global:
 # Recommended: override via --set-file / external secret tooling, or point existingSecretName at a
 # Secret carrying these keys: ADMIN_API_TOKEN, INTERNAL_API_SECRET, TRANSCRIPTION_SERVICE_TOKEN,
 # TINA_SERVICE_AUTHORITY_SECRET, TINA_SYSTEM_WEBHOOK_SECRET, TINA_DISPATCH_SIGNING_KEY,
-# TINA_BOT_API_KEY, ANTHROPIC_API_KEY,
+# TINA_BOT_API_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, ANTHROPIC_API_KEY,
 # ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, CLAUDE_CODE_OAUTH_TOKEN.
 # The deployment profile, the same word the mcp and transcription services read. Anything but
 # `production` (including unset) is a development posture; `production` makes an empty
@@ -65,6 +65,8 @@ secrets:
   dispatchSigningKey: ""            # agent-api signs per-dispatch tokens (default dev key; k8s prod → set this)
   botApiKey: ""                     # agent-api → gateway "add bot from URL" key (optional)
   nextauthSecret: ""                # terminal next-auth session signing (default dev key; set in prod)
+  googleClientId: ""                # shared with Terminal and Meeting API for Calendar OAuth
+  googleClientSecret: ""            # shared OAuth client secret; needed for background token refresh
   # Model-provider auth (config.v1 `model_inference` capability, ADR-0026). ANTHROPIC_AUTH_TOKEN +
   # ANTHROPIC_BASE_URL are the OpenRouter/subscription pair (compose sources them from .env as a
   # single source of truth — here they live in the Secret). claudeCodeOauthToken
@@ -397,9 +399,8 @@ terminal:
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits:   { cpu: 1000m, memory: 1Gi }
-  # OAuth (Google/Microsoft) + other knobs: add here, e.g.
-  #   - name: GOOGLE_CLIENT_ID
-  #     value: "..."
+  # Additional OAuth/runtime env. Google Calendar OAuth is wired from secrets.googleClientId/Secret;
+  # do not add duplicate GOOGLE_CLIENT_* entries here.
   extraEnv: []
 
 # DEPRECATED, OFF BY DEFAULT — the 0.10 dashboard as an opt-in component (#813). Hosted production

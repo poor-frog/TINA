@@ -50,7 +50,7 @@ async def run_user_sync(
     lists refresh. ``rows`` (optional) is the user's meeting rows, read ONCE per tick by the
     sweep and shared across that user's connections — ``sync_user`` keeps the list current as it
     writes. ``client`` (optional) is a shared pinned httpx client for the feed fetch."""
-    from . import fetch_ics, parse_ics, sync_user
+    from . import fetch_google_events, fetch_ics, parse_ics, sync_user
 
     user_id = cfg.get("user_id")
     moment = now or datetime.now(timezone.utc)
@@ -60,6 +60,11 @@ async def run_user_sync(
         # sync_user then strips this connection's sources and retires the rows only it managed.
         if cfg.get("deleted") or cfg.get("paused"):
             parsed = {"events": [], "cancelled_uids": []}
+        elif cfg.get("provider") == "google":
+            parsed, fetch_err = await fetch_google_events(cfg, now=moment, client=client)
+            if parsed is None:
+                stamp["last_error"] = fetch_err or "Google Calendar fetch failed"
+                return stamp
         else:
             text, fetch_err = await fetch_ics(cfg["ics_url"], client=client)
             if text is None:
@@ -79,7 +84,9 @@ async def run_user_sync(
                           + result.get("cancelled", [])):
                 await publish(user_id, entry)
     except Exception:
-        stamp["last_error"] = "the feed couldn't be parsed as an ICS calendar"
+        stamp["last_error"] = ("Google Calendar events could not be parsed"
+                                if cfg.get("provider") == "google"
+                                else "the feed couldn't be parsed as an ICS calendar")
     return stamp
 
 

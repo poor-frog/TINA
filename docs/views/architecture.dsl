@@ -164,7 +164,7 @@ edges:
   meeting-api -write-> postgres
   meeting-api -write-> object-store
   meeting-api -req-> runtime  # POST /workloads spawn bot
-  meeting-api -req-> admin-api  # GET /internal/calendar-configs discovers secret-gated calendar connections for sync and disconnect cleanup
+  meeting-api -req-> admin-api  # GET /internal/calendar-configs discovers secret-gated ICS/Google calendar connections; decrypts Google refresh tokens only for Meeting API sync and sends tombstones for cleanup
   meeting-api -req-> service-authority  # optional signed service-authority.v1 admit/continue decision; unset is explicit OSS allow-all, configured failure is closed
   meeting-api -req-> system-webhook  # optional signed terminal webhook.v1 delivery to a boot-frozen operator destination; customer webhook SSRF policy remains separate
   agent-api -read-> segments-stream  # XREADGROUP agent_copilot (proactive watcher)
@@ -175,10 +175,10 @@ edges:
   agent-worker -write-> out-stream  # XADD turn events, MCP approval requests and resolutions, cards, and notes
   agent-worker -read-> unit-in  # chat path XREADs prompts and matching owner decisions while Codex waits for MCP approval
   mcp -req-> gateway  # every MCP tool forwards the caller's X-API-Key to the public REST surface
-  gateway -req-> meeting-api  # proxy /bots /transcripts /meetings /recordings and per-calendar sync
+  gateway -req-> meeting-api  # proxy /bots /transcripts /meetings /recordings and per-calendar ICS/Google sync
   gateway -req-> agent-api  # proxy /agent/*
   gateway -req-> mcp  # proxy /mcp — POST buffered, GET relayed unbuffered (SSE stream)
-  gateway -req-> admin-api  # POST /internal/validate (authz oracle) plus user calendar connection CRUD
+  gateway -req-> admin-api  # POST /internal/validate (authz oracle), user calendar connection CRUD, and authenticated OAuth-grant storage from the Terminal callback
   gateway -read-> bm-status  # WS fan-out
   gateway -read-> u-meetings  # WS auto-subscribe
   gateway -read-> va-chat  # WS fan-out

@@ -607,8 +607,8 @@ def _attach_background_loops(
                 log.exception("auto-join tick failed")
             await asyncio.sleep(auto_join_interval)
 
-    # Calendar sync: each sweep discovers every user with a connected ICS feed (admin-api internal
-    # edge), fetches it over the SSRF-pinned transport, and upserts planned meetings (one row per
+    # Calendar sync: each sweep discovers ICS and selected Google calendar sources (admin-api internal
+    # edge), fetches them over the guarded transport or fixed Google API, and upserts planned meetings (one row per
     # calendar UID — next occurrence only). Per-user try/except: one bad feed never stalls the
     # sweep. Unset ADMIN_API_URL/INTERNAL_API_SECRET → no-op (capability degrade, not boot-fail).
     calendar_interval = float(os.getenv("CALENDAR_SYNC_INTERVAL_S", "300"))

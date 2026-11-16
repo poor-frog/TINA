@@ -1,6 +1,6 @@
 "use client";
 /** term-workbench — the structured 3-pane shell.
- *  LEFT (resizable/collapsible): capture-first actions + grouped navigation + the active list.
+ *  LEFT (resizable/collapsible): grouped navigation + the active list.
  *  CENTER: dockview TABS — a "tab" host resolves each panel by params.kind via the tab registry.
  *  RIGHT (resizable/collapsible): the persistent workspace chat, grounded by the active center tab.
  *  Reuses the Phase-C ⌘K palette + keybindings; the kernel's services do the rest. */
@@ -54,7 +54,6 @@ import { readActiveSet, readWorkspaceGit } from "../surfaces/workspaceApi";
 import { FilesList } from "../surfaces/workspace";
 import { ContextMenu, copyText } from "../ui-kit/ContextMenu";
 import { Chat } from "../surfaces/chat";
-import { SidebarMeetingCapture } from "../surfaces/meeting";
 import { SettingsDialog } from "../surfaces/settings";
 import { resolveDocRef } from "../ui-kit/docLinks";
 import { liveMeetingsNow } from "../surfaces/liveMeetings";
@@ -195,7 +194,7 @@ function TabHeader(props: IDockviewPanelHeaderProps) {
 }
 const dvTabComponents = { default: TabHeader };
 
-// ── LEFT pane (Direction C): capture action, grouped navigation, active list, profile ──
+// ── LEFT pane: grouped navigation, active list, profile ──
 function LeftPane({ onSelect }: { onSelect?: (listId?: string) => void }) {
   const layout = useService(LayoutServiceId);
   const { activeList, leftCollapsed } = useStore(layout.store);
@@ -245,7 +244,6 @@ function LeftPane({ onSelect }: { onSelect?: (listId?: string) => void }) {
         {toolLists.length > 0 && <div style={{ ...groupLabel, paddingTop: "var(--space-3)" }}>Tools</div>}
         <div style={{ display: "grid", gap: 2 }}>{toolLists.map(renderList)}</div>
       </nav>
-      {!leftCollapsed && activeList === "meetings" && <SidebarMeetingCapture />}
       <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }} onClickCapture={() => onSelect?.()}>{!leftCollapsed && Comp && <Comp />}</div>
       {!leftCollapsed && <UserProfile />}
     </div>

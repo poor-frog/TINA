@@ -98,8 +98,15 @@ GOOGLE_CLIENT_SECRET=your-client-secret
 ```
 
 Replace the values with the OAuth client from Google Cloud, use the exact callback URI above, then
-run `tina restart terminal --yes` while the same `ENV_FILE` is exported. Use the Microsoft client
-fields instead if you sign in with Microsoft.
+run `tina restart terminal --yes` while the same `ENV_FILE` is exported. Enable the Google Calendar
+API for that project if you want direct Calendar sync. Also register
+`${NEXTAUTH_URL}/api/auth/callback/google-calendar` as an authorized redirect URI: Calendar linking
+uses a dedicated callback and refuses expired or missing link intent without changing TINA login. The same `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` must reach meeting-api so it can refresh the user's read-only grant during
+background sync; Compose wires both services from this env file. In Helm, set
+`secrets.googleClientId` and `secrets.googleClientSecret` (or include both keys in the existing
+Secret). Use Microsoft's client fields instead if you sign in with Microsoft; Microsoft login does
+not enable Google Calendar linking.
 
 ## Transcription backends
 

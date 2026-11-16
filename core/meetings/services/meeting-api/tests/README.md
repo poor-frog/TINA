@@ -103,3 +103,8 @@ Recovery cases distinguish service failure from unmatched input, retain task sta
 `test_decision_flow.py` distinguishes stale-source 409 recovery from unknown-write 503 recovery and checks that uncertain task writes receive the same retry-blocking marker as decisions.
 
 Decision readback regression cases cover current proof receipts, source edits after plan/apply, source-service outage preserving fields, and Stop during source revalidation.
+
+`test_google_calendar_sync.py` drives Google snapshots through the production parser/reconciler
+with an in-memory store: removed/restored links, multi-calendar room/time authority, manual/live
+ownership, detached-link reuse, collisions, all-day timezone/date retention and finished occurrences.
+It makes no Google API calls and starts no meeting bot.

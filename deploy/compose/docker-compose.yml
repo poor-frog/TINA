@@ -509,9 +509,12 @@ services:
       # participants see; set DEFAULT_BOT_NAME in .env and restart meeting-api (no terminal rebuild).
       - DEFAULT_BOT_NAME=${DEFAULT_BOT_NAME:-TINA}
       # The background sweeps' internal lookups: auto-join fetches per-user spawn context
-      # (/internal/users/{id}/bot-context) and calendar sync discovers connected ICS feeds
+      # (/internal/users/{id}/bot-context) and calendar sync discovers connected ICS/Google sources
       # (/internal/calendar-configs). Unset -> calendar sync no-ops, auto-join spawns uncapped.
       - ADMIN_API_URL=http://admin-api:8001
+      # Shared OAuth client used only to refresh the user's read-only Google Calendar grant.
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       # MeetingToken is signed (mint) AND verified (recordings upload) with ADMIN_TOKEN — the SAME
       # admin secret admin-api holds (admin-api gets ADMIN_API_TOKEN=${ADMIN_TOKEN}). Exactly like
       # main (meeting-api ADMIN_TOKEN = admin-api ADMIN_API_TOKEN). __main__ passes token_secret=ADMIN_TOKEN.
@@ -1229,6 +1232,7 @@ services:
       # secret to expose that sign-in button on the login page; leave empty to hide it (the dev
       # type-any-email login still works). Register the redirect URI in the provider console:
       #   Google    → ${NEXTAUTH_URL}/api/auth/callback/google
+      # Calendar linking also requires: ${NEXTAUTH_URL}/api/auth/callback/google-calendar
       #   Microsoft → ${NEXTAUTH_URL}/api/auth/callback/microsoft
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
