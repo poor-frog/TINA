@@ -1,0 +1,7 @@
+%% GENERATED — pnpm arch:dsl --write
+sequenceDiagram
+  autonumber
+  flows_worker->>agent_api: Generate the existing grounded report without workspace writes
+  flows_worker->>gateway: Save the summary and mint recipient-restricted transcript plus recording grants through meetings
+  flows_worker->>mail_relay: Send individual thank-you emails with separate artifact links
+  flows_worker->>flows_rows: Checkpoint confirmed recipients and minted links for retries

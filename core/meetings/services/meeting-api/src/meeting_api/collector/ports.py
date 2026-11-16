@@ -134,6 +134,7 @@ class TranscriptStore(Protocol):
     async def mint_transcript_share(
         self, user_id: int, platform: str, native_meeting_id: str, *,
         mode: str = "open", allowed_emails: "Optional[list]" = None, expires_in_sec: int = 86400,
+        include_recordings: bool = False,
     ) -> "Optional[dict]":
         """OWNER-scoped: mint an INDEPENDENT transcript share grant (``data.share_grants[]``, hash-at-rest).
         Returns {id, token, ...} once, or ``None`` when the user owns no such meeting."""
@@ -142,6 +143,7 @@ class TranscriptStore(Protocol):
     async def mint_transcript_share_by_id(
         self, user_id: int, meeting_id: int, *,
         mode: str = "open", allowed_emails: "Optional[list]" = None, expires_in_sec: int = 86400,
+        include_recordings: bool = False,
     ) -> "Optional[dict]":
         """OWNER-scoped mint addressed by the ROW id — the identity a meeting always has. Same grant and
         same one-time token as the pair-keyed mint; ``None`` when the row is unknown OR not the caller's."""
@@ -350,6 +352,7 @@ class TranscriptStore(Protocol):
         self, user_id: int, meeting_id: int, *,
         title: Optional[str] = None,
         metadata: "Optional[dict]" = None,
+        summary: Optional[str] = None,
     ) -> Optional[dict]:
         """Attach the CALLER's own annotations to a row in ANY status — including one the bot FSM
         owns, and including one already completed.
@@ -363,6 +366,8 @@ class TranscriptStore(Protocol):
         re-arm, re-dispatch or re-route anything — and the moments a description is most worth
         writing are exactly the ones the FSM owns: mid-meeting, and after it ends.
 
+        ``summary`` is bounded report text (6000 characters), stored separately at ``data.summary``;
+        an empty string clears it. Artifact deletion prevents later report writes.
         ``metadata`` is arbitrary caller-owned JSON stored at ``data.metadata``. It ALWAYS merges
         key-wise; a key set to ``None`` deletes that one key. There is deliberately NO whole-object
         replace: every writer shares one API key, so a replace would let a caller destroy keys

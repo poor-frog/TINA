@@ -36,7 +36,7 @@ class NotifyPort(Protocol):
     name: str
 
     def send(self, to: str, subject: str, body: str, *, link: Optional[str] = None,
-             in_reply_to: Optional[str] = None) -> str: ...
+             in_reply_to: Optional[str] = None, html_body: Optional[str] = None) -> str: ...
 
 
 def compose(body: str, link: Optional[str]) -> str:
@@ -62,8 +62,10 @@ class SmtpNotifier:
     name = "smtp"
 
     def send(self, to: str, subject: str, body: str, *, link: Optional[str] = None,
-             in_reply_to: Optional[str] = None) -> str:
+             in_reply_to: Optional[str] = None, html_body: Optional[str] = None) -> str:
         from . import emailx as mx
+        if html_body is not None:
+            return mx.send(to, subject, compose(body, link), in_reply_to=in_reply_to, html_body=html_body)
         return mx.send(to, subject, compose(body, link), in_reply_to=in_reply_to)
 
 
@@ -92,6 +94,8 @@ def use(port: Optional[NotifyPort]) -> None:
 
 
 def notify(person: str, subject: str, body: str, *, link: Optional[str] = None,
-           in_reply_to: Optional[str] = None) -> str:
+           in_reply_to: Optional[str] = None, html_body: Optional[str] = None) -> str:
     """Tell one person one thing. Returns the channel's handle for the message sent."""
+    if html_body is not None:
+        return channel().send(person, subject, body, link=link, in_reply_to=in_reply_to, html_body=html_body)
     return channel().send(person, subject, body, link=link, in_reply_to=in_reply_to)

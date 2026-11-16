@@ -100,6 +100,6 @@ class RecordingRepo(Protocol):
         """
         ...
 
-    async def list_meeting_recordings(self, user_id: int) -> list[dict]:
-        """Every recording across the user's meetings (for ``GET /recordings``)."""
+    async def list_meeting_recordings(self, user_id: int, *, include_shared: bool = False) -> list[dict]:
+        """Owned recordings; read routes may include explicitly granted shared recordings."""
         ...

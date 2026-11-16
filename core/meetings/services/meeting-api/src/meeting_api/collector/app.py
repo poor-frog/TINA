@@ -956,7 +956,7 @@ def build_router(
     # — that it never saw and could not have known about. Merge plus explicit nulls expresses
     # every legitimate edit while making "corrupt what you did not write" unrepresentable.
     def _annotation_from(payload) -> tuple:
-        """``(title, metadata)`` off an annotate body, or the 422 that says what to send."""
+        """``(title, metadata, summary)`` off an annotate body, or a validation refusal."""
         if not isinstance(payload, dict):
             raise HTTPException(status_code=422, detail="body must be an object")
         title = payload.get("title")
@@ -965,12 +965,15 @@ def build_router(
         metadata = payload.get("metadata")
         if metadata is not None and not isinstance(metadata, dict):
             raise HTTPException(status_code=422, detail="'metadata' must be an object")
-        if title is None and metadata is None:
+        summary = payload.get("summary")
+        if "summary" in payload and (not isinstance(summary, str) or len(summary) > 6000):
+            raise HTTPException(status_code=422, detail="'summary' must be a string of at most 6000 characters")
+        if title is None and metadata is None and summary is None:
             raise HTTPException(
                 status_code=422,
-                detail="nothing to annotate: send 'title' and/or 'metadata'",
+                detail="nothing to annotate: send 'title', 'metadata' and/or 'summary'",
             )
-        return title, metadata
+        return title, metadata, summary
 
     # --- POST /meetings/{meeting_id}/annotate → the SAME write, addressed by the identity a
     # meeting always has. The (platform, native) pair is not one: a Google Meet room code is
@@ -993,8 +996,8 @@ def build_router(
             payload = await request.json()
         except Exception:
             raise HTTPException(status_code=422, detail="invalid JSON body")
-        title, metadata = _annotation_from(payload)
-        row = await store.annotate_meeting(user_id, meeting_id, title=title, metadata=metadata)
+        title, metadata, summary = _annotation_from(payload)
+        row = await store.annotate_meeting(user_id, meeting_id, title=title, metadata=metadata, summary=summary)
         return _annotate_result(row, user_id, meeting_id, title, metadata)
 
     def _annotate_result(row, user_id, meeting_id, title, metadata):
@@ -1027,7 +1030,7 @@ def build_router(
             payload = await request.json()
         except Exception:
             raise HTTPException(status_code=422, detail="invalid JSON body")
-        title, metadata = _annotation_from(payload)
+        title, metadata, summary = _annotation_from(payload)
 
         meeting_id = await _resolve_owned_native(user_id, platform, native_meeting_id)
         if meeting_id is None:
@@ -1035,7 +1038,7 @@ def build_router(
                 status_code=404,
                 detail=f"Meeting not found for platform {platform} and ID {native_meeting_id}",
             )
-        row = await store.annotate_meeting(user_id, meeting_id, title=title, metadata=metadata)
+        row = await store.annotate_meeting(user_id, meeting_id, title=title, metadata=metadata, summary=summary)
         return _annotate_result(row, user_id, meeting_id, title, metadata)
 
     @router.patch("/meetings/{platform}/{native_meeting_id}")
@@ -1216,6 +1219,16 @@ def build_router(
         )
         return JSONResponse(content={"workspace_id": bound})
 
+    def _recording_share_payload(payload, mode) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        value = payload.get("include_recordings", False)
+        if not isinstance(value, bool):
+            raise HTTPException(422, "include_recordings must be a boolean")
+        if value and mode != "restricted":
+            raise HTTPException(422, "Recording shares must be restricted to recipient emails")
+        return value
+
     def _share_payload(payload) -> "tuple[str, list, int]":
         """mode | allowed_emails | ttl out of a share-mint body, defaulted and VALIDATED the same
         way for both address shapes.
@@ -1300,8 +1313,10 @@ def build_router(
         except Exception:
             payload = {}
         mode, emails, ttl = _share_payload(payload)
+        include_recordings = _recording_share_payload(payload, mode)
         minted = await store.mint_transcript_share_by_id(
             user_id, meeting_id, mode=mode, allowed_emails=emails, expires_in_sec=ttl,
+            include_recordings=include_recordings,
         )
         if minted is None:
             log_event(
@@ -1332,8 +1347,10 @@ def build_router(
         except Exception:
             payload = {}
         mode, emails, ttl = _share_payload(payload)
+        include_recordings = _recording_share_payload(payload, mode)
         minted = await store.mint_transcript_share(
             user_id, platform, native_meeting_id, mode=mode, allowed_emails=emails, expires_in_sec=ttl,
+            include_recordings=include_recordings,
         )
         if minted is None:
             log_event(

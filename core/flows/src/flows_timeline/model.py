@@ -52,6 +52,7 @@ STEP_KINDS = {
     "ack_by_email": "mail.sent",
     "prepare_meeting": "mail.sent",
     "email_minutes": "report.delivered",
+    "email_meeting_followup": "report.delivered",
     "email_attendees": "report.delivered",
     "drop_to_attendees": "report.delivered",
     "email_reply": "mail.sent",
