@@ -36,6 +36,39 @@ test('VAD submits a short call before cadence/minimum; duplicate endpoints reuse
   } finally { await f.pipe.dispose(); mock.timers.reset(); }
 });
 
+test('voice endpoints follow the capture clock when it drifts from indexed audio time', async () => {
+  mock.timers.enable({ apis: ['Date', 'setInterval'], now: epoch });
+  const hypotheses: VoiceHypothesis[] = [];
+  const archived: Array<{captureMs: number; sourceCaptureMs: number}> = [];
+  const submitted: Float32Array[] = [];
+  const pipe = createGmeetPipeline({
+    config: { submitInterval: 100 },
+    onAudioFrame: frame => archived.push(frame),
+    onHypothesis: value => hypotheses.push(value),
+    transcribe: async pcm => {
+      submitted.push(pcm);
+      return { text: 'TINA ơi hỏi demo', segments: [{ text: 'TINA ơi hỏi demo', start: 0, end: pcm.length / 16000 }] };
+    },
+    sink: { segment() {}, finalize() {} },
+  });
+  const samples = new Float32Array(1024).fill(.1);
+  try {
+    for (let frame = 0; frame < 20; frame++) {
+      pipe.feedAudio(0, 'Speaker', samples, epoch + frame * 64 + frame * .5, null, frame * samples.length);
+    }
+    mock.timers.tick(2000);
+    const speechEnd = epoch + 20 * 64 + 19 * .5;
+    pipe.requestEndpoint(0, speechEnd);
+    await tick();
+    assert.equal(hypotheses.at(-1)?.final, true, 'fresh captured speech must reach the VAD endpoint');
+    assert.equal(hypotheses.at(-1)?.endMs, speechEnd);
+    assert.equal(submitted.length, 1);
+    assert.equal(submitted[0].length, samples.length * 20, 'clock correlation preserves every audio sample');
+    assert.equal(archived.at(-1)?.captureMs, epoch + 19 * 64, 'the indexed archive retains its source-local clock');
+    assert.equal(archived.at(-1)?.sourceCaptureMs, epoch + 19 * 64 + 19 * .5);
+  } finally { await pipe.dispose(); mock.timers.reset(); }
+});
+
 test('an already running request covering speech end is reused without parallel or duplicate ASR', async () => {
   mock.timers.enable({ apis: ['Date', 'setInterval'], now: epoch });
   const f = fixture(true);

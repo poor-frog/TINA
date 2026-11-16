@@ -24,6 +24,9 @@ network, boots the app container, waits on the gateway health endpoint, and prob
 front doors, giving each up to two minutes to answer (on first boot the terminal restarts once the
 self-host key is minted):
 
+Build Lite with the repository root as its Docker context. Its Terminal build includes the shared
+transcript formatter from `packages/transcript-rendering`, alongside the shared branding styles.
+
 | Front door | Port |
 |---|---|
 | **gateway** — the public REST API | `8056` |

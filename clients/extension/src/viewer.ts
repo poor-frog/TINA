@@ -19,7 +19,9 @@ const $ = (id: string) => document.getElementById(id)!;
 const fields = ['apiKey', 'deployment', 'ingestUrl', 'botGatewayUrl', 'terminalUrl', 'language'] as const;
 const defaults: Config = {
   apiKey: '', deployment: 'desktop', ingestUrl: 'ws://127.0.0.1:9099/ingest',
-  botGatewayUrl: 'http://127.0.0.1:18056', terminalUrl: 'http://127.0.0.1:13000', language: 'vi',
+  botGatewayUrl: 'https://tinabot.duckdns.org/extension-api',
+  terminalUrl: 'https://tinabot.duckdns.org',
+  language: 'vi',
 };
 const voiceActivityView = createVoiceActivity($('voiceActivity'));
 const feed = createTranscriptFeed($('feed'), $('transcriptTurns'), $('latestBtn') as HTMLButtonElement, {
