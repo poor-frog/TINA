@@ -6,6 +6,9 @@ on:
       revision:
         required: true
         type: string
+      build-asr:
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -50,6 +53,7 @@ jobs:
           docker push ghcr.io/poor-frog/tina-bot:"$BUILD_SHA"
 
   asr:
+    if: inputs.build-asr
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false

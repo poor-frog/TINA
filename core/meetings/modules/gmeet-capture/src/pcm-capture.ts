@@ -90,13 +90,24 @@ export async function createPcmCaptureNode(
     processorOptions: { bufferSize },
   });
   const epochMs=Date.now()-ctx.currentTime*1000;
+  const performanceEpochMs = Date.now() - performance.now();
   let firstFrame:number|undefined;
   node.port.onmessage = (e:MessageEvent) => {
     if(e.data instanceof Float32Array) {onPcm(e.data);return;} // old worklet during extension reload
     const {pcm,startFrame}=e.data ?? {};
     if(!(pcm instanceof Float32Array)||!Number.isSafeInteger(startFrame)||startFrame<0)return;
     firstFrame ??= startFrame as number;
-    onPcm(pcm,{startSample:startFrame-firstFrame,captureMs:epochMs+startFrame/ctx.sampleRate*1000});
+    const frameTime = startFrame / ctx.sampleRate;
+    const output = ctx.getOutputTimestamp?.();
+    const contextTime = output?.contextTime ?? 0;
+    const performanceTime = output?.performanceTime ?? 0;
+    // AudioContext time can drift or pause relative to the wall clock. Correlate the
+    // source sample with the device clock while preserving delayed frame timestamps.
+    const captureMs = Number.isFinite(contextTime) && contextTime > 0
+      && Number.isFinite(performanceTime) && performanceTime > 0
+      ? performanceEpochMs + performanceTime + (frameTime - contextTime) * 1000
+      : epochMs + frameTime * 1000;
+    onPcm(pcm,{startSample:startFrame-firstFrame,captureMs});
   };
   return node;
 }

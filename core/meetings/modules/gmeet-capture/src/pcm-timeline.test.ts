@@ -25,6 +25,35 @@ assert.equal(received[2].timeline.captureMs,10750);
 assert.deepEqual(received[0].pcm,new Float32Array(4096).fill(.1));
 console.log('worklet sample clock: callbacks delayed, frame gaps and source timestamps OK');
 
+const originalPerformance=globalThis.performance;
+let performanceMs=500;
+Object.defineProperty(globalThis,'performance',{configurable:true,value:{now:()=>performanceMs}});
+try {
+  Date.now=()=>10000;
+  const output={contextTime:0,performanceTime:0};
+  const clockContext:any={currentTime:0,sampleRate:16000,audioWorklet:{addModule:async()=>{}},
+    getOutputTimestamp:()=>output};
+  const timed:any[]=[];
+  await createPcmCaptureNode(clockContext,(_pcm,timeline)=>timed.push(timeline),'local-worklet');
+  output.contextTime=60;
+  output.performanceTime=70500;
+  performanceMs=70500;
+  Date.now=()=>80000;
+  node.port.onmessage({data:{pcm:new Float32Array(1024),startFrame:60*16000}});
+  assert.equal(timed[0].captureMs,80000,'device correlation corrects a ten-second audio clock lag');
+  output.contextTime=66;
+  output.performanceTime=76500;
+  performanceMs=76500;
+  Date.now=()=>86000;
+  node.port.onmessage({data:{pcm:new Float32Array(1024),startFrame:60*16000+1024}});
+  assert.equal(timed[1].captureMs,80064,'a queued frame retains its capture time instead of becoming fresh');
+  assert.equal(timed[1].startSample,1024,'clock correction preserves source sample positions');
+} finally {
+  Date.now=old;
+  Object.defineProperty(globalThis,'performance',{configurable:true,value:originalPerformance});
+}
+console.log('device audio clock: drift correction preserves delayed frames and sample offsets');
+
 for (const bufferSize of [1024, 4096]) {
   const outputs: any[] = [];
   const scope: any = { AudioWorkletProcessor: class { port = { postMessage: (value: any) => outputs.push(value) }; },

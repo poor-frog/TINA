@@ -12,10 +12,15 @@ async function proxy(req: NextRequest, write: boolean) {
       const origin = req.headers.get("origin");
       if (origin) {
         const source = new URL(origin), target = new URL(req.url);
-        target.host = req.headers.get("host") || target.host;
+        const host = req.headers.get("host") || target.host;
+        target.host = host;
+        // Behind a TLS-terminating proxy, the internal request URL may still be HTTP.
+        const configured = process.env.NEXTAUTH_URL || "";
+        const publicUrl = URL.canParse(configured) ? new URL(configured) : null;
+        const expected = publicUrl?.host === host.toLowerCase() ? publicUrl : target;
         const local = (host: string) => ["localhost", "127.0.0.1", "[::1]"].includes(host);
-        refused ||= source.origin !== target.origin && !(local(source.hostname) && local(target.hostname)
-          && source.port === target.port && source.protocol === target.protocol);
+        refused ||= source.origin !== expected.origin && !(local(source.hostname) && local(expected.hostname)
+          && source.port === expected.port && source.protocol === expected.protocol);
       }
     } catch { refused = true; }
     if (refused) return NextResponse.json({ detail: "Origin refused" }, { status: 403, headers });
