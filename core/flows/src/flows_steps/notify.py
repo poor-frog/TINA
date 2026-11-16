@@ -6,11 +6,9 @@ mail. That is the wrong seam. A step's business is WHO to tell, WHAT to say, and
 that carries them onward; which channel delivers it is a deployment fact, exactly like the SMTP
 host ``emailx`` already reads from the environment.
 
-So: ``notify(person, subject, body, link=...)``. One adapter implements it today — ``SmtpNotifier``,
-which is ``emailx.send`` with the link appended as the message's single call to action. Teams,
-Slack and the rest are NOT here: a port with one implementation is honest, a port with three
-stubs is furniture. When a second channel arrives it implements ``NotifyPort`` and ``use()``
-selects it; no recipe changes.
+``notify(person, subject, body, link=...)`` selects the deployment's delivery adapter:
+``SmtpNotifier`` for the existing mailbox transport, or ``ResendNotifier`` for authenticated
+Resend SMTPS. Both keep the same MIME message and thread handle; recipes do not change.
 
 Mirrors ``core/agent/llm/ports.py``'s ``HarnessPort``: a Protocol, a concrete adapter, and a
 module-level selector — the same shape the agent tier already uses for its swappable runner.
@@ -55,7 +53,7 @@ def compose(body: str, link: Optional[str]) -> str:
 
 
 class SmtpNotifier:
-    """Today's only implementation: real SMTP via ``emailx``, which already resolves host, port
+    """Real SMTP via ``emailx``, which already resolves host, port
     and From from the environment (``TINA_MAIL_SMTP_HOST`` / ``_PORT`` / ``TINA_MAIL_ADDR``).
     This class adds no transport of its own — it exists so the recipes stop naming one."""
 
@@ -69,20 +67,34 @@ class SmtpNotifier:
         return mx.send(to, subject, compose(body, link), in_reply_to=in_reply_to)
 
 
+class ResendNotifier:
+    """Resend's SMTP endpoint keeps HTML, inline logo and RFC Message-ID threading intact."""
+
+    name = "resend"
+
+    def send(self, to: str, subject: str, body: str, *, link: Optional[str] = None,
+             in_reply_to: Optional[str] = None, html_body: Optional[str] = None) -> str:
+        from . import emailx as mx
+        return mx.send_resend(to, subject, compose(body, link), in_reply_to=in_reply_to, html_body=html_body)
+
+
 _CHANNEL: Optional[NotifyPort] = None
 
 
 def channel() -> NotifyPort:
     """The process's outbound channel. Env-selected so a deployment, not a recipe, decides:
-    ``TINA_NOTIFY_CHANNEL`` names it; anything but ``smtp`` is refused loudly rather than
+    ``TINA_NOTIFY_CHANNEL`` names it; unsupported channels are refused loudly rather than
     silently falling back, because a notification that quietly went nowhere is the worst
     failure this module can have."""
     global _CHANNEL
     if _CHANNEL is None:
         want = os.environ.get("TINA_NOTIFY_CHANNEL", "smtp").strip().lower()
-        if want != "smtp":
-            raise ValueError(f"unknown notify channel {want!r} — only 'smtp' is implemented")
-        _CHANNEL = SmtpNotifier()
+        if want == "smtp":
+            _CHANNEL = SmtpNotifier()
+        elif want == "resend":
+            _CHANNEL = ResendNotifier()
+        else:
+            raise ValueError(f"unknown notify channel {want!r} — choose 'smtp' or 'resend'")
     return _CHANNEL
 
 

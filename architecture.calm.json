@@ -2091,7 +2091,7 @@
    "unique-id": "mail-relay",
    "node-type": "service",
    "name": "configured SMTP relay",
-   "description": "Deployment-owned SMTP transport. The follow-up path sends recipient addresses, meeting title and recipient-restricted artifact links, without transcript or recording attachments. Credentials remain in private environment configuration."
+   "description": "Deployment-configured SMTP transport, including optional Resend SMTPS at smtp.resend.com:465 with certificate verification and API-key authentication. The follow-up path sends recipient addresses, meeting title and recipient-restricted artifact links, without transcript or recording attachments. Credentials remain in private environment configuration."
   }
  ],
  "relationships": [
@@ -4777,7 +4777,7 @@
      }
     }
    },
-   "description": "Individual post-meeting thank-you emails via the existing notify/SMTP adapter.",
+   "description": "Individual post-meeting thank-you emails via the notify port, selecting the mailbox SMTP adapter or Resend SMTPS adapter.",
    "protocol": "SMTP",
    "metadata": [
     {

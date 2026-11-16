@@ -47,6 +47,49 @@ colors and Outlook-aware buttons. There are no animations or decorative status b
 React Email is an authoring dependency only; the Python worker still needs no Node runtime.
 Legacy notices remain plain text.
 
+### Gmail SMTP
+
+The default `TINA_NOTIFY_CHANNEL=smtp` uses `smtp.gmail.com:465` with SSL and authenticates with
+`TINA_MAIL_ADDR` plus `TINA_MAIL_APP_PASSWORD`. Enable Google 2-Step Verification and create a
+[Gmail App Password](https://support.google.com/accounts/answer/185833); the regular account
+password is not the SMTP credential. Store that pair in private deployment configuration, using
+the deployment's dotenvx encryption workflow when its env file is encrypted. Never put real
+credentials in `.env.example` or a commit.
+
+Leave `TINA_MAIL_SMTP_HOST` empty for Gmail. Setting that key selects the existing plain,
+unauthenticated relay transport; `TINA_MAIL_SMTP_PORT` only applies to that relay. Recreate the
+flows services after changing their environment. Sending a test message verifies the mailbox,
+but automatic meeting emails still require the automation and summary prerequisites above.
+
+### Resend delivery
+
+Set these in private deployment configuration (the names are listed in
+`deploy/compose/.env.example`; keep that example free of real API keys):
+
+```dotenv
+TINA_NOTIFY_CHANNEL=resend
+TINA_RESEND_API_KEY=YOUR_RESEND_SENDING_API_KEY
+TINA_RESEND_FROM=onboarding@resend.dev
+```
+
+Without a domain, `onboarding@resend.dev` is for tests to the email associated with your Resend
+account only. For actual attendee delivery, verify your domain in Resend and replace the sender
+with an address on that domain, such as `hello@your-domain.com`.
+See [Resend's testing restriction](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain).
+
+The `resend` notification adapter reuses the same MIME builder and sends via
+`smtp.resend.com:465` with certificate-verified TLS, username `resend` and the API key as password.
+HTML, plain text, the inline logo and RFC Message-ID threading are preserved. No SDK is required.
+Missing credentials fail before opening a connection. The selector applies to all `notify()`
+messages in this flows deployment, including meeting follow-ups. The default remains `smtp`.
+Recreate the flows services after changing their environment; changing a host env file alone does
+not update existing containers. The deployment's existing secret-loading workflow still applies.
+
+Inbound IMAP and calendar RSVP remain on the existing mailbox configuration. If `TINA_MAIL_ADDR`
+is set, Resend notifications include it as Reply-To so replies can reach that intake. To use the
+Helm deployment, set `flows.mail.notifyChannel`, `flows.mail.resendApiKey` and
+`flows.mail.resendFrom` through private values. To switch back, select `TINA_NOTIFY_CHANNEL=smtp`.
+
 ## Engine
 
 Durable product workflows as TWO Postgres tables and ONE leased worker loop. A fact enters as a

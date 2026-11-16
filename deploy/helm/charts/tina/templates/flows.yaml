@@ -23,6 +23,9 @@ type: Opaque
 stringData:
   TINA_MAIL_ADDR: {{ .Values.flows.mail.address | quote }}
   TINA_MAIL_APP_PASSWORD: {{ .Values.flows.mail.appPassword | quote }}
+  TINA_NOTIFY_CHANNEL: {{ .Values.flows.mail.notifyChannel | quote }}
+  TINA_RESEND_API_KEY: {{ .Values.flows.mail.resendApiKey | quote }}
+  TINA_RESEND_FROM: {{ .Values.flows.mail.resendFrom | quote }}
   # the inbound intake's authorization + ceilings (R-B12) — see values.yaml for what empty means
   TINA_FLOWS_MAIL_DOMAINS: {{ .Values.flows.mail.domains | quote }}
   TINA_FLOWS_MAIL_QUARANTINE_REPLY: {{ .Values.flows.mail.quarantineReply | quote }}
