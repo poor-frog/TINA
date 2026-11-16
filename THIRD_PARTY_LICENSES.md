@@ -127,3 +127,9 @@ Agent API bakes the INT8 ONNX conversion `Xenova/multilingual-e5-small` (MIT), r
 Model/tokenizer SHA-256 values are pinned in `control_plane/voice_retrieval.py`. The notice is
 `licenses/multilingual-e5-small.LICENSE.txt` and `/opt/tina/voice-retrieval/LICENSE.txt` in the image.
 ONNX Runtime, NumPy and Tokenizers are control-plane-only runtime dependencies in the Python lock.
+
+## Windows native audio
+
+TINA Capture's Windows backend uses `wasapi` 0.27.0 (MIT), maintained by HEnquist.
+The unmodified upstream notice is retained in `licenses/wasapi-0.27.0.LICENSE.txt` and included
+in Windows bundles. WASAPI and DPAPI are Windows platform APIs; no transcription model is added.

@@ -7,13 +7,14 @@ pub(crate) struct AudioProcessingStatus {
     residual_suppression: bool,
     high_pass_hz: u32,
     noise_suppression_db: Option<i32>,
-    fallback_reason: Option<&'static str>,
+    pub(crate) fallback_reason: Option<&'static str>,
     processed_blocks: u64,
     residual_blocks: u64,
     bypassed_samples: u64,
-    mic_clipped_samples: u64,
+    pub(crate) mic_clipped_samples: u64,
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn echo_mode(
     microphone: bool,
     system_audio: bool,
@@ -27,10 +28,10 @@ fn echo_mode(
     (aec, aec && residual_override != Some("0"))
 }
 
-#[cfg(feature = "speex-aec")]
+#[cfg(all(target_os = "macos", feature = "speex-aec"))]
 pub(crate) const AEC_RAW_MIC_CHANNEL: i32 = 1002;
 
-#[cfg(feature = "speex-aec")]
+#[cfg(all(target_os = "macos", feature = "speex-aec"))]
 pub(crate) struct CapturePcm {
     pub channel: i32,
     pub name: &'static str,
@@ -41,7 +42,7 @@ pub(crate) struct CapturePcm {
 
 pub(crate) enum CaptureFrame {
     Wire(Vec<u8>),
-    #[cfg(feature = "speex-aec")]
+    #[cfg(all(target_os = "macos", feature = "speex-aec"))]
     Pcm(CapturePcm),
 }
 
@@ -132,9 +133,14 @@ mod queue_tests {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn run(_: bool, _: bool, _: Arc<Shared>) -> anyhow::Result<()> {
     anyhow::bail!("Native system audio capture currently requires macOS 15+")
+}
+
+#[cfg(target_os = "windows")]
+pub fn run(microphone: bool, system_audio: bool, shared: Arc<Shared>) -> anyhow::Result<()> {
+    crate::capture_windows::run(microphone, system_audio, shared)
 }
 
 #[cfg(target_os = "macos")]
@@ -147,7 +153,7 @@ pub fn has_screen_audio_access() -> bool {
     macos::has_screen_audio_access()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn has_screen_audio_access() -> bool {
     false
 }
@@ -155,6 +161,8 @@ pub fn has_screen_audio_access() -> bool {
 #[cfg(target_os = "macos")]
 mod macos {
     use super::*;
+    use crate::capture_protocol::audio_frame;
+    use crate::capture_transport::{retry_transient_io, send_wire};
     #[cfg(feature = "speex-aec")]
     use crate::echo_cancel::EchoAligner;
     use crate::resampler::Resampler;
@@ -166,54 +174,6 @@ mod macos {
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
     use tungstenite::{client::IntoClientRequest, Message};
-
-    fn is_transient_io_error(error: &tungstenite::Error) -> bool {
-        matches!(
-            error,
-            tungstenite::Error::Io(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::WouldBlock
-                        | std::io::ErrorKind::TimedOut
-                        | std::io::ErrorKind::Interrupted
-                )
-        )
-    }
-
-    fn retry_transient_io<T>(
-        mut operation: impl FnMut() -> std::result::Result<T, tungstenite::Error>,
-    ) -> std::result::Result<T, tungstenite::Error> {
-        match operation() {
-            Err(error) if is_transient_io_error(&error) => operation(),
-            result => result,
-        }
-    }
-
-    fn send_wire<S: Read + Write>(
-        socket: &mut tungstenite::WebSocket<S>,
-        bytes: Vec<u8>,
-        shared: &Shared,
-        epoch: u64,
-    ) -> Result<()> {
-        let clock = shared.clock.lock().unwrap();
-        if !can_dispatch_event(
-            epoch,
-            clock.epoch,
-            clock.paused_at.is_some(),
-            shared.stop.load(Ordering::Relaxed),
-        ) {
-            shared.dropped.fetch_add(1, Ordering::Relaxed);
-            return Ok(());
-        }
-        if let Err(error) = socket.write(Message::Binary(bytes.into())) {
-            if !is_transient_io_error(&error) {
-                return Err(error.into());
-            }
-        }
-        retry_transient_io(|| socket.flush())?;
-        shared.frames.fetch_add(1, Ordering::Relaxed);
-        Ok(())
-    }
 
     #[cfg(feature = "speex-aec")]
     fn send_pcm<S: Read + Write>(
@@ -334,30 +294,6 @@ mod macos {
 
     pub fn has_screen_audio_access() -> bool {
         unsafe { CGPreflightScreenCaptureAccess() }
-    }
-
-    fn audio_frame(channel: u32, name: &str, ts: f64, sample: Option<u64>, pcm: &[f32]) -> Vec<u8> {
-        let name = name.as_bytes();
-        let padded = (name.len() + 3) & !3;
-        let header = if sample.is_some() { 24 } else { 16 };
-        let flags = if sample.is_some() {
-            0xc0000000
-        } else {
-            0x80000000
-        };
-        let mut frame = Vec::with_capacity(header + padded + pcm.len() * 4);
-        frame.extend_from_slice(&(channel | flags).to_le_bytes());
-        frame.extend_from_slice(&ts.to_le_bytes());
-        if let Some(index) = sample {
-            frame.extend_from_slice(&(index as f64).to_le_bytes());
-        }
-        frame.extend_from_slice(&(name.len() as i32).to_le_bytes());
-        frame.extend_from_slice(name);
-        frame.resize(header + padded, 0);
-        for value in pcm {
-            frame.extend_from_slice(&value.to_le_bytes());
-        }
-        frame
     }
 
     #[cfg(test)]
@@ -777,41 +713,7 @@ mod macos {
         if microphone && system_audio && aec_override.as_deref() == Some("1") {
             bail!("Speex AEC is unavailable in this build; rebuild with default features or --features speex-aec");
         }
-        let secret = crate::ingest_auth::read_secret()?;
-        let id = format!("tina-native-{}", uuid::Uuid::new_v4());
-        let challenge = uuid::Uuid::new_v4().simple().to_string();
-        let mut request =
-            format!("ws://127.0.0.1:9099/ingest?platform=desktop&native_meeting_id={id}")
-                .into_client_request()?;
-        request.headers_mut().insert(
-            "x-tina-capture-challenge",
-            challenge
-                .parse()
-                .context("Invalid local capture challenge")?,
-        );
-        let (mut socket, response) = crate::local_ws::connect_local(
-            request,
-            Duration::from_secs(5),
-            Duration::from_secs(2),
-        )?;
-        let proof = response
-            .headers()
-            .get("x-tina-capture-proof")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("");
-        if !crate::ingest_auth::verify_proof(&secret, &challenge, proof) {
-            bail!("TINA Desktop could not be authenticated on loopback");
-        }
-        let ready = retry_transient_io(|| socket.read())?;
-        let ready: serde_json::Value = serde_json::from_str(ready.to_text().unwrap_or(""))?;
-        if ready["type"] != "ready" {
-            bail!(
-                "{}",
-                ready["message"]
-                    .as_str()
-                    .unwrap_or("TINA Desktop did not accept capture")
-            );
-        }
+        let (mut socket, ready, id) = crate::capture_transport::connect_capture()?;
         let audio_processing = AudioProcessingStatus {
             fallback_reason: Some(if !microphone || !system_audio {
                 "Echo cancellation requires microphone and system audio"

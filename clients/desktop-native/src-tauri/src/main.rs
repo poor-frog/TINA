@@ -1,7 +1,11 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod captions;
 mod capture;
-#[cfg(target_os = "macos")]
-mod resampler;
+mod capture_protocol;
+mod capture_transport;
+#[cfg(target_os = "windows")]
+mod capture_windows;
 #[cfg(all(target_os = "macos", feature = "speex-aec"))]
 mod echo_cancel;
 #[cfg(target_os = "macos")]
@@ -10,6 +14,8 @@ mod ingest_auth;
 mod local_ws;
 mod meeting;
 mod overlay;
+#[cfg(target_os = "macos")]
+mod resampler;
 
 #[cfg(not(target_os = "macos"))]
 mod fn_key {
@@ -93,6 +99,20 @@ impl Shared {
         (clock.paused_at.is_none() && !self.stop.load(Ordering::Relaxed)).then_some(clock.epoch)
     }
 
+    #[cfg(any(target_os = "windows", test))]
+    pub(crate) fn capture_epoch_for_packet(&self, packet_started: Instant) -> Option<u64> {
+        let clock = self.clock.lock().unwrap();
+        if clock.paused_at.is_some()
+            || self.stop.load(Ordering::Relaxed)
+            || clock
+                .last_resumed
+                .is_some_and(|resume| packet_started < resume)
+        {
+            return None;
+        }
+        Some(clock.epoch)
+    }
+
     pub(crate) fn capture_epoch_is_active(&self, epoch: u64) -> bool {
         let clock = self.clock.lock().unwrap();
         crate::capture::can_dispatch_event(
@@ -132,6 +152,7 @@ struct Clock {
     started: Instant,
     paused_total: Duration,
     paused_at: Option<Instant>,
+    last_resumed: Option<Instant>,
     epoch: u64,
 }
 
@@ -141,6 +162,7 @@ impl Default for Clock {
             started: Instant::now(),
             paused_total: Duration::ZERO,
             paused_at: None,
+            last_resumed: None,
             epoch: 0,
         }
     }
@@ -167,6 +189,7 @@ impl Clock {
 
     fn resume_at(&mut self, at: Instant) {
         if let Some(paused_at) = self.paused_at.take() {
+            self.last_resumed = Some(at);
             self.paused_total += at.saturating_duration_since(paused_at);
             self.epoch = self.epoch.wrapping_add(1);
         }
@@ -185,6 +208,7 @@ mod clock_tests {
             started,
             paused_total: Duration::ZERO,
             paused_at: None,
+            last_resumed: None,
             epoch: 0,
         };
         let first_pause = started + Duration::from_secs(2);
@@ -285,6 +309,35 @@ pub(crate) struct Control {
     sources: Mutex<Sources>,
     overlay: Mutex<overlay::OverlayState>,
     subtitles: AtomicBool,
+}
+
+#[cfg(test)]
+mod windows_packet_tests {
+    use super::*;
+    #[test]
+    fn buffered_packets_captured_before_resume_are_discarded() {
+        let shared = Shared::default();
+        let start = shared.clock.lock().unwrap().started;
+        shared
+            .clock
+            .lock()
+            .unwrap()
+            .pause_at(start + Duration::from_millis(10));
+        shared
+            .clock
+            .lock()
+            .unwrap()
+            .resume_at(start + Duration::from_millis(20));
+        assert!(shared
+            .capture_epoch_for_packet(start + Duration::from_millis(15))
+            .is_none());
+        assert!(shared
+            .capture_epoch_for_packet(start + Duration::from_millis(19))
+            .is_none());
+        assert!(shared
+            .capture_epoch_for_packet(start + Duration::from_millis(21))
+            .is_some());
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -785,6 +838,17 @@ fn reveal_path(path: String) -> Result<(), String> {
     if !path.is_file() {
         return Err("The saved file no longer exists.".into());
     }
+    reveal_in_folder(&path)
+}
+
+fn reveal_in_folder(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer.exe")
+        .arg("/select,")
+        .arg(path)
+        .spawn()
+        .map_err(|_| "Could not open Explorer.".to_string())?;
+    #[cfg(target_os = "macos")]
     std::process::Command::new("open")
         .arg("-R")
         .arg(&path)
@@ -794,6 +858,9 @@ fn reveal_path(path: String) -> Result<(), String> {
 }
 
 fn capture_app_bundle_path() -> Result<PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    return std::env::current_exe().map_err(|e| format!("Could not locate TINA Capture: {e}"));
+    #[cfg(not(target_os = "windows"))]
     std::env::current_exe()
         .map_err(|e| format!("Could not locate TINA Capture: {e}"))?
         .ancestors()
@@ -810,17 +877,7 @@ fn capture_app_path() -> Result<String, String> {
 #[tauri::command]
 fn reveal_capture_app() -> Result<(), String> {
     let path = capture_app_bundle_path()?;
-    #[cfg(target_os = "macos")]
-    std::process::Command::new("open")
-        .arg("-R")
-        .arg(path)
-        .spawn()
-        .map_err(|e| format!("Could not reveal TINA Capture in Finder: {e}"))?;
-
-    #[cfg(not(target_os = "macos"))]
-    return Err("Show in Finder is only available on macOS".into());
-
-    Ok(())
+    reveal_in_folder(&path)
 }
 
 #[tauri::command]
@@ -855,6 +912,8 @@ async fn insert_text_to_active_app(app: tauri::AppHandle, text: String) -> Resul
 
 #[tauri::command]
 fn permissions_status() -> serde_json::Value {
+    #[cfg(target_os = "windows")]
+    return serde_json::json!({"platform": "windows", "accessibility": false, "microphone": "not-determined", "screenAudio": true});
     #[cfg(target_os = "macos")]
     return serde_json::json!({
         "accessibility": macos_paste::has_accessibility_access(),
@@ -862,25 +921,41 @@ fn permissions_status() -> serde_json::Value {
         "screenAudio": capture::has_screen_audio_access(),
     });
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     serde_json::json!({"accessibility": false, "microphone": "unsupported", "screenAudio": false})
 }
 
 #[tauri::command]
 fn open_privacy_settings(section: String) -> Result<(), String> {
-    let pane = match section.as_str() {
-        "accessibility" => "Privacy_Accessibility",
-        "microphone" => "Privacy_Microphone",
-        "screen-audio" => "Privacy_ScreenCapture",
-        _ => return Err("Unknown privacy setting".into()),
-    };
-    std::process::Command::new("open")
-        .arg(format!(
-            "x-apple.systempreferences:com.apple.preference.security?{pane}"
-        ))
-        .spawn()
-        .map_err(|e| format!("Could not open System Settings: {e}"))?;
-    Ok(())
+    #[cfg(target_os = "windows")]
+    {
+        let uri = match section.as_str() {
+            "microphone" => "ms-settings:privacy-microphone",
+            "screen-audio" => "ms-settings:sound",
+            _ => return Err("This permission is not used by Windows Capture".into()),
+        };
+        std::process::Command::new("explorer.exe")
+            .arg(uri)
+            .spawn()
+            .map_err(|e| format!("Could not open Windows Settings: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let pane = match section.as_str() {
+            "accessibility" => "Privacy_Accessibility",
+            "microphone" => "Privacy_Microphone",
+            "screen-audio" => "Privacy_ScreenCapture",
+            _ => return Err("Unknown privacy setting".into()),
+        };
+        std::process::Command::new("open")
+            .arg(format!(
+                "x-apple.systempreferences:com.apple.preference.security?{pane}"
+            ))
+            .spawn()
+            .map_err(|e| format!("Could not open System Settings: {e}"))?;
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -925,9 +1000,13 @@ fn write_notes(meeting: &str) -> Result<String, String> {
             clock_label(start)
         ));
     }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or("Cannot locate the home directory.")?;
+    let home = std::env::var_os(if cfg!(target_os = "windows") {
+        "USERPROFILE"
+    } else {
+        "HOME"
+    })
+    .map(PathBuf::from)
+    .ok_or("Cannot locate the home directory.")?;
     let downloads = home.join("Downloads");
     let directory = if downloads.is_dir() { downloads } else { home };
     let stem = format!("TINA meeting {}", captured.format("%Y-%m-%d %H-%M-%S"));
@@ -1143,13 +1222,20 @@ fn main() {
             insert_text_to_active_app
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api: _api, .. } = event {
                 // The main window is the control surface, not the session. Hide it
                 // so an active capture and its floating overlay keep running;
                 // Dock/Cmd+Tab reopens it through RunEvent::Reopen.
                 if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.hide();
+                    #[cfg(target_os = "windows")]
+                    {
+                        window.app_handle().exit(0);
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        _api.prevent_close();
+                        let _ = window.hide();
+                    }
                 }
             }
         })

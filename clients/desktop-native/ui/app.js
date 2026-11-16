@@ -20,6 +20,7 @@ let paused=false,captionsOn=false,savedPath='',meetingId='';
 let activeDictation=null;
 let dictationOriginal='';
 let latestCapture=null;
+let capturePlatform='macos';
 let liveSnapshot=null;
 let liveOutputMode='transcript';
 let liveTarget='off';
@@ -76,6 +77,28 @@ async function refreshPermissions(capture){
     for(const id of ['accessibility','microphone','screen-audio'])showPermission(id,'Can’t check this permission.',false);
     return;
   }
+  if(p.platform==='windows'){
+    capturePlatform='windows';
+    const copy=window.TinaCaptureSettings.platformPresentation(capturePlatform);
+    document.querySelector('.footer-platform').textContent=copy.name;
+    document.querySelector('.dictation-hero-lede').textContent=copy.dictation;
+    document.querySelector('.footnote').textContent=copy.privacy;
+    document.querySelector('.permission-note').textContent='Allow desktop apps to access the microphone in Windows Settings. Headphones help prevent echo.';
+    document.querySelector('.about-brand-tagline').textContent='Voice dictation and meeting capture for Windows.';
+    $('about-platform').textContent='Windows 11 · x64';
+    for(const id of ['reveal','live-reveal','settings-show-app'])$(id).textContent=copy.reveal;
+    for(const button of document.querySelectorAll('[data-open-privacy]'))button.textContent='Open Windows Settings';
+    $('settings-accessibility-badge').closest('.settings-row').hidden=true;
+    const shortcuts=$('settings-shortcut-status').closest('.settings-card');
+    shortcuts.hidden=true;
+    shortcuts.previousElementSibling.hidden=true;
+    document.querySelector('.shortcut').hidden=true;
+    $('setting-auto-paste').checked=false;
+    $('setting-auto-paste').disabled=true;
+    $('setting-auto-paste').closest('.settings-row').querySelector('p').textContent='Automatic paste is unavailable on Windows. Use Ctrl+V after dictation.';
+    $('settings-show-app').closest('.settings-details').hidden=true;
+    document.querySelectorAll('[data-macos-only]').forEach(element=>{element.hidden=true;});
+  }
   showPermission('accessibility',p.accessibility?'Granted':'Not granted',Boolean(p.accessibility));
   const microphone=p.microphone==='not-determined'
     ? capture?.capturing&&capture.microphone&&capture.level>0.005
@@ -84,6 +107,7 @@ async function refreshPermissions(capture){
     : ({authorized:['Granted',true],denied:['Not granted',false],restricted:['Restricted',false],unavailable:['Unable to check',false],unknown:['Unable to check',false],unsupported:['Unavailable',false]}[p.microphone]||['Unable to check',false]);
   showPermission('microphone',microphone[0],microphone[1],microphone[2]??!microphone[1]);
   showPermission('screen-audio',p.screenAudio?'Granted':'Not granted',Boolean(p.screenAudio));
+  if(capturePlatform==='windows')showPermission('screen-audio','Available · WASAPI audio only',true,false);
 }
 
 function renderSettingsNetwork(capture,asr){
@@ -994,7 +1018,7 @@ async function finishDictation(run){
     saveDictationHistory(text, dictationOriginal, mode);
     
     const autoPasteEnabled=localStorage.getItem(AUTO_PASTE_KEY)!=='false';
-    const shouldPaste=run.pasteToActiveApp&&autoPasteEnabled;
+    const shouldPaste=capturePlatform!=='windows'&&run.pasteToActiveApp&&autoPasteEnabled;
     if(shouldPaste){
       dictationResult='Inserting text…';
       await refresh();

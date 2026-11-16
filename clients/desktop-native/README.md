@@ -1,6 +1,6 @@
 # TINA Capture
 
-Tauri v2 shell with Rust audio capture for **macOS 15+**. Microphone and system
+Tauri v2 shell with Rust audio capture for **macOS 15+ and Windows 11 (x64)**. Microphone and system
 audio stay on separate channels. No screen frame handler is registered and no
 screen images are saved.
 
@@ -15,6 +15,63 @@ Capture starts only after the user presses **Start** or **Record meeting**.
 Detection is advisory and never starts capture by itself.
 
 ## Build and open
+
+### Windows 11
+
+Requires Rust's MSVC toolchain, Visual Studio C++ Build Tools, WebView2 and Node.js >=22.13.
+Windows validation uses Node.js 24.22.3 LTS. Older Windows Node 24 releases, including 24.11.1,
+can abort during process shutdown ([upstream issue](https://github.com/nodejs/node/issues/56645));
+use an updated LTS runtime for Desktop and its tests.
+From PowerShell at the repo root:
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm --filter '@tina/desktop...' build
+cd clients/desktop-native
+npm ci
+npm run build
+```
+
+The native executable is `src-tauri/target/release/tina-capture.exe`; the NSIS installer is
+under `src-tauri/target/release/bundle/nsis/`. Local builds are unsigned.
+
+Start Desktop in a separate PowerShell session before opening Capture:
+
+```powershell
+# Select the private local deployment config; never paste its contents into a terminal or chat.
+$env:ENV_FILE = 'C:\private\tina.env'
+# Only for the separate local CPU ASR deployment whose Docker-only hostname is transcription-api:
+$env:TINA_DESKTOP_TRANSCRIPTION_URL = 'http://127.0.0.1:8083'
+node deploy/compose/bin/desktop-local.mjs
+```
+
+Run the launcher from the repo root. `ENV_FILE` must be readable by the Windows user; a WSL config
+can be selected by its `\\wsl.localhost\Ubuntu\home\<user>\.config\tina\.env` path. An encrypted
+deployment file must first be loaded with Dotenvx or replaced by the existing private local config.
+The host URL override affects only the deployment ASR backend. Personal/custom and managed backend
+choices retain their configured endpoints and credentials. Do not change shared settings to a
+loopback URL just to make Desktop work: Docker bots need their existing endpoint.
+
+Windows uses WASAPI shared-mode conversion to mono 16 kHz. The default microphone and
+process-excluding system loopback stay on separate source channels. The app verifies Desktop's
+HMAC proof before opening audio devices. The ingest token lives at
+`%LOCALAPPDATA%\local.tina.capture\desktop-ingest-token`, encrypted for the Windows user with DPAPI;
+it is not a Gateway/provider credential.
+
+Choose a source and press **Record meeting** or **Start dictation**. Capture never starts by itself.
+Pause discards queued audio; resume preserves source-clock gaps. Closing the Windows main window
+exits Capture and closes ingest. Exports go to Downloads and **Show in Explorer** reveals the file.
+Windows does not provide the macOS Fn shortcut, automatic meeting detection, automatic paste or
+Speex AEC in this version. Dictation copies text for manual Ctrl+V; use headphones for dual-source
+recording. Microphone access failures link to Windows privacy settings. Device removal/clock reset
+stops capture with an error; select the correct default device and start a new session.
+
+Software tests do not establish microphone levels, echo quality or live ASR latency. Hardware
+enumeration without recording is available with
+`cargo test --manifest-path clients/desktop-native/src-tauri/Cargo.toml capture_windows::tests::windows_input_and_output_devices_are_available -- --ignored --exact`.
+Start an actual recording explicitly to check audio on the target machine.
+
+### macOS
 
 Requires Rust, Node/npm, and a full Xcode installation (Xcode 16+) with the
 macOS 15 SDK:

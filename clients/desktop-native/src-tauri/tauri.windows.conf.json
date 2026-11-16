@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "resources": {
+      "../../../licenses/wasapi-0.27.0.LICENSE.txt": "licenses/wasapi-0.27.0.LICENSE.txt"
+    }
+  }
+}

@@ -47,7 +47,19 @@
     return stages.join(" · ");
   }
 
+  function platformPresentation(platform) {
+    const windows = platform === "windows";
+    return {
+      name: windows ? "Windows" : "macOS",
+      reveal: windows ? "Show in Explorer" : "Show in Finder",
+      automaticPaste: !windows,
+      dictation: windows ? "Select Start dictation, speak, then Stop. Text is copied; use Ctrl+V to paste." : "Double-tap Fn for hands-free.",
+      privacy: windows ? "Windows 11 · WASAPI microphone and system audio. Recording starts only when you select Start. No screen recording." : "Requires macOS 15+.",
+    };
+  }
+
   scope.TinaCaptureSettings = Object.freeze({
+    platformPresentation,
     normalizeAudioSource,
     audioSourceFlags,
     startCaptureArgs,
