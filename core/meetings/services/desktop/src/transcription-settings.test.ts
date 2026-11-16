@@ -91,6 +91,12 @@ try {
   assert.equal((await (await fetch(`${base}/health`)).json() as any).checks.stt_url, null);
   selected = { backend: 'sherpa', url: 'http://host.docker.internal:18001' };
   assert.equal((await resolve()).url, 'http://127.0.0.1:18001');
+  const hostResolve = transcriptionResolver({ url: aUrl, token: '', model: 'env-model' },
+    { url: identityUrl, secret: 'identity-only-secret', deploymentUrl: bUrl });
+  selected = { backend: 'deployment', url: 'http://transcription-api' };
+  assert.equal((await hostResolve()).url, bUrl, 'host override maps only the deployment backend');
+  selected = { backend: 'custom', url: aUrl };
+  assert.equal((await hostResolve()).url, aUrl, 'personal/custom endpoints are never replaced');
   console.log('PASS: central ASR selection, personal/global identity, pinned audio routing, safe metadata, and fail-closed lookup');
 } finally {
   for (const ws of sockets) ws.terminate();

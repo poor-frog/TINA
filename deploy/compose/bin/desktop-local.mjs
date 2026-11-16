@@ -2,18 +2,21 @@
 import { randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { parseEnv } from 'node:util';
 import { startDesktop } from '../../../core/meetings/services/desktop/dist/desktop.js';
 import { startAuthenticatedIngestProxy } from '../../../core/meetings/services/desktop/dist/authenticated-ingest-proxy.js';
 import { startDictationPolishProxy } from '../../../core/meetings/services/desktop/dist/dictation-polish-proxy.js';
+import { captureSecretPath, protectIngestSecret } from './desktop-local-platform.mjs';
 
-const env = parseEnv(readFileSync(new URL('../.env', import.meta.url), 'utf8'));
+const env = parseEnv(readFileSync(process.env.ENV_FILE || new URL('../.env', import.meta.url), 'utf8'));
 const secret = process.env.TINA_INTERNAL_API_SECRET || env.INTERNAL_API_SECRET;
 if (!secret) throw new Error('Set INTERNAL_API_SECRET in deploy/compose/.env before starting Desktop');
+if (secret.startsWith('encrypted:')) throw new Error('Decrypt the deployment config first or select a private plaintext ENV_FILE');
 const ingestSecret = randomBytes(32).toString('hex');
-const captureDataDirectory = join(homedir(), 'Library', 'Application Support', 'local.tina.capture');
-const ingestSecretPath = join(captureDataDirectory, 'desktop-ingest-token');
+const ingestSecretPath = captureSecretPath();
+const captureDataDirectory = dirname(ingestSecretPath);
+const storedIngestSecret = protectIngestSecret(ingestSecret);
 const diarizationEnvPath = join(homedir(), '.config', 'tina', 'diarization.env');
 const diarizationEnv = existsSync(diarizationEnvPath) ? parseEnv(readFileSync(diarizationEnvPath, 'utf8')) : {};
 const diarizationToken = process.env.DIARIZATION_SERVICE_TOKEN || env.DIARIZATION_SERVICE_TOKEN || diarizationEnv.TINA_DIARIZATION_TOKEN || '';
@@ -36,11 +39,11 @@ if (alignmentUrl) {
 
 function removeIngestSecret() {
   try {
-    if (readFileSync(ingestSecretPath, 'utf8') === ingestSecret) unlinkSync(ingestSecretPath);
+    if (readFileSync(ingestSecretPath, 'utf8') === storedIngestSecret) unlinkSync(ingestSecretPath);
   } catch {}
 }
 
-let txUrl = process.env.TRANSCRIPTION_SERVICE_URL || env.TRANSCRIPTION_SERVICE_URL || '';
+let txUrl = process.env.TINA_DESKTOP_TRANSCRIPTION_URL || process.env.TRANSCRIPTION_SERVICE_URL || env.TRANSCRIPTION_SERVICE_URL || '';
 if (txUrl) {
   const endpoint = new URL(txUrl);
   if (endpoint.hostname === 'host.docker.internal') endpoint.hostname = '127.0.0.1';
@@ -62,13 +65,15 @@ try {
     ingestPort: 0,
     txUrl, txToken: process.env.TRANSCRIPTION_SERVICE_TOKEN || env.TRANSCRIPTION_SERVICE_TOKEN || '',
     txModel: process.env.TRANSCRIPTION_MODEL || env.TRANSCRIPTION_MODEL || 'whisper-1',
-    recordingsDir: process.env.TINA_RECORDINGS_DIR || env.TINA_RECORDINGS_DIR,
+    recordingsDir: process.env.TINA_RECORDINGS_DIR || env.TINA_RECORDINGS_DIR
+      || (process.platform === 'win32' ? join(captureDataDirectory, 'recordings') : undefined),
     initialMeetings,
     alignment: alignmentUrl ? { url: alignmentUrl, token: alignmentToken } : undefined,
     diarization: diarizationUrl ? { url: diarizationUrl, token: diarizationToken } : undefined,
     transcriptionSettings: {
       url: process.env.TINA_ADMIN_API_URL || `http://127.0.0.1:${env.ADMIN_API_PORT || 18057}`,
       secret, apiKey: process.env.TINA_DESKTOP_API_KEY || env.TINA_DESKTOP_API_KEY || '',
+      deploymentUrl: process.env.TINA_DESKTOP_TRANSCRIPTION_URL || undefined,
     },
   });
   authenticatedIngestProxy = await startAuthenticatedIngestProxy({
@@ -78,7 +83,7 @@ try {
   });
   mkdirSync(captureDataDirectory, { recursive: true, mode: 0o700 });
   chmodSync(captureDataDirectory, 0o700);
-  writeFileSync(ingestSecretPath, ingestSecret, { mode: 0o600 });
+  writeFileSync(ingestSecretPath, storedIngestSecret, { mode: 0o600 });
   chmodSync(ingestSecretPath, 0o600);
 } catch (error) {
   removeIngestSecret();

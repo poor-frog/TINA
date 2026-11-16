@@ -11,7 +11,7 @@ export interface TranscriptionConfig {
   model: string;
   summary: TranscriptionSummary;
 }
-export interface IdentitySettings { url: string; secret: string; apiKey?: string; }
+export interface IdentitySettings { url: string; secret: string; apiKey?: string; deploymentUrl?: string; }
 
 export class TranscriptionSettingsError extends Error {
   constructor(message: string, public status = 503) { super(message); }
@@ -48,7 +48,9 @@ export function transcriptionResolver(defaults: { url: string; token: string; mo
       throw new TranscriptionSettingsError('The selected transcription backend is not configured');
     }
     let url: URL;
-    try { url = new URL(config.url); } catch { throw new TranscriptionSettingsError('Invalid transcription endpoint'); }
+    try {
+      url = new URL(config.backend === 'deployment' && identity.deploymentUrl ? identity.deploymentUrl : config.url);
+    } catch { throw new TranscriptionSettingsError('Invalid transcription endpoint'); }
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
       throw new TranscriptionSettingsError('Invalid transcription endpoint');
     }

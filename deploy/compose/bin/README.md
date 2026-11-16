@@ -1,5 +1,15 @@
 # deploy/compose/bin — deployment and gate runners
 
+## Native Windows Capture host
+
+`desktop-local.mjs` accepts `ENV_FILE` for the private deployment config on Windows/macOS.
+Windows stores its DPAPI-protected local ingest secret and default recordings under
+`%LOCALAPPDATA%\local.tina.capture`; macOS retains its Application Support secret path.
+`TINA_DESKTOP_TRANSCRIPTION_URL` is an explicit host-reachable URL for the deployment ASR backend
+only, useful when the central config contains a Docker-only hostname such as `transcription-api`.
+It never replaces personal/custom/managed backend selections or exposes service credentials to Capture.
+See the [Windows Capture guide](../../../clients/desktop-native/README.md#windows-11) for setup/build.
+
 ## Local tina CLI / TUI
 
 From the repo root run `make cli-install`. This installs a symlink at `~/.local/bin/tina` to
