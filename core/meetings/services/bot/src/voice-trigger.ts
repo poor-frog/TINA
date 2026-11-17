@@ -78,6 +78,16 @@ export function turnPauseMs(text: string): number {
   return unfinished ? 2000 : 0;
 }
 interface Candidate { parts: VoiceHypothesis[]; confirmed: boolean; matches: number; seen: number; started: number; direct?: boolean; acoustic?: boolean; }
+const normalizedSpeech = (text: string) => text.normalize('NFKC').trim().replace(/\s+/gu, ' ');
+// KWS receives whole 64 ms capture frames; this is not a speech/word alignment estimate.
+const WAKE_FRAME_MS = 64;
+function timedSegments(value: VoiceHypothesis): VoiceHypothesis['segments'] {
+  const segments=value.segments;
+  return segments && segments.length<=256 && segments.every((s,i)=>typeof s.text==='string'
+    && Number.isFinite(s.startMs) && Number.isFinite(s.endMs) && s.startMs>=value.startMs
+    && s.endMs<=value.endMs+2 && s.endMs>s.startMs && (!i||s.startMs>=segments[i-1].endMs-2))
+    && normalizedSpeech(segments.map(s=>s.text).join(' '))===normalizedSpeech(value.text) ? segments : undefined;
+}
 export interface AcousticWake { channel: number; participant?: string | null; startMs: number; endMs: number; }
 export class VoiceTrigger {
   private candidate?: Candidate;
@@ -137,17 +147,14 @@ export class VoiceTrigger {
     }
     if (speechStart < this.after) {
       // Background PCM can keep the channel onset old; only timed ASR speech intervals prove fresh words.
-      const segments = value.segments;
-      const normalize = (text: string) => text.trim().replace(/\s+/gu, ' ');
-      const valid = segments && segments.length <= 256 && segments.every((s, i) =>
-        typeof s.text === 'string' && Number.isFinite(s.startMs) && Number.isFinite(s.endMs)
-        && s.startMs >= value.startMs && s.endMs <= value.endMs + 2 && s.endMs > s.startMs
-        && (!i || s.startMs >= segments[i - 1].endMs - 2))
-        && normalize(segments.map(s => s.text).join(' ')) === normalize(value.text);
-      const fresh = valid ? segments.filter(s => s.startMs >= this.after) : [];
-      if (!fresh.length) { this.reason = 'stale_asr'; return 'ignore'; }
-      value = { ...value, startMs: fresh[0].startMs, speechStartMs: fresh[0].startMs,
-        text: fresh.map(s => s.text).join(' '), segments: fresh };
+      const fresh = timedSegments(value)?.filter(s=>s.startMs>=this.after) || [];
+      if (!fresh.length) {
+        if (!this.acoustic || value.endMs<this.acoustic.endMs-WAKE_FRAME_MS) {
+          this.reason = 'stale_asr'; return 'ignore';
+        }
+        // A window spanning the wake may acknowledge it; old untimed text cannot become a request.
+      } else value = { ...value, startMs: fresh[0].startMs, speechStartMs: fresh[0].startMs,
+          text: fresh.map(s => s.text).join(' '), segments: fresh };
     }
     this.heard = value;
     const text = value.text.trim();
@@ -209,14 +216,42 @@ export class VoiceTrigger {
   private questionText(c: Candidate): string | null {
     const text=c.parts.map(p=>p.text).join(' ').trim();
     if(!c.acoustic)return c.direct?text:invocation(text,this.variants);
-    // ASR may split the wake phrase across windows; clean only the assembled question copy.
-    const names=[...this.variants,'hây ti na','ti na','ti nà ơi','ti nà','tiên na','anh ơi'];
-    return invocation(text,names)??invocation(text.replace(/^(?:hey|hây)[\s,.!?:;…—–-]+/iu,''),names)??text;
+    const wake=this.acoustic!;
+    let offset=0;
+    const spans=c.parts.flatMap(p=>timedSegments(p)||[p]).map(p=>{
+      const value=normalizedSpeech(p.text),start=offset;offset+=value.length+1;
+      return {...p,text:value,from:start,to:start+value.length};
+    });
+    const assembled=spans.map(s=>s.text).join(' ');
+    const names=[...VOICE_NAMES,...this.variants,'hây ti na','ti na','ti nà ơi','ti nà','tiên na','anh ơi'];
+    const alternatives=[...new Set(names.map(normalizedSpeech))].filter(Boolean).sort((a,b)=>b.length-a.length)
+      .map(name=>name.split(' ').map(word=>word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('[\\s,.!?:;…—–-]+'));
+    const markers=[...assembled.matchAll(new RegExp(`(?<![\\p{L}\\p{N}_])(?:(?:hey|hây)[\\s,.!?:;…—–-]+)?(?:${alternatives.join('|')})(?=$|[^\\p{L}\\p{N}_])`,'giu'))]
+      .filter(m=>{
+        const first=spans.find(s=>s.to>m.index!),last=spans.find(s=>s.to>=m.index!+m[0].length);
+        return first && last && first.startMs>=wake.startMs && first.startMs<=wake.endMs+WAKE_FRAME_MS
+          && last.endMs>=wake.endMs-800;
+      });
+    const strong=markers.filter(m=>/^(?:hey|hây)(?=$|[^\p{L}\p{N}_])/iu.test(m[0])
+      || /ơi(?=$|[^\p{L}\p{N}_])/iu.test(m[0]) && normalizedSpeech(m[0]).toLowerCase()!=='anh ơi');
+    if(strong.length>1)return '';
+    const marker=strong[0]||markers.find(m=>{
+      const span=spans.find(s=>s.to>m.index!)!;
+      return span.startMs>=wake.endMs-WAKE_FRAME_MS;
+    });
+    if(marker){
+      const rest=assembled.slice(marker.index!+marker[0].length).replace(/^[\s,.!?:;…—–-]+/u,'').trim();
+      return /^(?:(?:ạ|à|ơi)[\s,.!?:;…—–-]*)+$/iu.test(rest)?'':rest;
+    }
+    // Without a reliable name boundary, use only complete intervals after the detected wake.
+    const fresh=spans.filter(s=>s.startMs>=wake.endMs-WAKE_FRAME_MS).map(s=>s.text).join(' ').trim();
+    return invocation(fresh,names)===''?'':fresh;
   }
   question(quietEndMs: number | undefined, observeBeforeLexicalPause = false): string | null {
     const c = this.candidate;
     if (!c || !c.confirmed || quietEndMs === undefined) return null;
     const last = c.parts.at(-1)!;
+    if(this.acoustic && last.endMs<this.acoustic.endMs-WAKE_FRAME_MS)return null;
     // Both clocks come from capture samples; only rounding slack is safe for a short final word.
     if (last.endMs < quietEndMs - 2 || this.now() - c.seen < 300) return null;
     const question = this.questionText(c);

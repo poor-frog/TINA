@@ -7,10 +7,13 @@ the notice's policy check is pending. Slow new questions receive at most one not
 ordinary follow-ups keep their existing no-extra-ack behavior. Every fixed phrase bypasses the busy
 Agents session and pure normalized notice echoes are ignored during caller continuation. The TTS
 `WAKE_TEXTS`/`WAIT_TEXTS`/`SUMMARY_TEXTS` catalog must match these phrases. No LLM chooses filler.
-After acoustic KWS confirmation, wake-prefix cleanup runs on the assembled ASR question copy,
-including names split across windows and punctuation after “hey”. A name-only call stays in the
-wake acknowledgment path and never dispatches an answer or waiting notice. Original ASR text,
-source timing, caller ownership and the requirement for acoustic confirmation stay unchanged.
+After acoustic KWS confirmation, the assembled ASR question copy starts after the located invocation,
+including names split across windows and punctuation after “hey”. Pre-roll speech before that name
+is context only, including cached ASR replayed when KWS fires. If ASR omits the name, only complete
+intervals starting after detection (with one 64 ms capture frame of slack) supply a question.
+Uncertain boundaries or multiple possible calls take the name acknowledgment path and wait for the
+caller; they never dispatch old speech as a request. Original ASR text, source timing, caller ownership
+and the requirement for acoustic confirmation stay unchanged.
 
 `voice_timing` logs retain only request UUID/channel, timestamps and durations. Speech timing is
 split into `ack_*` (name acknowledgment), `notice_*` (question/recap wait) and `answer_*`.

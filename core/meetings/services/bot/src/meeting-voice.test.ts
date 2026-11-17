@@ -188,6 +188,26 @@ function acousticFixture(answer?: () => Promise<{text: string; clarification?: b
   return {...f, ready, wake, wakeFor, fail: () => fail(), kws: emit, messages};
 }
 
+for (const replay of [false, true]) for (const question of ['', 'ai phụ trách demo?'])
+test(`KWS pre-roll ${replay ? 'replay' : 'live ASR'} dispatches only the request after the call (${question || 'name only'})`, async () => {
+  const f = acousticFixture();
+  try {
+    await f.voice.start(); f.emit({event: 'state', state: 'LISTENING'}); f.ready();
+    const start = Date.now() + 1; await tick(5);
+    const hypothesis = {channel: 2, participant: 'transport-id', speakerKey: 's',
+      startMs: start + 10, endMs: start + 300,
+      text: `Lan đã trình bày kế hoạch. Hey TINA${question ? ', ' + question : '.'}`, final: true};
+    if (replay) f.voice.hypothesis(hypothesis);
+    f.wake(start + 200, {source_start_ms: start});
+    if (!replay) f.voice.hypothesis(hypothesis);
+    f.emit({event: 'activity', channel: 2, speech: false, endMs: start + 300, stamp: start + 300});
+    await tick(450);
+    assert.deepEqual(f.questions, question ? [question] : []);
+    if (!question) assert.deepEqual(f.spoken, [VOICE_NOTICES.wake[0]]);
+    assert.equal(hypothesis.text, `Lan đã trình bày kế hoạch. Hey TINA${question ? ', ' + question : '.'}`);
+  } finally { await f.voice.stop(); }
+});
+
 test('only whole-meeting recap-like requests get the fixed waiting notice', () => {
   for (const question of ['Tổng hợp toàn bộ quyết định trong cuộc họp.', 'Tóm tắt cuộc họp', 'Summarize the entire meeting'])
     assert.equal(summaryWaitNotice(question), SUMMARY_NOTICE);

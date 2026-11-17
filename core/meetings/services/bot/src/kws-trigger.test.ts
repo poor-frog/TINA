@@ -2,6 +2,52 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {VoiceTrigger, invocation, turnPauseMs, type VoiceHypothesis} from './voice-trigger.js';
 
+test('pre-wake speech is context only; only a located invocation or fresh audio supplies the request',()=>{
+  const cases:Array<[string,string]>=[
+    ['Lan phụ trách demo. Hey TINA.',''],
+    ['Ai phụ trách demo? Hey TINA.',''],
+    ['Ai phụ trách demo?',''],
+    ['Lan phụ trách demo. Hey TINA, hạn bàn giao khi nào?','hạn bàn giao khi nào?'],
+    ['Dự án TINA do Lan phụ trách. Hey TINA, còn deadline?','còn deadline?'],
+    ['Đã chốt demo. TINA ơi, mở tài liệu TINA giúp tôi?','mở tài liệu TINA giúp tôi?'],
+    ['Hey TINA, giải thích cách nói hey TINA?',''],
+  ];
+  for(const [text,expected] of cases){
+    let now=5000;const t=new VoiceTrigger(()=>now,[],true);t.reset(1000);
+    t.wake({channel:1,participant:'p',startMs:3000,endMs:5000});
+    const value={channel:1,participant:'p',speakerKey:'s',startMs:3100,endMs:5100,text,final:true};
+    t.feed(value);now=5500;
+    assert.equal(t.question(5100),expected,text);assert.equal(value.text,text);
+  }
+});
+
+test('timed segments fence old names and permit a fresh question when ASR omits the wake',()=>{
+  let now=5000;const t=new VoiceTrigger(()=>now,[],true);t.reset(1000);
+  t.wake({channel:1,participant:'p',startMs:3000,endMs:5000});
+  const value={channel:1,participant:'p',speakerKey:'s',startMs:3100,endMs:5500,final:true,
+    text:'Hey TINA hỏi cũ. Hạn bàn giao khi nào?',segments:[
+      {text:'Hey TINA hỏi cũ.',startMs:3100,endMs:4000},
+      {text:'Hạn bàn giao khi nào?',startMs:5100,endMs:5500}]};
+  t.feed(value);now=5800;assert.equal(t.question(5500),'Hạn bàn giao khi nào?');
+  assert.equal(value.segments[0].text,'Hey TINA hỏi cũ.');
+});
+
+test('untimed windows preceding the KWS context acknowledge instead of reviving an old invocation',()=>{
+  let now=5000;const t=new VoiceTrigger(()=>now,[],true);t.reset(1000);
+  t.wake({channel:1,participant:'p',startMs:3000,endMs:5000});
+  t.feed({channel:1,participant:'p',speakerKey:'s',startMs:1500,endMs:5100,
+    text:'Hey TINA, câu hỏi cũ.',final:true});
+  now=5500;assert.equal(t.question(5100),'');
+});
+
+test('fragmented wake after older speech removes only the request copy prefix',()=>{
+  let now=5000;const t=new VoiceTrigger(()=>now,[],true);t.reset(1000);
+  t.wake({channel:1,participant:'p',startMs:3000,endMs:5000});
+  for(const [text,startMs,endMs] of [['Lan phụ trách demo.',3100,4200],['hey',4200,4700],['TINA, còn deadline?',4700,5300]] as const)
+    t.feed({channel:1,participant:'p',speakerKey:'s',startMs,endMs,text,final:true});
+  now=5700;assert.equal(t.question(5300),'còn deadline?');
+});
+
 test('name calls with only polite particles do not become questions or broaden ASR-only activation', () => {
   for (const text of ['TINA ơi ạ', 'Tina à!', 'tin anh ơi, ạ.', 'TINA, ơi ạ…'])
     assert.equal(invocation(text), '', text);
@@ -17,7 +63,7 @@ test('KWS name variants acknowledge while real questions and raw ASR remain inta
     ['ti nà ơi, ai phụ trách demo?', 'ai phụ trách demo?'],
     ['hey tiên na, có?', 'có?'], ['TINA ơi, dừng', 'dừng'],
     ['TINA ơi, ạ ai phụ trách demo?', 'ạ ai phụ trách demo?'],
-    ['Hey, tìm tài liệu demo', 'Hey, tìm tài liệu demo'],
+    ['Hey, tìm tài liệu demo', ''],
   ];
   for (const [text, expected] of cases) {
     let now = 5000; const trigger = new VoiceTrigger(() => now, [], true); trigger.reset(1000);
@@ -37,7 +83,7 @@ test('fragmented acoustic wake phrases are cleaned after assembly without becomi
   for(const [parts,expected] of [
     [['hey','TINA'],''],[['Hey,','TINA!'],''],[['ti','na','ơi'],''],[['TINA','ơi','ạ'],''],
     [['hây','ti','na'],''],[['hey','TINA','ai phụ trách demo?'],'ai phụ trách demo?'],
-    [['Hey,','tìm tài liệu demo'],'Hey, tìm tài liệu demo'],
+    [['Hey,','tìm tài liệu demo'],''],
   ] as Array<[string[],string]>){
     let now=5000;const t=new VoiceTrigger(()=>now,[],true);t.reset(1000);
     assert(t.wake({channel:1,startMs:3000,endMs:3800}));
@@ -50,7 +96,7 @@ test('fragmented acoustic wake phrases are cleaned after assembly without becomi
 
 test('KWS authorizes a same-channel ASR question without requiring an ASR name match', () => {
   let now = 5000; const t = new VoiceTrigger(() => now, [], true); t.reset(1000);
-  const h: VoiceHypothesis = {channel: 2, participant: 'p', speakerKey: 's', startMs: 3000,
+  const h: VoiceHypothesis = {channel: 2, participant: 'p', speakerKey: 's', startMs: 3900,
     endMs: 4400, text: 'Ai phụ trách demo?', final: true};
   assert.equal(t.feed({...h, text: 'TINA ơi ai phụ trách demo?'}), 'ignore');
   assert(t.wake({channel: 2, participant: 'p', startMs: 3000, endMs: 3800}));
@@ -96,7 +142,7 @@ test('an acoustic continuation cannot authorize another channel or an expired AS
 test('missing ASR identity does not erase an acoustic call on the same channel, but a known conflict is refused', () => {
   let now=5000;const t=new VoiceTrigger(()=>now,[],true);t.reset(1000);
   assert(t.wake({channel:1,participant:'p',startMs:3000,endMs:3800}));
-  const h={channel:1,speakerKey:'s',startMs:3000,endMs:4400,text:'Ai làm demo?',final:true};
+  const h={channel:1,speakerKey:'s',startMs:3900,endMs:4400,text:'Ai làm demo?',final:true};
   assert.equal(t.feed({...h,participant:'other'}),'ignore');
   assert.equal(t.feed(h),'wake');now+=350;assert.equal(t.question(4400),h.text);
 });
