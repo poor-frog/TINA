@@ -160,3 +160,14 @@ Voice draft pagination regression uses21 drafts:20 newer discarded records canno
 `test_voice_sandbox.py` checks empty native/MCP grants, no workspace mounts or CLI resume,
 subprocess group cleanup on timeout/Stop, credential scrubbing and independent verification.
 The API regression freezes only the current authenticated voice lease, rejecting cancelled turns.
+
+Whole-Wiki voice cases cover unlinked documents beyond the eight-document selection budget,
+private owner isolation, hidden/symlink exclusion, unchanged generic Knowledge scope, oversized
+source failures and fingerprint invalidation after edits, deletion or broad-grant revocation.
+
+Sandbox structured-output regressions exercise native Codex/Claude schema forwarding, final JSON
+extraction without commentary, unchanged ordinary chat calls, one format repair, malformed plans,
+source verification and Stop during repair. Generation-format failures survive reply storage and
+owner handoff and count as service failures rather than evidence refusals in retrieval evaluation.
+The explicit `codex_web_smoke.py` additionally proves outputSchema propagation through the real
+container CLI to a local Responses fixture, with no model credentials or live provider inference.

@@ -75,6 +75,26 @@ def test_parse_stream_json_normalizes():
     assert evs[3]["sessionId"] == "s1" and evs[3]["ok"] is True
 
 
+def test_native_schema_and_structured_result_are_opt_in_for_voice(tmp_path):
+    schema = {'type': 'object', 'properties': {'tool_calls': {'type': 'array'}}}
+    response = {'type': 'result', 'subtype': 'success', 'result': 'Ordinary chat prose.',
+                'structured_output': {'tool_calls': []}}
+    seen = []
+    def execute(argv, cwd):
+        seen.append(argv)
+        return [json.dumps(response)]
+    harness = ClaudeCodeHarness(exec_fn=execute)
+    voice = list(run_harness_turn(tmp_path, 'voice', harness, commit=False, output_schema=schema))[-1]
+    assert json.loads(seen[0][seen[0].index('--json-schema') + 1]) == schema
+    assert json.loads(voice['reply']) == response['structured_output']
+    chat = list(run_harness_turn(tmp_path, 'chat', harness, commit=False))[-1]
+    assert '--json-schema' not in seen[1] and chat['reply'] == response['result']
+    failed = list(parse_stream_json([json.dumps(response | {'is_error': True})], structured_output=True))[-1]
+    assert failed['ok'] is False and failed['reply'] == response['result']
+    failed = list(parse_stream_json([json.dumps(response | {'subtype':'error_max_structured_output_retries'})], structured_output=True))[-1]
+    assert failed['ok'] is False
+
+
 def test_parse_stream_json_partial_messages_stream_incrementally():
     # Captured --include-partial-messages JSONL shape: stream_event(content_block_delta/text_delta)*
     # then the consolidated assistant text block, then result. The deltas must surface incrementally

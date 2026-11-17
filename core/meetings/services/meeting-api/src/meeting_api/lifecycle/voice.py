@@ -75,6 +75,7 @@ class VoicePolicy(BaseModel):
     model_config = ConfigDict(extra='forbid')
     enabled: StrictBool = False
     include_transcript: StrictBool = False
+    include_workspace_wiki: StrictBool = False
     include_approved_actions: StrictBool = False
     shared_meeting_ids: list[Annotated[int,Field(gt=0,strict=True)]] = Field(default_factory=list,max_length=4)
     documents: list[str] = Field(default_factory=list, max_length=8)
@@ -255,8 +256,9 @@ class VoiceState(BaseModel):
 
 def new_meeting_voice_policy():
     """Seed new capable rooms; saved policies and document grants remain owner-controlled."""
-    return VoicePolicy(enabled=True,include_transcript=True,noise_suppression=True,
-                       allow_general_knowledge=True,allow_web_search=True,engine='livekit',agent_backend='sandbox').model_dump()
+    return VoicePolicy(enabled=True,include_transcript=True,include_workspace_wiki=True,noise_suppression=True,
+                       allow_general_knowledge=True,allow_web_search=True,auto_web_search=True,
+                       engine='livekit',agent_backend='sandbox').model_dump()
 
 
 def policy_of(row):
@@ -541,9 +543,9 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 raise HTTPException(409, 'Start a new voice-enabled bot before enabling the assistant')
             if (row.get('data') or {}).get('transcribe_enabled') is False:
                 raise HTTPException(409, 'Enable transcription for the bot before enabling voice questions')
-            if not body.include_transcript and not body.include_approved_actions and not body.shared_meeting_ids and not body.documents and not body.allow_general_knowledge and not body.allow_web_search:
+            if not body.include_transcript and not body.include_workspace_wiki and not body.include_approved_actions and not body.shared_meeting_ids and not body.documents and not body.allow_general_knowledge and not body.allow_web_search:
                 raise HTTPException(422, 'Choose sources that may be spoken to this room')
-            available = await agent(row, 'profile', body.model_dump()) if body.source_profile_id or policy_of(row).source_profile_id else await agent(row, 'ready')
+            available = await agent(row, 'profile', body.model_dump()) if body.source_profile_id or policy_of(row).source_profile_id or body.include_workspace_wiki != policy_of(row).include_workspace_wiki else await agent(row, 'ready')
             if any(path not in available['documents'] for path in body.documents):
                 raise HTTPException(422, 'Choose documents linked to this meeting')
         try:

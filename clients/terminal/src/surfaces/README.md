@@ -132,3 +132,8 @@ room references. Public web permission and automatic public web selection are se
 Voice assistant → Meeting → Answer agent selects Sandbox agent or Direct LLM. Newly created
 voice-capable meetings use Sandbox agent; saved legacy policies remain selectable. Sandbox source
 tools are executed and checked by TINA, and its CLI cannot directly access account workspaces.
+
+New Google Meet rooms default to all-Wiki voice retrieval from the owner's primary private
+workspace. Meeting → "Read all Wiki documents in my private workspace" explicitly shows the
+room-level grant and can disable it; source profiles do not override it. Individual document
+selection applies when all-Wiki sharing is off. It does not share other accounts or hidden files.

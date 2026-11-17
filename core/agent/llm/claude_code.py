@@ -35,7 +35,7 @@ def _short(content: object, n: int = 80) -> str:
     return s[:n]
 
 
-def parse_stream_json(lines: Iterable[str]) -> Iterator[dict]:
+def parse_stream_json(lines: Iterable[str], *, structured_output: bool = False) -> Iterator[dict]:
     """Normalize Claude Code `--output-format stream-json` JSONL into UnitEvent dicts.
 
     assistant text → message-delta · assistant tool_use → tool-call · user tool_result →
@@ -89,13 +89,18 @@ def parse_stream_json(lines: Iterable[str]) -> Iterator[dict]:
                     }
         elif t == "result":
             reply = obj.get("result", "")
+            failed = obj.get('is_error') is True or obj.get('subtype') == 'error'
+            if structured_output and str(obj.get('subtype', '')).startswith('error'):
+                failed = True
+            if structured_output and isinstance(obj.get('structured_output'), dict) and not failed:
+                reply = json.dumps(obj['structured_output'], ensure_ascii=False)
             if obj.get("is_error") or obj.get("subtype") == "error":
                 reply = _short(reply, max(400, len(str(reply))))
             done = {
                 "type": "done",
                 "reply": reply,
                 "sessionId": obj.get("session_id"),
-                "ok": obj.get("is_error") is not True and obj.get("subtype") != "error",
+                "ok": not failed,
             }
             if not done["ok"] and looks_like_auth_failure(reply):
                 # The CLI's own auth text ("Not logged in · Please run /login") is an internal of
@@ -121,6 +126,7 @@ def build_argv(
     model: Optional[str] = None,
     mcp_config: Optional[str] = None,
     effort: Optional[str] = None,
+    output_schema: Optional[dict] = None,
 ) -> list[str]:
     """The headless Claude Code argv — `claude -p <prompt> --output-format stream-json [...]`.
 
@@ -146,6 +152,8 @@ def build_argv(
         argv += ["--resume", session]
     if model:
         argv += ["--model", model]
+    if output_schema is not None:
+        argv += ["--json-schema", json.dumps(output_schema, ensure_ascii=False)]
     # The compatibility argument is deliberately ignored: thinking is always automatic.
     return argv
 
@@ -262,6 +270,7 @@ class ClaudeCodeHarness:
                  mcp_config: Optional[str] = None, gated_mcp_servers: Iterable[str] = (),
                  mcp_servers: Optional[dict] = None, mcp_env: Optional[dict[str, str]] = None,
                  mcp_tools: Optional[dict[str, list[str]]] = None,
+                 output_schema: Optional[dict] = None,
                  approval_handler: Optional[Callable[[dict], Optional[bool]]] = None) -> Iterator[dict]:
         mode = "bedrock" if os.environ.get("CLAUDE_CODE_USE_BEDROCK") == "1" else (
             "deepseek" if os.environ.get("ANTHROPIC_BASE_URL", "").rstrip("/") == "https://api.deepseek.com/anthropic"
@@ -276,13 +285,13 @@ class ClaudeCodeHarness:
                 config.write_text(json.dumps({'mcpServers': {'tina-reach': {
                     'command': reach['command'], 'args': reach['args']}}}))
                 argv = build_argv(prompt, allowed_tools=allowed_tools, session=session, model=model,
-                                  effort=effort or None, mcp_config=str(config))
-                yield from parse_stream_json(self._exec(argv, str(work)))
+                                  effort=effort or None, mcp_config=str(config), output_schema=output_schema)
+                yield from parse_stream_json(self._exec(argv, str(work)), structured_output=output_schema is not None)
             return
         argv = build_argv(prompt, allowed_tools=allowed_tools, session=session, model=model,
                           effort=effort or None,
-                          mcp_config=mcp_config)
-        yield from parse_stream_json(self._exec(argv, str(work)))
+                          mcp_config=mcp_config, output_schema=output_schema)
+        yield from parse_stream_json(self._exec(argv, str(work)), structured_output=output_schema is not None)
 
     def prepare(self, work: Path, chat_root: Optional[Path] = None) -> None:
         # chats are saved to / resumed from the PRIVATE continuity root (the _system mount when the

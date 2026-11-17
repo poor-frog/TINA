@@ -202,15 +202,17 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
             cache[base] = paths
         return cache[base]
 
-    def related_text(base, path):
+    def related_text(base, path, *, required=False):
         try:
             target = content_path(base, path)
             if target is None or not target.is_file(): return None
             with target.open('rb') as stream:
                 raw = stream.read(200001)
             if len(raw) > 200000:
+                if required: raise HTTPException(413, 'A Wiki document exceeds the readable source size')
                 return None
             text = raw.decode('utf-8')
+            if required and len(text)>50000: raise HTTPException(413, 'A Wiki document exceeds the readable source size')
             return text if len(text) <= 50000 else None
         except (OSError, ValueError) as exc:
             raise HTTPException(503, 'Could not read related documents') from exc
@@ -234,7 +236,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                           'stale': fact_id not in current or bool(review and review['fingerprint'] != fingerprint)})
         return items
 
-    def load(request, meeting_id, slug=None, *, with_canonical=True, preferred=None, profile_documents=()):
+    def load(request, meeting_id, slug=None, *, with_canonical=True, preferred=None, profile_documents=(), include_workspace_wiki=False):
         voice = preferred is not None
         preferred = set(preferred or ())
         subject = subject_of(request)
@@ -242,6 +244,15 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         canonical = (meeting_get(meeting_api_url, subject, meeting_id, f'/transcripts/by-id/{meeting_id}/canonical')
                      if with_canonical else {'segments': []})
         base = read_target(request, slug)
+        if voice and include_workspace_wiki:
+            documents = {}; size = 0
+            for path in document_paths(request,base):
+                text = related_text(base,path,required=True)
+                if text is None: continue
+                size += len(text.encode('utf-8'))
+                if size > 20000000: raise HTTPException(413,'Workspace Wiki is too large for voice retrieval; choose individual documents')
+                documents[path] = text
+            return base,canonical,documents
         native = str(row.get('native_meeting_id') or row.get('platform_specific_id') or '')
         paths = set()
         paths.update(profile_documents)
@@ -486,7 +497,8 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         base = read_target(request, None)
         paths = resolve_profile(base, subject, policy)
         base, canonical, documents = load(request, meeting_id, with_canonical=with_canonical,
-            preferred=policy.get('documents', []), profile_documents=paths)
+            preferred=policy.get('documents', []), profile_documents=paths,
+            include_workspace_wiki=policy.get('include_workspace_wiki') is True)
         if policy.get('source_profile_id') and any(p not in documents for p in policy.get('documents', [])):
             raise HTTPException(409, 'A selected project document is unavailable')
         return request, row, base, canonical, documents
@@ -520,7 +532,8 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
             directory=safe_dir(reader,base,relative)
             actions=approved_action_documents(directory,owner=row['user_id'],meeting_id=row['id'],
                 read_document=lambda path:related_text(base,path))
-        docs={path:documents[path] for path in policy.get('documents',[]) if path in documents}|actions
+        docs=(documents if policy.get('include_workspace_wiki') is True else
+              {path:documents[path] for path in policy.get('documents',[]) if path in documents})|actions
         sources=[s|({'approved_action':True} if s.get('path') in actions else {})
             for s in sources_for(canonical if policy.get('include_transcript') else {'segments':[]},docs)]
         if not policy.get('shared_meeting_ids'): return voice_chunks(sources)
@@ -690,7 +703,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         if draft_kind: kind = 'draft'
         tools=[]
         if policy.get('include_transcript'):tools+=['get_recent_transcript','search_meeting']
-        if policy.get('documents'):tools.append('search_shared_documents')
+        if policy.get('documents') or policy.get('include_workspace_wiki'):tools.append('search_shared_documents')
         if policy.get('include_approved_actions'):tools.append('search_approved_actions')
         if policy.get('shared_meeting_ids'):tools.append('search_shared_meetings')
         tools.append('calculate')
@@ -907,7 +920,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
     def voice_answer(request: Request, meeting_id: int, body: VoiceQuestion):
         request,row,base,policy,candidates=authorized_voice(request,meeting_id,body)
         candidates=with_calculations(candidates,body.question,body.lookups)
-        paths=policy.get('documents',[])
+        documents_allowed=bool(policy.get('documents')) or policy.get('include_workspace_wiki') is True
         history = current_history([t.model_dump() for t in body.history], candidates, int(time.time()*1000))
         kind, question = source_route(request,body.question,policy,history)
         draft_kind, draft_details = action_context(body.question, pending_clarification(history,int(time.time()*1000))
@@ -990,7 +1003,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
             selected = [s | {'id': f"s{indices[s['key']]}"} for s in selected]
             if body.lookups is not None:
                 requested=[c.model_dump() for c in body.lookups]
-                if any(c['name'] in ('search_web','draft_task','draft_decision') or c['name']=='search_shared_documents' and not paths
+                if any(c['name'] in ('search_web','draft_task','draft_decision') or c['name']=='search_shared_documents' and not documents_allowed
                        or c['name']=='search_approved_actions' and not policy.get('include_approved_actions')
                        or c['name']=='search_shared_meetings' and not policy.get('shared_meeting_ids')
                        or c['name'] in ('search_meeting','get_recent_transcript') and not policy.get('include_transcript') for c in requested):

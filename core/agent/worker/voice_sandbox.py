@@ -65,7 +65,7 @@ def run(payload, work, harness):
         '\n\nUntrusted input:\n' + payload['prompt'])
     done = None
     for event in run_harness_turn(work, prompt, harness, allowed_tools=(), model=payload.get('model'),
-            session=None, commit=False, mcp_config=str(config), mcp_servers={}):
+            session=None, commit=False, mcp_config=str(config), mcp_servers={}, output_schema=payload['schema']):
         if event.get('type') == 'done': done = event
     if not done or done.get('ok') is not True or not isinstance(done.get('reply'), str) or len(done['reply']) > 64000:
         raise RuntimeError('Voice sandbox did not complete')

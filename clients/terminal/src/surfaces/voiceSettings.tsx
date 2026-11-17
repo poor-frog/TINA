@@ -149,7 +149,7 @@ export function VoiceSettings(){
         <p className={styles.helper}>{value==='default'?`Following deployment default. Voice is currently ${defaultVoice?'on':'off'}.`:value==='on'?'Voice is enabled for new bots, even if the deployment default changes.':'Voice is disabled for new bots, even if the deployment default changes.'}</p>
         <section aria-label="New meeting defaults" className={styles.defaults}>
           <div className={styles.sectionHeading}><strong>New meeting defaults</strong><span>{services?.new_meeting_policy?.engine==='livekit'?'LiveKit Agents':services?.new_meeting_policy?.engine==='tina'?'TINA':'Checking…'}</span></div>
-          <dl>{([['enabled','Voice assistant'],['include_transcript','Meeting transcript'],
+          <dl>{([['enabled','Voice assistant'],['include_transcript','Meeting transcript'],['include_workspace_wiki','Private workspace Wiki'],
             ['allow_general_knowledge','General knowledge'],['allow_web_search','Public web search']] as const).map(([key,label])=>
             <div key={key}><dt>{label}</dt><dd>{!services?.new_meeting_policy?'Unavailable':(key==='enabled'?defaultVoice:services.new_meeting_policy[key])?'On':'Off'}</dd></div>)}</dl>
           <p className={styles.helper}>Answer agent · {!services?.new_meeting_policy?'Checking…':services.new_meeting_policy.agent_backend==='sandbox'?'Sandbox agent':'Direct LLM'}</p>
@@ -179,7 +179,7 @@ export function VoiceSettings(){
   </div>;
 }
 
-interface RoomPolicy {enabled:boolean;include_transcript:boolean;include_approved_actions?:boolean;shared_meeting_ids?:number[];documents:string[];revision:number;wake_variants:string[];
+interface RoomPolicy {enabled:boolean;include_transcript:boolean;include_workspace_wiki?:boolean;include_approved_actions?:boolean;shared_meeting_ids?:number[];documents:string[];revision:number;wake_variants:string[];
   noise_suppression:boolean;allow_general_knowledge?:boolean;allow_web_search?:boolean;auto_web_search?:boolean;engine?:'tina'|'livekit';agent_backend?:'completion'|'sandbox';source_profile_id?:string|null;source_profile_fingerprint?:string|null}
 interface SourceProfile {id:string;name:string;fingerprint:string;sources:Pick<RoomPolicy,'documents'|'shared_meeting_ids'|'include_transcript'|'include_approved_actions'|'allow_general_knowledge'|'allow_web_search'|'auto_web_search'>}
 function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:string}>}){
@@ -302,9 +302,11 @@ function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:
       <span className={styles.helper}>Sandbox uses your configured chat harness with meeting-approved evidence. TINA executes source tools and verifies the answer before speech.</span>
       {policy.engine==='livekit'&&<span style={{fontSize:12,color:'var(--t3)'}}>Up to 3 concurrent meetings. Uses your selected ASR, approved sources and local voice.</span>}
       {([['enabled','Enable voice'],['include_transcript','Use this meeting’s transcript'],
+        ['include_workspace_wiki','Read all Wiki documents in my private workspace'],
         ['include_approved_actions','Share approved tasks and decisions from this meeting'],
         ['allow_general_knowledge','Allow general knowledge'],['allow_web_search','Allow public web search'],['auto_web_search','Let agent choose public web search']] as const).map(([key,label])=>
         <label key={key}><input type="checkbox" checked={!!policy[key]} disabled={busy||key==='auto_web_search'&&!policy.allow_web_search} onChange={e=>setPolicy({...policy,[key]:e.target.checked})}/> {label}</label>)}
+      <span className={styles.helper}>All-Wiki sharing lets TINA answer aloud from your private Markdown knowledge documents. Other accounts and hidden files are excluded. Turn it off to use only selected documents below.</span>
       {!!documents.length&&<details><summary>Shared documents ({policy.documents.length})</summary>
         {documents.map(doc=><label key={doc.path} style={{display:'block',marginTop:8}}><input type="checkbox" disabled={busy} checked={policy.documents.includes(doc.path)}
           onChange={e=>setPolicy({...policy,documents:e.target.checked?[...policy.documents,doc.path]:policy.documents.filter(p=>p!==doc.path)})}/> {doc.title}</label>)}

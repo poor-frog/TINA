@@ -56,11 +56,12 @@ def test_changed_or_unscoped_gold_is_rejected(tmp_path, change):
     with pytest.raises(ValueError): evaluation.load_cases(snapshot, dataset)
 
 
-def test_answer_grades_require_approved_labels_and_service_failures_are_not_false_refusals(tmp_path):
+@pytest.mark.parametrize('reason',['llm_unavailable','generation_format_invalid'])
+def test_answer_grades_require_approved_labels_and_service_failures_are_not_false_refusals(tmp_path,reason):
     _, _, gold = fixture(tmp_path)
     gold['cases'] += [gold['cases'][0] | {'id': '2'}, gold['cases'][0] | {'id': '3', 'expected': 'unanswerable'}]
     answers = {'cases': [{'id': '1', 'reason': 'insufficient_evidence', 'text': 'PRIVATE ANSWER', 'human_correct': False},
-                         {'id': '2', 'reason': 'llm_unavailable'}, {'id': '3', 'reason': 'answered'}]}
+                         {'id': '2', 'reason': reason}, {'id': '3', 'reason': 'answered'}]}
     report = evaluation.answer_report(gold, answers)
     assert report['answerable_refusals'] == 1 and report['service_errors'] == 1
     assert report['negative_answers_needing_review'] == 1 and report['human_correct_rate'] is None

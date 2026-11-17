@@ -190,7 +190,8 @@ async def test_unreachable_identity_does_not_prepare_voice_from_an_unknown_accou
     assert not json.loads(runtime.specs[0]['env']['BOT_CONFIG']).get('voiceAgentEnabled',False)
 
 
-@pytest.mark.parametrize('saved',[None,{}, {'enabled':False,'include_transcript':False,'documents':['wiki/approved.md'],'revision':4,'noise_suppression':False,'wake_variants':[]}])
+@pytest.mark.parametrize('saved',[None,{}, {'enabled':False,'include_transcript':False,'documents':['wiki/approved.md'],'revision':4,'noise_suppression':False,'wake_variants':[]},
+    {'enabled':True,'include_transcript':True,'documents':[],'revision':3,'allow_web_search':True,'auto_web_search':False}])
 async def test_new_room_defaults_on_and_continuation_preserves_explicit_room_choices(monkeypatch,saved):
     from meeting_api.bot_spawn import service
     async def context(user):return {'transcription':{'url':'http://asr.test','token':'synthetic'}}
@@ -203,6 +204,8 @@ async def test_new_room_defaults_on_and_continuation_preserves_explicit_room_cho
     assert policy['enabled'] and policy['noise_suppression'] and policy['include_transcript'] and policy['documents']==[]
     assert policy['agent_backend']=='sandbox'
     assert policy['engine']=='livekit' and policy['allow_general_knowledge'] and policy['allow_web_search']
+    assert policy['auto_web_search'] is True
+    assert policy['include_workspace_wiki'] is True
     if saved is None:row['data'].pop('voice_assistant')
     else:row['data']['voice_assistant']=saved.copy()
     row['status']='completed'

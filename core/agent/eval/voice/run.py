@@ -107,7 +107,7 @@ def main():
                     'X-Internal-Secret': 'synthetic-eval-only', 'X-User-Id': '7'}, json={'question': case['question'], 'revision': 1, 'history': history})
                 body = response.json()
                 result.update(http_status=response.status_code, reason=body.get('reason'), text=body.get('text'),
-                              service_available=body.get('reason') not in ('llm_unavailable', 'verification_unavailable', 'web_unavailable'),
+                              service_available=body.get('reason') not in ('llm_unavailable', 'verification_unavailable', 'web_unavailable', 'generation_format_invalid'),
                               lookups=body.get('lookups', []), links=body.get('links', []),
                               verification=body.get('verification', []),
                               source_count=len(body.get('sources', [])),

@@ -2,7 +2,13 @@
 from shared.voice_tools import object_schema, tool_call_schema
 
 
+class VoiceOutputFormatError(ValueError):
+    """A voice candidate still has an invalid shape after its one format repair."""
+
+
 def voice_schema(mode, sources=(), *, tools=()):
+    if mode == 'general':
+        return object_schema({'text': {'type': 'string', 'minLength': 1, 'maxLength': 2000}})
     if mode == 'source_intent':
         return object_schema({'route': {'type':'string','enum':['meeting','general','web']}})
     if mode == 'intent':

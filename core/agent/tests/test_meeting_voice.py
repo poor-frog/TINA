@@ -44,6 +44,65 @@ HEADERS = {'X-Internal-Secret': 'test-internal', 'X-User-Id': '7'}
 URL = '/api/internal/meeting-voice/1/answer'
 
 
+def test_whole_private_wiki_search_reaches_beyond_eight_unlinked_documents_but_not_other_scopes(voice):
+    client,row,root,_,_=voice
+    policy=row['data']['voice_assistant'];policy.update(engine='livekit',documents=[],include_workspace_wiki=True)
+    for i in range(12): (root/'wiki'/f'project-{i:02}.md').write_text(f'Nebula{i:02} owner is Lan.')
+    (root/'.private').mkdir();(root/'.private/hidden.md').write_text('HIDDEN_SCOPE')
+    other=root.parent/'8';other.mkdir();(other/'wiki').mkdir();(other/'wiki/other.md').write_text('OTHER_OWNER_SCOPE')
+    (root/'wiki/escape.md').symlink_to(other/'wiki/other.md')
+    ready=client.get('/api/internal/meeting-voice/1/ready',headers=HEADERS)
+    assert ready.status_code==200 and len(ready.json()['documents'])==14
+    assert 'wiki/project-11.md' in ready.json()['documents'] and 'wiki/escape.md' not in ready.json()['documents']
+    body={'question':'Ai phụ trách Nebula11?','revision':1}
+    context=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json=body|{'operation':'context'})
+    assert 'search_shared_documents' in context.json()['available_tools']
+    response=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json=body|{
+        'operation':'lookup','lookup':{'name':'search_shared_documents','query':'Nebula11'}})
+    assert response.status_code==200 and 'Nebula11 owner is Lan.' in response.text
+    assert 'HIDDEN_SCOPE' not in response.text and 'OTHER_OWNER_SCOPE' not in response.text and 'PRIVATE TRANSCRIPT' not in response.text
+    # Disabling broad sharing restores the explicit per-document boundary.
+    policy.update(include_workspace_wiki=False,documents=['wiki/shared.md'])
+    ready=client.get('/api/internal/meeting-voice/1/ready',headers=HEADERS)
+    assert ready.json()['documents']==['wiki/shared.md']
+
+
+def test_whole_wiki_sources_recheck_edits_deletion_and_scope_revocation(voice):
+    from shared.meeting_knowledge import sources_for
+    client,row,root,_,_=voice
+    policy=row['data']['voice_assistant'];policy.update(documents=[],include_workspace_wiki=True)
+    path=root/'wiki/project.md';path.write_text('Lan phụ trách demo.')
+    source=sources_for({'segments':[]},{'wiki/project.md':path.read_text()})[0]
+    body={'sources':[{k:source[k] for k in ('key','fingerprint')}]}
+    url='/api/internal/meeting-voice/1/sources'
+    assert client.post(url,headers=HEADERS,json=body).json()['unavailable']==0
+    path.write_text('Minh phụ trách demo.')
+    assert client.post(url,headers=HEADERS,json=body).json()['unavailable']==1
+    path.write_text('Lan phụ trách demo.');policy['include_workspace_wiki']=False
+    assert client.post(url,headers=HEADERS,json=body).json()['unavailable']==1
+    policy['include_workspace_wiki']=True;path.unlink()
+    assert client.post(url,headers=HEADERS,json=body).json()['unavailable']==1
+
+
+def test_whole_wiki_does_not_silently_skip_oversized_sources_or_expand_generic_knowledge(voice):
+    client,row,root,_,_=voice
+    row['data']['voice_assistant'].update(documents=[],include_workspace_wiki=True)
+    (root/'wiki/large.md').write_text('x'*50001)
+    response=client.get('/api/internal/meeting-voice/1/ready',headers=HEADERS)
+    assert response.status_code==413
+    response=client.get('/api/workspace/meeting-knowledge/1',headers=HEADERS)
+    assert response.status_code==200 and [d['path'] for d in response.json()['documents']]==['wiki/shared.md']
+
+
+def test_sandbox_format_failure_is_distinct_from_missing_evidence(voice):
+    client,row,_,_,mutate=voice
+    row['data']['voice_assistant']['agent_backend']='sandbox'
+    mutate[0]=lambda:json.dumps({'claims':[],'reason':'generation_format_invalid'})
+    result=client.post(URL,headers=HEADERS,json={'question':'Budget for demo?','revision':1})
+    assert result.status_code==200 and result.json()['reason']=='generation_format_invalid'
+    assert result.json()['sources']==[] and 'xác minh' not in result.json()['text']
+
+
 def test_room_sandbox_setting_marks_planning_and_answer_jobs(voice):
     client,row,_,prompts,_=voice
     row['data']['voice_assistant'].update(engine='livekit',agent_backend='sandbox')

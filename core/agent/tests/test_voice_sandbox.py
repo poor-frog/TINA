@@ -18,9 +18,102 @@ def test_runner_has_no_native_tools_mcp_writes_or_cli_resume(tmp_path):
     result=voice_sandbox.run({'system':'JSON only','prompt':'Authorized question and excerpts','schema':{},'model':'chosen'},tmp_path,Harness())
     assert result=={'ok':True,'reply':'{"tool_calls":[]}'}
     assert calls[0][1]['allowed_tools']==() and calls[0][1]['session'] is None
+    assert calls[0][1]['output_schema']=={}
     assert calls[0][1]['mcp_servers']=={} and json.loads((tmp_path/'mcp-empty.json').read_text())=={'mcpServers':{}}
     assert (tmp_path/'CLAUDE.md').read_text()=='JSON only'
     assert 'Authorized question' not in (tmp_path/'GEMINI.md').read_text()
+
+
+@pytest.mark.parametrize('mode,repaired,valid', [
+    ('voice', '{"claims":[{"text":"Lan phụ trách demo.","source_ids":["s0"]}]}', True),
+    ('voice', 'still malformed', False),
+    ('voice', '{"claims":[],"tool_calls":[{"name":"search_meeting","query":"demo"}]}', False),
+    ('voice_plan', '{"tool_calls":[{"name":"search_meeting","arguments":{"query":"demo"}}]}', True),
+    ('voice_plan', '{"tool_calls":[{"name":"search_web","query":"private demo"}]}', False),
+])
+@pytest.mark.parametrize('stopped', [False, True])
+def test_sandbox_format_repairs_once_with_existing_validators_and_turn_fences(monkeypatch, mode, repaired, valid, stopped):
+    from worker import engine
+    from shared.meeting_knowledge import PREFIX
+    from shared.voice_knowledge import VOICE_FORMAT_SYSTEM, VOICE_PLAN_SYSTEM, VERIFY_SYSTEM
+    from shared.voice_schema import voice_schema
+    monkeypatch.setenv('TINA_CHAT_SESSION', 'meeting-knowledge-format')
+    monkeypatch.setenv('REDIS_URL', 'redis://synthetic')
+    held = ['session:turn']; events = []; candidates = []; repairs = []; reviews = []
+    monkeypatch.setattr('redis.from_url', lambda *a, **k: SimpleNamespace(get=lambda _: held[0], close=lambda: None))
+    def candidate(prompt, system, schema, **kwargs):
+        candidates.append(schema)
+        expected = voice_schema('plan', tools=['search_meeting']) if mode == 'voice_plan' else voice_schema('answer', [{'id':'s0'}])
+        assert schema == expected
+        return 'Prose around {"claims":[]} must not be spoken.'
+    def structured(prompt, *, system, schema):
+        if system == VERIFY_SYSTEM:
+            reviews.append(True); return SimpleNamespace(text='{"approved":true}')
+        if mode == 'voice_plan': assert system.startswith(VOICE_PLAN_SYSTEM)
+        else: assert system == VOICE_FORMAT_SYSTEM
+        repairs.append(json.loads(prompt))
+        if stopped: held[0] = None
+        return SimpleNamespace(text=repaired)
+    monkeypatch.setattr(voice_sandbox, 'complete', candidate)
+    monkeypatch.setattr(engine, 'completion_from_env', lambda **_: SimpleNamespace(complete_structured=structured))
+    source = {'mode':mode, 'question':'Ai phụ trách demo?', 'use_sandbox_agent':True, 'tools_remaining':0,
+              'sources':[{'id':'s0','quote':'Lan phụ trách demo.'}], 'available_tools':['search_meeting']}
+    payload = {'request_id':'format', 'voice_turn':{'meeting_id':1,'holder':'session:turn'}, 'text':json.dumps(source)}
+    stream = SimpleNamespace(xadd=lambda _, e: events.append(json.loads(e['event'])), expire=lambda *_: None)
+    engine._run_meeting_knowledge(stream, 'out', {'entrypoint':{'inline':PREFIX+json.dumps(payload)}})
+    assert len(candidates) == len(repairs) == 1
+    assert 'Prose around' in repairs[0]['invalid_output']
+    output = [json.loads(e['text']) for e in events if e['type']=='message-delta']
+    if stopped or not valid and mode == 'voice_plan':
+        assert not output and not reviews
+    elif valid:
+        if mode == 'voice_plan': assert output == [json.loads(repaired)]
+        else: assert output[0]['verification'] == ['approved']
+        assert len(reviews) == int(mode == 'voice')
+    else:
+        assert output == [{'claims':[], 'reason':'generation_format_invalid'}] and not reviews
+    assert events[-1] == {'type':'turn-complete'}
+
+
+@pytest.mark.parametrize('mode', ['voice', 'voice_plan'])
+def test_harness_service_failure_does_not_become_a_format_retry_or_direct_fallback(monkeypatch, mode):
+    from worker import engine
+    from shared.meeting_knowledge import PREFIX
+    monkeypatch.setenv('TINA_CHAT_SESSION', 'meeting-knowledge-service-error')
+    monkeypatch.setenv('REDIS_URL', 'redis://synthetic')
+    monkeypatch.setattr('redis.from_url', lambda *a, **k: SimpleNamespace(get=lambda _: 'session:turn', close=lambda: None))
+    def unavailable(*a, **k): raise RuntimeError('synthetic harness unavailable')
+    def unexpected(*a, **k): pytest.fail('Service failures must not trigger format repair')
+    monkeypatch.setattr(voice_sandbox, 'complete', unavailable)
+    monkeypatch.setattr(engine, 'completion_from_env', lambda **_: SimpleNamespace(complete_structured=unexpected))
+    source = {'mode':mode, 'question':'Ai?', 'use_sandbox_agent':True, 'sources':[], 'available_tools':[]}
+    events = []; payload = {'request_id':'error', 'voice_turn':{'meeting_id':1,'holder':'session:turn'}, 'text':json.dumps(source)}
+    engine._run_meeting_knowledge(SimpleNamespace(xadd=lambda _, e:events.append(json.loads(e['event'])),expire=lambda *_:None),
+        'out', {'entrypoint':{'inline':PREFIX+json.dumps(payload)}})
+    assert events == [{'type':'turn-complete'}]
+
+
+def test_well_formed_but_unsupported_sandbox_answer_is_not_a_format_error(monkeypatch):
+    from worker import engine
+    from shared.meeting_knowledge import PREFIX
+    from shared.voice_knowledge import VERIFY_SYSTEM, VOICE_REPAIR_SYSTEM
+    monkeypatch.setenv('TINA_CHAT_SESSION','meeting-knowledge-unsupported')
+    monkeypatch.setenv('REDIS_URL','redis://synthetic')
+    monkeypatch.setattr('redis.from_url',lambda *a,**k:SimpleNamespace(get=lambda _:'session:turn',close=lambda:None))
+    raw='{"claims":[{"text":"Minh phụ trách demo.","source_ids":["s0"]}]}'
+    monkeypatch.setattr(voice_sandbox,'complete',lambda *a,**k:raw)
+    systems=[];events=[]
+    def structured(prompt,*,system,schema):
+        systems.append(system)
+        assert system in (VERIFY_SYSTEM,VOICE_REPAIR_SYSTEM)
+        return SimpleNamespace(text=raw if system==VOICE_REPAIR_SYSTEM else '{"approved":false,"reason":"contradiction","claim_indexes":[0]}')
+    monkeypatch.setattr(engine,'completion_from_env',lambda **_:SimpleNamespace(complete_structured=structured))
+    source={'mode':'voice','question':'Ai?','use_sandbox_agent':True,'sources':[{'id':'s0','quote':'Lan phụ trách demo.'}]}
+    payload={'request_id':'unsupported','voice_turn':{'meeting_id':1,'holder':'session:turn'},'text':json.dumps(source)}
+    engine._run_meeting_knowledge(SimpleNamespace(xadd=lambda _,e:events.append(json.loads(e['event'])),expire=lambda *_:None),
+        'out',{'entrypoint':{'inline':PREFIX+json.dumps(payload)}})
+    assert json.loads(events[0]['text'])['reason']=='verification_rejected'
+    assert systems.count(VOICE_REPAIR_SYSTEM)==1 and systems.count(VERIFY_SYSTEM)==2
 
 
 @pytest.mark.parametrize('cancel', [False,True])

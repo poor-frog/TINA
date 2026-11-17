@@ -48,8 +48,17 @@ an ephemeral instance of the account's configured CLI harness. LangGraph authori
 structured source-tool proposals. Legacy `completion` remains selectable. Classification, reranking,
 format recovery, repair and independent factual verification use CompletionPort.
 
+Sandbox planning and ordinary answers request native JSON Schema where supported. Existing
+tool/citation validators still run after generation. Malformed plans get one bounded CompletionPort
+format repair with the same available tools and retrieval deadline; ordinary answers retain their
+existing single format regeneration. No harness service/auth failure triggers this repair or an
+automatic Direct LLM fallback. If answer format repair still fails, `generation_format_invalid`
+is a generation error, separate from an empty retrieval or a factual `verification_rejected`.
+Stop/current-turn checks also fence repaired output. General/public/map generation receives its
+corresponding schema where available; this does not grant tools or bypass its existing validation.
+
 Knowledge jobs mount no account workspaces or chat tools. The sandbox receives only the authorized
-question, excerpts and receipt-confirmed conversation. Native CLI tools/MCP are disabled; source
+question, excerpts and receipt-confirmed conversation. CLI execution, web and MCP grants are disabled; source
 lookups go through TINA's existing tool budgets and policy checks. Its private cwd and CLI history
 are disposable; no CLI session is resumed. The existing caller-scoped heard history provides
 multi-turn context without retaining unspoken candidates or revoked evidence.
@@ -58,6 +67,8 @@ multi-turn context without retaining unspoken candidates or revoked evidence.
 40 seconds), polls the current room lease with bounded Redis I/O and kills subprocesses on Stop or
 timeout. Data-plane credentials are removed before launch. No candidate/tool event reaches TTS
 without the existing source/numeric/semantic checks. Voice cannot publish workspace edits.
+Codex may still advertise built-ins such as `apply_patch`; its read-only filesystem profile, not an
+empty tool catalog, prevents file writes. A JSON Schema request does not expand those permissions.
 
 The server-owned retrieval deadline still bounds planning; exhausted internal planning budgets
 use the existing empty-plan verified-answer path. Other failures retain the normal error handling.

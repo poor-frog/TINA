@@ -114,6 +114,11 @@
           ],
           "title": "Engine",
           "type": "string"
+        },
+        "include_workspace_wiki": {
+          "default": false,
+          "title": "Include Workspace Wiki",
+          "type": "boolean"
         }
       },
       "title": "VoicePolicy",
@@ -393,7 +398,8 @@
             "web_no_sources",
             "summary_pending",
             "clarification_exhausted",
-            "draft_unavailable"
+            "draft_unavailable",
+            "generation_format_invalid"
           ],
           "title": "Reason",
           "type": "string"
@@ -1624,7 +1630,8 @@
             "clarification_exhausted",
             "llm_unavailable",
             "verification_unavailable",
-            "draft_unavailable"
+            "draft_unavailable",
+            "generation_format_invalid"
           ],
           "title": "Reason",
           "type": "string"

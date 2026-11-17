@@ -96,6 +96,18 @@ async def test_project_readiness_rechecks_profile_revocation_even_with_a_cached_
 def question(): return {'request_id': str(uuid4()), 'question': 'What is the plan?', 'revision': 1}
 
 
+async def test_whole_wiki_only_policy_is_a_valid_source_and_toggling_revalidates_the_proposed_scope(setup):
+    import json
+    client,repo,_,calls,*_=setup
+    policy=deepcopy(repo.row['data']['voice_assistant'])|{'include_transcript':False,'include_workspace_wiki':True}
+    response=await client.put('/meetings/1/voice-assistant',headers={'X-User-Id':'7'},json=policy)
+    assert response.status_code==200,response.text
+    request=next(r for r in calls if r.url.path.endswith('/profile'))
+    assert json.loads(request.content)['include_workspace_wiki'] is True
+    from meeting_api.lifecycle.voice import VoicePolicy
+    assert VoicePolicy.model_validate({'enabled':True}).include_workspace_wiki is False
+
+
 async def test_retrieval_deadline_is_server_owned_and_unchanged_across_plan_and_lookup(setup):
     import json
     import time

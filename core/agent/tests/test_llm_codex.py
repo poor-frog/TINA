@@ -211,6 +211,30 @@ def test_codex_uses_read_only_sandbox_when_only_read_tools_are_allowed(
     assert events[-1]["type"] == "done" and events[-1]["ok"] is True
 
 
+@pytest.mark.parametrize('structured', [False, True])
+def test_output_schema_is_opt_in_and_voice_uses_only_the_completed_final_message(monkeypatch, tmp_path, structured):
+    body = {'tool_calls': []}
+    notifications = [
+        {'method': 'item/agentMessage/delta', 'params': {'delta': 'I will inspect the sources.'}},
+        {'method': 'item/completed', 'params': {'item': {'type': 'agentMessage', 'phase': 'final_answer', 'text': json.dumps(body)}}},
+    ]
+    proc = _FakeCodexProcess(notifications=notifications)
+    monkeypatch.setenv('OPENAI_API_KEY', 'synthetic')
+    monkeypatch.delenv('TINA_CODEX_AUTH_MODE', raising=False)
+    monkeypatch.setenv('TINA_MOUNTS', '[]')
+    monkeypatch.setattr('llm.codex.shutil.which', lambda _: '/usr/bin/codex')
+    monkeypatch.setattr('llm.codex.subprocess.Popen', lambda *a, **k: proc)
+    schema = {'type': 'object', 'properties': {'tool_calls': {'type': 'array'}}}
+    options = {'output_schema': schema} if structured else {}
+    events = list(CodexHarness().run_turn(tmp_path, 'synthetic', **options))
+    params = next(r['params'] for r in proc.requests if r.get('method') == 'turn/start')
+    assert events[-1]['ok'] is True
+    if structured:
+        assert params['outputSchema'] == schema and json.loads(events[-1]['reply']) == body
+    else:
+        assert 'outputSchema' not in params and events[-1]['reply'] == 'I will inspect the sources.'
+
+
 @pytest.mark.parametrize("session", [None, "thread-existing"])
 @pytest.mark.parametrize("trigger,tools,web_mode,network", [
     ("message", ["Read", "Write", "Bash", "WebSearch", "WebFetch"], "live", True),

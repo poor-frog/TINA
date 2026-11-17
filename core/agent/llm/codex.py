@@ -451,11 +451,12 @@ class CodexHarness:
                  mcp_config: Optional[str] = None, gated_mcp_servers: Iterable[str] = (),
                  mcp_servers: Optional[dict] = None, mcp_env: Optional[dict[str, str]] = None,
                  mcp_tools: Optional[dict[str, list[str]]] = None,
+                 output_schema: Optional[dict] = None,
                  approval_handler: Optional[Callable[[dict], Optional[bool]]] = None) -> Iterator[dict]:
         kwargs = dict(allowed_tools=allowed_tools, session=session, model=model,
                       mcp_config=mcp_config, gated_mcp_servers=gated_mcp_servers,
                       mcp_servers=mcp_servers, mcp_env=mcp_env, mcp_tools=mcp_tools,
-                      approval_handler=approval_handler)
+                      approval_handler=approval_handler, output_schema=output_schema)
         if (os.environ.get("TINA_CODEX_AUTH_MODE") or "").strip() != "groq":
             yield from self._run_turn(work, prompt, **kwargs)
             return
@@ -499,6 +500,7 @@ class CodexHarness:
                  mcp_servers: Optional[dict] = None,
                  mcp_env: Optional[dict[str, str]] = None,
                  mcp_tools: Optional[dict[str, list[str]]] = None,
+                 output_schema: Optional[dict] = None,
                  approval_handler: Optional[Callable[[dict], Optional[bool]]] = None) -> Iterator[dict]:
         preflight = self.preflight()
         if preflight:
@@ -646,11 +648,14 @@ class CodexHarness:
                 turn_params["effort"] = effort
             if model:
                 turn_params["model"] = model
+            if output_schema is not None:
+                turn_params["outputSchema"] = output_schema
             send({"method": "turn/start", "id": request_id, "params": turn_params})
             started = receive_until(request_id)
             turn_id = str((started.get('turn') or {}).get('id') or '')
 
             reply_parts: list[str] = []
+            structured_reply: Optional[str] = None
             saw_delta = False
             started_tools: set[str] = set()
             sources: list[dict] = []
@@ -711,6 +716,8 @@ class CodexHarness:
                         yield {"type": "message-delta", "text": delta}
                 elif method == "item/completed":
                     item = params.get("item") or {}
+                    if output_schema is not None and item.get('type') == 'agentMessage' and item.get('phase') != 'commentary':
+                        structured_reply = self._content_text(item)
                     sources = [*sources, *web_sources(item)][:50]
                     if item.get("type") == "agentMessage" and not saw_delta:
                         text = self._content_text(item)
@@ -731,8 +738,8 @@ class CodexHarness:
                     turn = params.get("turn") or {}
                     ok = turn.get("status") == "completed"
                     detail = self._redact_secrets(str((turn.get("error") or {}).get("message") or ""))
-                    reply = render_citations("".join(reply_parts), sources)
-                    if not self._save_sources(thread_id, turn_id, sources):
+                    reply = (structured_reply if structured_reply is not None else "".join(reply_parts)) if output_schema is not None else render_citations("".join(reply_parts), sources)
+                    if output_schema is None and not self._save_sources(thread_id, turn_id, sources):
                         reply += '\n\nKhông lưu được metadata nguồn; liên kết có thể thiếu sau khi tải lại.'
                     if not ok:
                         if looks_like_auth_failure(detail):

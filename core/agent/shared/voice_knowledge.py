@@ -234,6 +234,7 @@ FAILURES = {
     'verification_rejected': 'Em chưa xác minh được câu trả lời từ nguồn đang được chia sẻ.',
     'verification_unavailable': 'Em chưa kiểm chứng được vì dịch vụ đang gặp lỗi. Bạn có thể xem trạng thái trong TINA Terminal.',
     'llm_unavailable': 'Em chưa lấy được câu trả lời lúc này. Bạn có thể xem trạng thái trên TINA Terminal.',
+    'generation_format_invalid': 'Em gặp lỗi khi nhận câu trả lời. Bạn thử lại giúp em nhé.',
     'general_disabled': 'Kiến thức chung chưa được bật cho meeting này. Chủ meeting có thể bật trong Settings, Voice assistant.',
     'web_disabled': 'Tìm kiếm web chưa được bật cho meeting này. Chủ meeting có thể bật trong Settings, Voice assistant.',
     'web_unavailable': 'Dịch vụ tìm kiếm web hiện chưa dùng được với cấu hình model này.',

@@ -241,9 +241,23 @@ room policy PUT. Profiles live outside normal Wiki documents at
 `.meeting-knowledge/voice-source-profiles/{owner}.json`, use the existing workspace write lock and
 atomic replace, and are limited to 20 named selections. All file and meeting grants remain checked.
 
-`auto_web_search` defaults false, preserving explicit web behavior. When both web flags are on,
+`auto_web_search` defaults false when parsing legacy policies. Newly created capable Google Meet
+rooms explicitly seed both `allow_web_search` and `auto_web_search` true; saved room choices remain
+unchanged. When both web flags are on,
 a conservative question-only model classifier may select web for a self-contained public question;
 local tool selection, source verification, Stop and room policy checks remain authoritative.
+
+`include_workspace_wiki` grants read-only retrieval over the owner's primary private workspace
+content Markdown: README.md and files under kg/, wiki/, notes/, docs/, sources/ and concepts/.
+New capable Google Meet rooms seed it true; omitted legacy policies remain false. It does not
+grant another account, attached/shared workspace, hidden metadata, symlinks, or canonical transcript
+access to other meetings. All qualifying documents enter the existing bounded retrieval pipeline;
+the eight-document linked-selection cap applies only when this flag is off. Existing limits of
+1,000 discoverable documents and 200 KB/50,000 characters per document remain; the all-Wiki corpus
+has a 20 MB UTF-8 budget. Exceeding a source/corpus limit fails explicitly rather than silently
+omitting documents. Source fingerprints, policy checks and current-turn/Stop guards remain intact.
+Profile defaults do not change this separate room-level grant. Turning it off restores explicit
+document selection. This sharing allows spoken answers to everyone in the room.
 
 
 `VoicePolicy.agent_backend` selects `completion` or `sandbox`. Legacy reads/request defaults remain
@@ -253,3 +267,8 @@ TINA remains responsible for execution authorization, source revocation, verific
 Only the authenticated internal completion edge freezes a live voice lease into a private worker
 payload. Stop invalidates that lease. Private dispatches mount no account workspaces and do not
 resume CLI history; heard caller history remains source/revision scoped.
+
+`VoiceReply.reason` and eligible `VoiceHandoff.reason` add `generation_format_invalid`: a sandbox
+answer remained malformed after its one format repair. It carries no factual claims or verification
+verdict, and is distinct from missing evidence or a rejected factual answer. Existing handoff owner,
+source, Stop and completed-playback checks still apply. Chat responses are not given a voice schema.
