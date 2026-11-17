@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Optional
 
@@ -137,6 +138,8 @@ def build_argv(
     tools = list(allowed_tools)
     if tools:
         argv += ["--allowedTools", ",".join(tools)]
+    else:
+        argv += ["--tools", ""]
     if mcp_config:
         argv += ["--mcp-config", mcp_config, "--strict-mcp-config"]
     if session:
@@ -153,13 +156,39 @@ def _exec_subprocess(argv: list[str], cwd: str) -> Iterator[str]:
     # read/write another tenant's tc:meeting:* / unit:*:in streams, crossing the tenancy boundary the
     # mounts enforce on the filesystem) nor the minted per-dispatch bearer token. It also drops the
     # git repo-discovery redirects (a hook-exported GIT_DIR would re-point the workspace's git ops).
-    proc = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+    # Feed the prompt on stdin so large authorized evidence packs do not exceed argv limits.
+    command = [*argv[:2], *argv[3:]]
+    proc = subprocess.Popen(command, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
                             env=harness_subprocess_env())
     assert proc.stdout is not None
+    assert proc.stdin is not None
+    input_errors = []
+    def send_prompt():
+        try:
+            proc.stdin.write(argv[2])
+        except BrokenPipeError:
+            pass  # Preserve the CLI's structured startup/auth error on stdout.
+        except Exception:
+            input_errors.append(True)
+        finally:
+            try: proc.stdin.close()
+            except BrokenPipeError: pass
+            except Exception: input_errors.append(True)
+    writer = threading.Thread(target=send_prompt, daemon=True)
+    writer.start()
+    finished = False
     try:
         yield from proc.stdout
+        finished = True
     finally:
-        proc.wait()
+        if not finished and proc.poll() is None: proc.terminate()
+        try: proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill(); proc.wait(timeout=3)
+        writer.join(timeout=3)
+        proc.stdout.close()
+        if writer.is_alive() or input_errors:
+            raise RuntimeError('Claude prompt input could not complete')
 
 
 def _link_chat_into_workspace(work: Path) -> None:
