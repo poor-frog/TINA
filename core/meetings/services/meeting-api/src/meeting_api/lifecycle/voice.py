@@ -14,7 +14,7 @@ from typing import Literal, Annotated
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Response
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from .stop_router import _resolve_user_id
 from .stop import leave_command_channel
@@ -78,12 +78,22 @@ class VoicePolicy(BaseModel):
     include_approved_actions: StrictBool = False
     shared_meeting_ids: list[Annotated[int,Field(gt=0,strict=True)]] = Field(default_factory=list,max_length=4)
     documents: list[str] = Field(default_factory=list, max_length=8)
+    source_profile_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    source_profile_fingerprint: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
     revision: int = Field(default=0, ge=0)
     wake_variants: list[str] = Field(default_factory=list, max_length=8)
     noise_suppression: StrictBool = False
     allow_general_knowledge: StrictBool = False
     allow_web_search: StrictBool = False
+    auto_web_search: StrictBool = False
+    agent_backend: Literal['completion', 'sandbox'] = 'completion'
     engine: Literal['tina', 'livekit'] = 'tina'
+
+    @model_validator(mode='after')
+    def profile_reference(self):
+        if bool(self.source_profile_id) != bool(self.source_profile_fingerprint):
+            raise ValueError('Source profile id and fingerprint are required together')
+        return self
 
 
     @field_validator('shared_meeting_ids')
@@ -246,7 +256,7 @@ class VoiceState(BaseModel):
 def new_meeting_voice_policy():
     """Seed new capable rooms; saved policies and document grants remain owner-controlled."""
     return VoicePolicy(enabled=True,include_transcript=True,noise_suppression=True,
-                       allow_general_knowledge=True,allow_web_search=True,engine='livekit').model_dump()
+                       allow_general_knowledge=True,allow_web_search=True,engine='livekit',agent_backend='sandbox').model_dump()
 
 
 def policy_of(row):
@@ -533,7 +543,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 raise HTTPException(409, 'Enable transcription for the bot before enabling voice questions')
             if not body.include_transcript and not body.include_approved_actions and not body.shared_meeting_ids and not body.documents and not body.allow_general_knowledge and not body.allow_web_search:
                 raise HTTPException(422, 'Choose sources that may be spoken to this room')
-            available = await agent(row, 'ready')
+            available = await agent(row, 'profile', body.model_dump()) if body.source_profile_id or policy_of(row).source_profile_id else await agent(row, 'ready')
             if any(path not in available['documents'] for path in body.documents):
                 raise HTTPException(422, 'Choose documents linked to this meeting')
         try:
@@ -557,7 +567,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
             ready_key = f'meeting:voice:{mid}:{session}:ready:{policy.revision}'
             bridge = x_tina_voice_runtime == 'livekit-v1'
             if policy.engine == 'livekit': ready_key += ':bridge' if bridge else ':legacy'
-            cached = await redis.get(ready_key)
+            cached = None if policy.source_profile_id else await redis.get(ready_key)
             if cached is not None:
                 if cached in ('1', b'1', '0', b'0'):
                     ready = cached in ('1', b'1')

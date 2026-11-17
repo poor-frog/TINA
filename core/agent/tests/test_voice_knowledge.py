@@ -8,6 +8,27 @@ from shared.voice_knowledge import voice_sources, current_history, validate_voic
 NOW = 1800000000000
 
 
+def test_rejected_detail_can_leave_a_separately_verified_supported_claim():
+    from shared.voice_knowledge import verify_voice_reply
+    sources=[{'id':'s0','quote':'Lan phụ trách demo.'}]
+    raw=json.dumps({'claims':[{'text':'Lan phụ trách demo.','source_ids':['s0']},
+                             {'text':'Hạn thứ Sáu.','source_ids':['s0']}],
+                    'follow_up':'Bạn có thể xác nhận hạn bàn giao không?'})
+    reviewed=[]
+    def review(prompt):
+        reply=json.loads(prompt)['reply'];reviewed.append(reply)
+        return json.dumps({'approved':False,'reason':'unsupported_claim','claim_indexes':[1]}) if len(reply['claims'])==2 else '{"approved":true}'
+    result=json.loads(verify_voice_reply(raw,'Ai phụ trách demo và hạn khi nào?',sources,review,diagnostics=True))
+    assert result['claims']==[{'text':'Lan phụ trách demo.','source_ids':['s0']}]
+    assert result['follow_up']=='Bạn có thể xác nhận hạn bàn giao không?' and len(reviewed)==2
+    plain=json.loads(verify_voice_reply(raw,'Ai và hạn?',sources,review))
+    assert plain=={k:v for k,v in result.items() if k!='verification'}
+    repaired=json.loads(verify_voice_reply(raw,'Ai và hạn?',sources,review,repair=lambda _: 'invalid JSON',diagnostics=True))
+    assert repaired['claims']==result['claims'] and repaired['verification']==['unsupported_claim','approved']
+    unavailable=json.loads(verify_voice_reply(raw,'Ai và hạn?',sources,lambda _: (_ for _ in ()).throw(RuntimeError()),diagnostics=True))
+    assert not unavailable['claims'] and unavailable['reason']=='verification_unavailable'
+
+
 def test_semantic_social_fallback_accepts_only_bounded_intents_and_skips_compound_requests():
     from shared.voice_knowledge import semantic_assistant_intent
     calls=[]

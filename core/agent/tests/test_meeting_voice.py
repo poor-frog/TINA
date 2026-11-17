@@ -44,6 +44,123 @@ HEADERS = {'X-Internal-Secret': 'test-internal', 'X-User-Id': '7'}
 URL = '/api/internal/meeting-voice/1/answer'
 
 
+def test_room_sandbox_setting_marks_planning_and_answer_jobs(voice):
+    client,row,_,prompts,_=voice
+    row['data']['voice_assistant'].update(engine='livekit',agent_backend='sandbox')
+    body={'question':'Budget for demo?','revision':1}
+    result=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json=body|{'operation':'plan'})
+    assert result.status_code==200 and prompts[-1]['use_sandbox_agent'] is True
+    result=client.post(URL,headers=HEADERS,json=body)
+    assert result.status_code==200 and prompts[-1]['use_sandbox_agent'] is True
+    assert prompts[-1]['mode']=='voice'
+
+
+def test_sandbox_social_classification_carries_the_turn_guard_without_changing_the_mode(voice):
+    client,row,_,prompts,mutate=voice
+    row['data']['voice_assistant'].update(agent_backend='sandbox')
+    mutate[0]=lambda:json.dumps({'intent':'thanks'})
+    response=client.post(URL,headers=HEADERS,json={'question':'Cảm ơn TINA nha, được rồi.','revision':1})
+    assert response.status_code==200 and response.json()['answer_kind']=='assistant'
+    assert prompts==[{'mode':'voice_intent','question':'Cảm ơn TINA nha, được rồi.','use_sandbox_agent':True}]
+
+
+def test_project_sources_reuse_explicit_documents_and_revoke_after_removal(voice, monkeypatch):
+    client,row,root,_,_=voice
+    (root/'wiki/project.md').write_text('Lan owns the backend demo.')
+    profiles='/api/workspace/meeting-knowledge/1/source-profiles'
+    saved=client.post(profiles,headers=HEADERS,json={'name':'TINA project','documents':['wiki/project.md']})
+    assert saved.status_code==200, saved.text
+    profile=saved.json()
+    assert client.get(profiles,headers=HEADERS).json()['profiles']==[profile]
+    assert client.post(profiles,headers=HEADERS,json={'name':'TINA project'}).status_code==409
+    policy=row['data']['voice_assistant']
+    policy.update(profile['sources'],source_profile_id=profile['id'],source_profile_fingerprint=profile['fingerprint'])
+    # A second room has no document links; explicit project sharing grants the same document.
+    original=api.meeting_get
+    def meeting_get(base,subject,mid,path):
+        if mid==2 and path.endswith('/meetings/2'): return deepcopy(row)|{'id':2,'native_meeting_id':'second-room'}
+        if mid==2: return {'segments':[]}
+        return original(base,subject,mid,path)
+    monkeypatch.setattr(api,'meeting_get',meeting_get)
+    ready=client.get('/api/internal/meeting-voice/2/ready',headers=HEADERS)
+    assert ready.status_code==200 and 'wiki/project.md' in ready.json()['documents']
+    policy['allow_general_knowledge']=False
+    assert client.get('/api/internal/meeting-voice/2/ready',headers=HEADERS).status_code==200
+    policy['documents'].append('wiki/private.md')
+    assert client.get('/api/internal/meeting-voice/2/ready',headers=HEADERS).status_code==409
+    policy['documents'].pop()
+    assert client.post(profiles+'/remove',headers=HEADERS,json={'key':profile['id'],'fingerprint':'0'*64}).status_code==409
+    assert client.post(profiles+'/remove',headers=HEADERS,json={'key':profile['id'],'fingerprint':profile['fingerprint']}).status_code==200
+    assert client.get('/api/internal/meeting-voice/2/ready',headers=HEADERS).status_code==409
+    # Detaching does not require the deleted grant to remain readable.
+    custom=policy|{'source_profile_id':None,'source_profile_fingerprint':None,'documents':[]}
+    assert client.post('/api/internal/meeting-voice/2/profile',headers=HEADERS,json=custom).status_code==200
+
+
+def test_project_profiles_reject_path_escape_and_other_meeting_owners(voice,monkeypatch):
+    client,_,_,_,_=voice
+    path='/api/workspace/meeting-knowledge/1/source-profiles'
+    assert client.post(path,headers=HEADERS,json={'name':'unsafe','documents':['../7/wiki/private.md']}).status_code==422
+    original=api.meeting_get
+    monkeypatch.setattr(api,'meeting_get',lambda base,subject,mid,suffix:
+        {'id':2,'user_id':8} if mid==2 else original(base,subject,mid,suffix))
+    assert client.post(path,headers=HEADERS,json={'name':'other','shared_meeting_ids':[2]}).status_code==403
+
+
+def test_automatic_public_source_routing_never_receives_private_context(voice):
+    client,row,_,prompts,mutate=voice
+    row['data']['voice_assistant'].update(engine='livekit',allow_web_search=True,auto_web_search=True)
+    def respond():
+        if prompts[-1]['mode']=='voice_source_intent': return json.dumps({'route':'web'})
+    mutate[0]=respond
+    question='Where are the latest React release notes?'
+    result=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,
+        json={'question':question,'revision':1,'operation':'plan'})
+    assert result.status_code==200 and result.json()['tool_calls']==[{'name':'search_web','query':question}]
+    assert prompts==[{'mode':'voice_source_intent','question':question}]
+    prompts.clear()
+    client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,
+        json={'question':'Ai phụ trách dự án này?','revision':1,'operation':'plan'})
+    assert not any(p['mode']=='voice_source_intent' for p in prompts)
+
+
+def test_public_route_outage_keeps_authorized_local_retrieval(voice):
+    client,row,_,prompts,mutate=voice
+    row['data']['voice_assistant'].update(engine='livekit',allow_web_search=True,auto_web_search=True)
+    def respond():
+        if prompts[-1]['mode']=='voice_source_intent': raise HTTPException(503)
+    mutate[0]=respond
+    result=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,
+        json={'question':'Find the React release notes','revision':1,'operation':'plan'})
+    assert result.status_code==200 and result.json()['tool_calls'][0]['name']=='search_shared_documents'
+
+
+def test_source_routing_is_reused_within_a_turn_but_not_after_policy_changes(voice):
+    client,row,_,prompts,mutate=voice
+    policy=row['data']['voice_assistant'];policy.update(engine='livekit',allow_web_search=True,auto_web_search=True)
+    mutate[0]=lambda:json.dumps({'route':'web'}) if prompts[-1]['mode']=='voice_source_intent' else None
+    headers=HEADERS|{'X-Tina-Voice-Request-Id':'00000000-0000-4000-8000-000000000001'}
+    body={'question':'Find the newest React release notes','revision':1,'operation':'plan'}
+    for _ in range(2):
+        assert client.post('/api/internal/meeting-voice/1/agent',headers=headers,json=body).status_code==200
+    assert len([p for p in prompts if p['mode']=='voice_source_intent'])==1
+    policy['auto_web_search']=False
+    result=client.post('/api/internal/meeting-voice/1/agent',headers=headers,json=body)
+    assert result.json()['tool_calls'][0]['name']=='search_shared_documents'
+    assert len([p for p in prompts if p['mode']=='voice_source_intent'])==1
+
+
+def test_project_profile_references_remain_owner_scoped_and_cannot_grant_symlink_documents(voice):
+    client,row,root,_,_=voice
+    path='/api/workspace/meeting-knowledge/1/source-profiles'
+    (root/'wiki/escape.md').symlink_to(root/'wiki/private.md')
+    assert client.post(path,headers=HEADERS,json={'name':'escape','documents':['wiki/escape.md']}).status_code==422
+    (root/'.meeting-knowledge/voice-source-profiles').mkdir(parents=True)
+    (root/'.meeting-knowledge/voice-source-profiles/8.json').write_text('[]')
+    row['data']['voice_assistant'].update(source_profile_id='a'*32,source_profile_fingerprint='b'*64)
+    assert client.get('/api/internal/meeting-voice/1/ready',headers=HEADERS).status_code==409
+
+
 def test_natural_social_reply_uses_selected_classifier_without_exporting_room_context(voice):
     client, row, _, prompts, mutate = voice
     mutate[0]=lambda:json.dumps({'intent':'thanks'})

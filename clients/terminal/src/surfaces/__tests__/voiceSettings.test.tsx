@@ -129,10 +129,11 @@ it('room answer permissions preserve the full CAS policy and do not touch other 
   expect((screen.getByLabelText('Share approved tasks and decisions from this meeting') as HTMLInputElement).checked).toBe(false);
   fireEvent.click(screen.getByLabelText('Share approved tasks and decisions from this meeting'));
   fireEvent.click(screen.getByLabelText('Allow general knowledge'));fireEvent.click(screen.getByLabelText('Allow public web search'));
+  fireEvent.change(screen.getByLabelText('Answer agent'),{target:{value:'sandbox'}});
   fireEvent.click(screen.getByRole('button',{name:'Apply to meeting'}));
   await screen.findByText('Saved. The current voice turn stops when settings change.');
   const body=JSON.parse(fetch.mock.calls.find(([url,init])=>url==='/api/meetings/14/voice-assistant'&&init?.method==='PUT')![1]!.body as string);
-  expect(body).toEqual({...policy,include_approved_actions:true,allow_general_knowledge:true,allow_web_search:true});
+  expect(body).toEqual({...policy,include_approved_actions:true,allow_general_knowledge:true,allow_web_search:true,agent_backend:'sandbox'});
 });
 
 it('shares only explicitly checked meetings, preserves revision and enforces the four-selection UI limit',async()=>{
@@ -263,4 +264,32 @@ it('failed account saves retain edits and allow retry',async()=>{
   expect((screen.getByLabelText('Voice preset') as HTMLSelectElement).value).toBe('Mai Anh');
   fail=false;fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
   await screen.findByText('All changes saved');expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('reuses project sources with the room revision and preserves sharing when room permissions change',async()=>{
+  const policy={enabled:true,include_transcript:true,documents:[],revision:9,wake_variants:[],noise_suppression:true,engine:'livekit'};
+  const profile={id:'a'.repeat(32),name:'TINA project',fingerprint:'b'.repeat(64),sources:{
+    documents:['wiki/project.md'],shared_meeting_ids:[3],include_transcript:true,include_approved_actions:true,
+    allow_general_knowledge:true,allow_web_search:true}};
+  const fetch=vi.fn(async(input:RequestInfo|URL,init?:RequestInit)=>{
+    const path=String(input);
+    if(path==='/api/user/voice')return Response.json({prepare_new_bots:null});
+    if(path==='/api/user/transcription')return Response.json({});
+    if(path==='/api/bots/voice/services')return Response.json({...services,wake:{...services.wake,sessions:[{meeting_id:14,status:'ready'}]}});
+    if(path==='/api/meetings/14/voice-assistant')return Response.json({policy:init?.method==='PUT'?{...JSON.parse(init.body as string),revision:10}:policy,livekit_available:true});
+    if(path.endsWith('/source-profiles'))return Response.json({profiles:[profile]});
+    if(path==='/api/workspace/meeting-knowledge/14')return Response.json({documents:[]});
+    return new Response('',{status:404});
+  });vi.stubGlobal('fetch',fetch);
+  render(<SettingsDialog onClose={()=>{}}/>);fireEvent.click(screen.getByRole('button',{name:'Voice assistant'}));
+  await screen.findByText('Trúc Ly');fireEvent.click(screen.getByRole('tab',{name:'Meeting'}));
+  fireEvent.change(screen.getByLabelText('Active meeting'),{target:{value:'14'}});
+  await screen.findByRole('option',{name:'TINA project'});
+  fireEvent.change(screen.getByLabelText('Project sources'),{target:{value:profile.id}});
+  fireEvent.click(screen.getByRole('button',{name:'Apply to meeting'}));
+  await screen.findByText('Saved. The current voice turn stops when settings change.');
+  const sent=fetch.mock.calls.find(([url,init])=>url==='/api/meetings/14/voice-assistant'&&init?.method==='PUT')!;
+  expect(JSON.parse(sent[1]!.body as string)).toEqual({...policy,...profile.sources,source_profile_id:profile.id,source_profile_fingerprint:profile.fingerprint});
+  fireEvent.click(screen.getByLabelText('Allow general knowledge'));
+  expect((screen.getByLabelText('Project sources') as HTMLSelectElement).value).toBe(profile.id);
 });

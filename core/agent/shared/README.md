@@ -127,3 +127,16 @@ At draft-history capacity, Task/Decision Flow retains the original request and l
 Voice history preserves an optional `follow_up` question separately from verified answer facts.
 Completed, source-valid follow-ups use the existing 30-second pending clarification context for
 short replies in retrieval and LiveKit planning. An acknowledgment does not become source evidence.
+
+
+Project voice sources are immutable owner-scoped selections saved from Voice settings and reused
+across meetings. A room copies the bounded source settings plus a profile ID/fingerprint; source
+reads revalidate that reference and current document/meeting access. Removing the profile revokes
+those references. Profiles grant read-only source access, not workspace/tool execution privileges.
+
+Public source routing is separately opt-in (`auto_web_search` plus `allow_web_search`). A four-second
+question-only classifier chooses local evidence, public knowledge or public web; private/contextual
+questions and uncertain or failed classifications retain local retrieval. No room excerpts or history
+enter that classifier or the public search payload. Planning deadlines bound this stage too.
+A rejected detail can be removed only by independently verifying the remaining strict subset of
+claims and its follow-up. Verifier outages and unsupported premises still fail closed.

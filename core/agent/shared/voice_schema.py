@@ -3,6 +3,8 @@ from shared.voice_tools import object_schema, tool_call_schema
 
 
 def voice_schema(mode, sources=(), *, tools=()):
+    if mode == 'source_intent':
+        return object_schema({'route': {'type':'string','enum':['meeting','general','web']}})
     if mode == 'intent':
         return object_schema({'intent': {'type':'string',
             'enum':['greeting','thanks','identity','capabilities','meeting']}})

@@ -126,8 +126,9 @@ restored source text again without returning the previous revision's translation
 
 Voice regression cases cover conservative assistant intents, partial replies, one-repair limits, forged citations, verifier outages and bounded completion timeouts.
 
-Voice regression tests require the selected CompletionPort even when the chat runner is Codex;
-no voice CLI process may start. The existing chat Codex harness tests remain unchanged.
+Direct-LLM voice regression tests require the selected CompletionPort even when the chat runner is
+Codex; those jobs must not start a CLI. Sandbox voice has separate isolation and verification tests
+in `test_voice_sandbox.py`.
 
 test_llm_openai_responses_voice.py covers valid JSON generation/verdict deltas followed by early EOF, [DONE], incomplete/failed events, or invalid terminal status, plus successful completion with/without deltas and existing web citation validation. All provider calls are synthetic.
 
@@ -154,3 +155,8 @@ run it only against a running Agent Reach service. See deploy/agent-reach/README
 Draft recovery regression tests cover eight-input and character-capacity confirmation/cancel/correction with retained literal provenance, and a successfully written task whose response is lost: an uncertain retry must leave exactly one draft.
 
 Voice draft pagination regression uses21 drafts:20 newer discarded records cannot prevent the owner listing/reviewing the older pending record. Direct lookup retains existing authorization and stale-policy/readback checks.
+
+
+`test_voice_sandbox.py` checks empty native/MCP grants, no workspace mounts or CLI resume,
+subprocess group cleanup on timeout/Stop, credential scrubbing and independent verification.
+The API regression freezes only the current authenticated voice lease, rejecting cancelled turns.

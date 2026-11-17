@@ -22,6 +22,7 @@ from llm.ports import (
     HarnessExec,
     HarnessPort,
     run_harness_turn,
+    harness_subprocess_env,
 )
 from llm.registry import (
     COMPLETION_PROVIDERS,
@@ -49,6 +50,7 @@ __all__ = [
     "HarnessExec",
     "HarnessPort",
     "run_harness_turn",
+    "harness_subprocess_env",
     "COMPLETION_PROVIDERS",
     "HARNESS_RUNNERS",
     "completion_from_env",

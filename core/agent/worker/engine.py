@@ -652,12 +652,13 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
     from shared.voice_evidence import evidence_pack
     from shared.voice_trace import voice_span
     from shared.meeting_knowledge import PREFIX, SYSTEM, validate_answer
-    from shared.voice_knowledge import (VOICE_SYSTEM, VOICE_TOOLS, VOICE_PLAN_SYSTEM, VOICE_INTENT_SYSTEM, VOICE_REPAIR_SYSTEM, VOICE_FORMAT_SYSTEM, GENERAL_SYSTEM, VERIFY_SYSTEM,
+    from shared.voice_knowledge import (VOICE_SYSTEM, VOICE_TOOLS, VOICE_PLAN_SYSTEM, VOICE_INTENT_SYSTEM, VOICE_SOURCE_SYSTEM, VOICE_REPAIR_SYSTEM, VOICE_FORMAT_SYSTEM, GENERAL_SYSTEM, VERIFY_SYSTEM,
         validate_voice_answer, verify_voice_reply, voice_tool_calls)
     from shared.voice_summary import MAP_SYSTEM, SELECT_SYSTEM
     from shared.voice_task_flow import TASK_FLOW_SYSTEM, TaskPatch
     from shared.voice_decision_flow import DECISION_SYSTEM, EVIDENCE_SYSTEM, DecisionPatch, EvidenceVerdict, checked_evidence
     mode = None
+    lease = None
     try:
         inline = start_prompt(start) or ''
         if not inline.startswith(PREFIX):
@@ -668,25 +669,48 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
         source = json.loads(payload['text'])
         trace_id = payload.get('voice_trace_id', payload['request_id'])
         mode = source.get('mode')
+        if source.get('use_sandbox_agent') is True:
+            turn = payload.get('voice_turn') or {}
+            if type(turn.get('meeting_id')) is not int or not isinstance(turn.get('holder'), str):
+                raise ValueError('Current voice turn required for sandbox')
+            import redis
+            lease = redis.from_url(os.environ['REDIS_URL'], decode_responses=True, socket_timeout=1, socket_connect_timeout=1)
+        def check_current():
+            if lease is not None:
+                held = lease.get(f"meeting:voice:{turn['meeting_id']}:lock")
+                if isinstance(held, bytes): held = held.decode()
+                if held != turn['holder']: raise RuntimeError('Voice turn cancelled')
+            return True
+        check_current()
         answer_sources = source.get('sources', [])
         empty_rank = False
         voice = mode in ('voice', 'voice_summary_map', 'voice_summary_verify','voice_decision_evidence')
         voice_deadline = time.monotonic() + 50
-        if mode == 'voice_plan' and source.get('retrieval_deadline_ms') is not None:
+        if mode in ('voice_plan','voice_source_intent') and source.get('retrieval_deadline_ms') is not None:
             deadline = source['retrieval_deadline_ms']
             if type(deadline) is not int: raise ValueError('Invalid retrieval deadline')
             voice_deadline = min(voice_deadline, time.monotonic() + deadline / 1000 - time.time())
             if voice_deadline <= time.monotonic(): raise TimeoutError('Voice retrieval budget exhausted')
         def generate(provider, prompt, system, schema=None):
+            check_current()
             if not str(mode).startswith('voice'):
-                return generate_text(provider, prompt, system, schema)
-            stage = {VERIFY_SYSTEM: 'verify', VOICE_REPAIR_SYSTEM: 'repair',
-                     VOICE_FORMAT_SYSTEM: 'format_repair', VOICE_PLAN_SYSTEM: 'plan',
-                     VOICE_INTENT_SYSTEM: 'intent',
-                     RERANK_SYSTEM: 'rerank'}.get(system, 'generation')
-            with voice_span(stage, trace_id):
-                return generate_text(provider, prompt, system, schema)
+                result = generate_text(provider, prompt, system, schema)
+            else:
+                stage = {VERIFY_SYSTEM: 'verify', VOICE_REPAIR_SYSTEM: 'repair',
+                         VOICE_FORMAT_SYSTEM: 'format_repair', VOICE_PLAN_SYSTEM: 'plan',
+                         VOICE_INTENT_SYSTEM: 'intent', VOICE_SOURCE_SYSTEM: 'source_routing',
+                         RERANK_SYSTEM: 'rerank'}.get(system, 'generation')
+                with voice_span(stage, trace_id):
+                    result = generate_text(provider, prompt, system, schema)
+            check_current()
+            return result
         def generate_text(provider, prompt, system, schema):
+            if source.get('use_sandbox_agent') is True and mode in (
+                    'voice_plan', 'voice', 'voice_general', 'voice_web', 'voice_summary_map') and system not in (
+                    VERIFY_SYSTEM, VOICE_REPAIR_SYSTEM, VOICE_FORMAT_SYSTEM, RERANK_SYSTEM):
+                from worker.voice_sandbox import complete as sandbox_complete
+                with voice_span('sandbox_agent', trace_id):
+                    return sandbox_complete(prompt, system, schema, timeout=voice_deadline-time.monotonic(), current=check_current)
             structured = getattr(provider, 'complete_structured', None)
             if schema is not None and structured is not None:
                 try:
@@ -708,8 +732,8 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
             raw = generate(completion_from_env(timeout=min(10, remaining)), prompt, system, schema)
             if empty_rank and system != VERIFY_SYSTEM: validate_voice_answer(raw, answer_sources)
             return raw
-        provider_timeout = 4 if mode=='voice_intent' else 10 if mode in ('voice_plan','voice_task_flow','voice_decision_flow') else 25 if voice or mode=='voice_general' else 45
-        if mode == 'voice_plan':
+        provider_timeout = 4 if mode in ('voice_intent','voice_source_intent') else 10 if mode in ('voice_plan','voice_task_flow','voice_decision_flow') else 25 if voice or mode=='voice_general' else 45
+        if mode in ('voice_plan','voice_source_intent'):
             provider_timeout = min(provider_timeout, voice_deadline-time.monotonic())
             if provider_timeout <= 0: raise TimeoutError('Voice retrieval budget exhausted')
         provider = completion_from_env(timeout=provider_timeout)
@@ -740,6 +764,9 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
         elif mode == 'voice_intent':
             text = generate(provider, json.dumps({'question':source['question']},ensure_ascii=False),
                             VOICE_INTENT_SYSTEM, voice_schema('intent'))
+        elif mode == 'voice_source_intent':
+            text = generate(provider, json.dumps({'question':source['question']},ensure_ascii=False),
+                            VOICE_SOURCE_SYSTEM, voice_schema('source_intent'))
         elif mode == 'voice_plan':
             text = generate(provider, payload['text'], VOICE_PLAN_SYSTEM,
                             voice_schema('plan', tools=source['available_tools']))
@@ -750,8 +777,8 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                 try:
                     with voice_span('web_search', trace_id):
                         public = answer_public(source['question'],
-                            lambda prompt: completion_from_env(timeout=8).complete(prompt, system=VOICE_SYSTEM).text,
-                            lambda prompt: completion_from_env(timeout=4).complete(prompt, system=VERIFY_SYSTEM).text)
+                            lambda prompt: generate(completion_from_env(timeout=8), prompt, VOICE_SYSTEM),
+                            lambda prompt: generate(completion_from_env(timeout=4), prompt, VERIFY_SYSTEM))
                     text = json.dumps(public, ensure_ascii=False)
                 except Exception:
                     text = json.dumps({'reason': 'web_unavailable'})
@@ -760,8 +787,20 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
             else:
                 try:
                     with voice_span('web_search', trace_id):
+                        check_current()
                         result = search(source['question'])
-                    text = json.dumps({'text': result.text, 'links': result.sources}, ensure_ascii=False)
+                        check_current()
+                    spoken = result.text
+                    if source.get('use_sandbox_agent') is True:
+                        excerpts = [{'id':'s0','quote':result.text[:20000]}]
+                        raw = generate(provider, json.dumps({'question':source['question'],'sources':excerpts},ensure_ascii=False),
+                                       VOICE_SYSTEM, voice_schema('answer',excerpts))
+                        reviewed = verify_voice_reply(raw,source['question'],excerpts,
+                            lambda prompt: generate(completion_from_env(timeout=4),prompt,VERIFY_SYSTEM,voice_schema('verify',excerpts)))
+                        validated = validate_voice_answer(reviewed,excerpts)
+                        if not validated['claims']: raise ValueError('Public answer could not be verified')
+                        spoken = ' '.join(c['text'] for c in validated['claims'])
+                    text = json.dumps({'text': spoken, 'links': result.sources}, ensure_ascii=False)
                 except Exception:
                     text = json.dumps({'reason': 'web_unavailable'})
         else:
@@ -822,18 +861,24 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                         text = json.dumps(checked | {'reason':'retrieval_empty'}, ensure_ascii=False)
                 if voice:
                     log.info('voice verification checks=%s', ','.join(json.loads(text).get('verification', [])))
+        check_current()
         stream.xadd(out_topic, {'event': json.dumps({'type': 'message-delta', 'text': text})})
     except TimeoutError:
         if mode == 'voice_plan':
             # An empty plan uses the existing verified-answer path without new tool authority.
             log.warning('voice plan timed out; using verified-answer path')
-            with voice_span('plan',trace_id) as metrics:
-                metrics['outcome']='fallback'
-                stream.xadd(out_topic,{'event':json.dumps({'type':'message-delta','text':'{"tool_calls":[]}'})})
+            try: check_current()
+            except Exception: log.info('voice plan cancelled before fallback')
+            else:
+                with voice_span('plan',trace_id) as metrics:
+                    metrics['outcome']='fallback'
+                    stream.xadd(out_topic,{'event':json.dumps({'type':'message-delta','text':'{"tool_calls":[]}'})})
         else:
             log.warning('meeting knowledge failed error=TimeoutError')
     except Exception as exc:  # Never log questions, sources or provider responses.
         log.warning('meeting knowledge failed error=%s', type(exc).__name__)
+    finally:
+        if lease is not None: lease.close()
     stream.xadd(out_topic, {'event': json.dumps({'type': 'turn-complete'})})
     stream.expire(out_topic, 300)
 

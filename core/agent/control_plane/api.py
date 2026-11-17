@@ -1172,6 +1172,18 @@ def create_app(
                 try: trace_id = str(uuid.UUID(request.headers.get('x-tina-voice-request-id', '')))
                 except ValueError: pass
             if trace_id: payload['voice_trace_id'] = trace_id
+            if json.loads(text).get('use_sandbox_agent') is True:
+                raw_mid = str(request.path_params.get('meeting_id', ''))
+                if not redis_url or not trace_id or not raw_mid.isdecimal():
+                    raise HTTPException(409, 'Current voice turn required for sandbox')
+                mid = int(raw_mid)
+                import redis as _redis
+                connection = _redis.from_url(redis_url, decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
+                try: held = connection.get(f'meeting:voice:{mid}:lock')
+                finally: connection.close()
+                if not isinstance(held,str) or not held.endswith(':'+trace_id):
+                    raise HTTPException(409, 'Voice turn was cancelled')
+                payload['voice_turn'] = {'meeting_id': mid, 'holder': held}
         if target_language is not None:
             payload["target_language"] = target_language
         inline = prefix + json.dumps(payload, ensure_ascii=False)

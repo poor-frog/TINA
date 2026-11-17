@@ -43,10 +43,21 @@ It calls the existing tool-less meeting CompletionPort using canonical text and 
 names, then emits a candidate result. It does not publish live notes, edit canonical text or
 overwrite workspace documents. Meeting API owns source/lease validation and final publication.
 
-Meeting voice planning, answer generation and repairs use the selected CompletionPort directly.
-LiveKit/LangGraph executes the authorized TINA tools; workspace/chat turns retain their configured
-CLI harness. Voice does not start a CLI process or create a coding workspace. Source, numeric and
-independent semantic verification remain required before TTS.
+New meeting policies select `agent_backend: sandbox`. Voice planning and answer generation use
+an ephemeral instance of the account's configured CLI harness. LangGraph authorizes/executes its
+structured source-tool proposals. Legacy `completion` remains selectable. Classification, reranking,
+format recovery, repair and independent factual verification use CompletionPort.
+
+Knowledge jobs mount no account workspaces or chat tools. The sandbox receives only the authorized
+question, excerpts and receipt-confirmed conversation. Native CLI tools/MCP are disabled; source
+lookups go through TINA's existing tool budgets and policy checks. Its private cwd and CLI history
+are disposable; no CLI session is resumed. The existing caller-scoped heard history provides
+multi-turn context without retaining unspoken candidates or revoked evidence.
+
+`voice_sandbox.py` bounds the complete harness process group to the remaining job budget (at most
+40 seconds), polls the current room lease with bounded Redis I/O and kills subprocesses on Stop or
+timeout. Data-plane credentials are removed before launch. No candidate/tool event reaches TTS
+without the existing source/numeric/semantic checks. Voice cannot publish workspace edits.
 
 The server-owned retrieval deadline still bounds planning; exhausted internal planning budgets
 use the existing empty-plan verified-answer path. Other failures retain the normal error handling.
@@ -68,3 +79,14 @@ the ranking call has no capability fallback retry. This call consumes the existi
 scheduling budget; source/numeric/semantic checks and one-repair limits remain mandatory.
 Structured `voice_stage` logs correlate ranking/generation/review/repair with the bot request UUID
 forwarded by Meeting API and the control-plane dispatch envelope. No content is logged.
+
+
+`voice_source_intent` is a bounded, structured, question-only source classifier used for opt-in
+automatic public web routing. It receives no private source excerpts/history and cannot execute
+tools. Its four-second provider timeout also respects any remaining retrieval deadline.
+
+Sandbox turn checks cover every model stage, including API-only classification, recap verification,
+format recovery and repair, plus the final output. A call already in flight may finish, but cancelled
+results and subsequent calls are blocked. Timeout fallback plans also require a live turn.
+Process-group cleanup includes descendants whose leader has exited. Claude prompt input is written
+concurrently with stdout consumption, preserving structured CLI errors when stdin closes early.

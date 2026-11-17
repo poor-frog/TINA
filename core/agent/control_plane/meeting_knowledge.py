@@ -14,7 +14,7 @@ from pathlib import Path
 
 from fastapi import HTTPException, Request, Query
 from pydantic import BaseModel, Field, PositiveInt, StrictBool, field_validator
-from typing import Literal
+from typing import Literal, Annotated
 
 from shared.meeting_knowledge import digest, select_sources, sources_for, stale, validate_answer, wiki_page
 from shared.adapters import WorkspaceBusyError, parse_entity, workspace_write_lock
@@ -59,6 +59,18 @@ class VoiceSourceRef(BaseModel):
     model_config = {'extra': 'forbid'}
     key: str = Field(min_length=1, max_length=1024)
     fingerprint: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+class VoiceSourceProfile(BaseModel):
+    model_config = {'extra': 'forbid'}
+    name: str = Field(min_length=1, max_length=80)
+    documents: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(default_factory=list, max_length=8)
+    shared_meeting_ids: list[PositiveInt] = Field(default_factory=list, max_length=4)
+    include_transcript: StrictBool = True
+    include_approved_actions: StrictBool = True
+    allow_general_knowledge: StrictBool = True
+    allow_web_search: StrictBool = False
+    auto_web_search: StrictBool = False
 
 
 class VoiceHistoryTurn(BaseModel):
@@ -222,7 +234,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                           'stale': fact_id not in current or bool(review and review['fingerprint'] != fingerprint)})
         return items
 
-    def load(request, meeting_id, slug=None, *, with_canonical=True, preferred=None):
+    def load(request, meeting_id, slug=None, *, with_canonical=True, preferred=None, profile_documents=()):
         voice = preferred is not None
         preferred = set(preferred or ())
         subject = subject_of(request)
@@ -232,6 +244,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         base = read_target(request, slug)
         native = str(row.get('native_meeting_id') or row.get('platform_specific_id') or '')
         paths = set()
+        paths.update(profile_documents)
         for doc in (row.get('data') or {}).get('docs', []):
             if (isinstance(doc, dict) and isinstance(doc.get('path'), str)
                     and not doc.get('slug') and doc.get('workspace') in (None, '', subject, base.name)):
@@ -364,7 +377,96 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         return answer | {'stale': stale(answer, current),
                          'saved_path': saved_page(request, base, meeting_id, answer['id'])}
 
-    def voice_context(request, meeting_id, *, with_canonical=True):
+    def profile_path(base, subject):
+        if not str(subject).isdecimal(): raise HTTPException(401, 'Owner identity required')
+        path = base / '.meeting-knowledge' / 'voice-source-profiles' / f'{subject}.json'
+        if any(p.is_symlink() for p in (path, path.parent, path.parent.parent)):
+            raise HTTPException(409, 'Invalid source profile storage')
+        return path
+
+    def profiles(base, subject):
+        path = profile_path(base, subject)
+        try:
+            if not path.exists(): return []
+            if path.stat().st_size > 100000: raise ValueError()
+            rows = json.loads(path.read_text())
+            if not isinstance(rows, list) or len(rows) > 20: raise ValueError()
+            for item in rows:
+                checked = VoiceSourceProfile(name=item['name'], **item['sources'])
+                if not re.fullmatch(r'[0-9a-f]{32}', item['id']) or digest(checked.model_dump(exclude={'name'})) != item['fingerprint']:
+                    raise ValueError()
+            return rows
+        except (OSError, ValueError, KeyError, TypeError): raise HTTPException(503, 'Source profiles unavailable') from None
+
+    def write_profiles(base, subject, rows):
+        payload = json.dumps(rows, ensure_ascii=False)
+        if len(payload.encode()) > 100000: raise HTTPException(413, 'Source profiles are too large')
+        directory = safe_dir(reader, base, '.meeting-knowledge/voice-source-profiles')
+        with tempfile.NamedTemporaryFile(dir=directory, mode='w', delete=False) as out:
+            temporary = Path(out.name)
+            out.write(payload)
+        try: os.replace(temporary, profile_path(base, subject))
+        finally: temporary.unlink(missing_ok=True)
+
+    def resolve_profile(base, subject, policy):
+        identifier = policy.get('source_profile_id')
+        fingerprint = policy.get('source_profile_fingerprint')
+        if not identifier and not fingerprint: return []
+        item = next((p for p in profiles(base, subject) if p['id'] == identifier), None)
+        if not item or item['fingerprint'] != fingerprint:
+            raise HTTPException(409, 'Source profile changed or was removed; apply it again')
+        return item['sources']['documents']
+
+    @app.get('/api/workspace/meeting-knowledge/{meeting_id}/source-profiles')
+    def source_profiles(request: Request, meeting_id: int):
+        base, _, _ = load(request, meeting_id, with_canonical=False)
+        return {'profiles': profiles(base, subject_of(request))}
+
+    @app.post('/api/workspace/meeting-knowledge/{meeting_id}/source-profiles')
+    def save_source_profile(request: Request, meeting_id: int, body: VoiceSourceProfile):
+        base, _, _ = load(request, meeting_id, with_canonical=False)
+        subject = subject_of(request)
+        if not body.name.strip(): raise HTTPException(422, 'Profile name is empty')
+        if len(set(body.documents)) != len(body.documents) or len(set(body.shared_meeting_ids)) != len(body.shared_meeting_ids):
+            raise HTTPException(422, 'Choose distinct sources')
+        for path in body.documents:
+            if related_text(base, path) is None: raise HTTPException(422, 'Choose readable workspace documents')
+        for mid in body.shared_meeting_ids:
+            row = meeting_get(meeting_api_url, subject, mid, f'/meetings/{mid}')
+            if str(row.get('user_id')) != str(subject) or (row.get('data') or {}).get('artifact_deletion'):
+                raise HTTPException(403, 'Choose owned meetings with available sources')
+        sources = body.model_dump(exclude={'name'})
+        item = {'id': uuid.uuid4().hex, 'name': body.name.strip(), 'sources': sources, 'fingerprint': digest(sources)}
+        try:
+            with workspace_write_lock(base):
+                rows = profiles(base, subject)
+                if len(rows) >= 20: raise HTTPException(409, 'At most 20 source profiles')
+                if any(p['name'].casefold() == item['name'].casefold() for p in rows):
+                    raise HTTPException(409, 'Choose a different profile name')
+                write_profiles(base, subject, rows + [item])
+        except WorkspaceBusyError: raise HTTPException(409, 'Workspace busy; retry shortly') from None
+        return item
+
+    @app.post('/api/workspace/meeting-knowledge/{meeting_id}/source-profiles/remove')
+    def remove_source_profile(request: Request, meeting_id: int, body: VoiceSourceRef):
+        base, _, _ = load(request, meeting_id, with_canonical=False)
+        subject = subject_of(request)
+        try:
+            with workspace_write_lock(base):
+                rows = profiles(base, subject)
+                if not any(p['id'] == body.key and p['fingerprint'] == body.fingerprint for p in rows):
+                    raise HTTPException(409, 'Source profile changed; reload before removing')
+                write_profiles(base, subject, [p for p in rows if p['id'] != body.key])
+        except WorkspaceBusyError: raise HTTPException(409, 'Workspace busy; retry shortly') from None
+        return {'removed': True}
+
+    @app.post('/api/internal/meeting-voice/{meeting_id}/profile')
+    def check_source_profile(request: Request, meeting_id: int, body: dict):
+        _, _, _, _, documents = voice_context(request, meeting_id, with_canonical=False, source_policy=body)
+        if any(p not in documents for p in body.get('documents', [])): raise HTTPException(409, 'A profile document is unavailable')
+        return {'documents': list(documents)}
+
+    def voice_context(request, meeting_id, *, with_canonical=True, source_policy=None):
         expected = os.environ.get('TINA_INTERNAL_API_SECRET', '')
         supplied = request.headers.get('x-internal-secret', '')
         if not expected or not hmac.compare_digest(expected.encode(), supplied.encode()):
@@ -380,8 +482,13 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         row = meeting_get(meeting_api_url, subject, meeting_id, f'/meetings/{meeting_id}')
         if str(row.get('user_id')) != subject:
             raise HTTPException(404, 'Meeting unavailable')
+        policy = source_policy if source_policy is not None else (row.get('data') or {}).get('voice_assistant') or {}
+        base = read_target(request, None)
+        paths = resolve_profile(base, subject, policy)
         base, canonical, documents = load(request, meeting_id, with_canonical=with_canonical,
-            preferred=((row.get('data') or {}).get('voice_assistant') or {}).get('documents', []))
+            preferred=policy.get('documents', []), profile_documents=paths)
+        if policy.get('source_profile_id') and any(p not in documents for p in policy.get('documents', [])):
+            raise HTTPException(409, 'A selected project document is unavailable')
         return request, row, base, canonical, documents
 
     def voice_shared_rows(request,row,*,allow_missing=False):
@@ -530,6 +637,45 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                 return result
         return rank
 
+    def voice_complete(request, policy, text):
+        value = json.loads(text)
+        if policy.get('agent_backend') == 'sandbox' and str(value.get('mode', '')).startswith('voice'):
+            value['use_sandbox_agent'] = True
+        return complete(request, json.dumps(value, ensure_ascii=False))
+
+    source_routes = {}
+
+    def source_route(request, question, policy, history, deadline_ms=None):
+        route = voice_route(question)
+        if (route[0] != 'meeting' or not policy.get('allow_web_search') or not policy.get('auto_web_search') or len(question) > 200
+                or deadline_ms is not None and deadline_ms <= int(time.time()*1000)
+                or dialogue_context(question, history, int(time.time()*1000)) or wants_summary(question) or action_intent(question)
+                or re.search(r'cuộc họp|meeting|dự án|project|ngân sách|budget|deadline|phụ trách|nội bộ|'
+                             r'của (?:tôi|mình|chúng)|\b(?:our|my|task)\b|(?:sk-|ghp_)[\w-]+', question, re.I)):
+            return route
+        cached = getattr(request.state, 'voice_source_route', None)
+        if cached and cached[0] == question: return cached[1]
+        turn = request.headers.get('x-tina-voice-request-id')
+        cache_key = (subject_of(request), turn, policy.get('revision'), question)
+        now = time.monotonic()
+        for key, (stamp, _) in list(source_routes.items()):
+            if now - stamp > 60: source_routes.pop(key, None)
+        if turn and cache_key in source_routes: return source_routes[cache_key][1]
+        try:
+            payload = {'mode':'voice_source_intent','question':question}
+            if deadline_ms is not None: payload['retrieval_deadline_ms'] = deadline_ms
+            value = json.loads(voice_complete(request, policy, json.dumps(payload, ensure_ascii=False)))
+            kind = value.get('route') if isinstance(value, dict) and set(value) == {'route'} else None
+            if kind == 'web' or kind == 'general' and policy.get('allow_general_knowledge'):
+                route = (kind, question)
+        except (HTTPException, ValueError, TypeError, TimeoutError):
+            pass  # An uncertain/outage verdict stays on the authorized local evidence path.
+        request.state.voice_source_route = (question, route)
+        if turn:
+            if len(source_routes) >= 128: source_routes.pop(next(iter(source_routes)), None)
+            source_routes[cache_key] = (time.monotonic(), route)
+        return route
+
     @app.post('/api/internal/meeting-voice/{meeting_id}/agent',include_in_schema=False)
     @trace_voice_request('agent')
     def voice_agent(request:Request,meeting_id:int,body:VoiceAgentQuery):
@@ -538,7 +684,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         now_ms=int(time.time()*1000)
         candidates=with_calculations(candidates,body.question,body.lookups)
         history=current_history([t.model_dump() for t in body.history],candidates,now_ms)
-        kind,public_query=voice_route(body.question)
+        kind,public_query=source_route(request,body.question,policy,history,body.retrieval_deadline_ms)
         draft_kind, draft_details = action_context(body.question, pending_clarification(history,now_ms)
             if kind == 'meeting' else None)
         if draft_kind: kind = 'draft'
@@ -578,7 +724,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                 else:
                     selected,_=voice_sources(candidates,body.question,history,now_ms,semantic=semantic_for(row,policy),dictionary=domain_dictionary(base))
                 selected=[s|({'context_handle':context_handle(s)} if context_handle(s) in body.context_handles else {}) for s in selected]
-                raw=complete(request,json.dumps({'mode':'voice_plan','question':body.question,
+                raw=voice_complete(request,policy,json.dumps({'mode':'voice_plan','question':body.question,
                     'retrieval_deadline_ms':body.retrieval_deadline_ms,
                     'available_tools':tools,'sources':selected,'evidence_pack':evidence_pack(selected,available=len(candidates)),'pending_clarification':pending_clarification(history,now_ms),
                     'dialogue_context':dialogue_context(body.question,history,now_ms),
@@ -651,7 +797,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
             try:
                 explicit='cancel' if CANCEL.fullmatch(body.question.strip()) else 'confirm' if state.node=='review' and CONFIRM.fullmatch(body.question.strip()) else None
                 raw=json.dumps({'intent':explicit,'title':None,'assignee':None,'due':None,
-                    'skip_assignee':False,'skip_due':False}) if explicit else complete(request,json.dumps({
+                    'skip_assignee':False,'skip_due':False}) if explicit else voice_complete(request,policy,json.dumps({
                     'mode':'voice_task_flow','question':body.question,'node':state.node,'task_state':state.model_dump()},ensure_ascii=False))
                 result=apply_task_patch(body.question,state.model_dump(),raw)
             except (ValueError,TypeError):
@@ -706,7 +852,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                     'text':'Em vẫn giữ thông tin quyết định. '+decision_prompt(state)}
             explicit='cancel' if DECISION_CANCEL.fullmatch(body.question.strip()) else 'confirm' if state.node=='review' and CONFIRM.fullmatch(body.question.strip()) else None
             try:
-                raw=json.dumps({'intent':explicit,'title':None,'requested_status':None,'status_text':None,'source_hint':None}) if explicit else complete(request,json.dumps({
+                raw=json.dumps({'intent':explicit,'title':None,'requested_status':None,'status_text':None,'source_hint':None}) if explicit else voice_complete(request,policy,json.dumps({
                     'mode':'voice_decision_flow','question':body.question,'node':state.node,'decision_state':state.model_dump()},ensure_ascii=False))
                 result=apply_decision_patch(body.question,state.model_dump(),raw)
                 current=DecisionState.model_validate(result['state'])
@@ -714,7 +860,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                     selected,_=voice_sources(candidates,current.title+' '+current.source_hint,[],int(time.time()*1000),semantic=semantic_for(row,policy),dictionary=domain_dictionary(base))
                     if selected:
                         try:
-                            raw=complete(request,json.dumps({'mode':'voice_decision_evidence','title':current.title,
+                            raw=voice_complete(request,policy,json.dumps({'mode':'voice_decision_evidence','title':current.title,
                                 'sources':selected[:16]},ensure_ascii=False))
                             status,proof=checked_evidence(raw,selected[:16])
                         except (HTTPException,ValueError,TypeError) as exc:
@@ -762,15 +908,15 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         request,row,base,policy,candidates=authorized_voice(request,meeting_id,body)
         candidates=with_calculations(candidates,body.question,body.lookups)
         paths=policy.get('documents',[])
-        kind, question = voice_route(body.question)
         history = current_history([t.model_dump() for t in body.history], candidates, int(time.time()*1000))
+        kind, question = source_route(request,body.question,policy,history)
         draft_kind, draft_details = action_context(body.question, pending_clarification(history,int(time.time()*1000))
             if kind == 'meeting' else None)
         if draft_kind: kind = 'draft'
         social_intent = None
         if kind == 'meeting' and not pending_clarification(history,int(time.time()*1000)):
             try:
-                social_intent = semantic_assistant_intent(body.question, lambda utterance: complete(request,
+                social_intent = semantic_assistant_intent(body.question, lambda utterance: voice_complete(request,policy,
                     json.dumps({'mode':'voice_intent','question':utterance},ensure_ascii=False)))
             except (HTTPException, TimeoutError):
                 pass  # Classification is optional; the evidence-backed path remains available.
@@ -796,7 +942,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
             else:
                 # Public routes never receive the room's transcript, documents or conversation history.
                 try:
-                    public = body.web_result if kind=='web' and body.web_result is not None else json.loads(complete(request, json.dumps({'mode': 'voice_' + kind, 'question': question}, ensure_ascii=False)))
+                    public = body.web_result if kind=='web' and body.web_result is not None else json.loads(voice_complete(request,policy, json.dumps({'mode': 'voice_' + kind, 'question': question}, ensure_ascii=False)))
                     text = public.get('text')
                     links = [safe_web_source(link) for link in public.get('links', [])[:6]] if kind == 'web' else []
                     links = [{k: link[k] for k in ('url', 'title')} for link in links if link]
@@ -831,7 +977,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                 if fresh_base!=base or fresh_policy!=policy or stale({'sources':summary_sources},fresh_sources):
                     raise HTTPException(409,'Summary sources changed')
                 current_turn()
-                result = complete(scoped_request,json.dumps(payload,ensure_ascii=False))
+                result = voice_complete(scoped_request,policy,json.dumps(payload,ensure_ascii=False))
                 current_turn()
                 return result
             answer = recap(body.question,summary_sources,f"{row['user_id']}:{meeting_id}:{policy['revision']}:{turn_id or 'legacy'}",
@@ -866,7 +1012,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                     # One lookup round (at most two tools), then a verified final answer.
                     for remaining in ((1,0) if body.lookups is None else (0,)):
                         conversation = conversation_for(selected)
-                        raw = complete(request, json.dumps({'mode': 'voice', 'question': body.question,
+                        raw = voice_complete(request,policy, json.dumps({'mode': 'voice', 'question': body.question,
                             'sources':selected,
                             'evidence_pack':evidence_pack(selected,available=len(candidates)),
                             'clarification_attempt':clarification_attempts(history),

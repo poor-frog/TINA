@@ -192,7 +192,7 @@ def _mounts(work: Path) -> list[dict]:
 
 def _permission_settings(mounts: list[dict], allowed_tools: set[str],
                          mcp_rules: list[str]) -> dict:
-    readable = list(dict.fromkeys(item["path"] for item in mounts))
+    readable = list(dict.fromkeys(item["path"] for item in mounts)) if 'Read' in allowed_tools else []
     writable = (
         list(dict.fromkeys(item["path"] for item in mounts if item["write"]))
         if {"Write", "Edit"}.intersection(allowed_tools) else []
@@ -206,6 +206,8 @@ def _permission_settings(mounts: list[dict], allowed_tools: set[str],
         permissions["deny"].append("write_file(*)")
     if "Bash" not in allowed_tools:
         permissions["deny"].append("command(*)")
+    if not allowed_tools:
+        permissions["deny"].append("read_file(*)")
     if "WebSearch" not in allowed_tools and "WebFetch" not in allowed_tools:
         permissions["deny"].append("read_url(*)")
     return {

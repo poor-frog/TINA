@@ -225,3 +225,31 @@ evidence. Only completed playback can keep it; interrupted playback clears it. E
 caller, revision, source fingerprint and pending-expiry checks continue to apply.
 Heard history timestamps completed turns at playback completion, so synthesis/playback latency
 does not consume the 30-second pending-intent lifetime.
+
+
+Project source profiles add nullable `source_profile_id` (32 hex) and
+`source_profile_fingerprint` (64 hex) to VoicePolicy, supplied together. The profile is an explicit,
+immutable, owner-scoped selection of up to 8 documents, 4 other meeting transcripts and existing
+source permission flags. It is copied to each room; it does not automatically enroll future meetings
+or share an entire workspace. Profile removal/source loss blocks subsequent use, including TTS
+readiness checks. Profile rooms bypass the readiness cache to recheck revocation before playback.
+
+The owner saves/lists profiles through GET/POST
+`/agent/workspace/meeting-knowledge/{meeting_id}/source-profiles`, removes one with POST to
+`source-profiles/remove` carrying `{key, fingerprint}`, and applies its reference through the existing
+room policy PUT. Profiles live outside normal Wiki documents at
+`.meeting-knowledge/voice-source-profiles/{owner}.json`, use the existing workspace write lock and
+atomic replace, and are limited to 20 named selections. All file and meeting grants remain checked.
+
+`auto_web_search` defaults false, preserving explicit web behavior. When both web flags are on,
+a conservative question-only model classifier may select web for a self-contained public question;
+local tool selection, source verification, Stop and room policy checks remain authoritative.
+
+
+`VoicePolicy.agent_backend` selects `completion` or `sandbox`. Legacy reads/request defaults remain
+`completion`; newly created capable rooms default to `sandbox`. Source profiles do not grant or
+change harness execution mode. The sandbox produces source-tool proposals and candidate JSON;
+TINA remains responsible for execution authorization, source revocation, verification and playback.
+Only the authenticated internal completion edge freezes a live voice lease into a private worker
+payload. Stop invalidates that lease. Private dispatches mount no account workspaces and do not
+resume CLI history; heard caller history remains source/revision scoped.

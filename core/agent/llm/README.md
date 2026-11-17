@@ -228,3 +228,9 @@ never passes its sources/history to this method. Other completion adapters have 
 fallback. API/model/account support must be verified on the target deployment.
 
 OpenAI Responses completions require a response.completed terminal event for ordinary generation and verification as well as web search. Early EOF, a bare [DONE], response.incomplete, and explicit non-completed envelope status fail closed without returning accumulated deltas. Successful terminal envelopes may omit status for existing compatible gateways; explicit status must be completed.
+
+
+A voice sandbox supplies an explicitly empty native-tool grant. Codex disables execution, apps,
+browser/image/agent tools; Claude uses `--tools ""` and an empty strict MCP config; Antigravity denies
+file reads, writes, commands and URLs. The voice worker mounts no account workspace. Claude prompts
+travel on stdin to support evidence packs larger than OS argument limits.

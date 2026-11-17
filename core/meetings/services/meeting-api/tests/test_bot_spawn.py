@@ -201,6 +201,7 @@ async def test_new_room_defaults_on_and_continuation_preserves_explicit_room_cho
     row=next(iter(repo._meetings.values()));policy=row['data']['voice_assistant']
     assert runtime.specs[0]['env']['TINA_VOICE_TURN_SHADOW']=='1'
     assert policy['enabled'] and policy['noise_suppression'] and policy['include_transcript'] and policy['documents']==[]
+    assert policy['agent_backend']=='sandbox'
     assert policy['engine']=='livekit' and policy['allow_general_knowledge'] and policy['allow_web_search']
     if saved is None:row['data'].pop('voice_assistant')
     else:row['data']['voice_assistant']=saved.copy()

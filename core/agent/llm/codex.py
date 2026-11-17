@@ -257,7 +257,7 @@ class CodexHarness:
 
     def _argv(self, shell_environment_excludes: Iterable[str] = (), *, web_search: str = "disabled",
               writable_roots: Iterable[str] = (), groq_base_url: Optional[str] = None,
-              groq_model_catalog: Optional[Path] = None) -> list[str]:
+              groq_model_catalog: Optional[Path] = None, no_tools: bool = False) -> list[str]:
         mode = (os.environ.get("TINA_CODEX_AUTH_MODE") or "api-key").strip()
         argv = [self._executable, "app-server", "--listen", "stdio://"]
         if mode == "groq":
@@ -318,6 +318,10 @@ class CodexHarness:
         rules = "{" + ", ".join(f"{self._toml_string(path)} = {self._toml_string(access)}"
                                   for path, access in filesystem.items()) + "}"
         settings["default_permissions"] = '"tina-offline"'
+        if no_tools:
+            for feature in ('shell_tool', 'unified_exec', 'apps', 'browser_use', 'computer_use',
+                            'multi_agent', 'view_image', 'image_generation', 'skill_search', 'code_mode_host'):
+                settings[f'features.{feature}'] = 'false'
         for profile in ("tina-offline", "tina-online"):
             settings[f"permissions.{profile}.filesystem"] = rules
             settings[f"permissions.{profile}.network.enabled"] = "true" if profile == "tina-online" else "false"
@@ -543,7 +547,7 @@ class CodexHarness:
             proc = subprocess.Popen(
                 self._argv(shell_environment_excludes, web_search=web_search,
                            writable_roots=[] if read_only else writable_roots,
-                           groq_base_url=groq_base_url, groq_model_catalog=groq_model_catalog),
+                           groq_base_url=groq_base_url, groq_model_catalog=groq_model_catalog, no_tools=not allowed),
                 cwd=str(work), env=env, stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
             )

@@ -117,16 +117,25 @@ def test_groq_reach_namespace_round_trip_preserves_grants_and_call_ids():
     assert original['tools'][0]['tools'][0]['name']=='reach_web_read'
 
 
-def test_voice_worker_uses_reach_for_non_search_llm_and_emits_verified_links(monkeypatch):
+@pytest.mark.parametrize('sandbox',[False,True])
+def test_voice_worker_uses_reach_for_non_search_llm_and_emits_verified_links(monkeypatch,sandbox):
     from types import SimpleNamespace
     from worker.engine import _run_meeting_knowledge
     from shared.meeting_knowledge import PREFIX
     from shared.voice_knowledge import VERIFY_SYSTEM
     monkeypatch.setenv('TINA_AGENT_REACH_URL','http://reach:8080')
     monkeypatch.setenv('TINA_CHAT_SESSION','meeting-knowledge-public-request')
+    if sandbox:
+        monkeypatch.setenv('REDIS_URL','redis://synthetic')
+        monkeypatch.setattr('redis.from_url',lambda *a,**kw:SimpleNamespace(get=lambda _:'session:turn',close=lambda:None))
+        def candidate(prompt,system,schema,**kwargs):
+            assert 'PRIVATE ROOM' not in prompt and kwargs['current']()
+            return '{"claims":[{"text":"Redis is a database.","source_ids":["s0"]}]}'
+        monkeypatch.setattr('worker.voice_sandbox.complete',candidate)
     class Provider:
         def complete(self,prompt,*,system):
             assert 'PRIVATE ROOM' not in prompt
+            if sandbox: assert system==VERIFY_SYSTEM
             return SimpleNamespace(text='{"approved":true}' if system==VERIFY_SYSTEM else
                 '{"claims":[{"text":"Redis is a database.","source_ids":["s0"]}]}')
     monkeypatch.setattr('worker.engine.completion_from_env',lambda **kw:Provider())
@@ -139,7 +148,8 @@ def test_voice_worker_uses_reach_for_non_search_llm_and_emits_verified_links(mon
         def xadd(self,key,body): self.events.append(json.loads(body['event']))
         def expire(self,*args): pass
     stream=Stream()
-    payload={'request_id':'public-request','text':json.dumps({'mode':'voice_web','question':'What is Redis?'})}
+    payload={'request_id':'public-request','text':json.dumps({'mode':'voice_web','question':'What is Redis?','use_sandbox_agent':sandbox}),
+             'voice_turn':{'meeting_id':1,'holder':'session:turn'}}
     _run_meeting_knowledge(stream,'out',{'entrypoint':{'inline':PREFIX+json.dumps(payload)}})
     result=json.loads(next(e['text'] for e in stream.events if e['type']=='message-delta'))
     assert result=={'text':'Redis is a database.','links':[{'url':'https://redis.io','title':'Redis'}]}

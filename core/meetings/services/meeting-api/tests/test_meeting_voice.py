@@ -69,6 +69,30 @@ def headers(session='current'):
     return {'Authorization': 'Bearer ' + voice_token('test-admin-secret', 1, session)}
 
 
+async def test_project_policy_validates_profile_before_saving_and_requires_a_complete_reference(setup):
+    import json
+    client,repo,_,calls,*_=setup
+    policy=deepcopy(repo.row['data']['voice_assistant'])|{'source_profile_id':'a'*32,'source_profile_fingerprint':'b'*64,
+        'documents':['wiki/shared.md']}
+    response=await client.put('/meetings/1/voice-assistant',headers={'X-User-Id':'7'},json=policy)
+    assert response.status_code==200,response.text
+    request=next(r for r in calls if r.url.path.endswith('/profile'))
+    assert request.method=='POST' and json.loads(request.content)['source_profile_fingerprint']=='b'*64
+    assert response.json()['policy']['revision']==2
+    policy.pop('source_profile_fingerprint')
+    assert (await client.put('/meetings/1/voice-assistant',headers={'X-User-Id':'7'},json=policy)).status_code==422
+
+
+async def test_project_readiness_rechecks_profile_revocation_even_with_a_cached_ready_verdict(setup):
+    client,repo,redis,calls,*_=setup
+    repo.row['data']['voice_assistant'].update(source_profile_id='a'*32,source_profile_fingerprint='b'*64)
+    await redis.set('meeting:voice:1:current:ready:1','1')
+    for _ in range(2):
+        response=await client.get('/bots/voice/1/current/config',headers=headers())
+        assert response.status_code==200
+    assert len([r for r in calls if r.url.host=='agent.test' and r.url.path.endswith('/ready')])==2
+
+
 def question(): return {'request_id': str(uuid4()), 'question': 'What is the plan?', 'revision': 1}
 
 
