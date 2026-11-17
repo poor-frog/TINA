@@ -52,9 +52,11 @@ Legacy notices remain plain text.
 The default `TINA_NOTIFY_CHANNEL=smtp` uses `smtp.gmail.com:465` with SSL and authenticates with
 `TINA_MAIL_ADDR` plus `TINA_MAIL_APP_PASSWORD`. Enable Google 2-Step Verification and create a
 [Gmail App Password](https://support.google.com/accounts/answer/185833); the regular account
-password is not the SMTP credential. Store that pair in private deployment configuration, using
-the deployment's dotenvx encryption workflow when its env file is encrypted. Never put real
-credentials in `.env.example` or a commit.
+password is not the SMTP credential. The shared MVP mailbox values in `deploy/compose/.env` are
+encrypted with the deployment's existing dotenvx public key. Authorized team members need the
+matching `.env.keys`, distributed privately, to decrypt them; `git pull` does not supply that key.
+The SMTP update reuses the existing key pair. Never commit plaintext credentials or `.env.keys`,
+and keep `.env.example` free of real credentials.
 
 Leave `TINA_MAIL_SMTP_HOST` empty for Gmail. Setting that key selects the existing plain,
 unauthenticated relay transport; `TINA_MAIL_SMTP_PORT` only applies to that relay. Recreate the
