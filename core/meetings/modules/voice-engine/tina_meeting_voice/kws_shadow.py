@@ -105,7 +105,7 @@ class KwsMonitor:
             health['peaks'][name] = max(health['peaks'].get(name, 0), score)
             if not math.isfinite(score) or not 0 <= score <= 1:
                 raise ValueError('Invalid shadow score')
-            if score >= .5 and started - row['last_wake'].get(name, -math.inf) >= 1.5:
+            if score >= .4 and started - row['last_wake'].get(name, -math.inf) >= 1.5:
                 row['last_wake'][name] = started
                 self.emit({'event': 'kws', 'status': 'wake', 'model': name, 'channel': channel,
                            'score': round(score, 6), 'source_frame_end_ms': stamp + len(samples) / 16,

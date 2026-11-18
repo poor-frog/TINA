@@ -188,6 +188,17 @@ function acousticFixture(answer?: () => Promise<{text: string; clarification?: b
   return {...f, ready, wake, wakeFor, fail: () => fail(), kws: emit, messages};
 }
 
+for (const model of ['hey_tina','tina_oi']) for (const score of [.399,.4,.45])
+test(`KWS ${model} accepts the runtime 0.4 threshold (${score})`,async()=>{
+  const f=acousticFixture();
+  try {
+    await f.voice.start();f.emit({event:'state',state:'LISTENING'});f.ready();
+    const start=Date.now()+1;await tick(5);f.wake(start,{model,score});
+    assert.equal(f.states.at(-1),score>=.4?'CAPTURING':'LISTENING');
+    assert.deepEqual(f.questions,[]);
+  } finally {await f.voice.stop();}
+});
+
 for (const replay of [false, true]) for (const question of ['', 'ai phụ trách demo?'])
 test(`KWS pre-roll ${replay ? 'replay' : 'live ASR'} dispatches only the request after the call (${question || 'name only'})`, async () => {
   const f = acousticFixture();

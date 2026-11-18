@@ -297,7 +297,7 @@ export class MeetingVoice {
     if (event.status !== 'wake' || this.state !== 'LISTENING' || this.kwsStatus !== 'ready' || this.trigger.pending
         || !KWS_MODELS.includes(event.model as string)
         || !Number.isInteger(event.channel) || (event.channel as number) < 0 || (event.channel as number) >= 65536
-        || typeof event.score !== 'number' || !Number.isFinite(event.score) || event.score < .5 || event.score > 1
+        || typeof event.score !== 'number' || !Number.isFinite(event.score) || event.score < .4 || event.score > 1
         || typeof event.source_frame_end_ms !== 'number' || !Number.isFinite(event.source_frame_end_ms)
         || event.source_frame_end_ms > Date.now() + 1000
         || Date.now() - event.source_frame_end_ms > 5000

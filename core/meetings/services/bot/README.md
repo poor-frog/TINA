@@ -15,6 +15,9 @@ Uncertain boundaries or multiple possible calls take the name acknowledgment pat
 caller; they never dispatch old speech as a request. Original ASR text, source timing, caller ownership
 and the requirement for acoustic confirmation stay unchanged.
 
+The runtime KWS threshold is 0.4 for both `hey_tina` and `tina_oi`, checked in the native worker
+and bot controller. Their per-model 1.5-second detection cooldown remains in place.
+
 `voice_timing` logs retain only request UUID/channel, timestamps and durations. Speech timing is
 split into `ack_*` (name acknowledgment), `notice_*` (question/recap wait) and `answer_*`.
 Each group records `tts_requested`, `pcm_received`, `buffer_ready` and `playback_started`;

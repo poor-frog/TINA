@@ -149,3 +149,12 @@ def test_wake_keeps_only_recent_continuous_transport_identity(monkeypatch):
     streams[-1].score = .9
     engine.feed(1, None, np.zeros(1280), 4080, 1280)
     assert [e for e in events if e['status'] == 'wake'][-1]['participant'] is None
+
+
+@pytest.mark.parametrize('score,expected',[(.399,False),(.4,True),(.45,True),(.5,True)])
+def test_activation_threshold_is_point_four(monkeypatch,score,expected):
+    engine,streams,events,_=fixture(monkeypatch)
+    streams[0].score=score
+    engine.feed(1,'caller',np.zeros(1280),1000,0)
+    assert any(e['status']=='wake' for e in events) is expected
+    engine.close()
