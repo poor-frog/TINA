@@ -404,3 +404,107 @@ def test_web_worker_expired_shared_deadline_does_not_contact_retrieval(monkeypat
     payload={'request_id':'expired','text':json.dumps({'mode':'voice_web','question':'public','retrieval_deadline_ms':1})}
     engine._run_meeting_knowledge(stream,'out',{'entrypoint':{'inline':PREFIX+json.dumps(payload)}})
     assert events==[{'type':'turn-complete'}]
+
+
+@pytest.mark.parametrize('repaired,reviewed,reason,checks',[
+ ('150 triệu đồng/lượng',True,'answered',['numeric_mismatch','approved']),
+ ('150 triệu đồng/chỉ',True,'web_numeric_mismatch',['numeric_mismatch','numeric_mismatch']),
+ ('invalid',True,'web_numeric_mismatch',['numeric_mismatch','repair_failed']),
+ ('150 triệu đồng/lượng',False,'verification_rejected',['numeric_mismatch','contradiction']),
+])
+def test_public_money_repair_runs_once_and_must_pass_numeric_and_semantic_checks(monkeypatch,repaired,reviewed,reason,checks):
+    quote='Giá giả định là 150.000.000 đồng/lượng.'
+    monkeypatch.setattr(agent_reach,'query',lambda *a,**k:{'ok':True,'items':[
+        {'title':'Synthetic source','url':'https://example.com','text':quote}]})
+    def claim(text):return json.dumps({'claims':[{'text':text,'source_ids':['s0']}]})
+    repairs,reviews=[],[]
+    def repair(prompt):
+        value=json.loads(prompt);repairs.append(value)
+        assert value['sources'][0]['quote']==quote
+        assert value['rejection']=={'reason':'numeric_mismatch','claim_indexes':[0]}
+        return 'invalid' if repaired=='invalid' else claim(repaired)
+    def review(prompt):
+        reviews.append(json.loads(prompt))
+        return json.dumps({'approved':reviewed,'reason':'contradiction','claim_indexes':[0]})
+    result=agent_reach.answer_public('https://example.com',lambda _:claim('150 tỷ đồng/lượng'),review,repair=repair)
+    assert len(repairs)==1 and result.get('reason','answered')==reason and result['verification']==checks
+    assert len(reviews)==int(repaired=='150 triệu đồng/lượng')
+    if reason=='answered':assert result['text']==repaired and result['links']
+    else:assert not result.get('text') and not result.get('links')
+
+
+@pytest.mark.parametrize('stop',[False,True])
+def test_web_repair_cannot_advance_after_stop_or_deadline(monkeypatch,stop):
+    now,alive=[0],[True]
+    monkeypatch.setattr(agent_reach.time,'monotonic',lambda:now[0])
+    monkeypatch.setattr(agent_reach,'query',lambda *a,**k:{'ok':True,'items':[
+        {'title':'Synthetic source','url':'https://example.com','text':'150 triệu đồng/lượng'}]})
+    calls=[]
+    def repair(_):
+        calls.append('repair')
+        if stop:alive[0]=False
+        else:now[0]=31
+        return '{"claims":[{"text":"150 triệu đồng/lượng","source_ids":["s0"]}]}'
+    def forbidden(_):pytest.fail('Late review must be blocked')
+    with pytest.raises(RuntimeError if stop else TimeoutError):
+        agent_reach.answer_public('https://example.com',
+            lambda _:'{"claims":[{"text":"150 tỷ đồng/lượng","source_ids":["s0"]}]}',forbidden,
+            repair=repair,current=lambda:alive[0],deadline=30)
+    assert calls==['repair']
+
+
+def test_failed_web_repair_can_release_only_a_separately_verified_supported_subset(monkeypatch):
+    monkeypatch.setattr(agent_reach,'query',lambda *a,**k:{'ok':True,'items':[
+        {'title':'Synthetic source','url':'https://example.com','text':'Giá 150 triệu đồng/lượng. Bảng giá đã cập nhật.'}]})
+    raw=json.dumps({'claims':[{'text':text,'source_ids':['s0']} for text in
+        ('Giá 150 tỷ đồng/lượng.','Bảng giá đã cập nhật.')]})
+    repairs=[];reviews=[]
+    def repair(prompt):repairs.append(prompt);return raw
+    def review(prompt):
+        value=json.loads(prompt);reviews.append(value)
+        assert [c['text'] for c in value['reply']['claims']]==['Bảng giá đã cập nhật.']
+        return '{"approved":true}'
+    result=agent_reach.answer_public('https://example.com',lambda _:raw,review,repair=repair)
+    assert result['text']=='Bảng giá đã cập nhật.' and len(repairs)==len(reviews)==1
+    assert result['verification']==['numeric_mismatch','approved']
+
+
+@pytest.mark.parametrize('sandbox',[False,True])
+def test_worker_repairs_public_money_via_api_even_when_generation_uses_sandbox(monkeypatch,sandbox):
+    import time
+    from types import SimpleNamespace
+    from worker import engine
+    from shared.meeting_knowledge import PREFIX
+    from shared.voice_knowledge import VOICE_REPAIR_SYSTEM,VERIFY_SYSTEM
+    monkeypatch.setenv('TINA_AGENT_REACH_URL','http://reach:8080')
+    monkeypatch.setenv('TINA_CHAT_SESSION','meeting-knowledge-money-repair')
+    monkeypatch.setenv('REDIS_URL','redis://synthetic')
+    monkeypatch.setattr('redis.from_url',lambda *a,**k:SimpleNamespace(get=lambda _:'session:turn',close=lambda:None))
+    quote='Giá giả định là 150.000.000 đồng/lượng.'
+    monkeypatch.setattr(agent_reach,'query',lambda *a,**k:{'ok':True,'items':[
+        {'title':'Synthetic source','url':'https://example.com','text':quote}]})
+    stages=[]
+    def claim(amount):return json.dumps({'claims':[{'text':amount,'source_ids':['s0']}]})
+    def candidate(*args,**kwargs):stages.append('candidate');return claim('150 tỷ đồng/lượng')
+    class Provider:
+        def complete(self,prompt,*,system):
+            if system==VERIFY_SYSTEM:
+                stages.append('review');return SimpleNamespace(text='{"approved":true}')
+            assert not sandbox
+            return SimpleNamespace(text=candidate())
+        def complete_structured(self,prompt,*,system,schema):
+            assert system==VOICE_REPAIR_SYSTEM and schema
+            payload=json.loads(prompt)
+            assert payload['sources'][0]['quote']==quote
+            assert 'history' not in payload and 'PRIVATE ROOM' not in prompt
+            stages.append('repair');return SimpleNamespace(text=claim('150 triệu đồng/lượng'))
+    monkeypatch.setattr(engine,'completion_from_env',lambda **k:Provider())
+    monkeypatch.setattr('worker.voice_sandbox.complete',candidate)
+    events=[];stream=SimpleNamespace(xadd=lambda _,b:events.append(json.loads(b['event'])),expire=lambda *a:None)
+    payload={'request_id':'money-repair','voice_turn':{'meeting_id':1,'holder':'session:turn'},'text':json.dumps({
+        'mode':'voice_web','question':'https://example.com','use_sandbox_agent':sandbox,
+        'retrieval_deadline_ms':int(time.time()*1000)+30000})}
+    engine._run_meeting_knowledge(stream,'out',{'entrypoint':{'inline':PREFIX+json.dumps(payload)}})
+    answer=json.loads(next(e['text'] for e in events if e['type']=='message-delta'))
+    assert answer['text']=='150 triệu đồng/lượng' and answer['verification']==['numeric_mismatch','approved']
+    assert stages==['candidate','repair','review']

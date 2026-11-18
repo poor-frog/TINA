@@ -71,8 +71,9 @@ def public_request(question):
     return 'web', 'search', question
 
 
-def answer_public(question, complete, review, *, refine=None, current=lambda: True, deadline=None):
+def answer_public(question, complete, review, *, repair=None, refine=None, current=lambda: True, deadline=None):
     from shared.voice_knowledge import validate_voice_answer, verify_voice_reply
+    from shared.voice_prices import gold_request, price_answer, CLARIFICATION
     from shared.voice_trace import voice_span, voice_trace_id, log as voice_log
     deadline = min(deadline if deadline is not None else float('inf'), time.monotonic() + 50)
     sources = []
@@ -88,6 +89,11 @@ def answer_public(question, complete, review, *, refine=None, current=lambda: Tr
             value = query(*operation, timeout=min(10, remaining()))
         remaining()
         return value
+
+    price_request = gold_request(question)
+    if price_request and price_request['product'] is None:
+        remaining()
+        return {'text':CLARIFICATION,'clarification':True,'reason':'clarification','links':[]}
 
     def read_pages(items):
         nonlocal pages_read, pages_failed
@@ -150,7 +156,15 @@ def answer_public(question, complete, review, *, refine=None, current=lambda: Tr
         sources = [{'id': f's{i}', 'title': item['title'], 'url': item['url'], 'quote': item['text']}
                    for i, item in enumerate(items.values())]
         remaining()
-        if sources:
+        if sources and price_request:
+            priced = price_answer(question,sources,complete,review,repair,remaining)
+            if priced.get('reason')!='web_answer_empty':
+                return result_for(priced.get('reason','answered'),verification=priced.get('verification',[]),body=priced)
+            # An empty price extraction may use the same one-refinement search budget below.
+            sources_for_answer = False
+        else:
+            sources_for_answer = bool(sources)
+        if sources_for_answer:
             prompt = json.dumps({'question': question, 'sources': sources}, ensure_ascii=False)
             try: raw = complete(prompt)
             except Exception:
@@ -180,13 +194,21 @@ def answer_public(question, complete, review, *, refine=None, current=lambda: Tr
         if not result['ok']:
             return result_for('web_unavailable',retrieval_error=(result.get('error') or {}).get('code'))
     remaining()
-    verified = json.loads(verify_voice_reply(raw,question,sources,review,diagnostics=True))
+    def checked(callback, prompt):
+        remaining()
+        result = callback(prompt)
+        remaining()
+        return result
+    verified = json.loads(verify_voice_reply(raw,question,sources,
+        lambda prompt:checked(review,prompt),
+        repair=(lambda prompt:checked(repair,prompt)) if repair else None,diagnostics=True))
     remaining()
     checks = verified.get('verification',[])
     checked = validate_voice_answer(json.dumps(verified,ensure_ascii=False),sources)
     if not checked['claims']:
         reason = ('verification_unavailable' if verified.get('reason')=='verification_unavailable'
-                  else 'web_numeric_mismatch' if 'numeric_mismatch' in checks else 'verification_rejected')
+                  else 'web_numeric_mismatch' if checks and (checks[-1]=='numeric_mismatch'
+                       or checks==['numeric_mismatch','repair_failed']) else 'verification_rejected')
         return result_for(reason,verification=checks)
     return result_for('answered',verification=checks,body={
         'text':' '.join(c['text'] for c in checked['claims']),

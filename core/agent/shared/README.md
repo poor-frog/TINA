@@ -140,3 +140,5 @@ questions and uncertain or failed classifications retain local retrieval. No roo
 enter that classifier or the public search payload. Planning deadlines bound this stage too.
 A rejected detail can be removed only by independently verifying the remaining strict subset of
 claims and its follow-up. Verifier outages and unsupported premises still fail closed.
+
+`voice_prices.py` owns bounded gold-price extraction and comparison. Rows quote the exact product/amount cell, buy/sell/spot column, scale/currency/unit header and price update text within an existing approved public excerpt. The quantity normalizer and independent API reviewer both gate deterministic spoken formatting; no supplier feed, conversion or private context is added.

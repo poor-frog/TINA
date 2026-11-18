@@ -792,19 +792,35 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
         elif mode == 'voice_web':
             if os.environ.get('TINA_AGENT_REACH_URL'):
                 from llm.agent_reach import answer_public
+                from shared.voice_prices import PRICE_SYSTEM, PRICE_REVIEW_SYSTEM, price_schema
                 def web_complete(prompt, system, *, refining=False):
                     remaining = voice_deadline - time.monotonic()
                     if remaining <= 0: raise TimeoutError('Voice retrieval budget exhausted')
+                    data = json.loads(prompt)
+                    prices = data.get('mode') == 'gold_prices'
+                    repairing = system == VOICE_REPAIR_SYSTEM
                     schema = ({'type':'object','properties':{'query':{'type':['string','null'],'maxLength':200}},
                                'required':['query'],'additionalProperties':False} if refining else
-                              voice_schema('answer', json.loads(prompt)['sources']) if source.get('use_sandbox_agent') is True else None)
+                              voice_schema('answer', data['sources']) if source.get('use_sandbox_agent') is True or repairing else None)
+                    if prices:
+                        system = PRICE_SYSTEM
+                        schema = price_schema(data['sources'])
                     return generate(completion_from_env(timeout=min(4 if refining else 8,remaining)), prompt,
-                        system, schema, use_harness=not refining)
+                        system, schema, use_harness=not refining and not repairing)
+                def web_review(prompt):
+                    remaining = voice_deadline-time.monotonic()
+                    if remaining<=0: raise TimeoutError('Voice retrieval budget exhausted')
+                    prices = json.loads(prompt).get('mode')=='gold_prices_review'
+                    return generate(completion_from_env(timeout=min(4,remaining)),prompt,
+                        PRICE_REVIEW_SYSTEM if prices else VERIFY_SYSTEM,
+                        {'type':'object','properties':{'approved':{'type':'boolean'}},'required':['approved'],
+                         'additionalProperties':False} if prices else None,use_harness=False)
                 try:
                     with voice_span('web_search', trace_id):
                         public = answer_public(source['question'],
                             lambda prompt: web_complete(prompt,VOICE_SYSTEM),
-                            lambda prompt: generate(completion_from_env(timeout=min(4,voice_deadline-time.monotonic())), prompt, VERIFY_SYSTEM),
+                            web_review,
+                            repair=lambda prompt:web_complete(prompt,VOICE_REPAIR_SYSTEM),
                             refine=lambda prompt: web_complete(prompt,
                                 'Return only JSON {"query":string|null}. The public question could not be answered from these web excerpts. '
                                 'Suggest one short public search query for the missing information, or null if another search will not help. '

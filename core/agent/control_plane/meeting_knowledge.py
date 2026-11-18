@@ -661,6 +661,10 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
     source_routes = {}
 
     def source_route(request, question, policy, history, deadline_ms=None):
+        from shared.voice_prices import gold_followup
+        followup = gold_followup(question,history,int(time.time()*1000))
+        if followup and policy.get('allow_web_search') and (deadline_ms is None or deadline_ms>int(time.time()*1000)):
+            return 'web',followup
         route = voice_route(question)
         if (route[0] != 'meeting' or not policy.get('allow_web_search') or not policy.get('auto_web_search') or len(question) > 200
                 or deadline_ms is not None and deadline_ms <= int(time.time()*1000)
@@ -784,10 +788,12 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
             elif lookup['name']=='search_web':
                 if lookup['query']!=public_query: raise HTTPException(403,'Only the explicit public query may be searched')
                 answer=voice_answer(request,meeting_id,VoiceQuestion(question=body.question,revision=body.revision,
+                    history=body.history,
                     retrieval_deadline_ms=body.retrieval_deadline_ms))
                 result={'tool':'search_web','source_count':len(answer.get('links',[])),
                         'web_result':{'text':answer['text'].removeprefix('Theo thông tin trên web: '),
                                       'links':answer.get('links',[]),'reason':answer.get('reason'),
+                                      'clarification':answer.get('clarification',False),
                                       'verification':answer.get('verification',[])}}
             else:
                 selected,trace=lookup_voice_sources(candidates,[],[lookup],now_ms,semantic=semantic_for(row,policy),dictionary=domain_dictionary(base))
@@ -978,6 +984,12 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                             'web_unavailable','web_no_sources','web_answer_empty','web_numeric_mismatch',
                             'llm_unavailable','generation_format_invalid','verification_rejected','verification_unavailable'):
                         answer = voice_failure(public['reason'],kind=kind)
+                    elif kind=='web' and public.get('clarification') is True:
+                        from shared.voice_prices import CLARIFICATION, gold_request
+                        if public.get('reason')!='clarification' or text!=CLARIFICATION or not gold_request(question):
+                            raise ValueError('Invalid public clarification')
+                        answer={'text':text,'sources':[],'links':[],'answer_kind':'web',
+                                'reason':'clarification','clarification':True}
                     elif kind == 'web' and not links:
                         answer = voice_failure('web_no_sources', kind=kind)
                     elif not isinstance(text, str) or not text.strip() or len(text) > 2000:

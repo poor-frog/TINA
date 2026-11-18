@@ -960,3 +960,38 @@ def test_public_voice_and_livekit_lookup_preserve_failure_category_and_checks(vo
     assert lookup.status_code==200,lookup.text
     result=lookup.json()['web_result']
     assert result['reason']==reason and result['verification']==checks
+
+
+def test_gold_clarification_and_fixed_public_followup_survive_lookup_and_final(voice):
+    import time
+    from shared.voice_prices import CLARIFICATION
+    client,row,_,prompts,mutate=voice
+    row['data']['voice_assistant'].update(engine='livekit',allow_web_search=True,auto_web_search=True)
+    mutate[0]=lambda:json.dumps({'text':CLARIFICATION,'clarification':True,'reason':'clarification','links':[]})
+    path='/api/internal/meeting-voice/1/agent'
+    base={'question':'Giá vàng hôm nay bao nhiêu?','revision':1}
+    lookup=client.post(path,headers=HEADERS,json=base|{'operation':'lookup','lookup':{'name':'search_web','query':base['question']}})
+    assert lookup.status_code==200,lookup.text
+    result=lookup.json()['web_result']
+    assert result['text']==CLARIFICATION and result['clarification'] and result['reason']=='clarification'
+    final=client.post(URL,headers=HEADERS,json=base|{'web_result':result})
+    assert final.status_code==200,final.text
+    assert final.json()['clarification'] is True and final.json()['text']==CLARIFICATION
+    history=[{'question':base['question'],'answer':CLARIFICATION,'clarification':True,'sources':[],
+              'created_at_ms':int(time.time()*1000)-1000}]
+    follow={'question':'SJC','revision':1,'history':history}
+    expected='Giá vàng sjc hôm nay bao nhiêu?'
+    plan=client.post(path,headers=HEADERS,json=follow|{'operation':'plan'})
+    assert plan.json()['tool_calls']==[{'name':'search_web','query':expected}]
+    mutate[0]=lambda:json.dumps({'text':'SJC: giá giả định theo nguồn.','links':[{'title':'Synthetic','url':'https://example.com'}],'verification':['approved']})
+    lookup=client.post(path,headers=HEADERS,json=follow|{'operation':'lookup','lookup':plan.json()['tool_calls'][0]})
+    assert lookup.status_code==200,lookup.text
+    assert prompts[-1]['question']==expected and set(prompts[-1])=={'mode','question'}
+    assert all('PRIVATE' not in json.dumps(p) for p in prompts)
+    final=client.post(URL,headers=HEADERS,json=follow|{'web_result':lookup.json()['web_result']})
+    assert final.status_code==200 and final.json()['answer_kind']=='web' and final.json()['reason']=='answered'
+    row['data']['voice_assistant']['allow_web_search']=False
+    mutate[0]=None
+    plan=client.post(path,headers=HEADERS,json=follow|{'operation':'plan'})
+    assert plan.status_code==200,plan.text
+    assert all(c['name']!='search_web' for c in plan.json()['tool_calls'])

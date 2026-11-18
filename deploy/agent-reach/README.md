@@ -75,3 +75,7 @@ docker run --rm --network tina-production_tina --cap-drop=SYS_ADMIN \
 
 Use your selected project's private network name when it differs. This proof checks source URL
 preservation and a real Codex MCP call/result round trip; it does not exercise a live voice meeting.
+
+After generation, public voice may repair a rejected draft once using the existing API completion adapter and the same original excerpts. Repair never triggers another public search or increases the turn deadline. Invalid, still-mismatched or unreviewable repairs remain blocked; a supported subset needs its own review before TTS.
+
+Gold-price voice answers require source-bound structured rows and independent verification of product, buy/sell column, amount, scale/currency/unit and the table update time. Publication/retrieval times are not price dates. Unknown product asks one short clarification before web retrieval. Missing/old dates are disclosed without claiming today; sources from different suppliers/tables are not combined into a buy/sell pair. This uses public excerpts already retrieved through the same gateway, with no new provider or currency/unit conversions.

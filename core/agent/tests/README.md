@@ -186,3 +186,7 @@ Public-web diagnostic cases distinguish retrieval empty/unavailable, generation 
 unavailable, numeric rejection, semantic rejection and verification outages. They prove content-free
 UUID-correlated logs, typed HTTP retrieval errors without retry, and preservation through LiveKit
 lookup/final answers and durable Meeting API replies. Verification thresholds remain unchanged.
+
+Money verification tests cover Vietnamese grouped currency amounts, explicit mixed separators, exact scale/sign preservation and distinct per-lượng/per-chỉ units. Single ambiguous separators without Vietnamese locale evidence, dates and technical version strings remain conservative. Public-web tests cover one repair for direct/sandbox generation, API-only repair, Stop/deadline fences and separately reviewed partial answers.
+
+`test_voice_prices.py` checks exact source fragments, wrong product/amount/currency/unit/scale, swapped buy/sell rejection by the independent reviewer, preserved dates/clocks and unknown/old/future/invalid timestamps, separate suppliers, one repair and Stop. Worker tests exercise direct and sandbox extraction with API-only verification; Meeting Knowledge tests drive public clarification, fixed product follow-up and finalization without exporting private sources. Live supplier accuracy is not proved by synthetic fixtures.
