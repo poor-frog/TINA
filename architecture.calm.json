@@ -68,10 +68,19 @@
    "unique-id": "deploy",
    "node-type": "system",
    "name": "deploy",
-   "description": "Deployment and execution-target registry. Local tina CLI/TUI shares Compose configuration, build/activation and readiness logic; operational mutations target the selected Docker context/project, preserve data volumes and support dry-run. Read-only full diagnostics resolve effective ASR through Identity and probe configured host/container health without inference. Allowlisted repository checks reuse existing gates and write private local logs. ASR configuration uses existing Identity global/account settings APIs with explicit scoped previews and secret-free output. Fresh local setup creates private configuration and new Compose-managed volumes, refuses existing configuration/resources and occupied ports, and reuses deployment plus optional ASR configuration/status verification; it does not install native capture or models. No user meeting/agent API client is added.",
+   "description": "Deployment and execution-target registry. Local tina CLI/TUI shares Compose configuration, build/activation and readiness logic; operational mutations target the selected Docker context/project, preserve data volumes and support dry-run. Read-only full diagnostics resolve effective ASR through Identity and probe configured host/container health without inference. Allowlisted repository checks reuse existing gates and write private local logs. ASR configuration uses existing Identity global/account settings APIs with explicit scoped previews and secret-free output. Fresh local setup creates private configuration and new Compose-managed volumes, refuses existing configuration/resources and occupied ports, and reuses deployment plus optional ASR configuration/status verification; it does not install native capture or models. No user meeting/agent API client is added. Optional AWS host maintenance archives logs and changed writable files from expired stopped runtime-owned Docker bot/worker containers into private checksummed host bundles before exact-ID removal. Selection is scoped to one runtime network with a 15-minute grace, excludes service/init containers and mounted persistent data, and rechecks stopped identity after archival. A host systemd timer runs every ten minutes while EC2 is running; no runtime API or workload contract changes.",
    "metadata": [
     {
-     "path": "deploy"
+     "path": "deploy",
+     "host-maintenance": {
+      "source": "deploy/aws-demo/container-cleanup.py",
+      "installer": "deploy/aws-demo/install-container-cleanup.sh",
+      "writer": "operator-owned host cleanup service",
+      "archive": "/var/lib/tina/container-cleanup/archives/<container-id>/<stopped-identity>/",
+      "archive-retention": "Preserved for operator review; no automatic archive deletion",
+      "selection": "runtime.managed=true; exact runtime network; stopped for at least 900 seconds; bot/worker name prefix",
+      "preservation": "Changed writable files and logs archived durably before removal; persistent mounts, running containers and ECS/Compose services are excluded"
+     }
     }
    ]
   },
