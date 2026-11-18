@@ -427,6 +427,9 @@ async def request_bot(
     voice_agent_enabled: Optional[bool] = False,
     automatic_leave: Optional[dict] = None,
     continue_meeting: bool = False,
+    auto_retry_enabled: bool = True,
+    expected_meeting_id: Optional[int] = None,
+    auto_retry_attempt: Optional[int] = None,
     max_concurrent: Optional[int] = None,
     redis_url: Optional[str] = None,
     meeting_api_url: Optional[str] = None,
@@ -457,6 +460,13 @@ async def request_bot(
     if is_discord:
         # This connector is receive/transcribe-only; the browser bot owns TTS injection.
         voice_agent_enabled = False
+    if auto_retry_attempt is not None and (not continue_meeting or expected_meeting_id is None):
+        raise ValueError("automatic retry requires the expected terminal meeting row")
+    if auto_retry_attempt is not None:
+        from ..lifecycle.retry import DEFAULT_MAX_ATTEMPTS
+
+        if type(auto_retry_attempt) is not int or not 2 <= auto_retry_attempt <= DEFAULT_MAX_ATTEMPTS:
+            raise ValueError("automatic retry attempt is outside its bounded policy")
     # 1. URL.
     constructed_url = meeting_url or construct_meeting_url(
         platform, native_meeting_id, teams_base_host=teams_base_host
@@ -499,10 +509,10 @@ async def request_bot(
         recording_enabled = False
     # THE NAME THIS PERSON'S BOT SHOWS UP AS — third reader of the same one hop. Precedence is
     # auto-join's, unchanged: an explicit name on THIS request, then this person's default from
-    # identity, then the deployment's (applied at `build_invocation` below). An explicit name wins
-    # without identity being consulted about it at all — the answer could not change anything.
+    # identity, then the deployment's. An explicit name wins without identity being consulted
+    # about it at all — the answer could not change anything.
     if not bot_name:
-        bot_name = _bot_name_from_context(bot_context)
+        bot_name = _bot_name_from_context(bot_context) or os.getenv("DEFAULT_BOT_NAME") or f"TINA-{uuid.uuid4().hex[:6]}"
     transcription_provider: Optional[str] = "none" if not transcribe_enabled else None
     configured_backend = configured.get("backend")
     if configured.get("disabled") and transcribe_enabled:
@@ -609,6 +619,8 @@ async def request_bot(
     reused_row: Optional[dict] = None
     if continue_meeting:
         latest = await repo.find_latest(user_id, platform, native_meeting_id)
+        if expected_meeting_id is not None and (latest or {}).get("id") != expected_meeting_id:
+            raise DuplicateMeeting("Automatic retry was superseded by a newer meeting request")
         latest_data = (latest or {}).get("data") or {}
         deletion = latest_data.get("artifact_deletion") or {}
         recording_delete = any(
@@ -635,6 +647,8 @@ async def request_bot(
                 )
                 raise MeetingStopped(_stopped_reopen_detail(latest["id"]))
             reused_row = latest
+        if expected_meeting_id is not None and reused_row is None:
+            raise DuplicateMeeting("Automatic retry is no longer eligible")
 
     # 2+2b+3. Dedup + max-bots cap + INSERT, made ATOMIC (ROB1/ROB2). Replaces the old read-check-
     #     then-act sequence (find_active → count_active_bots → create_meeting), whose three separate
@@ -727,6 +741,14 @@ async def request_bot(
                 )
                 raise MaxBotsExceeded(user_id, max_concurrent)
         policy_patch = {}
+        if auto_retry_attempt is not None:
+            from ..lifecycle.retry import DEFAULT_MAX_ATTEMPTS
+
+            policy_patch["auto_retry"] = {
+                "state": "in_progress",
+                "attempt": auto_retry_attempt,
+                "max_attempts": DEFAULT_MAX_ATTEMPTS,
+            }
         if (voice_agent_enabled and transcribe_enabled and platform=='google_meet' and env_flag('TINA_MEETING_VOICE',False)
                 and not (reused_row.get('data') or {}).get('voice_assistant')):
             from ..lifecycle.voice import new_meeting_voice_policy
@@ -747,6 +769,26 @@ async def request_bot(
         meeting_data: dict[str, Any] = {}
         if constructed_url:
             meeting_data["constructed_meeting_url"] = constructed_url
+        if auto_retry_enabled and constructed_url and passcode:
+            meeting_data["auto_retry"] = {"state": "manual_only", "attempt": 1,
+                                           "max_attempts": 3}
+        elif auto_retry_enabled and constructed_url:
+            from ..lifecycle.retry import DEFAULT_MAX_ATTEMPTS
+
+            meeting_data["auto_retry"] = {"state": "ready", "attempt": 1,
+                                           "max_attempts": DEFAULT_MAX_ATTEMPTS}
+            meeting_data["_auto_retry_request"] = {
+                "bot_name": bot_name,
+                "teams_base_host": teams_base_host,
+                "language": language,
+                "task": task,
+                "transcription_tier": transcription_tier,
+                "recording_enabled": recording_enabled,
+                "transcribe_enabled": transcribe_enabled,
+                "voice_agent_enabled": voice_agent_enabled,
+                "automatic_leave": automatic_leave,
+                "max_concurrent": max_concurrent,
+            }
         meeting_data["transcribe_enabled"] = transcribe_enabled
         meeting_data["recording_enabled"] = recording_enabled
         meeting_data["voice_agent_enabled"] = voice_agent_enabled
@@ -817,7 +859,7 @@ async def request_bot(
         meeting_id=meeting_id,
         platform=platform,
         meeting_url=join_url,
-        bot_name=bot_name or (os.getenv("DEFAULT_BOT_NAME") or f"TINA-{uuid.uuid4().hex[:6]}"),
+        bot_name=bot_name,
         passcode=passcode,
         token=token,
         native_meeting_id=native_meeting_id,

@@ -1510,6 +1510,7 @@ export function createSpeakController(
   let micQueue: Promise<void> = Promise.resolve();
   let speechGeneration = 0;
   let micUncertain = false;
+  let micTouched = false;
   const setMic = async (on: boolean): Promise<boolean> => {
     const generation = speechGeneration;
     const operation = micQueue.then(async () => {
@@ -1542,6 +1543,7 @@ export function createSpeakController(
         if (generation !== speechGeneration) return 'stopped';
         if (!buffered) return await run() ?? 'failed';
       }
+      micTouched = true; // Even a failed/timed-out unmute must retain the strict Stop mute check.
       const verified = await setMic(true);                   // (a) unmute the meeting-UI mic button
       if (generation !== speechGeneration) return 'stopped';
       // (b) synthesize via the TTS service + stream PCM to tts_sink → virtual_mic (the bot's mic).
@@ -1579,6 +1581,7 @@ export function createSpeakController(
       if (!enabled) return;
       speechGeneration++;
       tts.stop();                                             // barge-in: kill playback + re-mute tts_sink
+      if (!micTouched) return; // A pre-admission failure has no meeting microphone to manipulate.
       if (!await setMic(false)) throw new Error('Meeting microphone mute could not be verified');
       console.log('[bot] speak_stop');
     },

@@ -6,7 +6,7 @@
  *  "Stop bot"; no active meeting → the send/resend control.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { BotControls, meetingHeaderState, meetingWhenLabel } from "../meeting";
 import type { MeetingMock } from "../meetingModel";
 
@@ -42,6 +42,23 @@ describe("meetingHeaderState — pure (row, connected) → header", () => {
 });
 
 describe("BotControls — enabled-ness follows WS connectivity", () => {
+  it("shows the owner's safe join diagnosis on a failed meeting", () => {
+    const summary="Google Meet blocked the bot before an admission request could be sent.";
+    const {rerender}=render(<BotControls m={{...row('failed'),join_failure_summary:summary}} />);
+    expect(screen.getByRole('status').textContent).toBe(summary);
+    rerender(<BotControls m={{...row('active'),join_failure_summary:summary}} />);
+    expect(screen.queryByText(summary)).toBeNull();
+  });
+  it("lets the owner cancel a pending automatic retry", async () => {
+    render(<BotControls m={{ ...row("failed"), auto_retry: {
+      state: "scheduled", attempt: 1, max_attempts: 3,
+    } }} connected={true} />);
+    expect(screen.queryByRole("button", { name: "Send bot again" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel retry" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      `/api/bots/google_meet/${NATIVE}`, { method: "DELETE" },
+    ));
+  });
   it("connected + active → 'Stop bot' enabled", () => {
     render(<BotControls m={row("active")} connected={true} />);
     const btn = screen.getByRole("button", { name: "Stop bot" });

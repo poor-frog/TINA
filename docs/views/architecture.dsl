@@ -158,10 +158,10 @@ edges:
   agent-worker -write-> meeting-wiki-entity  # deterministically serialize the validated summary/cards and commit only kg/entities/meeting/{id}.md
   bot -read-> bot-commands  # SUBSCRIBE acts.v1 commands
   meeting-api -write-> bm-status  # PUBLISH status
-  meeting-api -write-> u-meetings  # PUBLISH per-user status
+  meeting-api -write-> u-meetings  # PUBLISH per-user lifecycle and auto-retry attempt state for Terminal; Extension reads the same owner-only retry state from GET /meetings.
   meeting-api -write-> bot-commands  # PUBLISH leave/speak
   meeting-api -write-> recording-blob  # S3 PUT stitched master
-  meeting-api -write-> postgres
+  meeting-api -write-> postgres  # Persist transient pre-admission retry state atomically with lifecycle status; the single-flight auto-join loop polls due rows. Owner cancellation and retry reopen share the row lock; cancelled, deleted and superseded rows cannot trigger a fresh automatic spawn.
   meeting-api -write-> object-store
   meeting-api -req-> runtime  # POST /workloads spawn bot
   meeting-api -req-> admin-api  # GET /internal/calendar-configs discovers secret-gated ICS/Google calendar connections; decrypts Google refresh tokens only for Meeting API sync and sends tombstones for cleanup

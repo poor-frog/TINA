@@ -373,6 +373,9 @@ export function actionsFor(m: MeetingMock): RowAction[] {
   };
 
   const raw = m.live_status ?? (m.status === "live" ? "active" : "completed");
+  if (raw === "failed" && m.auto_retry?.state === "scheduled") {
+    return [{ id: "stop", label: "Cancel retry", tone: "live", run: stop }];
+  }
   const hasLink = !!m.native_id;
   if (raw === "awaiting_admission") {
     return [{ id: "stop", label: "Stop waiting", tone: "live", run: stop }];
@@ -407,6 +410,18 @@ function StatusBadge({ raw }: { raw?: string }) {
       {dot && <span style={{ width: 5, height: 5, borderRadius: "50%", background: b.color }} />}{b.label}
     </span>
   );
+}
+
+function autoRetryMessage(m: MeetingMock): string | null {
+  const retry = m.auto_retry;
+  if (!retry) return null;
+  if (retry.state === "manual_only" && m.live_status === "failed") return "This meeting needs a passcode, so send it again manually.";
+  if (retry.state === "exhausted") return "Automatic retries are exhausted. Use Send bot again to retry.";
+  if (retry.state === "failed") return "Automatic retry failed. Use Send bot again to retry.";
+  if (retry.state === "not_retryable") return "This failure will not be retried automatically.";
+  if (retry.state !== "scheduled" && !(retry.state === "in_progress" && retry.attempt > 1)) return null;
+  const attempt = retry.attempt + (retry.state === "scheduled" ? 1 : 0);
+  return `TINA is retrying automatically · attempt ${attempt} of ${retry.max_attempts}`;
 }
 
 /** Status badge (only when meaningful) + a small ▾ menu of action→transition items for one meeting row.
@@ -470,6 +485,7 @@ function MeetingRow({ m }: { m: MeetingMock }) {
   const label = m.title_custom ?? (m.native_id ?? m.title).replace(/^Google Meet · /, "");
   const showBadge = BADGE_STATUSES.has(m.live_status ?? "");
   const isIntent = INTENT_STATUSES.has(m.live_status ?? "");
+  const retryMessage = autoRetryMessage(m);
   useEffect(() => {
     if (!actionFailure) return;
     // A service denial is a thing the user must ACT on (add funds, finish setup, raise the cap) —
@@ -488,6 +504,11 @@ function MeetingRow({ m }: { m: MeetingMock }) {
         {(m.native_id || isIntent) && !m.shared && <RowActions m={m} showBadge={showBadge} reveal={hover} onActionStart={() => setActionFailure(null)} onActionFailure={setActionFailure} />}
       </div>
       <div style={{ fontSize: 11, color: inRoom ? "var(--green)" : "var(--t3)", marginTop: 1, paddingLeft: inRoom ? 13 : 0 }}>{inRoom ? "live" : m.when}</div>
+      {retryMessage && (
+        <div role="status" style={{ fontSize: 11, color: "var(--accent)", marginTop: 3, lineHeight: 1.35 }}>
+          {retryMessage}
+        </div>
+      )}
       {isIntent && m.auto_join_error && (
         <div role="alert" style={{ fontSize: 11, color: "var(--danger)", marginTop: 3, lineHeight: 1.35 }}>
           Auto-join failed: {m.auto_join_error}
@@ -828,7 +849,8 @@ export function BotControls({ m, connected = true }: { m: MeetingMock; connected
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const acts = actionsFor(m).filter((a) => a.id === "stop" || a.id === "resend" || a.id === "send");
-  if (acts.length === 0) return null;
+  const retryMessage = autoRetryMessage(m);
+  if (acts.length === 0 && !retryMessage) return null;
   // The control's enabled-ness is a pure function of (row status, WS-connected): while the live
   // `meeting.status` stream is down the row may be a stale snapshot, so a state-bearing control
   // degrades to indeterminate/disabled — never an actionable "Stop bot" for a meeting the backend
@@ -836,6 +858,8 @@ export function BotControls({ m, connected = true }: { m: MeetingMock; connected
   const disabled = busy || !connected;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flex: "none" }}>
+      {m.live_status === "failed" && m.join_failure_summary && <span role="status" style={{ fontSize: 11, color: "var(--danger)", maxWidth: 280, lineHeight: 1.4 }}>{m.join_failure_summary}</span>}
+      {retryMessage && <span role="status" style={{ fontSize: 11, color: "var(--accent)" }}>{retryMessage}</span>}
       {acts.map((a) => {
         const danger = a.tone === "live";
         return (
@@ -851,7 +875,7 @@ export function BotControls({ m, connected = true }: { m: MeetingMock; connected
               color: danger ? "var(--danger)" : "var(--accent)",
               borderRadius: 7, padding: "4px 11px", fontSize: 12, fontWeight: 600,
               cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1 }}>
-            {a.id === "stop" ? "Stop bot" : "Send bot again"}
+            {a.id === "stop" ? (m.auto_retry?.state === "scheduled" ? "Cancel retry" : "Stop bot") : "Send bot again"}
           </button>
         );
       })}

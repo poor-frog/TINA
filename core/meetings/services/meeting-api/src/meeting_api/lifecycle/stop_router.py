@@ -128,7 +128,22 @@ def build_stop_router(repo: MeetingRepo, publisher: CommandPublisher, runtime=No
         # the lobby survived the stop and walked in afterwards. The shapes that produce a sibling
         # are known and live (a manual "Send bot now" plus a calendar import that failed to adopt
         # it — rows 26237 + 26251 on one native id, 2026-08-17).
+        cancel = getattr(repo, "cancel_join_retries", None)
+        cancelled_retries = await cancel(user_id, platform, native_meeting_id) if cancel else []
+        for row in cancelled_retries:
+            try:
+                await publisher.publish(f"u:{user_id}:meetings", json.dumps({
+                    "type": "meeting.status", "meeting_id": row["id"],
+                    "native": native_meeting_id, "status": row["status"],
+                    "auto_retry": row["data"]["auto_retry"],
+                }))
+            except Exception:
+                pass  # cancellation is durable even if the notification bus is unavailable
         rows = await _active_rows(repo, user_id, platform, native_meeting_id)
+        if not rows and cancelled_retries:
+            return {"status": "stopping", "meeting_id": cancelled_retries[0]["id"],
+                    "native_meeting_id": native_meeting_id,
+                    "also_stopped": [], "cancelled": [row["id"] for row in cancelled_retries]}
         if not rows:
             raise HTTPException(status_code=404, detail="No active meeting for this bot")
         # The stop trigger is ONE-SHOT. Redelivering DELETE must not re-publish a leave command or
@@ -228,7 +243,7 @@ def build_stop_router(repo: MeetingRepo, publisher: CommandPublisher, runtime=No
             # not been dispatched. Same always-present rule as `also_stopped`. `status` stays
             # "stopping" whatever the mix — it describes the request, and the api.v1 client codes
             # against it; the truthful per-row fate is on the rows themselves.
-            "cancelled": [row["id"] for row in planned],
+            "cancelled": [row["id"] for row in planned + cancelled_retries],
         }
 
     return router

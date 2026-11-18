@@ -6,6 +6,16 @@ import {mkdtempSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
+test('cleanup before first playback stops the audio sink without looking for a meeting microphone', async () => {
+  let stopped=0;
+  const page={evaluate(){throw new Error('No admitted meeting page');}};
+  const controller=createSpeakController(page as never,{platform:'google_meet',voiceAgentEnabled:true} as never,
+    ()=>({async speak(){return 'completed';},stop(){stopped++;}}));
+  await controller.stop();
+  await controller.stop();
+  assert.equal(stopped,2);
+});
+
 test('a stalled renderer bounds Stop and fences late unmute until mute is verified', async context => {
   context.mock.timers.enable({apis:['setTimeout']});
   let release!: (on:boolean)=>void, evaluations=0, played=0, stopped=0;

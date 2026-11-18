@@ -138,3 +138,5 @@ VoiceInterruption uses caller identity, source-clock/ASR agreement, final soft-c
 After a spoken prompt, the same caller has five seconds to begin a reply. A primary VAD onset
 with matching recent transport identity reserves that reply while ASR completes, bounded by the
 existing 20-second capture limit. Other callers, stale audio, Stop and policy changes cannot extend it.
+
+Before any playback/unmute attempt, cleanup stops the TTS sink without searching for a meeting microphone on a rejected lobby page. After an unmute attempt, Stop still verifies mute strictly, including failed or timed-out attempts that could complete later.

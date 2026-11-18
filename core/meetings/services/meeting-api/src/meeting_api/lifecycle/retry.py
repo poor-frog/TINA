@@ -1,8 +1,8 @@
-"""Join-retry as a control-plane re-spawn (P3d).
+"""Bounded retry policy for transient, pre-admission bot failures.
 
-On a **TRANSIENT** join-failure the control plane schedules a FRESH bot as a NEW ``meeting_session``
-via the runtime scheduler (reusing the proven exponential-backoff + bounded-attempt machinery), then
-stops. On a **PERMANENT** reason there is NO retry — the meeting goes straight to ``failed``.
+Production persists the next attempt on the failed meeting row and the existing single-flight auto-join
+loop dispatches it. ``JoinRetryController`` remains the FakeClock eval harness for the same policy.
+Each retry is a fresh ``meeting_session``. On a **PERMANENT** reason there is NO retry.
 
 The taxonomy is DERIVED FROM the sealed lifecycle.v1 ``CompletionReason`` values (the plan's P3d
 classification — NB: the PARENT meeting-api has no join-retry; this is NEW control-plane behaviour,
@@ -20,10 +20,14 @@ Bounded to a few attempts (config, default 3). Each attempt is its OWN ``meeting
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
 from .machine import CompletionReason
+
+
+DEFAULT_MAX_ATTEMPTS = 3
 
 
 class RetryClass(str, Enum):
@@ -66,11 +70,64 @@ def is_transient(reason: Optional[CompletionReason]) -> bool:
     return classify_retry(reason) is RetryClass.TRANSIENT
 
 
+def next_retry_state(
+    current: dict,
+    reason: Optional[CompletionReason],
+    failure_stage: Optional[str],
+    *,
+    stop_requested: bool = False,
+    now: Optional[datetime] = None,
+    policy: Optional[RetryPolicy] = None,
+) -> dict:
+    """Return the persisted state after a failed attempt; only unserved transient failures retry."""
+    policy = policy or RetryPolicy()
+    attempt = current.get("attempt", 1)
+    attempt = attempt if type(attempt) is int and attempt > 0 else 1
+    max_attempts = policy.max_attempts
+    state = {"attempt": attempt, "max_attempts": max_attempts}
+    if stop_requested:
+        return {**state, "state": "cancelled"}
+    if failure_stage not in {"requested", "joining", "awaiting_admission"} or not is_transient(reason):
+        return {**state, "state": "not_retryable"}
+    if attempt >= max_attempts:
+        return {**state, "state": "exhausted"}
+    delay = policy.delay_for(attempt)
+    return {
+        **state,
+        "state": "scheduled",
+        "next_at": ((now or datetime.now(timezone.utc)) + timedelta(seconds=delay)).isoformat(),
+    }
+
+
+def persist_retry_transition(data: dict, previous_status: str, status: str) -> None:
+    """Update retry state with the lifecycle write, under the meeting row lock."""
+    current = data.get("auto_retry")
+    if previous_status == status or not isinstance(current, dict) or not isinstance(data.get("_auto_retry_request"), dict):
+        return
+    state = dict(current)
+    state.pop("next_at", None)
+    if data.get("stop_requested"):
+        state["state"] = "cancelled"
+    elif status == "failed":
+        try:
+            reason = CompletionReason(data.get("completion_reason"))
+        except ValueError:
+            reason = None
+        state = next_retry_state(current, reason, data.get("failure_stage"))
+    elif status == "active":
+        state["state"] = "succeeded"
+    elif status == "completed":
+        state["state"] = "completed"
+    else:
+        state["state"] = "in_progress"
+    data["auto_retry"] = state
+
+
 @dataclass
 class RetryPolicy:
     """Bounded exponential backoff (mirrors the scheduler's Retry shape)."""
 
-    max_attempts: int = 3
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS
     backoff: List[float] = field(default_factory=lambda: [30.0, 120.0, 300.0])
 
     def delay_for(self, attempt: int) -> float:
