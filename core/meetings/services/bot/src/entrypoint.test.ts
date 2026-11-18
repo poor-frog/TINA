@@ -32,7 +32,7 @@ function makeStubBin(root: string): string {
   mkdirSync(bin, { recursive: true });
   for (const name of ['Xvfb', 'fluxbox', 'pulseaudio', 'pactl']) {
     const p = join(bin, name);
-    writeFileSync(p, '#!/bin/sh\nexit 0\n');
+    writeFileSync(p, name === 'pactl' ? '#!/bin/sh\nprintf "PACTL %s\\n" "$*"\n' : '#!/bin/sh\nexit 0\n');
     chmodSync(p, 0o755);
   }
   return bin;
@@ -111,6 +111,7 @@ const main = async () => {
     const r = await runEntrypoint(PLAIN_EXIT_WORKER);
     check('a normal worker exit propagates its code unchanged', r.code === 7, `exit=${r.code}`);
     check('exit breadcrumb carries the code', r.stdout.includes('worker exited with code 7'), r.stdout.slice(-400));
+    check('bot speech starts at 70% volume', r.stdout.includes('PACTL set-sink-volume tts_sink 70%'));
   }
 };
 

@@ -3,6 +3,7 @@ import { log, randomDelay, callJoiningCallback } from "../_host";
 import { BotConfig } from "../_host";
 import {
   googleNameInputSelectors,
+  googleGuestContinueSelectors,
   googleJoinButtonSelectors,
   googleMicrophoneButtonSelectors,
   googleCameraButtonSelectors,
@@ -248,6 +249,22 @@ export function isGoogleMeetProductRedirect(url: string): boolean {
   }
 }
 
+/** New signed-out Meet screens require an explicit guest choice before showing the name field. */
+export async function waitForGuestNameInput(
+  page: Page, timeoutMs: number,
+  click: (handle: ElementHandle<Element>, label: string) => Promise<void>,
+): Promise<{ handle: ElementHandle<Element>; selector: string }> {
+  const deadline = Date.now() + timeoutMs;
+  const hit = await waitForAnySelector(page, [...googleNameInputSelectors, ...googleGuestContinueSelectors],
+    timeoutMs, "name input or guest continuation");
+  if (!googleGuestContinueSelectors.includes(hit.selector)) return hit;
+  await click(hit.handle, "continue_as_guest");
+  log("Selected Continue as guest; waiting for the name input.");
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error("Google Meet guest continuation exceeded the name-input budget");
+  return waitForAnySelector(page, googleNameInputSelectors, remaining, "name input");
+}
+
 /**
  * Resolve the Meet lobby's primary admission CTA by the ordered selector list.
  *
@@ -474,11 +491,10 @@ export async function joinGoogleMeeting(
     // Anonymous flow: enter bot name and ask to join
     log("Attempting to find name input field...");
 
-    const { handle: nameHandle, selector: nameFieldSelector } = await waitForAnySelector(
+    const { handle: nameHandle, selector: nameFieldSelector } = await waitForGuestNameInput(
       page,
-      googleNameInputSelectors,
       120000,
-      "name input"
+      clickHandle
     );
     log("Name input field found.");
 

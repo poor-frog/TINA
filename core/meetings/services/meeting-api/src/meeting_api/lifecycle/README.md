@@ -50,7 +50,8 @@ parent's FM-003 discipline). `active → joining` (and any re-open of a terminal
 - `stop.py` (P3b) — the user-stop path: `request_stop(record, publisher, meeting_id)` sets
   `stop_requested` + publishes the `bot_commands:meeting:{id}` `{action:"leave"}` command;
   `classify_user_stop` / `stop_event_for` resolve the bot's exit to an ATTRIBUTED terminal.
-- `retry.py` (P3d) — `JoinRetryController` + the transient/permanent taxonomy
+- `retry.py` — transient/permanent taxonomy and bounded backoff. Production persists eligible retries
+  in `meeting.data.auto_retry`; the single-flight auto-join loop re-spawns each attempt as a new session.
   (`classify_retry` / `is_transient`): on a TRANSIENT join-failure schedule a fresh re-spawn (a new
   `meeting_session`) through the runtime scheduler with bounded exponential backoff; a PERMANENT
   reason never retries.

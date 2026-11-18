@@ -5,4 +5,8 @@ Autonomous testcontainers evals — ephemeral Postgres + Redis, no live bbb stac
 `runtime/tests/test_docker_backend.py`). O-STACK-1 `test_stack_postgres.py`, O-STACK-2
 `test_stack_redis.py`, O-STACK-3 `test_stack_admin_api.py`.
 
+`test_google_calendar_regressions.py` uses the actual FastAPI routes with an in-memory SQLAlchemy
+user and fake persistence. It checks first link/encryption, legacy ICS isolation, and connection caps
+without starting Postgres or Docker.
+
 _Governed by `docs/docs/governance/architecture.mdx` (P1–P12). This folder owns one concern; its public surface is its `index`/contract; it may depend only on what the dependency-rules allow._

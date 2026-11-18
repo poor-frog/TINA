@@ -37,6 +37,10 @@ and stays in their ecosystem (FastAPI + redis + DB).
 
 ## Isolated evaluation
 
+Meeting voice retrieval shares a server-owned 30-second deadline across planning and lookups.
+Internal Agent API requests carry that same deadline to queued planning workers; it is never
+accepted from the bot request body, refreshed by a new plan, or used to widen source permissions.
+
 ```bash
 uv run pytest -q        # uv manages this package's own venv/deps
 ```

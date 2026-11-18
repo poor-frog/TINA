@@ -22,6 +22,8 @@ def main():
             requests.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
             has_web = any(tool.get('type') == 'web_search' for tool in requests[-1]['tools'])
             text = 'WEB_WIRE_OK' + (' citeturn0search0' if has_web else '')
+            if requests[-1].get('text', {}).get('format', {}).get('type') == 'json_schema':
+                text = '{"tool_calls":[]}'
             message = {'id': 'msg_fixture', 'type': 'message', 'role': 'assistant',
                        'content': [{'type': 'output_text', 'text': text, 'annotations': []}]}
             events = [
@@ -88,6 +90,15 @@ def main():
                     assert stored and any(json.loads(path.read_text())[0]['url'].startswith('https://docs.python.org/') for path in stored)
                 session = events[-1]['sessionId']
                 print(f'PASS {trigger} {mode} web tool on {"new" if previous == 0 else "resumed"} thread', flush=True)
+            schema = {'type':'object','properties':{'tool_calls':{'type':'array','items':{'type':'string'}}},
+                      'required':['tool_calls'],'additionalProperties':False}
+            events = list(harness.run_turn(work, 'Return an empty tool_calls array.', allowed_tools=(),
+                                           model='gpt-5.4', output_schema=schema))
+            assert events[-1].get('ok') and json.loads(events[-1]['reply']) == {'tool_calls':[]}
+            assert requests[-1]['text']['format']['schema'] == schema
+            assert not any(t.get('type') == 'web_search' or t.get('name') in (
+                'exec_command','shell_command','shell','write_stdin') for t in requests[-1]['tools'])
+            print('PASS voice outputSchema reaches real Codex Responses request; final JSON is intact', flush=True)
     finally:
         server.shutdown()
         server.server_close()

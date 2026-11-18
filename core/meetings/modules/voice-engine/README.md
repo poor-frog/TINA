@@ -24,7 +24,8 @@ known participant ID, backwards source clock or sample gap still resets the stre
 metadata is not account authentication; meeting source permissions remain server-owned.
 
 The bot controller may preserve a caller while a different known ID speaks on another fresh
-channel. KWS itself still emits channel-local detections; source models/thresholds are unchanged.
+channel. KWS itself still emits channel-local detections. Both `hey_tina` and `tina_oi` use a
+runtime score threshold of 0.4, also enforced by the bot controller; per-model cooldown stays 1.5s.
 A fresh known caller can take an idle follow-up slot only, not preempt a question or playback.
 
 ## Smart Turn and Namo observations

@@ -32,8 +32,11 @@ globalThis.setTimeout = ((fn: () => void) => { timers.push(fn); return timers.le
 globalThis.clearTimeout = (() => {}) as any;
 const turn = () => new Promise<void>(resolve => setImmediate(resolve));
 try {
-  respond = async () => Response.json({ meetings: [{ id: 12, platform: 'teams', native_meeting_id: 'same-room', status: 'active' }, { id: 13, platform: 'note', native_meeting_id: 'note' }] });
-  assert.equal((await listBotMeetings(config)).length, 1);
+  respond = async () => Response.json({ meetings: [{ id: 12, platform: 'teams', native_meeting_id: 'same-room', status: 'active',
+    data:{join_failure_summary:'Platform refused the bot.'} }, { id: 13, platform: 'note', native_meeting_id: 'note' }] });
+  const listed=await listBotMeetings(config);
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].joinFailureSummary,'Platform refused the bot.');
   assert.equal(calls[0].options.headers!['X-API-Key' as keyof HeadersInit], 'fixture-secret');
   assert.equal(calls[0].options.redirect, 'error');
   assert.ok(calls.every(call => !call.url.includes('fixture-secret')));

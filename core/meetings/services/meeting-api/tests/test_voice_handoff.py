@@ -73,11 +73,25 @@ async def test_successful_clarification_has_no_handoff_button_hint(flow_service)
     assert (await client.get('/meetings/1/voice-assistant',headers=OWNER)).json()['runtime']['handoff'] is None
 
 
-def test_general_handoff_keeps_current_request_and_bounds_source_excerpts():
-    from meeting_api.lifecycle.voice_handoff import public_context
+@pytest.mark.parametrize('reason',['llm_unavailable','generation_format_invalid'])
+def test_general_handoff_keeps_current_request_and_bounds_source_excerpts(reason):
+    from meeting_api.lifecycle.voice_handoff import public_context, ELIGIBLE, VoiceHandoff
     value={'state':None,'question':'Ai phụ trách demo?','request_id':'request','expires_at_ms':1,
-        'reason':'llm_unavailable','history':[{'question':'Tóm tắt meeting','answer':'Nội dung đã phát.'}]}
+        'reason':reason,'history':[{'question':'Tóm tắt meeting','answer':'Nội dung đã phát.'}]}
     result=public_context(1,value,[{'quote':'x'*1200} for _ in range(16)])
+    assert reason in ELIGIBLE and result['reason']==reason
+    assert reason in VoiceHandoff.model_json_schema()['properties']['reason']['enum']
     assert result['original_request']=='Ai phụ trách demo?'
     assert result['heard_turns']==value['history']
     assert len(result['sources'])<=8 and sum(len(s['quote']) for s in result['sources'])<=8000
+
+
+def test_format_failure_is_durable_reply_metadata_not_a_source_verification_rejection():
+    from uuid import uuid4
+    from meeting_api.lifecycle.voice_replies import VoiceReply,merge_reply,public_replies
+    reply=VoiceReply(request_id=uuid4(),text='Lỗi định dạng câu trả lời.',reason='generation_format_invalid',
+        state='completed',created_at_ms=1,updated_at_ms=2)
+    data=merge_reply({},'current',reply.model_dump(mode='json'))
+    stored=public_replies({'data':data},'current')[0]
+    assert stored['reason']=='generation_format_invalid'
+    assert stored['verification']==[] and stored['source_count']==0

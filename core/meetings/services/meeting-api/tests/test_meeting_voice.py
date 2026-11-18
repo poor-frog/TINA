@@ -69,7 +69,61 @@ def headers(session='current'):
     return {'Authorization': 'Bearer ' + voice_token('test-admin-secret', 1, session)}
 
 
+async def test_project_policy_validates_profile_before_saving_and_requires_a_complete_reference(setup):
+    import json
+    client,repo,_,calls,*_=setup
+    policy=deepcopy(repo.row['data']['voice_assistant'])|{'source_profile_id':'a'*32,'source_profile_fingerprint':'b'*64,
+        'documents':['wiki/shared.md']}
+    response=await client.put('/meetings/1/voice-assistant',headers={'X-User-Id':'7'},json=policy)
+    assert response.status_code==200,response.text
+    request=next(r for r in calls if r.url.path.endswith('/profile'))
+    assert request.method=='POST' and json.loads(request.content)['source_profile_fingerprint']=='b'*64
+    assert response.json()['policy']['revision']==2
+    policy.pop('source_profile_fingerprint')
+    assert (await client.put('/meetings/1/voice-assistant',headers={'X-User-Id':'7'},json=policy)).status_code==422
+
+
+async def test_project_readiness_rechecks_profile_revocation_even_with_a_cached_ready_verdict(setup):
+    client,repo,redis,calls,*_=setup
+    repo.row['data']['voice_assistant'].update(source_profile_id='a'*32,source_profile_fingerprint='b'*64)
+    await redis.set('meeting:voice:1:current:ready:1','1')
+    for _ in range(2):
+        response=await client.get('/bots/voice/1/current/config',headers=headers())
+        assert response.status_code==200
+    assert len([r for r in calls if r.url.host=='agent.test' and r.url.path.endswith('/ready')])==2
+
+
 def question(): return {'request_id': str(uuid4()), 'question': 'What is the plan?', 'revision': 1}
+
+
+async def test_whole_wiki_only_policy_is_a_valid_source_and_toggling_revalidates_the_proposed_scope(setup):
+    import json
+    client,repo,_,calls,*_=setup
+    policy=deepcopy(repo.row['data']['voice_assistant'])|{'include_transcript':False,'include_workspace_wiki':True}
+    response=await client.put('/meetings/1/voice-assistant',headers={'X-User-Id':'7'},json=policy)
+    assert response.status_code==200,response.text
+    request=next(r for r in calls if r.url.path.endswith('/profile'))
+    assert json.loads(request.content)['include_workspace_wiki'] is True
+    from meeting_api.lifecycle.voice import VoicePolicy
+    assert VoicePolicy.model_validate({'enabled':True}).include_workspace_wiki is False
+
+
+async def test_retrieval_deadline_is_server_owned_and_unchanged_across_plan_and_lookup(setup):
+    import json
+    import time
+    client,repo,_,calls,*_=setup
+    repo.row['data']['voice_assistant']['engine']='livekit'
+    body=question();path='/bots/voice/1/current/agent'
+    assert (await client.post(path,headers=headers(),json=body|{'operation':'context'})).status_code==200
+    assert (await client.post(path,headers=headers(),json=body|{
+        'operation':'plan','agent_context':[],'retrieval_deadline_ms':int(time.time()*1000)+999999})).status_code==422
+    plan=await client.post(path,headers=headers(),json=body|{'operation':'plan','agent_context':[]})
+    assert plan.status_code==200
+    deadline=json.loads(calls[-1].content)['retrieval_deadline_ms']
+    assert 0<deadline-int(time.time()*1000)<=30000
+    lookup=await client.post(path,headers=headers(),json=body|{'operation':'lookup','agent_context':[],
+        'lookup':plan.json()['tool_calls'][0]})
+    assert lookup.status_code==200 and json.loads(calls[-1].content)['retrieval_deadline_ms']==deadline
 
 
 async def test_shared_meeting_policy_requires_owned_non_deleted_distinct_sources_and_current_owner(setup):
@@ -680,14 +734,16 @@ async def test_unheard_answers_cannot_evict_the_three_last_heard_turns(setup, li
 
 
 @pytest.mark.parametrize('refs', [[], [{'key': 'segment:demo', 'fingerprint': 'a' * 64}]])
-async def test_completed_clarification_is_context_only_and_internal_refs_are_not_returned(setup, refs):
+@pytest.mark.parametrize('follow_up', [False, True])
+async def test_completed_clarification_is_context_only_and_internal_refs_are_not_returned(setup, refs, follow_up):
     import json
     _, repo, redis, *_ = setup
     seen = []
     async def upstream(request):
         seen.append(json.loads(request.content))
         return httpx.Response(200, json={'text': 'Bạn hỏi bản demo hay bản chính thức?', 'sources': [],
-            'clarification': True, 'context_refs': refs})
+            'clarification': not follow_up, 'context_refs': refs,
+            **({'follow_up': 'Bạn hỏi bản demo hay bản chính thức?'} if follow_up else {})})
     def factory(**kwargs): return httpx.AsyncClient(transport=httpx.MockTransport(upstream), **kwargs)
     store = PlaybackStore(redis, repo.save_voice_reply)
     app = FastAPI(); app.include_router(build_voice_router(repo, redis, redis, store, client_factory=factory))
@@ -695,14 +751,19 @@ async def test_completed_clarification_is_context_only_and_internal_refs_are_not
         h = headers() | {'X-Voice-Speaker-Key': 'a' * 64}
         body = question()
         r = await client.post('/bots/voice/1/current/answer', headers=h, json=body)
-        assert r.status_code == 200 and r.json()['clarification'] is True
+        assert r.status_code == 200 and r.json()['clarification'] is not follow_up
         assert 'context_refs' not in r.json() and not r.json()['evidence_available']
+        history_key='meeting:voice:1:current:history:1:'+'a'*64
+        stored=json.loads(await redis.get(history_key));stored[-1]['created_at_ms']-=60000
+        await redis.set(history_key,json.dumps(stored))
         await store.report(1, body['request_id'], 'current', 'started')
         await store.report(1, body['request_id'], 'current', 'completed')
         await client.post('/bots/voice/1/current/state', headers=headers(), json={'state': 'QUIET', 'request_id': body['request_id']})
         r = await client.post('/bots/voice/1/current/answer', headers=h, json=question())
         assert r.status_code == 200 and seen[-1]['history'][0]['answer'].endswith('?')
-        assert seen[-1]['history'][0]['clarification'] is True
+        assert seen[-1]['history'][0]['clarification'] is not follow_up
+        assert bool(seen[-1]['history'][0].get('follow_up')) is follow_up
+        assert seen[-1]['history'][0]['created_at_ms']==repo.row['data']['voice_replies'][body['request_id']]['ended_at_ms']
 
 
 async def test_interrupted_history_keeps_only_monotonic_completed_sentences_and_session_source_scope(setup):
@@ -711,6 +772,7 @@ async def test_interrupted_history_keeps_only_monotonic_completed_sentences_and_
     async def upstream(request):
         seen.append(json.loads(request.content))
         return httpx.Response(200,json={'text':'Lan phụ trách demo. Hạn thứ Sáu.',
+            'follow_up':'Bạn cần phần backend?',
             'sources':[{'key':'segment:demo','fingerprint':'a'*64}]})
     def factory(**kwargs):return httpx.AsyncClient(transport=httpx.MockTransport(upstream),**kwargs)
     store=PlaybackStore(redis,repo.save_voice_reply);app=FastAPI()
@@ -731,8 +793,10 @@ async def test_interrupted_history_keeps_only_monotonic_completed_sentences_and_
         assert reply['text']=='Lan phụ trách demo. Hạn thứ Sáu.','preserve the generated proposal separately'
         assert (await client.post('/bots/voice/1/current/answer',headers=h,json=question())).status_code==200
         history=seen[-1]['history'];assert len(history)==1 and history[0]['answer']=='Lan phụ trách demo.'
+        assert history[0]['sources']==[] and history[0]['heard_partial'] is True
+        assert history[0]['heard_source_guards']==[{'key':'segment:demo','fingerprint':'a'*64}]
         assert 'Hạn thứ Sáu' not in json.dumps(history) and history[0]['clarification'] is False
-
+        assert history[0]['follow_up'] is None, 'an interrupted prompt must not arm a pending reply'
 
 
 async def test_public_answer_options_are_owner_scoped_opt_in_and_revision_bound(setup):
@@ -1085,3 +1149,46 @@ async def test_bot_config_exposes_only_live_session_and_revision_fenced_tool_pro
     await redis.set('meeting:voice:1:progress', json.dumps(value))
     await redis.delete('meeting:voice:1:lock')
     assert (await client.get(path, headers=headers())).json().get('progress') is None
+
+
+async def test_retired_runtime_metadata_does_not_block_existing_meetings_or_expand_sources(setup):
+    client,repo,*_=setup
+    policy=repo.row['data']['voice_assistant']
+    policy.update(engine='livekit',agent_runtime='amp',allow_general_knowledge=False,allow_web_search=False)
+    response=await client.get('/meetings/1/voice-assistant',headers={'X-User-Id':'7'})
+    assert response.status_code==200
+    saved=response.json()['policy']
+    assert 'agent_runtime' not in saved and saved['engine']=='livekit'
+    assert saved['allow_general_knowledge'] is False and saved['allow_web_search'] is False
+    # Stored history/config is retained, but new writes cannot re-enable a removed runtime.
+    assert policy['agent_runtime']=='amp'
+    assert (await client.put('/meetings/1/voice-assistant',headers={'X-User-Id':'7'},json=saved|{'agent_runtime':'amp'})).status_code==422
+
+
+def test_legacy_reply_metadata_remains_readable_without_the_retired_runtime():
+    from meeting_api.lifecycle.voice_replies import VoiceReply,public_replies
+    value=VoiceReply(request_id=uuid4(),text='Lan làm demo.',detail_text='Hạn thứ Sáu.',answer_complete=False,
+        state='stopped',played_text='Lan làm demo.',created_at_ms=1,updated_at_ms=2).model_dump(mode='json')
+    row={'data':{'voice_replies':{value['request_id']:value|{'session_uid':'old'}}}}
+    reply=public_replies(row,None)[0]
+    assert reply['text']=='Lan làm demo.' and reply['detail_text']=='Hạn thứ Sáu.' and not reply['answer_complete']
+
+
+@pytest.mark.parametrize('reason,checks',[('web_answer_empty',[]),('web_numeric_mismatch',['numeric_mismatch']),
+    ('verification_rejected',['contradiction']),('verification_unavailable',['unavailable'])])
+async def test_web_failure_category_and_verification_survive_playback_storage(setup,reason,checks):
+    _,repo,redis,*_=setup
+    async def upstream(request):
+        return httpx.Response(200,json={'text':'Synthetic web failure.','sources':[],
+            'answer_kind':'web','reason':reason,'verification':checks})
+    def factory(**kw):return httpx.AsyncClient(transport=httpx.MockTransport(upstream),**kw)
+    store=PlaybackStore(redis,repo.save_voice_reply);app=FastAPI()
+    app.include_router(build_voice_router(repo,redis,redis,store,client_factory=factory))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
+        body=question();response=await client.post('/bots/voice/1/current/answer',headers=headers(),json=body)
+        assert response.status_code==200,response.text
+        await store.report(1,body['request_id'],'current','started')
+        await store.report(1,body['request_id'],'current','completed')
+        saved=repo.row['data']['voice_replies'][body['request_id']]
+        assert saved['reason']==reason and saved['verification']==checks
+        assert saved['answer_kind']=='web' and saved['state']=='completed'

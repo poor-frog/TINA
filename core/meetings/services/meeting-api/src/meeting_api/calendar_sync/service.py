@@ -48,6 +48,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..collector.meeting_link import find_meeting_link
 from ..lifecycle import may_dispatch_again
@@ -301,6 +302,140 @@ def parse_ics(text: str, *, now: datetime,
     return {"events": events, "cancelled_uids": cancelled}
 
 
+def parse_google_events(items: list[dict], *, now: datetime,
+                        horizon_days: int = DEFAULT_HORIZON_DAYS,
+                        lookback_s: float = DEFAULT_LOOKBACK_S,
+                        time_zone: Optional[str] = None) -> dict:
+    """Normalize a complete Google Calendar events.list snapshot to the ICS sync contract.
+
+    The API request expands recurring instances. TINA keeps one planned row per recurring-series id,
+    so this selects the next non-cancelled instance per series; absent series then reconcile as removed.
+    """
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    window_start = now.astimezone(timezone.utc) - timedelta(seconds=lookback_s)
+    window_end = now.astimezone(timezone.utc) + timedelta(days=horizon_days)
+    try:
+        calendar_zone = ZoneInfo(time_zone) if time_zone else timezone.utc
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        calendar_zone = timezone.utc
+
+    def start_time(event: dict) -> Optional[datetime]:
+        value = event.get("start")
+        if not isinstance(value, dict):
+            return None
+        date_time = value.get("dateTime")
+        if isinstance(date_time, str):
+            try:
+                parsed = datetime.fromisoformat(date_time.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            if parsed.tzinfo is None:
+                zone = value.get("timeZone")
+                try:
+                    parsed = parsed.replace(tzinfo=ZoneInfo(zone)) if isinstance(zone, str) else parsed.replace(tzinfo=timezone.utc)
+                except ZoneInfoNotFoundError:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        all_day = value.get("date")
+        if isinstance(all_day, str):
+            try:
+                return datetime.combine(date.fromisoformat(all_day), time.min, tzinfo=timezone.utc)
+            except ValueError:
+                return None
+        return None
+
+    grouped: dict[str, list[tuple[datetime, dict]]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        uid = item.get("recurringEventId") or item.get("id")
+        if not isinstance(uid, str) or not uid:
+            continue
+        if item.get("status") == "cancelled":
+            continue
+        start = start_time(item)
+        if start is None:
+            continue
+        all_day = isinstance(item["start"].get("date"), str)
+        if all_day:
+            end = item.get("end") or {}
+            try:
+                until = date.fromisoformat(end["date"]) if isinstance(end, dict) and end.get("date") else start.date() + timedelta(days=1)
+            except (ValueError, TypeError):
+                continue
+            if start.date() > window_end.astimezone(calendar_zone).date() or until <= window_start.astimezone(calendar_zone).date():
+                continue
+        elif not window_start <= start <= window_end:
+            continue
+        grouped.setdefault(uid, []).append((start, item))
+
+    events: list[dict] = []
+    for uid, instances in grouped.items():
+        scheduled, item = min(instances, key=lambda pair: pair[0])
+        all_day = isinstance((item.get("start") or {}).get("date"), str)
+        scheduled_at = None if all_day else scheduled.isoformat()
+        end = item.get("end") if isinstance(item.get("end"), dict) else {}
+        sources = []
+        if isinstance(item.get("hangoutLink"), str):
+            sources.append(item["hangoutLink"])
+        conference = item.get("conferenceData")
+        entry_points = conference.get("entryPoints", []) if isinstance(conference, dict) else []
+        if isinstance(entry_points, list):
+            sources.extend(entry.get("uri") for entry in entry_points
+                           if isinstance(entry, dict) and entry.get("entryPointType") == "video"
+                           and isinstance(entry.get("uri"), str))
+        sources.extend(value[:8000] for value in (item.get("location"), item.get("description"))
+                       if isinstance(value, str))
+        resolved = next((link for value in sources if (link := find_meeting_link(value))), None)
+
+        attendees: list[dict] = []
+        seen_emails: set[str] = set()
+        raw_attendees = item.get("attendees", [])
+        if isinstance(raw_attendees, list):
+            for attendee in raw_attendees[:250]:
+                if not isinstance(attendee, dict) or attendee.get("resource") is True:
+                    continue
+                email = attendee.get("email")
+                if not isinstance(email, str) or len(email) > 320 or "@" not in email:
+                    continue
+                email = email.strip().lower()
+                if email in seen_emails:
+                    continue
+                seen_emails.add(email)
+                person = {"email": email}
+                name = attendee.get("displayName")
+                if isinstance(name, str) and name.strip() and name.strip().lower() != email:
+                    person["name"] = name.strip()[:300]
+                status = attendee.get("responseStatus")
+                if isinstance(status, str) and status:
+                    person["partstat"] = status.lower()[:40]
+                attendees.append(person)
+
+        summary = item.get("summary")
+        updated = item.get("updated")
+        title = (summary.strip()[:1000] or None) if isinstance(summary, str) else None
+        events.append({
+            "uid": uid,
+            "title": title,
+            "scheduled_at": scheduled_at,
+            "platform": resolved[0] if resolved else None,
+            "native_meeting_id": resolved[1] if resolved else None,
+            "meeting_url": resolved[2] if resolved else None,
+            "attendees": attendees,
+            # Do not persist the full Google event body (description/attendee list) in provenance.
+            "metadata": {"provider": "google", "event_id": item.get("id"),
+                         "updated": updated if isinstance(updated, str) else None,
+                         "meeting_url": resolved[2] if resolved else None,
+                         "resolved_start": scheduled_at,
+                         **({"all_day": True, "start_date": item["start"]["date"],
+                             "end_date": end.get("date")} if all_day else {})},
+        })
+    # This is a complete bounded snapshot: an absent event/series is retired by sync_user's
+    # missing-UID reconciliation. A cancelled recurring instance is not a cancelled series.
+    return {"events": events, "cancelled_uids": []}
+
+
 def _calendar_sources(data: dict) -> list[dict]:
     raw = data.get("calendar_sources")
     return [dict(source) for source in raw if isinstance(source, dict) and source.get("id")] \
@@ -310,6 +445,8 @@ def _calendar_sources(data: dict) -> list[dict]:
 def _source_entry(calendar_id: str, calendar_name: Optional[str], uid: str,
                   auto_join: bool, *, bot_name: Optional[str] = None,
                   metadata: Optional[dict] = None) -> dict:
+    if metadata and metadata.get("provider") == "google" and (metadata.get("all_day") or not metadata.get("meeting_url")):
+        auto_join = False
     source = {"id": calendar_id, "name": calendar_name or "Calendar", "uid": uid,
               "auto_join": bool(auto_join), "bot_name": bot_name or "TINA"}
     if metadata:
@@ -409,7 +546,14 @@ def _same_occurrence(left: Any, right: Any) -> bool:
     return abs((a - b).total_seconds()) <= OCCURRENCE_MATCH_S
 
 
-def _finished_row(row: Optional[dict], ev: dict) -> Optional[dict]:
+def _row_occurrence(data: dict, uid: str, calendar_id: Optional[str]) -> Any:
+    event = next((s.get("event") or {} for s in _calendar_sources(data)
+                  if s.get("uid") == uid and (calendar_id is None or s.get("id") == calendar_id)), {})
+    # Date anchors are for occurrence comparison only, never a scheduled join instant.
+    return event.get("start_date") if event.get("all_day") else data.get("scheduled_at")
+
+
+def _finished_row(row: Optional[dict], ev: dict, calendar_id: Optional[str] = None) -> Optional[dict]:
     """The terminal row that already FINISHED this event's occurrence, or ``None``.
 
     Finished means ``lifecycle.occurrence`` classed the row SERVED (the bot reached the room and the
@@ -429,7 +573,8 @@ def _finished_row(row: Optional[dict], ev: dict) -> Optional[dict]:
     if not isinstance(row, dict) or may_dispatch_again(row):
         return None
     data = row.get("data") if isinstance(row.get("data"), dict) else {}
-    if not _same_occurrence(data.get("scheduled_at"), ev.get("scheduled_at")):
+    when = ev.get("scheduled_at") or (ev.get("metadata") or {}).get("start_date")
+    if not _same_occurrence(_row_occurrence(data, ev["uid"], calendar_id), when):
         return None
     return row
 
@@ -536,7 +681,7 @@ async def sync_user(store, user_id: int, parsed: dict, *, auto_join_default: boo
             data.get("calendar_uid") if not sources and (not calendar_id or legacy) else None
         )
         if uid and (data.get("workspace_id") or data.get("workspace_unbound")):
-            stamp = str(row.get("start_time") or data.get("scheduled_at") or "")
+            stamp = str(row.get("start_time") or _row_occurrence(data, uid, calendar_id) or "")
             if uid not in series_stamp or stamp >= series_stamp[uid]:
                 series_stamp[uid] = stamp
                 series_ws[uid] = None if data.get("workspace_unbound") else data.get("workspace_id")
@@ -549,9 +694,9 @@ async def sync_user(store, user_id: int, parsed: dict, *, auto_join_default: boo
                 # occurrence match happens where the event is known, so a stale week's finished
                 # run never suppresses this week's.
                 held = finished_rows.get(uid)
-                previous = _as_utc(_parse_iso((held.get("data") or {}).get("scheduled_at"))) \
+                previous = _as_utc(_parse_iso(_row_occurrence(held.get("data") or {}, uid, calendar_id))) \
                     if held else None
-                current = _as_utc(_parse_iso(data.get("scheduled_at")))
+                current = _as_utc(_parse_iso(_row_occurrence(data, uid, calendar_id)))
                 if previous is None or (current is not None and previous <= current):
                     finished_rows[uid] = row
             elif uid:
@@ -580,40 +725,86 @@ async def sync_user(store, user_id: int, parsed: dict, *, auto_join_default: boo
     out = {"created": [], "updated": [], "cancelled": []}
 
     for ev in parsed.get("events", []):
+        metadata = ev.get("metadata") or {}
+        google = metadata.get("provider") == "google"
+        all_day = google and metadata.get("all_day") is True
+        source = _source_entry(calendar_id, calendar_name, ev["uid"], auto_join_default,
+                               bot_name=bot_name, metadata=metadata) if calendar_id else None
         row = by_uid.pop(ev["uid"], None)
         if row is not None:
             if row.get("status") not in _INTENT:
                 continue  # the FSM owns it now — sync never fights a live/finished meeting
             data = row.get("data") if isinstance(row.get("data"), dict) else {}
             updates: dict = {}
+            sources = _calendar_sources(data)
+            managed = bool(data.get("calendar_managed", bool(sources) or bool(data.get("calendar_uid"))))
+            other = [s for s in sources if s.get("id") != calendar_id]
+            preserve_manual = google and not managed and (all_day or not ev["platform"])
+            timed_google = [s["event"] for s in other if (s.get("event") or {}).get("provider") == "google"
+                            and (s.get("event") or {}).get("resolved_start") and (s.get("event") or {}).get("meeting_url")]
+            legacy = any((s.get("event") or {}).get("provider") != "google" for s in other)
+            preserve_time = all_day and (not managed or legacy or bool(timed_google))
             if calendar_id:
-                sources = _calendar_sources(data)
-                source = _source_entry(
-                    calendar_id, calendar_name, ev["uid"], auto_join_default,
-                    bot_name=bot_name, metadata=ev.get("metadata"),
-                )
                 next_sources = _replace_source(sources, source)
                 if next_sources != sources:
                     updates.update(_source_updates(
-                        next_sources, user_set=_auto_join_user_set(data),
+                        next_sources, user_set=_auto_join_user_set(data) or preserve_manual,
                     ))
             if (data.get("title") or None) != ev["title"] and ev["title"]:
                 updates["title"] = ev["title"]
-            if data.get("scheduled_at") != ev["scheduled_at"]:
+            if data.get("scheduled_at") != ev["scheduled_at"] and not preserve_time:
                 updates["scheduled_at"] = ev["scheduled_at"]
-            # link updates only when the feed CARRIES a link — a link-less event never strips an
-            # armed row's link (and never churns the row back to 'unknown' every sweep)
-            if ev["platform"] and (row.get("native_meeting_id") != ev["native_meeting_id"] or row.get("platform") != ev["platform"]):
+            if all_day and managed and not preserve_time and data.get("auto_join") is not False:
+                updates["auto_join"] = False
+            # ICS keeps its legacy omitted-link behavior; a complete Google snapshot can revoke a link.
+            if ev["platform"] and not (all_day and preserve_time) and (row.get("native_meeting_id") != ev["native_meeting_id"] or row.get("platform") != ev["platform"]):
                 updates["platform"] = ev["platform"]
                 updates["native_meeting_id"] = ev["native_meeting_id"]
                 updates["constructed_meeting_url"] = ev["meeting_url"]
+            elif google and not ev["platform"] and managed:
+                # A complete Google snapshot can revoke its link; other sources retain their own authority.
+                links = [link for s in other if not (s.get("event") or {}).get("all_day")
+                         and (link := find_meeting_link((s.get("event") or {}).get("meeting_url") or ""))]
+                unknown = any((s.get("event") or {}).get("provider") != "google" for s in other)
+                holder = by_native.get((links[0][0], links[0][1])) if links else None
+                if holder and holder["id"] != row["id"]:
+                    links = []  # The surviving room already has its own plan; do not dispatch a duplicate.
+                if links:
+                    platform, native, url = links[0]
+                    if (row.get("platform"), row.get("native_meeting_id"), row.get("constructed_meeting_url")) != (platform, native, url):
+                        updates.update(platform=platform, native_meeting_id=native, constructed_meeting_url=url)
+                elif not unknown:
+                    if row.get("platform") != "unknown" or row.get("native_meeting_id") or row.get("constructed_meeting_url"):
+                        updates.update(platform="unknown", native_meeting_id=None, constructed_meeting_url=None)
+                    if data.get("auto_join") is not False:
+                        updates["auto_join"] = False
+            if all_day and managed and timed_google:
+                # Keep the time and room from the same timed source, not an all-day room at another event's time.
+                timed = timed_google[0]
+                link = find_meeting_link(timed["meeting_url"])
+                if link and (row.get("native_meeting_id") != link[1] or row.get("platform") != link[0]):
+                    updates.update(platform=link[0], native_meeting_id=link[1], constructed_meeting_url=link[2])
+                if data.get("scheduled_at") != timed["resolved_start"]:
+                    updates["scheduled_at"] = timed["resolved_start"]
             # attendees follow the feed both ways — an invite list changes right up to the call
             if (data.get("attendees") or []) != (ev.get("attendees") or []):
                 updates["attendees"] = ev.get("attendees") or []
             if not updates:
                 continue
             updated = await store.update_planned_meeting(user_id, row["id"], updates)
+            if google and (not ev["platform"] or all_day) and managed and isinstance(updated, dict) and updated.get("error") == "duplicate":
+                # A concurrent plan can win the fallback link; the revoked room must still be disarmed.
+                updated = await store.update_planned_meeting(user_id, row["id"], updates | {
+                    "platform": "unknown", "native_meeting_id": None, "constructed_meeting_url": None, "auto_join": False,
+                    **({"scheduled_at": None} if all_day else {}),
+                })
             if isinstance(updated, dict) and not updated.get("error"):
+                old_key = (row.get("platform"), row.get("native_meeting_id"))
+                new_key = (updated.get("platform"), updated.get("native_meeting_id"))
+                if old_key != new_key and (by_native.get(old_key) or {}).get("id") == row["id"]:
+                    by_native.pop(old_key, None)
+                if updated.get("native_meeting_id"):
+                    by_native[new_key] = updated
                 _remember(rows, updated)
                 out["updated"].append({"id": updated["id"], "native": updated.get("native_meeting_id"),
                                        "status": updated.get("status"),
@@ -628,13 +819,9 @@ async def sync_user(store, user_id: int, parsed: dict, *, auto_join_default: boo
                 manual_data = manual.get("data") or {}
                 sources = _calendar_sources(manual_data)
                 if calendar_id:
-                    source = _source_entry(
-                        calendar_id, calendar_name, ev["uid"], auto_join_default,
-                        bot_name=bot_name, metadata=ev.get("metadata"),
-                    )
                     next_sources = _replace_source(sources, source)
                     source_patch = _source_updates(
-                        next_sources, user_set=_auto_join_user_set(manual_data),
+                    next_sources, user_set=_auto_join_user_set(manual_data) or all_day,
                     )
                     source_patch["calendar_managed"] = bool(
                         manual_data.get("calendar_managed", False)
@@ -645,7 +832,7 @@ async def sync_user(store, user_id: int, parsed: dict, *, auto_join_default: boo
                     source_patch = {"calendar_uid": ev["uid"]}
                 adopted = await store.update_planned_meeting(user_id, manual["id"], {
                     **source_patch,
-                    "scheduled_at": ev["scheduled_at"],
+                    **({} if all_day else {"scheduled_at": ev["scheduled_at"]}),
                 })
                 if isinstance(adopted, dict) and not adopted.get("error"):
                     by_uid_row = dict(adopted)
@@ -678,7 +865,7 @@ async def sync_user(store, user_id: int, parsed: dict, *, auto_join_default: boo
         # uninvited bot walked back into a meeting the founder had stopped 15 seconds earlier
         # (stage rev 192, 26312 → 26313). Nothing to create: the occurrence is already in the
         # user's list as the terminal meeting, carrying its transcript.
-        if _finished_row(finished_rows.get(ev["uid"]), ev) is not None:
+        if _finished_row(finished_rows.get(ev["uid"]), ev, calendar_id) is not None:
             continue
 
         inherited_ws = series_ws.get(ev["uid"])  # None = no binding OR tombstoned — both mean "don't"
@@ -693,13 +880,9 @@ async def sync_user(store, user_id: int, parsed: dict, *, auto_join_default: boo
             title=ev["title"],
             scheduled_at=ev["scheduled_at"],
             meeting_url=ev["meeting_url"],
-            auto_join=auto_join_default,
+            auto_join=source["auto_join"] if source else auto_join_default,
             calendar_uid=ev["uid"],
-            calendar_source=_source_entry(
-                calendar_id, calendar_name, ev["uid"], auto_join_default,
-                bot_name=bot_name, metadata=ev.get("metadata"),
-            )
-            if calendar_id else None,
+            calendar_source=source,
             workspace_id=inherited_ws,
             workspace_source="series" if inherited_ws else None,
             attendees=ev.get("attendees") or None,

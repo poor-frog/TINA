@@ -132,8 +132,8 @@ def answer_report(gold, answers):
         seen.add(identifier); case = by_id[identifier]
         reason = answer.get('reason')
         if not isinstance(reason, str): raise ValueError('Answer reason is required')
-        failed = reason in {'llm_unavailable', 'verification_unavailable', 'web_unavailable', 'service_error'}
-        refused = reason in {'insufficient_evidence', 'no_shared_sources', 'verification_rejected'}
+        failed = reason in {'llm_unavailable', 'verification_unavailable', 'web_unavailable', 'service_error', 'generation_format_invalid', 'web_answer_empty'}
+        refused = reason in {'insufficient_evidence', 'no_shared_sources', 'verification_rejected', 'web_numeric_mismatch'}
         correct = answer.get('human_correct')
         if correct is not None and type(correct) is not bool: raise ValueError('Human correctness must be boolean or null')
         rows.append({'id': identifier, 'service_error': failed,

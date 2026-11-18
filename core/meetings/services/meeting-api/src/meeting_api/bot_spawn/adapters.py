@@ -193,6 +193,12 @@ class SqlAlchemyMeetingRepo:
             )
             if m.status not in ("completed", "failed") or deletion_pending:
                 raise DuplicateMeeting("Terminal meeting is no longer reusable")
+            next_retry = (data_patch or {}).get("auto_retry")
+            if next_retry is not None:
+                current_retry = data.get("auto_retry") or {}
+                if (m.status != "failed" or current_retry.get("state") != "scheduled"
+                        or current_retry.get("attempt") != next_retry.get("attempt", 0) - 1):
+                    raise DuplicateMeeting("Automatic retry was cancelled or superseded")
             m.status = "requested"
             m.end_time = None
             m.bot_container_id = None
@@ -304,6 +310,7 @@ class SqlAlchemyMeetingRepo:
             ).scalars().first()
             if m is None:
                 return
+            previous_status = m.status
             m.status = status
             merged = dict(m.data) if isinstance(m.data, dict) else {}
             if completion_reason is not None:
@@ -312,6 +319,8 @@ class SqlAlchemyMeetingRepo:
                 merged["failure_stage"] = failure_stage
             for k, v in (data or {}).items():
                 merged[k] = v
+            from ..lifecycle.retry import persist_retry_transition
+            persist_retry_transition(merged, previous_status, status)
             if status in ("completed", "failed"):
                 # Delivery marker (#807): `completed` alone means "the bot exited cleanly" — it says
                 # nothing about whether a transcript exists. Persisting the segment count at the
@@ -571,6 +580,46 @@ class SqlAlchemyMeetingRepo:
                 ) from e
             await db.refresh(m)
             return _row_to_dict(m)
+
+    async def cancel_join_retries(self, user_id, platform, native_meeting_id) -> list[dict]:
+        from sqlalchemy import select
+        from sqlalchemy.orm.attributes import flag_modified
+        from ..sessions.models import Meeting
+
+        async with self._session_factory() as db:
+            rows = (await db.execute(select(Meeting).where(
+                Meeting.user_id == user_id, Meeting.platform == platform,
+                Meeting.platform_specific_id == native_meeting_id,
+                Meeting.status == "failed",
+                Meeting.data.contains({"auto_retry": {"state": "scheduled"}}),
+            ).with_for_update())).scalars().all()
+            for row in rows:
+                data = dict(row.data)
+                retry = dict(data["auto_retry"], state="cancelled")
+                retry.pop("next_at", None)
+                data.update(stop_requested=True, auto_retry=retry)
+                row.data = data
+                flag_modified(row, "data")
+            await db.commit()
+            for row in rows:
+                await db.refresh(row)
+            return [_row_to_dict(row) for row in rows]
+
+    async def list_due_join_retries(self, *, now, limit=50) -> list[dict]:
+        """Due failed rows are the durable queue; JSONB containment uses the meetings GIN index."""
+        from sqlalchemy import DateTime, cast, select
+
+        from ..sessions.models import Meeting
+
+        async with self._session_factory() as db:
+            rows = (await db.execute(
+                select(Meeting).where(
+                    Meeting.status == "failed",
+                    Meeting.data.contains({"auto_retry": {"state": "scheduled"}}),
+                    cast(Meeting.data["auto_retry"]["next_at"].astext, DateTime(timezone=True)) <= now,
+                ).order_by(Meeting.updated_at.asc(), Meeting.id.asc()).limit(limit)
+            )).scalars().all()
+            return [_row_to_dict(row) for row in rows]
 
     async def list_scheduled_meetings(self) -> list[dict]:
         """Every ``scheduled`` row with a joinable link (the auto-join sweep's candidate set —

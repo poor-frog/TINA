@@ -14,7 +14,7 @@ from typing import Literal, Annotated
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Response
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from .stop_router import _resolve_user_id
 from .stop import leave_command_channel
@@ -75,15 +75,27 @@ class VoicePolicy(BaseModel):
     model_config = ConfigDict(extra='forbid')
     enabled: StrictBool = False
     include_transcript: StrictBool = False
+    include_workspace_wiki: StrictBool = False
     include_approved_actions: StrictBool = False
     shared_meeting_ids: list[Annotated[int,Field(gt=0,strict=True)]] = Field(default_factory=list,max_length=4)
     documents: list[str] = Field(default_factory=list, max_length=8)
+    source_profile_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    source_profile_fingerprint: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
     revision: int = Field(default=0, ge=0)
     wake_variants: list[str] = Field(default_factory=list, max_length=8)
     noise_suppression: StrictBool = False
     allow_general_knowledge: StrictBool = False
     allow_web_search: StrictBool = False
+    auto_web_search: StrictBool = False
+    agent_backend: Literal['completion', 'sandbox'] = 'completion'
     engine: Literal['tina', 'livekit'] = 'tina'
+
+    @model_validator(mode='after')
+    def profile_reference(self):
+        if bool(self.source_profile_id) != bool(self.source_profile_fingerprint):
+            raise ValueError('Source profile id and fingerprint are required together')
+        return self
+
 
     @field_validator('shared_meeting_ids')
     @classmethod
@@ -244,12 +256,16 @@ class VoiceState(BaseModel):
 
 def new_meeting_voice_policy():
     """Seed new capable rooms; saved policies and document grants remain owner-controlled."""
-    return VoicePolicy(enabled=True,include_transcript=True,noise_suppression=True,
-                       allow_general_knowledge=True,allow_web_search=True,engine='livekit').model_dump()
+    return VoicePolicy(enabled=True,include_transcript=True,include_workspace_wiki=True,noise_suppression=True,
+                       allow_general_knowledge=True,allow_web_search=True,auto_web_search=True,
+                       engine='livekit',agent_backend='sandbox').model_dump()
 
 
 def policy_of(row):
-    return VoicePolicy.model_validate((row.get('data') or {}).get('voice_assistant') or {})
+    saved=dict((row.get('data') or {}).get('voice_assistant') or {})
+    # Ignore the retired selector in saved rows; source grants and strict incoming validation stay intact.
+    saved.pop('agent_runtime',None)
+    return VoicePolicy.model_validate(saved)
 
 
 def build_voice_router(repo, redis, publisher, playback=None, client_factory=httpx.AsyncClient):
@@ -308,6 +324,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         value = VoiceProgress(request_id=body.request_id, session_uid=session,
                               revision=body.revision, stage=stage, observed_at_ms=int(time.time()*1000))
         await redis.set(f'meeting:voice:{mid}:progress', value.model_dump_json(), ex=180)
+
 
     async def reserve(mid, session: str, request):
         lock, _ = keys(mid, session, request)
@@ -381,6 +398,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         held = await redis.get(f'meeting:voice:{mid}:lock')
         if isinstance(held, bytes): held = held.decode()
         return {'current': held == f'{session}:{request_id}'}
+
 
     @router.get('/meetings/{meeting_id}/voice-assistant')
     async def get_policy(meeting_id: int, x_user_id: str | None = Header(default=None)):
@@ -525,9 +543,9 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 raise HTTPException(409, 'Start a new voice-enabled bot before enabling the assistant')
             if (row.get('data') or {}).get('transcribe_enabled') is False:
                 raise HTTPException(409, 'Enable transcription for the bot before enabling voice questions')
-            if not body.include_transcript and not body.include_approved_actions and not body.shared_meeting_ids and not body.documents and not body.allow_general_knowledge and not body.allow_web_search:
+            if not body.include_transcript and not body.include_workspace_wiki and not body.include_approved_actions and not body.shared_meeting_ids and not body.documents and not body.allow_general_knowledge and not body.allow_web_search:
                 raise HTTPException(422, 'Choose sources that may be spoken to this room')
-            available = await agent(row, 'ready')
+            available = await agent(row, 'profile', body.model_dump()) if body.source_profile_id or policy_of(row).source_profile_id or body.include_workspace_wiki != policy_of(row).include_workspace_wiki else await agent(row, 'ready')
             if any(path not in available['documents'] for path in body.documents):
                 raise HTTPException(422, 'Choose documents linked to this meeting')
         try:
@@ -551,7 +569,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
             ready_key = f'meeting:voice:{mid}:{session}:ready:{policy.revision}'
             bridge = x_tina_voice_runtime == 'livekit-v1'
             if policy.engine == 'livekit': ready_key += ':bridge' if bridge else ':legacy'
-            cached = await redis.get(ready_key)
+            cached = None if policy.source_profile_id else await redis.get(ready_key)
             if cached is not None:
                 if cached in ('1', b'1', '0', b'0'):
                     ready = cached in ('1', b'1')
@@ -682,9 +700,12 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         for turn in stored:
             reply = replies.get(turn['request_id'], {})
             if reply.get('session_uid') != session: continue
-            if reply.get('state') == 'completed': history.append(turn)
+            if reply.get('state') == 'completed':
+                history.append(turn | {'created_at_ms': reply.get('ended_at_ms') or turn['created_at_ms']})
             elif reply.get('state') == 'stopped' and reply.get('played_text'):
-                history.append(turn | {'answer': reply['played_text'], 'clarification': False})
+                history.append(turn | {'answer': reply['played_text'], 'sources': [],
+                                       'heard_source_guards':turn.get('heard_source_guards',turn['sources']),
+                                       'clarification': False, 'follow_up': None, 'heard_partial': True})
         history = history[-3:]
         return key, history, [{k: v for k, v in t.items() if k != 'request_id'} for t in history]
 
@@ -848,6 +869,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                     result['task_flow']={'node':flow['node'],**({'kind':'decision'} if flow.get('kind')=='decision' else {})}
                     result['available_tools']=[]
             else:
+                payload['retrieval_deadline_ms']=saved['retrieval_deadline_ms']
                 remaining=(saved['retrieval_deadline_ms']-int(time.time()*1000))/1000
                 try:
                     if remaining<=0: raise TimeoutError()
@@ -1034,12 +1056,13 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 await redis.set(f'meeting:voice:{mid}:navigation',json.dumps(hint|{
                     'target_id':saved['navigation']['target_id'],'source_refs':saved['navigation']['source_refs']}),ex=60)
             await progress(mid, session, body, 'preparing_speech')
-            refs = result.pop('context_refs', []) if result.get('clarification') else []
+            refs = result.pop('context_refs', []) if result.get('clarification') or result.get('follow_up') else []
             result.pop('context_refs', None)
             refs = refs or [{'key': s['key'], 'fingerprint': s['fingerprint']} for s in result.get('sources', [])]
-            if history_key and (refs or result.get('clarification') is True or result.get('reason')=='clarification_exhausted'):
+            if history_key and (refs or result.get('clarification') is True or result.get('follow_up') or result.get('reason')=='clarification_exhausted'):
                 turn = {'request_id': str(body.request_id), 'question': body.question, 'answer': result['text'],
                         'clarification': result.get('clarification') is True,
+                        'follow_up': result.get('follow_up'),
                         'created_at_ms': int(time.time() * 1000),
                         'sources': refs}
                 async with redis.pipeline(transaction=True) as pipe:

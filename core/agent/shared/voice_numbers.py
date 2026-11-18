@@ -12,10 +12,11 @@ QUANTITY = re.compile(
     r'(?<!\w)(?P<sign>[+−-]|(?:âm|dương)[^\S\r\n]+)?'
     r'(?P<amount>\d+(?:[.,:/-]\d+)*|(?:'+WORDS+r')(?:[^\S\r\n]+(?:'+WORDS+r'))*)'
     r'(?P<scale>[^\S\r\n]+(?:nghìn|ngàn|triệu|tỷ|tỉ)\b)?'
-    r'(?P<unit>[^\S\r\n]*(?:phần[^\S\r\n]+trăm\b|%|đô[^\S\r\n]+la\b|usd\b|vnd\b|vnđ\b|đồng\b|eur\b|euro\b))?'
+    r'(?P<unit>[^\S\r\n]*(?:phần[^\S\r\n]+trăm\b|%|đô[^\S\r\n]+la\b|usd\b|vnd\b|vnđ\b|đồng\b|đ\b|₫|eur\b|euro\b))?'
+    r'(?P<basis>[^\S\r\n]*(?:/[^\S\r\n]*|(?:mỗi|một)[^\S\r\n]+)(?:lượng|chỉ)\b)?'
     r'(?!\w)')
 UNITS = {'phần trăm':'percent', '%':'percent', 'đô la':'usd', 'usd':'usd',
-         'vnd':'vnd', 'vnđ':'vnd', 'đồng':'vnd', 'eur':'eur', 'euro':'eur'}
+         'vnd':'vnd', 'vnđ':'vnd', 'đồng':'vnd', 'đ':'vnd', '₫':'vnd', 'eur':'eur', 'euro':'eur'}
 COUNT = re.compile(r'[^\S\r\n]+(?:đứa|người|cái|chiếc|cấp|lần)\b')
 
 
@@ -63,6 +64,20 @@ def _words(amount):
     return value
 
 
+def _digits(amount, unit, scale):
+    if UNITS.get(unit) in ('vnd','usd','eur'):
+        vietnamese = unit in ('vnđ','đồng','đ','₫') or bool(scale)
+        for grouping, decimal in (('.',','), (',','.')):
+            pattern = r'\d{1,3}(?:'+re.escape(grouping)+r'\d{3})+(?:'+re.escape(decimal)+r'\d+)?'
+            if (re.fullmatch(pattern,amount) and (vietnamese and grouping=='.'
+                    or amount.count(grouping)>1 or decimal in amount)):
+                return Fraction(amount.replace(grouping,'').replace(decimal,'.'))
+    # shortcut: single ambiguous separators, dates and versions stay literal without currency evidence.
+    if not re.fullmatch(r'\d+(?:[.,]\d+)?',amount) or re.search(r'[.,]\d{3}$',amount):
+        raise ValueError('Ambiguous numeric spelling')
+    return Fraction(amount.replace(',','.'))
+
+
 def numeric_facts(text):
     text = unicodedata.normalize('NFKC',text).casefold()
     facts = set()
@@ -74,14 +89,14 @@ def numeric_facts(text):
             continue  # Bare “không”/“năm” may mean negation/year, not a quantity.
         try:
             if amount[0].isdigit():
-                # shortcut: ambiguous separators/dates/version sequences stay literal; add locale evidence before widening.
-                if not re.fullmatch(r'\d+(?:[.,]\d+)?',amount) or re.search(r'[.,]\d{3}$',amount):
-                    raise ValueError('Ambiguous numeric spelling')
-                value = Fraction(amount.replace(',','.'))
+                value = _digits(amount,unit,match['scale'])
             else: value = _words(amount)
             if match['scale']: value *= SCALES[match['scale'].strip()]
             if (match['sign'] or '').strip() in ('-','−','âm'): value = -value
-            facts.add(('quantity',value,UNITS.get(unit,'')))
+            canonical_unit = UNITS.get(unit,'')
+            if match['basis']:
+                canonical_unit += '/' + re.search(r'(lượng|chỉ)\b',match['basis'])[0]
+            facts.add(('quantity',value,canonical_unit))
         except ValueError:
             facts.add(('literal',match[0].strip()))
     return facts

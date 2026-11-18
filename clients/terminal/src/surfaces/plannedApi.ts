@@ -69,6 +69,11 @@ export async function deletePlannedMeeting(id: string | number): Promise<void> {
 
 /** How many active connections an account may hold; the eleventh POST is a 409 (docs/api/calendar). */
 export const MAX_CALENDARS = 10;
+export const CALENDAR_CONNECTIONS_CHANGED = "tina:calendar-connections-changed";
+
+export function notifyCalendarConnectionsChanged(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(CALENDAR_CONNECTIONS_CHANGED));
+}
 
 export interface CalendarConnection {
   id: string;
@@ -78,6 +83,29 @@ export interface CalendarConnection {
   auto_join: boolean;
   bot_name: string;
   enabled: boolean;
+  provider?: "ics" | "google";
+  google_account_id?: string;
+  google_calendar_id?: string;
+  google_account_email?: string;
+}
+
+export interface GoogleCalendarInfo {
+  id: string;
+  summary: string;
+  primary: boolean;
+  time_zone?: string | null;
+  connected: boolean;
+}
+
+export interface GoogleCalendarAccount {
+  id: string;
+  email: string;
+  calendars: GoogleCalendarInfo[];
+}
+
+export interface CalendarState {
+  calendars: CalendarConnection[];
+  google_accounts: GoogleCalendarAccount[];
 }
 
 export interface CalendarCreateBody {
@@ -97,10 +125,14 @@ export interface CalendarUpdateBody {
 }
 
 export async function listCalendars(): Promise<CalendarConnection[]> {
-  const body = await jsonOrThrow<{ calendars?: CalendarConnection[] }>(
+  return (await listCalendarState()).calendars;
+}
+
+export async function listCalendarState(): Promise<CalendarState> {
+  const body = await jsonOrThrow<Partial<CalendarState>>(
     await fetch("/api/user/calendars", { cache: "no-store" }),
   );
-  return body?.calendars ?? [];
+  return { calendars: body?.calendars ?? [], google_accounts: body?.google_accounts ?? [] };
 }
 
 /** 201 → the masked connection. 409 = already at MAX_CALENDARS; 422 = bad name/bot name/feed URL. */
@@ -108,6 +140,18 @@ export async function createCalendar(body: CalendarCreateBody): Promise<Calendar
   return jsonOrThrow(await fetch("/api/user/calendars", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   }));
+}
+
+export async function createGoogleCalendarConnection(body: {
+  name: string; google_account_id: string; google_calendar_id: string; auto_join: boolean;
+}): Promise<CalendarConnection> {
+  return jsonOrThrow(await fetch("/api/user/calendars", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  }));
+}
+
+export async function disconnectGoogleCalendarAccount(accountId: string): Promise<void> {
+  return deleteCalendar(`google-account-${accountId}`);
 }
 
 export async function updateCalendar(id: string, body: CalendarUpdateBody): Promise<CalendarConnection> {

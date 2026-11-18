@@ -1,6 +1,5 @@
 "use client";
 /** Meetings (mocked backend) — the differentiator flow.
- *  • SidebarMeetingCapture (left): global capture actions and entry points, present across sections.
  *  • "meetings" LIST: the live one auto-opens; the section link leads to Today in the center.
  *  • "meeting" TAB (center): fixed meeting chrome around the Meeting Canvas body.
  *    The generated canvas view consumes this meeting's live MeetingState. */
@@ -16,12 +15,12 @@ import { ContextMenu, copyText } from "../ui-kit/ContextMenu";
 import { MEETING_CANVAS_CONTENT_INSET, MeetingCanvasView } from "../canvas/MeetingCanvasView";
 import { meetingPhase, type MeetingMock } from "./meetingModel";
 import { ApiError, presentError, readApiFailure } from "./apiClient";
-import { resolveJoinError, serviceDenialFromError, type ServiceDenialPresentation } from "./serviceDenial";
+import { serviceDenialFromError, type ServiceDenialPresentation } from "./serviceDenial";
 import { ServiceDenialPanel } from "./ServiceDenialPanel";
 import { useLiveMeetings, useLiveMeetingsConnection, useLiveMeetingsLoaded, liveMeetingsNow, refreshMeetings } from "./liveMeetings";
 import { usePreviewPinTab } from "./previewPinTab";
 import { defaultBotName } from "./defaultBotName";
-import { discordChannelUrl, meetingUrlFor, parseMeetingInput } from "./meetingId";
+import { discordChannelUrl, meetingUrlFor } from "./meetingId";
 import { getJitsiHosts } from "./jitsiHosts";
 import { mintTranscriptShare, mintInvite, listSharedMemberships, type Membership } from "./workspaceApi";
 import { deletePlannedMeeting, MAX_CALENDARS, listCalendars, createCalendar, updateCalendar, syncCalendar, getCalendarSyncStatus, type CalendarConnection, type CalendarSyncStamp } from "./plannedApi";
@@ -374,6 +373,9 @@ export function actionsFor(m: MeetingMock): RowAction[] {
   };
 
   const raw = m.live_status ?? (m.status === "live" ? "active" : "completed");
+  if (raw === "failed" && m.auto_retry?.state === "scheduled") {
+    return [{ id: "stop", label: "Cancel retry", tone: "live", run: stop }];
+  }
   const hasLink = !!m.native_id;
   if (raw === "awaiting_admission") {
     return [{ id: "stop", label: "Stop waiting", tone: "live", run: stop }];
@@ -408,6 +410,18 @@ function StatusBadge({ raw }: { raw?: string }) {
       {dot && <span style={{ width: 5, height: 5, borderRadius: "50%", background: b.color }} />}{b.label}
     </span>
   );
+}
+
+function autoRetryMessage(m: MeetingMock): string | null {
+  const retry = m.auto_retry;
+  if (!retry) return null;
+  if (retry.state === "manual_only" && m.live_status === "failed") return "This meeting needs a passcode, so send it again manually.";
+  if (retry.state === "exhausted") return "Automatic retries are exhausted. Use Send bot again to retry.";
+  if (retry.state === "failed") return "Automatic retry failed. Use Send bot again to retry.";
+  if (retry.state === "not_retryable") return "This failure will not be retried automatically.";
+  if (retry.state !== "scheduled" && !(retry.state === "in_progress" && retry.attempt > 1)) return null;
+  const attempt = retry.attempt + (retry.state === "scheduled" ? 1 : 0);
+  return `TINA is retrying automatically · attempt ${attempt} of ${retry.max_attempts}`;
 }
 
 /** Status badge (only when meaningful) + a small ▾ menu of action→transition items for one meeting row.
@@ -471,6 +485,7 @@ function MeetingRow({ m }: { m: MeetingMock }) {
   const label = m.title_custom ?? (m.native_id ?? m.title).replace(/^Google Meet · /, "");
   const showBadge = BADGE_STATUSES.has(m.live_status ?? "");
   const isIntent = INTENT_STATUSES.has(m.live_status ?? "");
+  const retryMessage = autoRetryMessage(m);
   useEffect(() => {
     if (!actionFailure) return;
     // A service denial is a thing the user must ACT on (add funds, finish setup, raise the cap) —
@@ -489,6 +504,11 @@ function MeetingRow({ m }: { m: MeetingMock }) {
         {(m.native_id || isIntent) && !m.shared && <RowActions m={m} showBadge={showBadge} reveal={hover} onActionStart={() => setActionFailure(null)} onActionFailure={setActionFailure} />}
       </div>
       <div style={{ fontSize: 11, color: inRoom ? "var(--green)" : "var(--t3)", marginTop: 1, paddingLeft: inRoom ? 13 : 0 }}>{inRoom ? "live" : m.when}</div>
+      {retryMessage && (
+        <div role="status" style={{ fontSize: 11, color: "var(--accent)", marginTop: 3, lineHeight: 1.35 }}>
+          {retryMessage}
+        </div>
+      )}
       {isIntent && m.auto_join_error && (
         <div role="alert" style={{ fontSize: 11, color: "var(--danger)", marginTop: 3, lineHeight: 1.35 }}>
           Auto-join failed: {m.auto_join_error}
@@ -753,79 +773,6 @@ function CalendarSyncButton({ variant = "icon" }: { variant?: "icon" | "row" }) 
   );
 }
 
-// ── Always-available capture actions (Direction C: capture first, navigation below). ─────────────
-export function SidebarMeetingCapture() {
-  // 'add bot from URL': send OUR bot into a meeting; the watcher attaches the copilot once it transcribes
-  const [url, setUrl] = useState("");
-  const [sent, setSent] = useState<null | "sending" | "ok" | "err">(null);
-  const [errMsg, setErrMsg] = useState<string | null>(null);
-  const [denial, setDenial] = useState<ServiceDenialPresentation | null>(null);
-  const addBot = async () => {
-    const u = url.trim();
-    if (!u || sent === "sending") return;
-    // Parse + validate the pasted link/id against the platform formats (mirrors join-form).
-    const parsed = parseMeetingInput(u, await getJitsiHosts());
-    if (!parsed) { setSent("err"); setErrMsg("That doesn't look like a Meet / Zoom / Teams / Jitsi / Discord link."); setDenial(null); setTimeout(() => setSent(null), 5000); return; }
-    setSent("sending"); setErrMsg(null); setDenial(null);
-    let refused = false;
-    try {
-      // POST /bots through the authed gateway proxy (X-API-Key injected server-side from the cookie token).
-      const r = await fetch("/api/bots", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: parsed.platform, native_meeting_id: parsed.native_meeting_id, meeting_url: meetingUrlFor(parsed, u), bot_name: defaultBotName() }),
-      });
-      if (r.ok) {
-        setSent("ok"); setUrl("");
-        // The list has no background poll, so force a re-fetch now and again as the bot
-        // transitions requested → joining → active (else the meeting only shows on reload).
-        refreshMeetings(); setTimeout(refreshMeetings, 2000); setTimeout(refreshMeetings, 6000);
-      } else {
-        // Surface the REAL reason, not a generic "bad link" (the cap/dup/auth cases are common).
-        setSent("err");
-        if (r.status === 429) { setErrMsg("You're at your meeting limit — stop one first."); }
-        else if (r.status === 409) { setErrMsg("That meeting already has a bot."); }
-        else if (r.status === 401) { setErrMsg("Not signed in — sign in and retry."); }
-        else {
-          // 403 service_not_allowed / 503 service_authority_unavailable are the deciding service
-          // refusing, not an access fault: they get their own words and their own fix.
-          const state = resolveJoinError(await readFailure(r));
-          if (state.kind === "denial") { setDenial(state.presentation); setErrMsg(null); refused = true; }
-          else setErrMsg(state.headline);
-        }
-      }
-    } catch { setSent("err"); setErrMsg("Couldn't reach the server."); }
-    // The transient flash clears itself; a denial panel is sticky until the next attempt — a
-    // paywall the user has to act on must not vanish on a 5s timer.
-    if (!refused) setTimeout(() => setSent(null), 5000);
-  };
-  return (
-    <section aria-label="Start meeting capture" style={{ padding: "17px 17px 14px", borderBottom: "1px solid var(--line)", flex: "none" }}>
-      <div style={{ display: "flex", alignItems: "center", minHeight: 20, padding: "0 0 9px" }}>
-        <span style={{ fontSize: "var(--ui-type-meta)", color: "var(--t3)", fontWeight: 500, flex: 1 }}>Start capture</span>
-      </div>
-      <div>
-        <div style={{ display: "flex", gap: 7, minWidth: 0 }}>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void addBot(); }}
-            className="meeting-capture-input" placeholder="Paste a meeting link…" />
-          <button onClick={() => void addBot()} disabled={!url.trim() || sent === "sending"} title="Send the TINA bot to this meeting"
-            className="meeting-capture-add">
-            <span aria-hidden="true">+</span>{sent === "sending" ? "…" : "Add bot"}
-          </button>
-        </div>
-        {sent === "ok" && <div style={{ fontSize: 11, color: "var(--green)", marginTop: 5, lineHeight: 1.4 }}>Bot sent — admit it in the meeting; it appears here once it starts transcribing.</div>}
-        {denial
-          ? <ServiceDenialPanel presentation={denial} onRetry={() => void addBot()} />
-          : sent === "err" && <div style={{ fontSize: 11, color: "var(--danger)", marginTop: 5, lineHeight: 1.4 }}>{errMsg ?? "Couldn't send."}</div>}
-        <div style={{ display: "grid", gap: 1, marginTop: 7 }}>
-          <PlanMeetingButton />
-          <CalendarSyncButton variant="row" />
-        </div>
-      </div>
-    </section>
-  );
-}
-
 // ── Meetings section's destination link and live auto-open behavior. ──────────────
 function MeetingsList() {
   const layout = useService(LayoutServiceId);
@@ -902,7 +849,8 @@ export function BotControls({ m, connected = true }: { m: MeetingMock; connected
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const acts = actionsFor(m).filter((a) => a.id === "stop" || a.id === "resend" || a.id === "send");
-  if (acts.length === 0) return null;
+  const retryMessage = autoRetryMessage(m);
+  if (acts.length === 0 && !retryMessage) return null;
   // The control's enabled-ness is a pure function of (row status, WS-connected): while the live
   // `meeting.status` stream is down the row may be a stale snapshot, so a state-bearing control
   // degrades to indeterminate/disabled — never an actionable "Stop bot" for a meeting the backend
@@ -910,6 +858,8 @@ export function BotControls({ m, connected = true }: { m: MeetingMock; connected
   const disabled = busy || !connected;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flex: "none" }}>
+      {m.live_status === "failed" && m.join_failure_summary && <span role="status" style={{ fontSize: 11, color: "var(--danger)", maxWidth: 280, lineHeight: 1.4 }}>{m.join_failure_summary}</span>}
+      {retryMessage && <span role="status" style={{ fontSize: 11, color: "var(--accent)" }}>{retryMessage}</span>}
       {acts.map((a) => {
         const danger = a.tone === "live";
         return (
@@ -925,7 +875,7 @@ export function BotControls({ m, connected = true }: { m: MeetingMock; connected
               color: danger ? "var(--danger)" : "var(--accent)",
               borderRadius: 7, padding: "4px 11px", fontSize: 12, fontWeight: 600,
               cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1 }}>
-            {a.id === "stop" ? "Stop bot" : "Send bot again"}
+            {a.id === "stop" ? (m.auto_retry?.state === "scheduled" ? "Cancel retry" : "Stop bot") : "Send bot again"}
           </button>
         );
       })}

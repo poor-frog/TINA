@@ -21,12 +21,13 @@ import hmac
 import json
 import os
 import time
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response, Security, status
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field, StrictBool, field_serializer, model_validator
+from pydantic import BaseModel, Field, StrictBool, field_serializer, field_validator, model_validator
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.future import select
@@ -173,7 +174,8 @@ class UserResponse(BaseModel):
         return {
             key: value
             for key, value in data.items()
-            if key != "webhook_secret"
+            # Google refresh tokens are kept only for the secret-gated calendar-sync edge.
+            if key not in {"webhook_secret", "google_calendar_accounts"}
         }
 
     model_config = {"from_attributes": True}
@@ -246,12 +248,97 @@ class CalendarUpdate(BaseModel):
 
 
 class CalendarCreate(BaseModel):
-    name: str
-    ics_url: str
-    auto_join: bool = True
+    name: Optional[str] = Field(default=None, max_length=100)
+    ics_url: Optional[str] = Field(default=None, max_length=2048)
+    auto_join: Optional[StrictBool] = None
     bot_name: Optional[str] = None
+    google_account: Optional["GoogleCalendarAccountLink"] = None
+    google_account_id: Optional[str] = Field(default=None, max_length=64)
+    google_calendar_id: Optional[str] = Field(default=None, max_length=512)
 
     model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def one_calendar_operation(self):
+        account_link = self.google_account is not None
+        google_calendar = self.google_account_id is not None or self.google_calendar_id is not None
+        ics_calendar = self.ics_url is not None
+        if sum((account_link, google_calendar, ics_calendar)) != 1:
+            raise ValueError("provide one ICS feed, Google account link, or Google calendar")
+        if account_link and any((self.name, self.bot_name, self.auto_join,
+                                 self.google_account_id, self.google_calendar_id)):
+            raise ValueError("Google account link cannot include calendar fields")
+        if google_calendar and (not self.google_account_id or not self.google_calendar_id or not self.name or self.ics_url):
+            raise ValueError("Google calendar requires its account, calendar id, and name")
+        if ics_calendar and (not self.name or self.google_account_id or self.google_calendar_id):
+            raise ValueError("ICS calendar requires a name and cannot include Google fields")
+        return self
+
+
+class GoogleCalendarInfo(BaseModel):
+    model_config = {"extra": "forbid"}
+    id: str = Field(min_length=1, max_length=512)
+    summary: str = Field(default="Calendar", max_length=300)
+    primary: StrictBool = False
+    time_zone: Optional[str] = Field(default=None, max_length=128)
+
+    @field_validator("id")
+    @classmethod
+    def bounded_google_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or any(ord(char) < 32 for char in value):
+            raise ValueError("invalid Google calendar metadata")
+        return value
+
+    @field_validator("summary")
+    @classmethod
+    def clean_google_summary(cls, value: str) -> str:
+        return value.strip()
+
+
+class GoogleCalendarAccountLink(BaseModel):
+    model_config = {"extra": "forbid"}
+    provider_account_id: str = Field(min_length=1, max_length=256)
+    email: str = Field(min_length=3, max_length=320)
+    refresh_token: Optional[str] = Field(default=None, min_length=16, max_length=4096)
+    calendars: list[GoogleCalendarInfo] = Field(max_length=250)
+
+    @field_validator("provider_account_id", "email")
+    @classmethod
+    def bounded_account_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value or any(ord(char) < 32 for char in value):
+            raise ValueError("invalid Google account metadata")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def valid_google_email(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value.count("@") != 1 or value.startswith("@") or value.endswith("@"):
+            raise ValueError("invalid Google account email")
+        return value
+
+    @field_validator("refresh_token")
+    @classmethod
+    def clean_refresh_token(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if len(value) < 16:
+            raise ValueError("invalid Google refresh token")
+        return value
+
+    @field_validator("calendars")
+    @classmethod
+    def unique_google_calendars(cls, values: list[GoogleCalendarInfo]) -> list[GoogleCalendarInfo]:
+        ids = [calendar.id for calendar in values]
+        if len(set(ids)) != len(ids):
+            raise ValueError("duplicate Google calendars")
+        return values
+
+
+CalendarCreate.model_rebuild()
 
 
 class CalendarPatch(BaseModel):
@@ -824,21 +911,28 @@ def create_app() -> FastAPI:
 
     # --- user tier: calendar-sync self-serve (writes to user.data JSONB, like webhook) ---
     from .calendars import (MAX_CALENDAR_CONNECTIONS, connections_from_data,
-                            masked_connection, new_connection, store_connections,
-                            validate_bot_name, validate_ics_url)
+                            google_account_id, google_accounts_from_data,
+                            masked_connection, new_connection, public_google_accounts,
+                            store_connections, validate_bot_name, validate_ics_url)
 
-    async def _save_calendar_connections(user: User, db: AsyncSession,
-                                         connections: list[dict]) -> None:
+    async def _save_calendar_data(user: User, db: AsyncSession, data: dict) -> None:
         from sqlalchemy.orm import attributes
-        user.data = store_connections(dict(user.data or {}), connections)
+        user.data = data
         attributes.flag_modified(user, "data")
         db.add(user)
         await db.commit()
 
+    async def _save_calendar_connections(user: User, db: AsyncSession,
+                                         connections: list[dict]) -> None:
+        await _save_calendar_data(user, db,
+                                  store_connections(dict(user.data or {}), connections))
+
     @app.get("/user/calendars")
     async def list_user_calendars(user: User = Depends(get_current_user)):
-        connections = connections_from_data(dict(user.data or {}), user.id)
-        return {"calendars": [masked_connection(c) for c in connections]}
+        data = dict(user.data or {})
+        connections = connections_from_data(data, user.id)
+        return {"calendars": [masked_connection(c) for c in connections],
+                "google_accounts": public_google_accounts(data, user.id)}
 
     @app.post("/user/calendars", status_code=status.HTTP_201_CREATED)
     async def create_user_calendar(calendar: CalendarCreate,
@@ -846,14 +940,104 @@ def create_app() -> FastAPI:
                                    db: AsyncSession = Depends(get_db)):
         connections = connections_from_data(dict(user.data or {}), user.id,
                                             include_deleted=True)
+        data = dict(user.data or {})
+
+        if calendar.google_account is not None:
+            link = calendar.google_account
+            accounts = google_accounts_from_data(data)
+            account_id = google_account_id(user.id, link.provider_account_id)
+            existing = next((a for a in accounts
+                             if a.get("id") == account_id), None)
+            encrypted_refresh_token = (existing or {}).get("refresh_token_encrypted")
+            if link.refresh_token:
+                try:
+                    from .calendar_crypto import encrypt_google_refresh_token
+                    encrypted_refresh_token = encrypt_google_refresh_token(link.refresh_token)
+                except RuntimeError:
+                    raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                                        detail="Google Calendar token storage is not configured") from None
+            if not encrypted_refresh_token:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                    detail="Google did not grant offline calendar access; reconnect Google Calendar")
+            safe_calendars = [item.model_dump(exclude_none=True) for item in link.calendars]
+            available_ids = {item["id"] for item in safe_calendars}
+            account = {
+                "id": account_id,
+                "provider_account_id": link.provider_account_id,
+                "email": link.email.strip().lower(),
+                "refresh_token_encrypted": encrypted_refresh_token,
+                "calendars": safe_calendars,
+            }
+            accounts = [a for a in accounts if a.get("id") != account_id]
+            accounts.append(account)
+            data["google_calendar_accounts"] = accounts
+            # CalendarList is refreshed on reauthorization. Retire selected calendars whose
+            # access disappeared so their imported meetings cannot remain armed indefinitely.
+            for connection in connections:
+                if (connection.get("provider") == "google"
+                        and connection.get("google_account_id") == account_id
+                        and connection.get("google_calendar_id") not in available_ids):
+                    connection["enabled"] = False
+                    connection["deleted"] = True
+            data = store_connections(data, connections)
+            await _save_calendar_data(user, db, data)
+            public = next(a for a in public_google_accounts(data, user.id)
+                          if a["id"] == account_id)
+            return {"google_account": public}
+
+        if calendar.google_account_id is not None:
+            account = next((a for a in google_accounts_from_data(data)
+                            if a.get("id") == calendar.google_account_id), None)
+            if account is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Google Calendar account not found")
+            metadata = next((item for item in account.get("calendars", [])
+                             if item.get("id") == calendar.google_calendar_id), None)
+            if metadata is None:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                    detail="Choose a calendar returned by Google")
+            existing = next((c for c in connections
+                             if c.get("provider") == "google"
+                             and c.get("google_account_id") == account["id"]
+                             and c.get("google_calendar_id") == metadata["id"]), None)
+            if existing is not None:
+                if existing.get("deleted") and sum(not c.get("deleted") for c in connections) >= MAX_CALENDAR_CONNECTIONS:
+                    raise HTTPException(status.HTTP_409_CONFLICT,
+                                        detail=f"at most {MAX_CALENDAR_CONNECTIONS} calendars can be connected")
+                existing.pop("deleted", None)
+                existing["enabled"] = True
+                if calendar.auto_join is not None:
+                    existing["auto_join"] = calendar.auto_join
+                await _save_calendar_connections(user, db, connections)
+                return masked_connection(existing)
+            active_count = len([c for c in connections if not c.get("deleted")])
+            if active_count >= MAX_CALENDAR_CONNECTIONS:
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    detail=f"at most {MAX_CALENDAR_CONNECTIONS} calendars can be connected")
+            name = (calendar.name or metadata.get("summary") or "Google Calendar").strip()[:100]
+            if not name:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid calendar name")
+            created = {
+                "id": str(uuid.uuid4()),
+                "provider": "google",
+                "name": name,
+                "google_account_id": account["id"],
+                "google_calendar_id": metadata["id"],
+                "google_account_email": account["email"],
+                "auto_join": calendar.auto_join if calendar.auto_join is not None else False,
+                "bot_name": validate_bot_name(calendar.bot_name or "TINA"),
+                "enabled": True,
+            }
+            connections.append(created)
+            await _save_calendar_connections(user, db, connections)
+            return masked_connection(created)
+
         if len([c for c in connections if not c.get("deleted")]) >= MAX_CALENDAR_CONNECTIONS:
             raise HTTPException(status.HTTP_409_CONFLICT,
                                 detail=f"at most {MAX_CALENDAR_CONNECTIONS} calendars can be connected")
-        data = dict(user.data or {})
         created = new_connection(
-            name=calendar.name,
-            ics_url=calendar.ics_url,
-            auto_join=calendar.auto_join,
+            name=calendar.name or "",
+            ics_url=calendar.ics_url or "",
+            auto_join=calendar.auto_join if calendar.auto_join is not None else True,
             bot_name=calendar.bot_name or data.get("calendar_bot_name") or "TINA",
         )
         connections.append(created)
@@ -875,6 +1059,9 @@ def create_app() -> FastAPI:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid name")
             target["name"] = name
         if patch.ics_url is not None:
+            if target.get("provider") == "google":
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                    detail="Google Calendar connections cannot be replaced with an ICS feed")
             target["ics_url"] = validate_ics_url(patch.ics_url)
         if patch.auto_join is not None:
             target["auto_join"] = bool(patch.auto_join)
@@ -889,6 +1076,23 @@ def create_app() -> FastAPI:
     async def delete_user_calendar(calendar_id: str,
                                    user: User = Depends(get_current_user_for_update),
                                    db: AsyncSession = Depends(get_db)):
+        data = dict(user.data or {})
+        account_prefix = "google-account-"
+        if calendar_id.startswith(account_prefix):
+            account_id = calendar_id[len(account_prefix):]
+            accounts = google_accounts_from_data(data)
+            if not any(a.get("id") == account_id for a in accounts):
+                raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Google Calendar account not found")
+            connections = connections_from_data(data, user.id, include_deleted=True)
+            for connection in connections:
+                if (connection.get("provider") == "google"
+                        and connection.get("google_account_id") == account_id):
+                    connection["enabled"] = False
+                    connection["deleted"] = True
+            data["google_calendar_accounts"] = [a for a in accounts if a.get("id") != account_id]
+            await _save_calendar_data(user, db, store_connections(data, connections))
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+
         connections = connections_from_data(dict(user.data or {}), user.id,
                                             include_deleted=True)
         target = next((c for c in connections if c["id"] == calendar_id and not c.get("deleted")), None)
@@ -923,13 +1127,17 @@ def create_app() -> FastAPI:
             user.data = data
             attributes.flag_modified(user, "data")
         connections = connections_from_data(data, user.id, include_deleted=True)
-        current = next((c for c in connections if not c.get("deleted")), None)
+        current = next((c for c in connections
+                        if not c.get("deleted") and c.get("provider") != "google"), None)
         if updated_bot_name is not None and current is not None:
             current["bot_name"] = updated_bot_name
         if "ics_url" in calendar_update.model_fields_set:
             url = (calendar_update.ics_url or "").strip()
             if url:
                 if current is None:
+                    if sum(not c.get("deleted") for c in connections) >= MAX_CALENDAR_CONNECTIONS:
+                        raise HTTPException(status.HTTP_409_CONFLICT,
+                                            detail=f"at most {MAX_CALENDAR_CONNECTIONS} calendars can be connected")
                     current = new_connection(name="Calendar", ics_url=url,
                                              auto_join=calendar_update.auto_join
                                              if calendar_update.auto_join is not None else True,
@@ -952,7 +1160,8 @@ def create_app() -> FastAPI:
         """Read back the caller's calendar config. The ICS URL is a secret — masked to its host
         + last 4 chars, enough to recognize WHICH feed is connected without disclosing it."""
         data = user.data if isinstance(user.data, dict) else {}
-        current = next(iter(connections_from_data(data, user.id)), None)
+        current = next((c for c in connections_from_data(data, user.id)
+                        if c.get("provider") != "google"), None)
         masked = masked_connection(current) if current else None
         return {
             "ics_url_set": bool(masked and masked["ics_url_set"]),
@@ -1319,6 +1528,7 @@ def create_app() -> FastAPI:
         _check_internal(request)
         from sqlalchemy import or_
         from .calendars import internal_connections
+        from .calendar_crypto import decrypt_google_refresh_token
         rows = (await db.execute(select(User).where(or_(
             User.data["calendar_ics_url"].astext.isnot(None),
             User.data["calendar_connections"].astext.isnot(None),
@@ -1326,7 +1536,9 @@ def create_app() -> FastAPI:
         configs = []
         for u in rows:
             data = u.data if isinstance(u.data, dict) else {}
-            configs.extend(internal_connections(data, u.id))
+            configs.extend(internal_connections(
+                data, u.id, decrypt_google_token=decrypt_google_refresh_token,
+            ))
         return {"configs": configs}
 
     # --- internal tier: per-user spawn context — the auto-join sweep's stand-in for the headers

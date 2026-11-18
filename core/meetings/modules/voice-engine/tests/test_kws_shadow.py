@@ -131,3 +131,30 @@ def test_intermittent_identity_metadata_keeps_the_same_audio_stream_until_a_know
     assert engine.health[1]['identity_resets'] == 0
     engine.feed(1, 'b', np.zeros(1024), 1256, 4096)
     assert len(streams) == 2 and engine.health[1]['identity_resets'] == 1
+
+
+def test_wake_keeps_only_recent_continuous_transport_identity(monkeypatch):
+    engine, streams, events, now = fixture(monkeypatch)
+    engine.feed(1, 'a', np.zeros(1024), 1000, 0)
+    streams[0].score = .9
+    engine.feed(1, None, np.zeros(1024), 1064, 1024)
+    assert [e for e in events if e['status'] == 'wake'][-1]['participant'] == 'a'
+    now[0] = 2
+    for i in range(2, 28):
+        engine.feed(1, None, np.zeros(1024), 1000+i*64, i*1024)
+    now[0] = 4
+    engine.feed(1, None, np.zeros(1280), 2792, 28*1024)
+    assert [e for e in events if e['status'] == 'wake'][-1]['participant'] is None
+    engine.feed(1, None, np.zeros(1280), 4000, 0)
+    streams[-1].score = .9
+    engine.feed(1, None, np.zeros(1280), 4080, 1280)
+    assert [e for e in events if e['status'] == 'wake'][-1]['participant'] is None
+
+
+@pytest.mark.parametrize('score,expected',[(.399,False),(.4,True),(.45,True),(.5,True)])
+def test_activation_threshold_is_point_four(monkeypatch,score,expected):
+    engine,streams,events,_=fixture(monkeypatch)
+    streams[0].score=score
+    engine.feed(1,'caller',np.zeros(1280),1000,0)
+    assert any(e['status']=='wake' for e in events) is expected
+    engine.close()

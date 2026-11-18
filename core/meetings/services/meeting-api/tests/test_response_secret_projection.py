@@ -345,6 +345,20 @@ def test_the_projections_default_to_the_strict_view():
         assert projected["title"] == "Quarterly review"
 
 
+def test_auto_retry_request_is_private_but_owner_can_see_retry_progress():
+    data = {
+        "auto_retry": {"state": "scheduled", "attempt": 1, "max_attempts": 3},
+        "_auto_retry_request": {"task": "private task"},
+    }
+    for projected in (project_response_data(data, viewer_is_owner=True),
+                      project_list_data(data, viewer_is_owner=True)):
+        assert projected["auto_retry"]["state"] == "scheduled"
+        assert "_auto_retry_request" not in projected
+    for projected in (project_response_data(data), project_list_data(data)):
+        assert "auto_retry" not in projected
+        assert "_auto_retry_request" not in projected
+
+
 def test_projection_is_pure_and_leaves_the_stored_row_intact():
     """It shapes the RESPONSE. The row keeps what the system needs to keep — on both views."""
     stored = dict(ROW_DATA)

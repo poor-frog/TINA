@@ -37,6 +37,32 @@
           "title": "Documents",
           "type": "array"
         },
+        "source_profile_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{32}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Profile Id"
+        },
+        "source_profile_fingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Profile Fingerprint"
+        },
         "revision": {
           "default": 0,
           "minimum": 0,
@@ -66,6 +92,20 @@
           "title": "Allow Web Search",
           "type": "boolean"
         },
+        "auto_web_search": {
+          "default": false,
+          "title": "Auto Web Search",
+          "type": "boolean"
+        },
+        "agent_backend": {
+          "default": "completion",
+          "enum": [
+            "completion",
+            "sandbox"
+          ],
+          "title": "Agent Backend",
+          "type": "string"
+        },
         "engine": {
           "default": "tina",
           "enum": [
@@ -74,6 +114,11 @@
           ],
           "title": "Engine",
           "type": "string"
+        },
+        "include_workspace_wiki": {
+          "default": false,
+          "title": "Include Workspace Wiki",
+          "type": "boolean"
         }
       },
       "title": "VoicePolicy",
@@ -353,7 +398,10 @@
             "web_no_sources",
             "summary_pending",
             "clarification_exhausted",
-            "draft_unavailable"
+            "draft_unavailable",
+            "generation_format_invalid",
+            "web_answer_empty",
+            "web_numeric_mismatch"
           ],
           "title": "Reason",
           "type": "string"
@@ -453,6 +501,25 @@
           ],
           "default": null,
           "title": "Ended At Ms"
+        },
+        "detail_text": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail Text"
+        },
+        "answer_complete": {
+          "default": true,
+          "title": "Answer Complete",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1565,7 +1632,8 @@
             "clarification_exhausted",
             "llm_unavailable",
             "verification_unavailable",
-            "draft_unavailable"
+            "draft_unavailable",
+            "generation_format_invalid"
           ],
           "title": "Reason",
           "type": "string"
@@ -1895,6 +1963,33 @@
           "default": false,
           "title": "Clarification",
           "type": "boolean"
+        },
+        "follow_up": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Follow Up"
+        },
+        "heard_partial": {
+          "default": false,
+          "title": "Heard Partial",
+          "type": "boolean"
+        },
+        "heard_source_guards": {
+          "items": {
+            "$ref": "#/$defs/VoiceSourceRef"
+          },
+          "maxItems": 32,
+          "title": "Heard Source Guards",
+          "type": "array"
         }
       },
       "required": [
@@ -2207,6 +2302,141 @@
       ],
       "title": "VoiceActionDraftPage",
       "type": "object"
+    },
+    "VoiceSourceProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "documents": {
+          "items": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Documents",
+          "type": "array"
+        },
+        "shared_meeting_ids": {
+          "items": {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "title": "Shared Meeting Ids",
+          "type": "array"
+        },
+        "include_transcript": {
+          "default": true,
+          "title": "Include Transcript",
+          "type": "boolean"
+        },
+        "include_approved_actions": {
+          "default": true,
+          "title": "Include Approved Actions",
+          "type": "boolean"
+        },
+        "allow_general_knowledge": {
+          "default": true,
+          "title": "Allow General Knowledge",
+          "type": "boolean"
+        },
+        "allow_web_search": {
+          "default": false,
+          "title": "Allow Web Search",
+          "type": "boolean"
+        },
+        "auto_web_search": {
+          "default": false,
+          "title": "Auto Web Search",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "VoiceSourceProfile",
+      "type": "object"
+    },
+    "SavedVoiceSourceProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "sources",
+        "fingerprint"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sources": {
+          "additionalProperties": false,
+          "properties": {
+            "documents": {
+              "items": {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Documents",
+              "type": "array"
+            },
+            "shared_meeting_ids": {
+              "items": {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 4,
+              "title": "Shared Meeting Ids",
+              "type": "array"
+            },
+            "include_transcript": {
+              "default": true,
+              "title": "Include Transcript",
+              "type": "boolean"
+            },
+            "include_approved_actions": {
+              "default": true,
+              "title": "Include Approved Actions",
+              "type": "boolean"
+            },
+            "allow_general_knowledge": {
+              "default": true,
+              "title": "Allow General Knowledge",
+              "type": "boolean"
+            },
+            "allow_web_search": {
+              "default": false,
+              "title": "Allow Web Search",
+              "type": "boolean"
+            },
+            "auto_web_search": {
+              "default": false,
+              "title": "Auto Web Search",
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      }
     }
   }
 }

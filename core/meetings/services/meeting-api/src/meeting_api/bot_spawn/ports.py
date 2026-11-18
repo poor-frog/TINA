@@ -167,6 +167,18 @@ class MeetingRepo(Protocol):
         changed under them."""
         ...
 
+    async def cancel_join_retries(self, user_id: int, platform: str, native_meeting_id: str) -> list[dict]:
+        """Cancel scheduled retries under the same row lock used to reopen a meeting."""
+        ...
+
+    async def list_due_join_retries(self, *, now: datetime, limit: int = 50) -> list[dict]:
+        """Return failed meeting rows whose owner-approved transient retry is due."""
+        ...
+
+    async def merge_meeting_data(self, meeting_id: int, patch: dict) -> None:
+        """Merge internal retry state into the meeting row without replacing other data."""
+        ...
+
     async def count_active_bots(self, *, user_id: int, exclude_meeting_id: Optional[int] = None) -> int:
         """Count the user's ACTIVE (non-terminal) bots for the max-bots quota (P3e).
 

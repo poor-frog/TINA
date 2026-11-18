@@ -81,3 +81,8 @@ node build.mjs
 In Chrome, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `clients/extension/dist`. The manifest grants storage, tabs, side-panel, loopback HTTP, and HTTPS access to `tinabot.duckdns.org`. It includes no meeting-site content scripts, tab-capture, microphone, offscreen, or ingest-WebSocket permissions.
 
 Voice status shows fresh same-session recovery diagnostics for silent expiry, paused clarification, answer-service failure and failed audio. Rebuild `dist/` and reload the unpacked extension to load changes.
+
+When an automatic bot retry is pending, **Cancel retry** cancels it through the same owner-scoped Stop
+endpoint used by Terminal. After cancellation or exhausted retries, **Send Bot Again** starts a manual run.
+
+Failed Meeting Bot attempts show the server-provided owner-only join diagnosis alongside the retry controls. Rebuild and reload the unpacked extension to receive UI updates; a join refusal is separate from voice playback failure.

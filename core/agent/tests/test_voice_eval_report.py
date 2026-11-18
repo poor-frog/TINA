@@ -53,6 +53,16 @@ def test_notice_only_logs_do_not_imply_any_answer_latency(tmp_path):
     assert value['completed'] == {} and 'answer_playback_after_end' not in value['all_observed']
 
 
+def test_spoken_service_error_is_excluded_from_completed_answer_latency(tmp_path):
+    path=tmp_path/'bot.log'
+    path.write_text('\n'.join(json.dumps({'type':'voice_timing','request_id':outcome,
+        'stage':'turn_finished','outcome':outcome,'durations_ms':{'answer_playback_after_end':duration}})
+        for outcome,duration in [('answer_failed',10000),('no_evidence',2000)]))
+    value=report.latency_report(path)
+    assert value['observed_turns']==2 and value['completed_turns']==1
+    assert value['completed']['answer_playback_after_end']=={'n':1,'p50_ms':2000,'p95_ms':2000}
+
+
 def test_stage_report_deduplicates_spans_keeps_rounds_and_omits_content(tmp_path):
     from uuid import uuid4
     path = tmp_path / 'stages.log'; identifier = str(uuid4())

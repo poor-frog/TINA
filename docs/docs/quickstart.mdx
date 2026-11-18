@@ -130,12 +130,10 @@ frames mark anything the agent recorded. See the [Agent API](/api/agent).
 
 ## 4. Third win — connect your calendar
 
-Stop pasting links: give TINA your calendar's **secret ICS address** (Google Calendar → Settings →
-your calendar → *Integrate calendar* → **Secret address in iCal format**, the `…/private-…/basic.ics`
-one — *not* the public address above it). Every upcoming event imports; Meet/Zoom/Teams events are
-armed for auto-join and link-less events remain visible until you add a link. On a Google
-**Workspace** domain the secret-address field may need a one-time admin unlock
-([how](/how-to/calendar-sync#1-find-your-secret-ics-address)).
+Connect Google Calendar directly from **Settings → Calendar → Connect Google Calendar** and approve
+read-only access. Choose which calendars TINA should sync; each starts with auto-join off. You can
+also use a calendar's **secret ICS address** when you prefer not to grant OAuth access. ICS setup is
+covered in the [calendar walkthrough](/how-to/calendar-sync#ics-feed).
 
 ```bash
 curl -X POST "$API_BASE/user/calendars" \
