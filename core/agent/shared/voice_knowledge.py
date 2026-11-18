@@ -46,6 +46,9 @@ Use conversational language, without formal report openings, filler, Markdown or
 In Vietnamese use "em" for necessary self-reference; use "bạn" for the listener without inferring
 age, gender or rank. Prefer direct answers without pronouns. For follow-ups answer the new detail
 without repeating the previous reply. Use a short supported correction for a false premise.
+If heard_partial is true, that history answer is only the completed spoken prefix of an interrupted
+reply. Use it to avoid repeating heard sentences; retrieve fresh evidence for the corrected request.
+Do not infer or continue the unheard remainder. Repeat a fact only when the user explicitly asks.
 Match the conversational situation instead of adding a random friendly opening:
 - A clear question gets its answer immediately. The runtime handles wake acknowledgments and
   waiting notices; do not add "Dạ, em nghe", "đợi em chút" or narrate a tool operation here.
@@ -239,6 +242,8 @@ FAILURES = {
     'web_disabled': 'Tìm kiếm web chưa được bật cho meeting này. Chủ meeting có thể bật trong Settings, Voice assistant.',
     'web_unavailable': 'Dịch vụ tìm kiếm web hiện chưa dùng được với cấu hình model này.',
     'web_no_sources': 'Em chưa có nguồn web hợp lệ để xác nhận kết quả.',
+    'web_answer_empty': 'Em tìm được nội dung trên web nhưng chưa rút ra được câu trả lời phù hợp.',
+    'web_numeric_mismatch': 'Em tìm được nguồn web nhưng số liệu hoặc đơn vị trong câu trả lời chưa khớp nguồn.',
 }
 
 
@@ -514,8 +519,10 @@ def current_history(history, sources, now_ms):
     pending = bool(history and (history[-1].get('clarification') or history[-1].get('follow_up'))
                    and 0 <= now_ms - history[-1]['created_at_ms'] <= 30000)
     valid = [turn for turn in history if now_ms - 900000 <= turn['created_at_ms'] <= now_ms
-            and (turn['sources'] or (turn.get('clarification') or turn.get('follow_up')) and pending)
-            and all(current.get(ref['key']) == ref['fingerprint'] for ref in turn['sources'])][-3:]
+            and (turn['sources'] or turn.get('heard_partial') is True
+                 or (turn.get('clarification') or turn.get('follow_up')) and pending)
+            and all(current.get(ref['key']) == ref['fingerprint']
+                    for ref in turn['sources'] + turn.get('heard_source_guards',[]))][-3:]
     if valid and valid[-1] is not history[-1]:
         valid = [turn | {'clarification': False, 'follow_up': None} for turn in valid]
     return valid

@@ -399,7 +399,9 @@
             "summary_pending",
             "clarification_exhausted",
             "draft_unavailable",
-            "generation_format_invalid"
+            "generation_format_invalid",
+            "web_answer_empty",
+            "web_numeric_mismatch"
           ],
           "title": "Reason",
           "type": "string"
@@ -1975,6 +1977,19 @@
           ],
           "default": null,
           "title": "Follow Up"
+        },
+        "heard_partial": {
+          "default": false,
+          "title": "Heard Partial",
+          "type": "boolean"
+        },
+        "heard_source_guards": {
+          "items": {
+            "$ref": "#/$defs/VoiceSourceRef"
+          },
+          "maxItems": 32,
+          "title": "Heard Source Guards",
+          "type": "array"
         }
       },
       "required": [

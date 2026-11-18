@@ -583,6 +583,10 @@ class Dispatcher:
     def settings(self) -> Settings:
         return self._settings
 
+    def stop_workload(self, workload_id: str) -> None:
+        """Stop one isolated dispatch workload after its live voice lease is revoked."""
+        self._runtime.stop(workload_id)
+
     def resolve_model_config(self, subject: str) -> Optional[dict]:
         """The subject's effective Settings → Models config (user pref > platform setting).
         ``{}`` = resolved empty / no resolver wired; ``None`` = the lookup FAILED — callers fail

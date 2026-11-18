@@ -81,7 +81,7 @@ class VoiceReply(BaseModel):
     answer_kind: Literal['meeting', 'general', 'web', 'assistant'] = 'meeting'
     reason: Literal['answered', 'clarification', 'no_shared_sources', 'retrieval_empty', 'insufficient_evidence',
                     'verification_rejected', 'verification_unavailable', 'llm_unavailable', 'generation_format_invalid',
-                    'general_disabled', 'web_disabled', 'web_unavailable', 'web_no_sources', 'summary_pending',
+                    'general_disabled', 'web_disabled', 'web_unavailable', 'web_no_sources', 'web_answer_empty', 'web_numeric_mismatch', 'summary_pending',
                     'clarification_exhausted', 'draft_unavailable'] = 'answered'
     links: list[VoiceLink] = Field(default_factory=list, max_length=6)
     source_refs: list[VoiceSourceRef] = Field(default_factory=list, max_length=32)

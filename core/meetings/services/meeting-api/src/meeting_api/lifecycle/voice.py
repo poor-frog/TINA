@@ -703,7 +703,9 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
             if reply.get('state') == 'completed':
                 history.append(turn | {'created_at_ms': reply.get('ended_at_ms') or turn['created_at_ms']})
             elif reply.get('state') == 'stopped' and reply.get('played_text'):
-                history.append(turn | {'answer': reply['played_text'], 'clarification': False, 'follow_up': None})
+                history.append(turn | {'answer': reply['played_text'], 'sources': [],
+                                       'heard_source_guards':turn.get('heard_source_guards',turn['sources']),
+                                       'clarification': False, 'follow_up': None, 'heard_partial': True})
         history = history[-3:]
         return key, history, [{k: v for k, v in t.items() if k != 'request_id'} for t in history]
 

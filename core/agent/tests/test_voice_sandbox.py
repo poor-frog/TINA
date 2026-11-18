@@ -293,7 +293,7 @@ def test_explicit_empty_tool_grant_disables_codex_claude_and_antigravity_native_
     assert not permissions['allow'] and 'read_file(*)' in permissions['deny']
 
 
-def test_provider_native_web_remains_an_external_tool_before_sandbox_generation(monkeypatch):
+def test_provider_summary_without_original_web_excerpts_cannot_authorize_voice(monkeypatch):
     from worker import engine
     from shared.meeting_knowledge import PREFIX
     from shared.voice_knowledge import VERIFY_SYSTEM
@@ -318,4 +318,20 @@ def test_provider_native_web_remains_an_external_tool_before_sandbox_generation(
     events=[];stream=SimpleNamespace(xadd=lambda _,e:events.append(json.loads(e['event'])),expire=lambda *_:None)
     engine._run_meeting_knowledge(stream,'out',{'entrypoint':{'inline':PREFIX+json.dumps(payload)}})
     result=json.loads(events[0]['text'])
-    assert result['text']=='Redis is a database.' and result['links'][0]['url']=='https://redis.io'
+    assert result=={'reason':'web_unavailable'}
+
+
+def test_cancelable_reader_polls_voice_without_changing_chat_interval(monkeypatch):
+    from shared.adapters import RedisStreamReader
+    blocks=[];closed=[]
+    class Connection:
+        def xread(self,*args,block,**kwargs):blocks.append(block);return []
+        def close(self):closed.append(True)
+    monkeypatch.setattr('redis.from_url',lambda *a,**kw:Connection())
+    reader=RedisStreamReader('redis://synthetic');alive=[True]
+    stream=reader.read_cancelable('voice',resume='0-0',should_continue=lambda:alive[0])
+    assert next(stream) is None
+    alive[0]=False
+    assert list(stream)==[] and blocks==[250] and closed==[True]
+    chat=reader.read('chat',resume='0-0');assert next(chat) is None;chat.close()
+    assert blocks==[250,15000] and closed==[True,True]

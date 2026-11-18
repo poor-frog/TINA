@@ -142,3 +142,11 @@ def test_explicit_llm_reranker_evaluation_records_applied_or_fallback_without_ne
     assert report['reranker']['outcomes'][outcome] == 1
     assert sum(report['reranker']['outcomes'].values()) == 1
     if outcome=='empty':assert report['cases'][0]['retrieved_count']==0
+
+
+def test_web_numeric_mismatch_is_a_refusal_and_empty_generation_is_a_service_failure(tmp_path):
+    _,_,gold=fixture(tmp_path)
+    first=evaluation.answer_report(gold,{'cases':[{'id':'1','reason':'web_numeric_mismatch'}]})
+    second=evaluation.answer_report(gold,{'cases':[{'id':'1','reason':'web_answer_empty'}]})
+    assert first['answerable_refusals']==1 and first['service_errors']==0
+    assert second['service_errors']==1 and second['answerable_refusals']==0

@@ -33,6 +33,23 @@ Stop fences late results using TINA's current turn checks. An already running sy
 may finish; it cannot authorize playback. The retrieval server kills its exact subprocess on HTTP
 disconnect or timeout.
 
+For voice, the existing LangGraph `search_web` tool now reads the first two distinct result pages
+in parallel through this same gateway. A successful read replaces that URL's search snippet with
+the original bounded Markdown, preserving headings/tables inside the 5,000-character excerpt.
+Failed or mismatched-URL reads retain the original search excerpt; they never invent page content.
+Explicit URL/GitHub reads are already page reads and are not fetched again.
+
+If web search returns no usable evidence or the answer model returns no claims, one public-only
+refinement may search again and read one additional distinct page. Limits per tool invocation are
+two searches, three page attempts (two concurrent), six unique excerpts, and one refinement of at
+most 200 characters. A minimum remaining budget is required for refinement. The original question
+remains the answer/verification target; the refinement sees only that public question and public
+excerpts. Quota/auth failures, invalid answers and failed numeric/claim verification never trigger
+another search. All stages share the core retrieval deadline (30 seconds for LiveKit tool lookup)
+and the current-turn fence; cancelled in-flight reads may finish within their HTTP timeout but
+cannot start another model/search call or authorize playback. Content-free web_retrieve/web_read/
+web_refine spans and search_rounds/pages_read/pages_failed counters separate added work from LLM time.
+
 At most two subprocesses run concurrently, each with a 24-second outer deadline and bounded input
 and output. The service is intended for TINA's trusted private network; do not publish its port.
 `/health` checks local imports/readiness only and does not promise upstream internet availability.

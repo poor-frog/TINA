@@ -793,6 +793,8 @@ async def test_interrupted_history_keeps_only_monotonic_completed_sentences_and_
         assert reply['text']=='Lan phụ trách demo. Hạn thứ Sáu.','preserve the generated proposal separately'
         assert (await client.post('/bots/voice/1/current/answer',headers=h,json=question())).status_code==200
         history=seen[-1]['history'];assert len(history)==1 and history[0]['answer']=='Lan phụ trách demo.'
+        assert history[0]['sources']==[] and history[0]['heard_partial'] is True
+        assert history[0]['heard_source_guards']==[{'key':'segment:demo','fingerprint':'a'*64}]
         assert 'Hạn thứ Sáu' not in json.dumps(history) and history[0]['clarification'] is False
         assert history[0]['follow_up'] is None, 'an interrupted prompt must not arm a pending reply'
 
@@ -1170,3 +1172,23 @@ def test_legacy_reply_metadata_remains_readable_without_the_retired_runtime():
     row={'data':{'voice_replies':{value['request_id']:value|{'session_uid':'old'}}}}
     reply=public_replies(row,None)[0]
     assert reply['text']=='Lan làm demo.' and reply['detail_text']=='Hạn thứ Sáu.' and not reply['answer_complete']
+
+
+@pytest.mark.parametrize('reason,checks',[('web_answer_empty',[]),('web_numeric_mismatch',['numeric_mismatch']),
+    ('verification_rejected',['contradiction']),('verification_unavailable',['unavailable'])])
+async def test_web_failure_category_and_verification_survive_playback_storage(setup,reason,checks):
+    _,repo,redis,*_=setup
+    async def upstream(request):
+        return httpx.Response(200,json={'text':'Synthetic web failure.','sources':[],
+            'answer_kind':'web','reason':reason,'verification':checks})
+    def factory(**kw):return httpx.AsyncClient(transport=httpx.MockTransport(upstream),**kw)
+    store=PlaybackStore(redis,repo.save_voice_reply);app=FastAPI()
+    app.include_router(build_voice_router(repo,redis,redis,store,client_factory=factory))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
+        body=question();response=await client.post('/bots/voice/1/current/answer',headers=headers(),json=body)
+        assert response.status_code==200,response.text
+        await store.report(1,body['request_id'],'current','started')
+        await store.report(1,body['request_id'],'current','completed')
+        saved=repo.row['data']['voice_replies'][body['request_id']]
+        assert saved['reason']==reason and saved['verification']==checks
+        assert saved['answer_kind']=='web' and saved['state']=='completed'

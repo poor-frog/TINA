@@ -325,7 +325,7 @@ function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:
               :(policy.shared_meeting_ids||[]).filter(id=>id!==item.id)})}/> {item.title}</label>;
         })}
       </details>
-      <span style={{fontSize:12,color:'var(--t3)',lineHeight:1.5}}>General: “ASR là gì?” or “Kiến thức chung: …”. Web: “Tìm trên web về …”. Only the spoken search query goes to web search. Requires a configured search service or a provider with web search.</span>
+      <span style={{fontSize:12,color:'var(--t3)',lineHeight:1.5}}>General: “ASR là gì?” or “Kiến thức chung: …”. Web: “Tìm trên web về …”. Only the spoken search query leaves the room; verified public search must be configured.</span>
       {reason&&<span role="status" style={{fontSize:12,color:'var(--t3)'}}>Last answer: {reason.replaceAll('_',' ')}</span>}
       <div className={styles.meetingActions}><button type="button" disabled={busy||JSON.stringify(policy)===JSON.stringify(savedPolicy)} style={button} onClick={save}>{busy?'Applying…':'Apply to meeting'}</button>
         <span className={styles.helper}>{JSON.stringify(policy)===JSON.stringify(savedPolicy)?'No meeting changes':'Unsaved meeting changes'}</span></div>

@@ -817,6 +817,23 @@ def test_agents_web_query_is_explicit_opt_in_and_cannot_contain_room_context(voi
     assert answer.json()['lookups']==[{'tool':'search_web','source_count':1}]
 
 
+def test_web_lookup_forwards_the_same_deadline_without_private_sources(voice):
+    import time
+    client,row,_,prompts,mutate=voice
+    row['data']['voice_assistant'].update(engine='livekit',allow_web_search=True)
+    deadline = int(time.time()*1000)+20000
+    mutate[0]=lambda:json.dumps({'reason':'web_no_sources'})
+    result=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json={
+        'question':'Tìm trên web Redis','revision':1,'operation':'lookup',
+        'lookup':{'name':'search_web','query':'Redis'},'retrieval_deadline_ms':deadline})
+    assert result.status_code==200,result.text
+    assert prompts==[{'mode':'voice_web','question':'Redis','retrieval_deadline_ms':deadline}]
+    row['data']['voice_assistant']['revision']=2
+    assert client.post(URL,headers=HEADERS,json={
+        'question':'Tìm trên web Redis','revision':1,'retrieval_deadline_ms':deadline}).status_code==409
+    assert len(prompts)==1
+
+
 def test_agents_context_removes_history_after_document_revocation(voice):
     import time
     from shared.meeting_knowledge import sources_for
@@ -901,3 +918,45 @@ def test_worker_repairs_one_rejected_draft_with_a_shared_deadline_and_rechecks(m
     assert timeouts[0]==25 and all(t<=10 for t in timeouts[1:])
     result=json.loads(events[0]['text'])
     assert result['verification']==['contradiction','approved'] and result['claims'][0]['text']=='Lan làm demo.'
+
+
+@pytest.mark.parametrize('question',['giá vàng hôm nay là bao nhiêu?','tôi muốn hỏi là giá vàng hôm nay là bao nhiêu','hôm nay giá vàng quốc tế bao nhiêu?'])
+def test_clear_public_gold_price_starts_web_topic_despite_pending_wiki_clarification(voice,question):
+    import time
+    client,row,_,prompts,_=voice
+    row['data']['voice_assistant'].update(engine='livekit',allow_web_search=True,auto_web_search=True)
+    history=[{'question':'workspace wiki','answer':'Bạn muốn hỏi Wiki nào?','clarification':True,'sources':[], 'created_at_ms':int(time.time()*1000)-1000}]
+    result=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json={'question':question,'revision':1,'operation':'plan','history':history})
+    assert result.status_code==200,result.text
+    assert result.json()['tool_calls']==[{'name':'search_web','query':question}]
+    assert prompts==[]
+
+
+@pytest.mark.parametrize('question,auto',[('giá vàng của dự án hôm nay là bao nhiêu?',True),('giá vàng hôm nay là bao nhiêu?',False)])
+def test_public_price_rule_does_not_override_private_scope_or_disabled_auto_search(voice,question,auto):
+    client,row,_,prompts,mutate=voice
+    row['data']['voice_assistant'].update(engine='livekit',allow_web_search=True,auto_web_search=auto)
+    result=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json={'question':question,'revision':1,'operation':'plan'})
+    assert result.status_code==200
+    assert all(c['name']!='search_web' for c in result.json()['tool_calls'])
+
+
+@pytest.mark.parametrize('reason,checks',[
+ ('web_no_sources',[]),('web_answer_empty',[]),('web_numeric_mismatch',['numeric_mismatch']),
+ ('verification_rejected',['contradiction']),('verification_unavailable',['unavailable']),
+ ('llm_unavailable',[]),('generation_format_invalid',[]),
+])
+def test_public_voice_and_livekit_lookup_preserve_failure_category_and_checks(voice,reason,checks):
+    client,row,_,prompts,mutate=voice
+    row['data']['voice_assistant'].update(engine='livekit',allow_web_search=True)
+    mutate[0]=lambda:json.dumps({'reason':reason,'verification':checks})
+    question='Tìm trên web giá vàng SJC'
+    response=client.post(URL,headers=HEADERS,json={'question':question,'revision':1})
+    assert response.status_code==200,response.text
+    assert response.json()['reason']==reason and response.json()['verification']==checks
+    assert response.json()['answer_kind']=='web'
+    lookup=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json={
+        'question':question,'revision':1,'operation':'lookup','lookup':{'name':'search_web','query':'giá vàng SJC'}})
+    assert lookup.status_code==200,lookup.text
+    result=lookup.json()['web_result']
+    assert result['reason']==reason and result['verification']==checks

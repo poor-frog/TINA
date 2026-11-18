@@ -272,3 +272,16 @@ resume CLI history; heard caller history remains source/revision scoped.
 answer remained malformed after its one format repair. It carries no factual claims or verification
 verdict, and is distinct from missing evidence or a rejected factual answer. Existing handoff owner,
 source, Stop and completed-playback checks still apply. Chat responses are not given a voice schema.
+
+Interrupted heard history adds optional heard_partial and heard_source_guards. It contains only
+complete sentences confirmed by playback receipts, no clarification/follow-up from an unheard tail,
+and no factual source grants. Guards retain the old source fingerprints solely to remove revoked
+history; fresh retrieval must supply evidence for the corrected question. Heard text guides the next
+answer to avoid repeating completed sentences. Mid-sentence audio is not word-aligned and is omitted.
+
+VoiceReply adds web_answer_empty and web_numeric_mismatch as public-web outcomes. Existing
+verification codes distinguish numeric mismatch, semantic rejection and reviewer outage; LiveKit
+web_result carries these codes through finalization and durable playback history. web_no_sources
+is reserved for absent usable excerpts/links, not a synonym for failed verification. User-visible
+fallback text names the failure and never releases an unverified original. No new source grants
+or automatic model retries are introduced.

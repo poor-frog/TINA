@@ -817,7 +817,7 @@ export class MeetingVoice {
       let started = Promise.resolve();
       let didStart = false;
       const unanswered = answer.reason ? !['answered','clarification'].includes(answer.reason) : answer.evidence_available === false;
-      const serviceFailure = ['llm_unavailable','verification_unavailable','draft_unavailable','web_unavailable'].includes(answer.reason??'');
+      const serviceFailure = ['llm_unavailable','verification_unavailable','draft_unavailable','web_unavailable','generation_format_invalid','web_answer_empty'].includes(answer.reason??'');
       this.setState('SPEAKING'); this.diagnose(answer.clarification ? 'speaking' : serviceFailure ? 'answer_failed' : unanswered ? 'no_evidence' : 'speaking');
       const sentences = speechSentences(answer.text);
       for (let index = 0; index < sentences.length; index++) {

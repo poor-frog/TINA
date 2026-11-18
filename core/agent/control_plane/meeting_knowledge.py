@@ -80,6 +80,8 @@ class VoiceHistoryTurn(BaseModel):
     created_at_ms: int = Field(ge=0)
     sources: list[VoiceSourceRef] = Field(max_length=32)
     clarification: bool = False
+    heard_partial: StrictBool = False
+    heard_source_guards: list[VoiceSourceRef] = Field(default_factory=list,max_length=32)
     follow_up: str | None = Field(default=None, min_length=1, max_length=200)
 
 
@@ -95,6 +97,7 @@ class VoiceQuestion(BaseModel):
     history: list[VoiceHistoryTurn] = Field(default_factory=list, max_length=3)
     lookups: list['VoiceLookupQuery'] | None = Field(default=None,max_length=4)
     web_result: dict | None = None
+    retrieval_deadline_ms: int | None = Field(default=None,strict=True,gt=0)
 
 
 class VoiceLookupQuery(BaseModel):
@@ -115,7 +118,6 @@ class VoiceLookupQuery(BaseModel):
 
 class VoiceAgentQuery(VoiceQuestion):
     operation: Literal['context','plan','lookup']
-    retrieval_deadline_ms: int | None = Field(default=None,strict=True,gt=0)
     lookup: VoiceLookupQuery | None = None
     context_handles: list[str] = Field(default_factory=list,max_length=128)
 
@@ -662,10 +664,20 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         route = voice_route(question)
         if (route[0] != 'meeting' or not policy.get('allow_web_search') or not policy.get('auto_web_search') or len(question) > 200
                 or deadline_ms is not None and deadline_ms <= int(time.time()*1000)
-                or dialogue_context(question, history, int(time.time()*1000)) or wants_summary(question) or action_intent(question)
+                or wants_summary(question) or action_intent(question)
                 or re.search(r'cuộc họp|meeting|dự án|project|ngân sách|budget|deadline|phụ trách|nội bộ|'
                              r'của (?:tôi|mình|chúng)|\b(?:our|my|task)\b|(?:sk-|ghp_)[\w-]+', question, re.I)):
             return route
+        # A self-contained public price question starts a new topic, even during an old clarification.
+        gold_price = (r'(?:(?:tôi muốn hỏi(?: là)?|cho tôi (?:hỏi|biết))\s+)?'
+                      r'(?:(?:hôm nay|hiện tại)\s+)?giá vàng'
+                      r'(?:\s+(?:SJC|DOJI|PNJ|nhẫn|miếng|9999|24k|quốc tế|trong nước))?'
+                      r'(?:\s+(?:hôm nay|hiện tại|mới nhất))?(?:\s+(?:là|đang))?'
+                      r'(?:\s+(?:bao nhiêu|thế nào))?[\s?!.]*')
+        if re.fullmatch(gold_price,question.strip(),re.I):
+            with voice_span('source_routing') as metrics: metrics['outcome']='applied'
+            return 'web',question
+        if dialogue_context(question,history,int(time.time()*1000)): return route
         cached = getattr(request.state, 'voice_source_route', None)
         if cached and cached[0] == question: return cached[1]
         turn = request.headers.get('x-tina-voice-request-id')
@@ -771,10 +783,12 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                     result={'tool':'calculate','source_count':0,'sources':[],'error':'invalid_or_unsupported_inputs'}
             elif lookup['name']=='search_web':
                 if lookup['query']!=public_query: raise HTTPException(403,'Only the explicit public query may be searched')
-                answer=voice_answer(request,meeting_id,VoiceQuestion(question=body.question,revision=body.revision))
+                answer=voice_answer(request,meeting_id,VoiceQuestion(question=body.question,revision=body.revision,
+                    retrieval_deadline_ms=body.retrieval_deadline_ms))
                 result={'tool':'search_web','source_count':len(answer.get('links',[])),
                         'web_result':{'text':answer['text'].removeprefix('Theo thông tin trên web: '),
-                                      'links':answer.get('links',[]),'reason':answer.get('reason')}}
+                                      'links':answer.get('links',[]),'reason':answer.get('reason'),
+                                      'verification':answer.get('verification',[])}}
             else:
                 selected,trace=lookup_voice_sources(candidates,[],[lookup],now_ms,semantic=semantic_for(row,policy),dictionary=domain_dictionary(base))
                 result={'tool':lookup['name'],'source_count':trace[0]['source_count'],
@@ -922,7 +936,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         candidates=with_calculations(candidates,body.question,body.lookups)
         documents_allowed=bool(policy.get('documents')) or policy.get('include_workspace_wiki') is True
         history = current_history([t.model_dump() for t in body.history], candidates, int(time.time()*1000))
-        kind, question = source_route(request,body.question,policy,history)
+        kind, question = source_route(request,body.question,policy,history,body.retrieval_deadline_ms)
         draft_kind, draft_details = action_context(body.question, pending_clarification(history,int(time.time()*1000))
             if kind == 'meeting' else None)
         if draft_kind: kind = 'draft'
@@ -955,12 +969,15 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
             else:
                 # Public routes never receive the room's transcript, documents or conversation history.
                 try:
-                    public = body.web_result if kind=='web' and body.web_result is not None else json.loads(voice_complete(request,policy, json.dumps({'mode': 'voice_' + kind, 'question': question}, ensure_ascii=False)))
+                    public = body.web_result if kind=='web' and body.web_result is not None else json.loads(voice_complete(request,policy, json.dumps({'mode': 'voice_' + kind, 'question': question,
+                        **({'retrieval_deadline_ms':body.retrieval_deadline_ms} if kind=='web' and body.retrieval_deadline_ms is not None else {})}, ensure_ascii=False)))
                     text = public.get('text')
                     links = [safe_web_source(link) for link in public.get('links', [])[:6]] if kind == 'web' else []
                     links = [{k: link[k] for k in ('url', 'title')} for link in links if link]
-                    if public.get('reason') == 'web_unavailable':
-                        answer = voice_failure('web_unavailable', kind=kind)
+                    if kind=='web' and public.get('reason') in (
+                            'web_unavailable','web_no_sources','web_answer_empty','web_numeric_mismatch',
+                            'llm_unavailable','generation_format_invalid','verification_rejected','verification_unavailable'):
+                        answer = voice_failure(public['reason'],kind=kind)
                     elif kind == 'web' and not links:
                         answer = voice_failure('web_no_sources', kind=kind)
                     elif not isinstance(text, str) or not text.strip() or len(text) > 2000:
@@ -970,6 +987,12 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                         text = re.sub(r'\[([^\]]+)\]\(https?://[^)]+\)', r'\1', text).strip()
                         answer = {'text': ('Theo thông tin trên web: ' if kind == 'web' else 'Về kiến thức chung: ') + text,
                                   'sources': [], 'links': links, 'answer_kind': kind, 'reason': 'answered'}
+                    if kind=='web':
+                        checks=public.get('verification',[])
+                        if not isinstance(checks,list) or len(checks)>2 or any(c not in (
+                                'approved','numeric_mismatch','unsupported_claim','contradiction','ambiguous','unavailable','repair_failed') for c in checks):
+                            raise ValueError('Invalid web verification metadata')
+                        answer['verification']=checks
                 except (HTTPException, ValueError, TypeError, AttributeError):
                     answer = voice_failure('web_unavailable' if kind == 'web' else 'llm_unavailable', kind=kind)
         now_ms = int(time.time() * 1000)
@@ -1012,6 +1035,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
             def conversation_for(rows):
                 ids = {s['key']: s['id'] for s in rows}
                 return [{'question': t['question'], 'answer': t['answer'],
+                         'heard_partial': t.get('heard_partial',False),
                          'clarification': t.get('clarification', False) and now_ms - t['created_at_ms'] <= 30000,
                          'follow_up': t.get('follow_up') if now_ms - t['created_at_ms'] <= 30000 else None,
                          'source_ids': [ids[r['key']] for r in t['sources']]}

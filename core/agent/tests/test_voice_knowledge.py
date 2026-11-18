@@ -373,3 +373,12 @@ def test_malformed_voice_reply_gets_one_regeneration_and_still_requires_source_r
     else:
         assert not output or not output[0]['claims']
     assert events[-1]['type'] == 'turn-complete'
+
+
+def test_interrupted_prefix_is_intent_only_and_source_guard_revocation_discards_it():
+    ref={'key':'doc:wiki/demo.md:0','fingerprint':'a'*64}
+    turn={'question':'Demo?','answer':'Lan phụ trách demo.','sources':[],
+          'heard_partial':True,'heard_source_guards':[ref],'created_at_ms':NOW-1}
+    assert current_history([turn],[ref],NOW)==[turn]
+    assert current_history([turn],[],NOW)==[]
+    assert current_history([turn],[ref|{'fingerprint':'b'*64}],NOW)==[]

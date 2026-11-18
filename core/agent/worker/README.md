@@ -101,3 +101,26 @@ format recovery and repair, plus the final output. A call already in flight may 
 results and subsequent calls are blocked. Timeout fallback plans also require a live turn.
 Process-group cleanup includes descendants whose leader has exited. Claude prompt input is written
 concurrently with stdout consumption, preserving structured CLI errors when stdin closes early.
+
+Both Direct LLM and sandbox live voice jobs carry server-owned room leases. Agent API checks the
+lease through a cancelable stream reader every 250 ms and requests runtime Stop for exactly that
+isolated worker when revoked. Worker stages also reject revoked results. This cannot undo provider
+work or charges already incurred before Stop. Public voice answers require Agent-Reach original
+excerpts and the independent verifier. A native provider summary with links alone is not evidence;
+without the retrieval service the public voice route reports web_unavailable.
+
+Public web failures preserve separate reasons: web_no_sources means no usable original excerpts;
+web_answer_empty means generation produced no claims; web_numeric_mismatch means deterministic
+numeric/unit checks rejected every remaining claim. generation_format_invalid, llm_unavailable,
+verification_rejected and verification_unavailable retain their existing meanings. Content-free
+voice_web_result logs record the voice request UUID, retrieved-source count, outcome and verification
+codes, plus allowlisted upstream retrieval errors. A blocked answer never becomes a successful
+factual response. LiveKit lookup and final delivery retain the same reason/checks in VoiceReply.
+
+Public voice retrieval reads two top distinct page URLs concurrently and may refine an unanswered
+public question once. Across both rounds it attempts at most three page reads and retains six
+original excerpts (5,000 characters each). Refinement uses the completion API with a validated
+query-only schema, never the sandbox's private context. Generation still uses the selected direct
+or sandbox backend, followed by the existing independent verifier. The core's lookup deadline is
+forwarded into voice_web and bounds search, reads, refinement, generation and verification together.
+See [Agent-Reach limits](../../../deploy/agent-reach/README.md) for fallback and cancellation behavior.

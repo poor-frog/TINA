@@ -1,5 +1,11 @@
 # tests — agent-api (L1 + L2 of the validation pyramid)
 
+`test_agent_reach.py` covers parallel original-page reads, retained Markdown/URL provenance,
+snippet fallback, two public-search rounds/three-page/six-excerpt limits, query-only refinement,
+shared deadlines and Stop fences. Worker integration checks both sandbox and direct generation
+with API-only refinement and independent claim verification. Meeting voice tests check deadline
+propagation without exporting private sources and rejection after a room revision changes.
+
 Reranker regressions distinguish valid empty/no-match selections from malformed/provider/budget
 fallback, preserve recent/heard pins without automatic unrelated meeting seeds, restrict empty
 generation/repair source IDs and keep full contradiction review. Lookup budgets and service-error
@@ -171,3 +177,12 @@ source verification and Stop during repair. Generation-format failures survive r
 owner handoff and count as service failures rather than evidence refusals in retrieval evaluation.
 The explicit `codex_web_smoke.py` additionally proves outputSchema propagation through the real
 container CLI to a local Responses fixture, with no model credentials or live provider inference.
+
+Voice cancellation regressions cover revoking a Direct LLM lease, stopping only its isolated worker,
+250 ms cancelable output reads with unchanged chat polling, and interrupted heard-prefix history
+whose source guards invalidate edited/deleted evidence without granting citations for unheard text.
+
+Public-web diagnostic cases distinguish retrieval empty/unavailable, generation empty/malformed/
+unavailable, numeric rejection, semantic rejection and verification outages. They prove content-free
+UUID-correlated logs, typed HTTP retrieval errors without retry, and preservation through LiveKit
+lookup/final answers and durable Meeting API replies. Verification thresholds remain unchanged.
