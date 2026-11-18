@@ -51,6 +51,8 @@ class Workers:
         self.identity_env = selected.services["admin-api"]["environment"]
     def endpoint(self, backend):
         if backend == "viegem" and self.selected.viegem_device == "mps":
+            if self.selected.context == "kiri":
+                return "http://127.0.0.1:18005"
             return self.selected.native_viegem_access()[1]
         return self.selected.endpoint(backend, 8000)
     def credential(self, backend):

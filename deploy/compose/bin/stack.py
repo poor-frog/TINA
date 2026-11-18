@@ -210,6 +210,10 @@ class Stack:
         self.context = self.env.get("DOCKER_CONTEXT") or "default"
         if not self.context:
             raise StackError("Cannot resolve Docker context.")
+        # Kiri keeps its Engine socket under ~/.kiri; /var/run/docker.sock may still target OrbStack.
+        self.env["TINA_DOCKER_SOCKET_PATH"] = (
+            str(Path.home() / ".kiri/run/docker.sock") if self.context == "kiri" else "/var/run/docker.sock"
+        )
         self._native_viegem_access_cache = None
         self.builder = self.env.pop("BUILDX_BUILDER", None) or self.context
         # Compose's Buildx subprocess also needs the global flag; environment-only
@@ -255,6 +259,18 @@ class Stack:
         expected = self.config["networks"]["tina"]["name"]
         if self.runtime.get("DOCKER_NETWORK") != expected:
             raise StackError("Runtime DOCKER_NETWORK differs from the selected Compose network.")
+        if self.runtime.get("RUNTIME_BACKEND", "docker") == "docker":
+            socket_mount = next((mount for mount in self.services["runtime"].get("volumes", [])
+                                 if mount.get("target") == "/var/run/docker.sock"), None)
+            if not socket_mount or socket_mount.get("source") != self.env["TINA_DOCKER_SOCKET_PATH"]:
+                raise StackError("Runtime Docker socket mount differs from the selected Docker context.")
+            workspace_source = self.runtime.get("TINA_WORKSPACE_MOUNT_SOURCE", "")
+            if self.context == "kiri" and workspace_source and not workspace_source.startswith("/"):
+                raise StackError(
+                    "Kiri Docker does not enforce the workspace VolumeOptions.Subpath mount. "
+                    "Runtime is stopped to protect cross-workspace isolation; use a backend that "
+                    "enforces subPath (such as Kubernetes) before enabling workload spawns."
+                )
         api = self.services["agent-api"]
         for mount in api.get("volumes", []):
             if mount["target"] == "/workspaces" and mount["type"] == "volume":

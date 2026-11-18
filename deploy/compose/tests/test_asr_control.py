@@ -93,13 +93,23 @@ class ControlTests(unittest.TestCase):
         probe.assert_called_once_with("http://gipformer/status", timeout=1)
 
     def test_native_mps_status_does_not_require_a_compose_viegem_service(self):
-        selected = SimpleNamespace(services={"admin-api": {"environment": {}}}, viegem_device="mps",
+        selected = SimpleNamespace(services={"admin-api": {"environment": {}}}, context="orbstack", viegem_device="mps",
                                    native_viegem_access=lambda: ("192.168.139.3", "http://192.168.139.3:18005"))
         with patch.object(control, "request_json", return_value={
                 "model": {"asr_model": "5CD-AI/VieGem-ASR", "device": "mps"}}) as probe:
             result = control.Workers(selected).status("viegem")
         self.assertTrue(result["ready"])
         probe.assert_called_once_with("http://192.168.139.3:18005/status", timeout=1)
+
+    def test_kiri_native_mps_controller_probes_loopback(self):
+        selected = SimpleNamespace(services={"admin-api": {"environment": {}}},
+            context="kiri", viegem_device="mps",
+            native_viegem_access=lambda: ("127.0.0.1", "http://host.docker.internal:18005"))
+        with patch.object(control, "request_json", return_value={
+                "model": {"asr_model": "5CD-AI/VieGem-ASR", "device": "mps"}}) as probe:
+            result = control.Workers(selected).status("viegem")
+        self.assertTrue(result["ready"])
+        probe.assert_called_once_with("http://127.0.0.1:18005/status", timeout=1)
 
     def test_switch_keeps_worker_required_by_another_account(self):
         self.controller.select("1", "gipformer", True, 0)

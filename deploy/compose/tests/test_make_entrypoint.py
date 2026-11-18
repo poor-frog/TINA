@@ -28,7 +28,9 @@ def fixture():
         "services": {
             "runtime": {"build": {}, "environment": {
                 "DOCKER_NETWORK": "existing_tina", "AGENT_WORKER_IMAGE": "worker:resolved",
-                "BROWSER_IMAGE": "bot:resolved"}, "healthcheck": {"test": ["CMD", "true"]}},
+                "BROWSER_IMAGE": "bot:resolved", "RUNTIME_BACKEND": "docker"},
+                "volumes": [{"type": "bind", "source": "/var/run/docker.sock", "target": "/var/run/docker.sock"}],
+                "healthcheck": {"test": ["CMD", "true"]}},
             "agent-api": {"build": {}, "environment": {
                 "TINA_WORKSPACE_MOUNT_SOURCE": "existing_agent-workspaces"},
                 "volumes": [{"type": "volume", "source": "agent-workspaces", "target": "/workspaces"}]},
@@ -72,7 +74,12 @@ class Docker:
                     values.update({k: (env or {})[k] for k in ("TINA_VIEGEM_DEVICE", "COMPOSE_PROFILES", "TINA_MEETING_VOICE", "TTS_API_TOKEN", "LIVEKIT_AGENT_URL") if k in (env or {})})
                     out = "\n".join(f"{k}={v}" for k, v in values.items())
                 else:
-                    out = json.dumps(self.config)
+                    config = copy.deepcopy(self.config)
+                    runtime = config["services"].get("runtime", {})
+                    for mount in runtime.get("volumes", []):
+                        if mount.get("target") == "/var/run/docker.sock":
+                            mount["source"] = (env or {}).get("TINA_DOCKER_SOCKET_PATH", mount["source"])
+                    out = json.dumps(config)
             elif "build" in args:
                 code = int(self.fail_build)
             elif "up" in args:
@@ -144,6 +151,16 @@ class EntryPointTest(unittest.TestCase):
         with contextlib.redirect_stdout(output): selected.access()
         self.assertNotIn('fixture-user-key', output.getvalue())
         self.assertIn('API access provisioned', output.getvalue())
+
+    def test_kiri_docker_runtime_refuses_unsafe_named_workspace_volume_subpath(self):
+        self.docker.context = "kiri"
+        selected = stack.Stack("plan")
+        runtime_socket = next(m for m in selected.services["runtime"]["volumes"]
+                              if m.get("target") == "/var/run/docker.sock")
+        self.assertEqual(runtime_socket["source"], str(Path.home() / ".kiri/run/docker.sock"))
+        selected.runtime["TINA_WORKSPACE_MOUNT_SOURCE"] = "existing_agent-workspaces"
+        with self.assertRaisesRegex(stack.StackError, "does not enforce the workspace VolumeOptions.Subpath"):
+            selected.validate_bindings()
 
     def test_doctor_accepts_a_paused_unused_asr_worker_but_rejects_a_required_failed_one(self):
         from types import SimpleNamespace

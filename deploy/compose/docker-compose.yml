@@ -320,7 +320,7 @@ services:
       - DOCKER_NETWORK=${COMPOSE_PROJECT_NAME:-tina-v012}_tina
       - TINA_MEETING_VOICE_MODELS_VOLUME=${COMPOSE_PROJECT_NAME:-tina-v012}_meeting-voice-models
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${TINA_DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
       # Mirror of HOST_CLAUDE_CREDENTIALS (a DOCKER-HOST path — see .env.example) into THIS container,
       # so the config.v1 `model_inference` file probe can verify the host file actually exists before
       # any worker spawns: docker bind-mounts a MISSING host path as an empty DIRECTORY, which is how

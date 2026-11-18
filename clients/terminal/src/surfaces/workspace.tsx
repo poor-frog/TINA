@@ -72,7 +72,7 @@ function revealInTree(dir: string): void {
     const cur = JSON.parse(readSS(SS_EXPANDED) ?? "[]") as string[];
     writeSS(SS_EXPANDED, JSON.stringify([...new Set([...(Array.isArray(cur) ? cur : []), ...ancestorDirs(dir)])]));
   } catch { writeSS(SS_EXPANDED, JSON.stringify(ancestorDirs(dir))); }
-  if (!dir.startsWith("kg")) writeSS(SS_HIDDEN, "0");  // target hidden by the kg-only filter → reveal all
+  if (dir !== "README.md" && dir !== "kg" && !dir.startsWith("kg/")) writeSS(SS_KG_ONLY, "0");
   writeSS(SS_FILES_OPEN, "1");  // the Files section is collapsed by default — a reveal must expand it
   window.dispatchEvent(new CustomEvent(REVEAL_PATH_EVENT, { detail: { dir } }));
 }
@@ -289,7 +289,7 @@ function MountSection({ mount }: { mount: ActiveMount }) {
 }
 
 // ── Files LIST (left) ───────────────────────────────────────────────────────────
-const SS_EXPANDED = "ws.tree.expanded", SS_HIDDEN = "ws.tree.hidden", SS_SYSTEM = "ws.system.show", SS_FILES_OPEN = "ws.files.open.v2", SS_WS_FOCUS = "ws.focused";
+const SS_EXPANDED = "ws.tree.expanded", SS_KG_ONLY = "ws.tree.knowledgeOnly.v1", SS_SYSTEM = "ws.system.show", SS_FILES_OPEN = "ws.files.open.v2", SS_WS_FOCUS = "ws.focused";
 export function FilesList({ showSourceControl = true }: { showSourceControl?: boolean } = {}) {
   const layout = useService(LayoutServiceId);
   const { activeTab } = useStore(layout.store);
@@ -303,11 +303,8 @@ export function FilesList({ showSourceControl = true }: { showSourceControl?: bo
   const [error, setError] = useState<string | null>(null);  // fail-loud (P18): a tree-load failure is shown, not hidden as "empty"
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);  // bumped after a workspace swap → re-fetch the tree
-  // Knowledge view defaults to ONLY the knowledge graph (kg/); the eye toggle reveals the rest of the
-  // workspace scaffold (CLAUDE.md, agents/, skills/, views/, …). Default ON = kg-only.
-  // Default: show the ENTIRE workspace (a normal workspace IS the knowledge — full context to share &
-  // collaborate on, not kg-only). The eye toggle can still collapse to just the knowledge graph.
-  const [kgOnly, setKgOnly] = useState<boolean>(() => readSS(SS_HIDDEN) === "1");
+  // Keep Knowledge files focused while retaining the workspace README as its landing page.
+  const [kgOnly, setKgOnly] = useState<boolean>(() => readSS(SS_KG_ONLY) !== "0");
   // _system (the user's private system workspace — chats/settings/routines, RW) is HIDDEN BY DEFAULT;
   // a toggle surfaces it as a section in the files panel.
   const [showSystem, setShowSystem] = useState<boolean>(() => readSS(SS_SYSTEM) === "1");
@@ -380,7 +377,8 @@ export function FilesList({ showSourceControl = true }: { showSourceControl?: bo
   }, [reloadKey, focusedSlug]);
   // No active workspace ⇒ nothing to show (a deactivated workspace's files leave with it, like any mount).
   const hasHome = homeMount != null;
-  const nodes = hasHome ? buildTree(kgOnly ? tree.filter((p) => p.startsWith("kg/")) : tree) : [];
+  const isKnowledgeFile = (path: string) => path === "README.md" || path.startsWith("kg/");
+  const nodes = hasHome ? buildTree(kgOnly ? tree.filter(isKnowledgeFile) : tree) : [];
   // default expansion: top-level folders open, deeper folders collapsed (only when no saved state yet)
   useEffect(() => {
     if (readSS(SS_EXPANDED) != null || nodes.length === 0) return;
@@ -410,7 +408,7 @@ export function FilesList({ showSourceControl = true }: { showSourceControl?: bo
     const onReveal = (e: Event) => {
       const dir = (e as CustomEvent<{ dir?: string }>).detail?.dir;
       if (!dir) return;
-      if (dir !== "kg" && !dir.startsWith("kg/")) { setKgOnly(false); writeSS(SS_HIDDEN, "0"); }
+      if (!isKnowledgeFile(dir) && dir !== "kg") { setKgOnly(false); writeSS(SS_KG_ONLY, "0"); }
       setFilesOpen(true);  // sessionStorage was already set by the sender (revealInTree)
       setQuery("");  // a live search hides the tree — clear it so the reveal is visible
       setSearchMode("filename");
@@ -444,7 +442,7 @@ export function FilesList({ showSourceControl = true }: { showSourceControl?: bo
     const next = new Set(prev); next.has(p) ? next.delete(p) : next.add(p);
     writeSS(SS_EXPANDED, JSON.stringify([...next])); return next;
   });
-  const toggleKgOnly = () => setKgOnly((v) => { const n = !v; writeSS(SS_HIDDEN, n ? "1" : "0"); return n; });
+  const toggleKgOnly = () => setKgOnly((v) => { const n = !v; writeSS(SS_KG_ONLY, n ? "1" : "0"); return n; });
   const openMenu = (e: MouseEvent<HTMLElement>, path: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -455,7 +453,7 @@ export function FilesList({ showSourceControl = true }: { showSourceControl?: bo
   const [searchMode, setSearchMode] = useState<"filename" | "content">("filename");
   const [optionsOpen, setOptionsOpen] = useState(false);
   const q = query.trim().toLowerCase();
-  const scoped = !hasHome ? [] : (kgOnly ? tree.filter((p) => p.startsWith("kg/")) : tree);
+  const scoped = !hasHome ? [] : (kgOnly ? tree.filter(isKnowledgeFile) : tree);
   // search spans the primary tree AND every active mount (shared / other private), each hit tagged with
   // its slug + workspace label — so a file a member's agent wrote in a SHARED workspace is findable and
   // opens against the right mount, not just the caller's own primary.
@@ -607,7 +605,7 @@ export function FilesList({ showSourceControl = true }: { showSourceControl?: bo
           {nodes.map((n) => <TreeRow key={n.path} node={n} expanded={expanded} toggle={toggle} openFile={(p) => layout.openPreview(docTab(p, homeMount?.slug))} pinFile={(p) => layout.openTab(docTab(p, homeMount?.slug))} openMenu={openMenu} activePath={homeActivePath} />)}
           {!error && homeMount === null && <p className={panelStyles.emptyState}>No workspace is active. Turn one on above.</p>}
           {!error && hasHome && tree.length === 0 && <p className={panelStyles.emptyState}>No files yet. Ask the agent in Chat to add one.</p>}
-          {!error && hasHome && kgOnly && tree.length > 0 && nodes.length === 0 && <p className={panelStyles.emptyState}>No Knowledge files found in this workspace.</p>}
+          {!error && hasHome && kgOnly && tree.length > 0 && nodes.length === 0 && <p className={panelStyles.emptyState}>No Knowledge files or workspace README found.</p>}
         </div>
       </>) : null}
       {menu && (

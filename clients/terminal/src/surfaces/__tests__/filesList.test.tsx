@@ -44,7 +44,7 @@ function renderList() {
 beforeEach(() => {
   sessionStorage.clear();
   vi.mocked(api.readActiveSet).mockResolvedValue(activeSet);
-  vi.mocked(api.listWorkspaceTree).mockResolvedValue(["README.md", "kg/index.md"]);
+  vi.mocked(api.listWorkspaceTree).mockResolvedValue(["README.md", "CLAUDE.md", "agents/README.md", "kg/index.md"]);
   vi.mocked(api.readAttachedWorkspaces).mockResolvedValue(view);
   vi.mocked(api.listSharedMemberships).mockResolvedValue([]);
   vi.mocked(api.readWorkspaceGit).mockResolvedValue({ branch: "", changes: [], commits: [] } as Awaited<ReturnType<typeof api.readWorkspaceGit>>);
@@ -62,12 +62,15 @@ describe("FilesList — workspace-first Knowledge rail", () => {
     expect(screen.getByRole("button", { name: "Attach repo" })).toBeTruthy();
   });
 
-  it("shows file search and the workspace tree by default", async () => {
+  it("defaults to Knowledge files plus the workspace README", async () => {
     renderList();
     expect(screen.getByRole("textbox", { name: "Find files" })).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Files" })).toBeTruthy();
     await screen.findByText("kg");
     expect(screen.getByText("README.md")).toBeTruthy();
+    expect(screen.queryByText("CLAUDE.md")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View options" }));
+    expect((screen.getByLabelText("Show only Knowledge files") as HTMLInputElement).checked).toBe(true);
   });
 
   it("lands on the home workspace's README as a slug-addressed preview", async () => {

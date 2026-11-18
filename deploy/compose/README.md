@@ -197,6 +197,12 @@ Optionally persist DOCKER_CONTEXT in the env file to bind the deployment to its 
 explicit shell DOCKER_CONTEXT/DOCKER_HOST wins. The global Docker context is never switched.
 A different BUILDX_BUILDER is refused for local source builds so images cannot be exported to another daemon.
 
+On Kiri, Runtime mounts `~/.kiri/run/docker.sock` so it talks to the selected engine. Kiri currently
+does not enforce Docker `VolumeOptions.Subpath`; because TINA uses that feature to isolate each
+worker's workspace grants, the Compose runner refuses the Kiri Docker runtime and keeps workload
+spawning stopped until a backend with enforced subpath mounts is configured. TINA's API, calendar,
+and meeting history services can still run on Kiri.
+
 Persist optional profiles and override paths in that env file, or pass them in the environment:
 
 ```dotenv
