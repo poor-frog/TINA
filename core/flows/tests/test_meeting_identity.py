@@ -103,62 +103,46 @@ def test_a_zoned_and_a_zulu_dtstart_are_untouched():
 
 
 # ── R-B19 · the grounding gate ───────────────────────────────────────────────────────────────
-def _process_rig(monkeypatch, *, transcript, row_id=412):
+def _process_rig(monkeypatch, *, code, body, row_id=412):
     reg = Registry()
     production.build(reg, _StubDB())
-    read = {}
-    monkeypatch.setattr(production, "setting", lambda uid, key: "")
+    seen = {}
     monkeypatch.setattr(production.mt, "meeting_row",
                         lambda uid, m, native=None: {"id": row_id} if row_id else None)
-    monkeypatch.setattr(production.mt, "room_order", lambda uid, mid, p, n, cap=0: [])
-    def fake_transcript(uid, mid):
-        read["asked"] = mid
-        return transcript
+    monkeypatch.setattr(production._common, "agent_door", lambda: "http://agent")
+    monkeypatch.setattr(production._common, "require_internal_secret", lambda: "fixture")
 
-    monkeypatch.setattr(production.mt, "transcript_text", fake_transcript)
-    monkeypatch.setattr(production.ag, "dispatch_turn", lambda *a, **k: 0)
-    monkeypatch.setattr(production.ag, "head_sha", lambda uid: "sha")
-    monkeypatch.setattr(production.ag, "collect_reply",
-                        lambda uid, s, base: "we agreed to defer the vote until next quarter")
-    return reg, read
+    def report(method, url, headers, payload, timeout):
+        seen.update(method=method, url=url, headers=headers)
+        return code, body
+
+    monkeypatch.setattr(production._common, "http", report)
+    return reg, seen
 
 
 def test_an_unreadable_transcript_is_loud_and_not_a_pass(monkeypatch):
-    """`transcript_text` answered `""` for BOTH "no speech captured" and "the read failed", and
-    `grounded_in("")` answers True by design. So on precisely the broken-identity meetings the
-    gate exists for — `platform='unknown'`, empty native, no pair addressing the row — the gate
-    passed silently and the report was mailed."""
-    reg, _read = _process_rig(monkeypatch, transcript=None)
-    ctx = _ctx({"uid": "7", "meeting_id": "96088138284", "native": "", "organizer": "a@b.test",
-                "title": "T", "start": 1_700_003_600.0},
-               scratch={"baseline": 0, "row_id": 412, "head_before": "sha"})
-    with pytest.raises(StepError) as e:
+    reg, _seen = _process_rig(monkeypatch, code=503, body={"detail": "Meeting unavailable"})
+    ctx = _ctx({"uid": "7", "meeting_id": 412, "native": ""}, scratch={})
+    with pytest.raises(StepError, match="HTTP 503"):
         reg.steps["process_meeting"](ctx)
-    assert "could not be read" in str(e.value)
-    assert "not a quiet meeting" in str(e.value)
 
 
-def test_a_genuinely_silent_meeting_is_still_writable(monkeypatch):
-    """The other half, and it must not regress: absence of evidence is not evidence of
-    fabrication, and a meeting with no captured speech must still produce a report."""
-    reg, _read = _process_rig(monkeypatch, transcript="")
-    ctx = _ctx({"uid": "7", "meeting_id": 412, "native": "abc", "organizer": "a@b.test",
-                "title": "T", "start": 1_700_003_600.0},
-               scratch={"baseline": 0, "row_id": 412, "head_before": "sha"})
-    out = reg.steps["process_meeting"](ctx)
-    assert out.result["report"].startswith("we agreed")
+def test_a_valid_summary_unavailable_notice_still_allows_followup(monkeypatch):
+    notice = "TINA could not generate a grounded summary. Open the meeting for its artifacts."
+    reg, _seen = _process_rig(monkeypatch, code=200, body={"report": notice})
+    ctx = _ctx({"uid": "7", "meeting_id": 412, "native": "abc"}, scratch={})
+    assert reg.steps["process_meeting"](ctx).result["report"] == notice
 
 
-def test_the_gate_reads_the_resolved_row_not_the_ref(monkeypatch):
-    """The dispatch two screens up already resolved a row and said why. This line kept using the
-    ref — so it asked the transcript store for a Zoom number."""
-    reg, read = _process_rig(monkeypatch, transcript="we agreed to defer the vote until next "
-                                                     "quarter, minuted")
-    ctx = _ctx({"uid": "7", "meeting_id": "96088138284", "native": "", "organizer": "a@b.test",
-                "title": "T", "start": 1_700_003_600.0},
-               scratch={"baseline": 0, "row_id": 412, "head_before": "sha"})
+def test_the_report_uses_the_resolved_row_not_the_ref(monkeypatch):
+    reg, seen = _process_rig(monkeypatch, code=200, body={"report": "The vote was deferred."})
+    ctx = _ctx({"uid": "7", "meeting_id": "96088138284", "native": ""}, scratch={})
     reg.steps["process_meeting"](ctx)
-    assert read["asked"] == 412, "the gate asked about the ref, not the row"
+    assert seen == {
+        "method": "POST",
+        "url": "http://agent/internal/post-meeting/report/412",
+        "headers": {"X-User-Id": "7", "X-Internal-Secret": "fixture"},
+    }
 
 
 def test_transcript_text_separates_unreadable_from_empty(monkeypatch):

@@ -53,6 +53,14 @@ saved key used for that single request, non-chat entries filtered out, and a rej
 401 instead of an empty list. Callers supply `mode` only — never a base URL — so this route cannot be
 turned into an egress proxy.
 
+## Company profile and mail-template reads
+
+`GET /internal/system-workspace/file?path=...` is an internal-tier read used by flows to render
+post-meeting email. It requires `X-Internal-Secret` and serves only `_global/README.md` and
+`_global/mail/*.md` from the configured read-only global workspace. The user-facing workspace
+tree/file/git routes do not resolve `_global`, so platform instructions and unrelated files stay
+outside normal workspace access.
+
 ## Workspace membership + invites + roles (Lane M — the access layer for shared workspaces)
 
 > **The full workspace + collaboration model (tiers, personal, sharing, live collaboration, deferred)

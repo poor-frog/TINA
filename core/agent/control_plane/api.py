@@ -1145,6 +1145,47 @@ def create_app(
         except openai_auth.ChatGPTAuthError as exc:
             raise HTTPException(409, str(exc)) from exc
 
+    @app.get('/internal/system-workspace/file', include_in_schema=False)
+    def global_system_workspace_file(request: Request, path: str):
+        """Read the company profile or a mail template for trusted internal services only.
+
+        The platform-owned ``_global`` workspace is deliberately not a user workspace mount. Keep
+        this edge narrow: flows may read its README and ``mail/*.md`` templates, but the public
+        workspace tree/file/git routes must not expose the rest of the system instructions.
+        """
+        secret = settings.internal_api_secret.get_secret_value() if settings is not None else ''
+        provided = request.headers.get('x-internal-secret', '')
+        if not secret or not hmac.compare_digest(provided.encode(), secret.encode()):
+            raise HTTPException(403, 'internal secret required')
+
+        relative = path.strip()
+        if len(relative) > 160 or not (
+            relative == 'README.md'
+            or re.fullmatch(r'mail/[A-Za-z0-9][A-Za-z0-9._-]*\.md', relative)
+        ):
+            raise HTTPException(404, 'not found')
+        source = (getattr(settings, 'global_system_workspace_path', '') or '').strip() if settings else ''
+        if not source:
+            raise HTTPException(404, 'not found')
+        try:
+            root = Path(source).resolve(strict=True)
+            target = (root / relative).resolve(strict=True)
+        except FileNotFoundError:
+            raise HTTPException(404, 'not found')
+        except (OSError, RuntimeError):
+            raise HTTPException(404, 'not found')
+        if not root.is_dir() or root not in target.parents or not target.is_file():
+            raise HTTPException(404, 'not found')
+        try:
+            if target.stat().st_size > 500_000:
+                raise HTTPException(413, 'file too large')
+            content = target.read_text(encoding='utf-8')
+        except UnicodeDecodeError as exc:
+            raise HTTPException(422, 'file is not UTF-8') from exc
+        except OSError as exc:
+            raise HTTPException(404, 'not found') from exc
+        return JSONResponse({'path': relative, 'content': content}, headers={'Cache-Control': 'no-store'})
+
     def _transcript_completion(
         request: Request,
         *,
@@ -1237,6 +1278,67 @@ def create_app(
         if not output:
             raise HTTPException(status_code=503, detail=f"{label} is unavailable")
         return output
+
+    @app.post("/internal/post-meeting/report/{meeting_id}", include_in_schema=False)
+    def post_meeting_report(meeting_id: int, request: Request):
+        """Generate a report only from the completed meeting's canonical transcript."""
+        from control_plane.meeting_knowledge import meeting_get
+        from shared.meeting_knowledge import digest, sources_for, validate_answer
+
+        secret = settings.internal_api_secret.get_secret_value() if settings is not None else ""
+        supplied = request.headers.get("x-internal-secret", "")
+        if not secret or not hmac.compare_digest(secret.encode(), supplied.encode()):
+            raise HTTPException(403, "internal secret required")
+        subject = subject_of(request)
+        base = settings.meeting_api_url
+
+        def read_sources():
+            row = meeting_get(base, subject, meeting_id, f"/meetings/{meeting_id}")
+            if (str(row.get("user_id")) != subject or row.get("shared") is True
+                    or (row.get("data") or {}).get("artifact_deletion")):
+                raise HTTPException(404, "Meeting unavailable")
+            if row.get("status") != "completed":
+                raise HTTPException(409, "Meeting is not completed")
+            canonical = meeting_get(base, subject, meeting_id, f"/transcripts/by-id/{meeting_id}/canonical")
+            return sources_for(canonical, {})
+
+        original = read_sources()
+        if not original:
+            raise HTTPException(422, "Meeting has no transcript")
+        # Join consecutive transcript segments into bounded excerpts without truncating the meeting.
+        excerpts: list[dict] = []
+        for source in original:
+            quote = source["quote"].strip()
+            for offset in range(0, len(quote), 2400):
+                part = quote[offset:offset + 2400]
+                if excerpts and len(excerpts[-1]["quote"]) + len(part) + 1 <= 2400:
+                    excerpts[-1]["quote"] += "\n" + part
+                else:
+                    excerpts.append({"id": f"s{len(excerpts)}", "quote": part, "kind": "transcript"})
+        if sum(len(x["quote"]) for x in excerpts) > 48000 or len(excerpts) > 40:
+            raise HTTPException(413, "Meeting transcript exceeds the report budget")
+        payload = {
+            "question": ("Write a shared meeting summary in the main language of the transcript. "
+                         "Cover the main topics, confirmed decisions and explicit next actions. "
+                         "Use concise claims and omit anything the transcript does not establish."),
+            "sources": excerpts,
+        }
+        raw = _transcript_completion(
+            request, text=json.dumps(payload, ensure_ascii=False), task="knowledge",
+        )
+        try:
+            claims = validate_answer(raw, excerpts)["claims"]
+        except (ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(502, "Meeting report could not be validated") from exc
+        if digest(read_sources()) != digest(original):
+            raise HTTPException(409, "Transcript changed while generating its report")
+        if not claims:
+            # A valid empty result conveys no meeting facts. Let the normal follow-up deliver
+            # the authorized artifact links with an explicit status in place of a summary.
+            return {"report": ("TINA ch\u01b0a t\u1ea1o \u0111\u01b0\u1ee3c t\xf3m t\u1eaft c\xf3 c\u0103n c\u1ee9 t\u1eeb b\u1ea3n ch\xe9p l\u1eddi. "
+                               "M\u1edf trang cu\u1ed9c h\u1ecdp \u0111\u1ec3 xem b\u1ea3n ch\xe9p l\u1eddi v\xe0 b\u1ea3n ghi n\u1ebfu c\xf3.")}
+        report = "\n".join(f"- {claim['text']}" for claim in claims)
+        return {"report": report[:6000]}
 
     @app.post("/api/dictation/polish")
     def polish_dictation(body: DictationPolishBody, request: Request):
