@@ -332,7 +332,7 @@ def test_post_meeting_answers_not_present_when_the_kickoff_is_absent(monkeypatch
     def _forbidden(*a, **k):
         raise AssertionError("a turn was dispatched with no kickoff")
 
-    monkeypatch.setattr(production.ag, "dispatch_turn", _forbidden)
+    monkeypatch.setattr(production.mt, "meeting_row", _forbidden)
     reg = _production_registry()
     r = Reaction("rid", "sid", "e", {"uid": "7", "meeting_id": 97, "native": "abc",
                                      "organizer": "a@x.test", "title": "T"},

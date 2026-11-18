@@ -446,9 +446,17 @@ def ws_file(uid: str, path: str, slug: Optional[str] = None) -> Optional[str]:
     # `path` is refs-derived and one of its sources is the invite's own `#group:` token, so it is
     # attacker-adjacent in exactly the way the address above is: unencoded, a `&` or a `#` in it
     # forges a second query parameter on an internal service (R-B14).
-    q = f"&slug={_q(slug, safe='')}" if slug else ""
-    code, body = http("GET", f"{agent_door()}/api/workspace/file?path={_q(path, safe='')}{q}",
-                      {"X-User-Id": uid})
+    if slug == "_global":
+        # _global is platform-owned and deliberately outside the caller's workspace permissions.
+        # The internal endpoint exposes only the company README and mail templates, and requires
+        # the shared internal-tier secret; never route this through the user workspace file API.
+        url = f"{agent_door()}/internal/system-workspace/file?path={_q(path, safe='')}"
+        headers = {"X-Internal-Secret": require_internal_secret()}
+    else:
+        q = f"&slug={_q(slug, safe='')}" if slug else ""
+        url = f"{agent_door()}/api/workspace/file?path={_q(path, safe='')}{q}"
+        headers = {"X-User-Id": uid}
+    code, body = http("GET", url, headers)
     return body.get("content") if code == 200 and isinstance(body, dict) else None
 
 
