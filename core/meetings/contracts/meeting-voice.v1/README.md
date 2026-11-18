@@ -213,3 +213,75 @@ TaskState and HandoffTask additionally accept optional `save_uncertain` (default
 At eight retained inputs or the 8,000-character boundary, draft input history compacts to the original request and exact user-input snippets proving current fields plus the new input. This is bounded ephemeral field provenance, not a full conversational audit or canonical ASR rewrite. Explicit cancel/leave do not consume capacity; confirmation and corrections remain valid.
 
 VoiceActionDraftPage bounds owner list responses to20 drafts with optional next_offset; GET voice-drafts accepts a nonnegative offset. Direct review and its pre-write reauthorization resolve the requested ID independently of list pagination, retaining owner/meeting/policy/completed-readback fences. Missing next_offset means the last page. Legacy first-page response keys remain compatible.
+
+Previously recorded replies may retain optional `detail_text` and `answer_complete` metadata.
+The API keeps these fields readable so switching runtimes does not discard historical answers;
+new replies follow the existing single verified-answer flow.
+
+
+`VoiceHistoryTurn.follow_up` is an optional nullable question (1–200 characters). It preserves a
+verified answer's follow-up as pending intent, without changing its `clarification: false` or source
+evidence. Only completed playback can keep it; interrupted playback clears it. Existing session,
+caller, revision, source fingerprint and pending-expiry checks continue to apply.
+Heard history timestamps completed turns at playback completion, so synthesis/playback latency
+does not consume the 30-second pending-intent lifetime.
+
+
+Project source profiles add nullable `source_profile_id` (32 hex) and
+`source_profile_fingerprint` (64 hex) to VoicePolicy, supplied together. The profile is an explicit,
+immutable, owner-scoped selection of up to 8 documents, 4 other meeting transcripts and existing
+source permission flags. It is copied to each room; it does not automatically enroll future meetings
+or share an entire workspace. Profile removal/source loss blocks subsequent use, including TTS
+readiness checks. Profile rooms bypass the readiness cache to recheck revocation before playback.
+
+The owner saves/lists profiles through GET/POST
+`/agent/workspace/meeting-knowledge/{meeting_id}/source-profiles`, removes one with POST to
+`source-profiles/remove` carrying `{key, fingerprint}`, and applies its reference through the existing
+room policy PUT. Profiles live outside normal Wiki documents at
+`.meeting-knowledge/voice-source-profiles/{owner}.json`, use the existing workspace write lock and
+atomic replace, and are limited to 20 named selections. All file and meeting grants remain checked.
+
+`auto_web_search` defaults false when parsing legacy policies. Newly created capable Google Meet
+rooms explicitly seed both `allow_web_search` and `auto_web_search` true; saved room choices remain
+unchanged. When both web flags are on,
+a conservative question-only model classifier may select web for a self-contained public question;
+local tool selection, source verification, Stop and room policy checks remain authoritative.
+
+`include_workspace_wiki` grants read-only retrieval over the owner's primary private workspace
+content Markdown: README.md and files under kg/, wiki/, notes/, docs/, sources/ and concepts/.
+New capable Google Meet rooms seed it true; omitted legacy policies remain false. It does not
+grant another account, attached/shared workspace, hidden metadata, symlinks, or canonical transcript
+access to other meetings. All qualifying documents enter the existing bounded retrieval pipeline;
+the eight-document linked-selection cap applies only when this flag is off. Existing limits of
+1,000 discoverable documents and 200 KB/50,000 characters per document remain; the all-Wiki corpus
+has a 20 MB UTF-8 budget. Exceeding a source/corpus limit fails explicitly rather than silently
+omitting documents. Source fingerprints, policy checks and current-turn/Stop guards remain intact.
+Profile defaults do not change this separate room-level grant. Turning it off restores explicit
+document selection. This sharing allows spoken answers to everyone in the room.
+
+
+`VoicePolicy.agent_backend` selects `completion` or `sandbox`. Legacy reads/request defaults remain
+`completion`; newly created capable rooms default to `sandbox`. Source profiles do not grant or
+change harness execution mode. The sandbox produces source-tool proposals and candidate JSON;
+TINA remains responsible for execution authorization, source revocation, verification and playback.
+Only the authenticated internal completion edge freezes a live voice lease into a private worker
+payload. Stop invalidates that lease. Private dispatches mount no account workspaces and do not
+resume CLI history; heard caller history remains source/revision scoped.
+
+`VoiceReply.reason` and eligible `VoiceHandoff.reason` add `generation_format_invalid`: a sandbox
+answer remained malformed after its one format repair. It carries no factual claims or verification
+verdict, and is distinct from missing evidence or a rejected factual answer. Existing handoff owner,
+source, Stop and completed-playback checks still apply. Chat responses are not given a voice schema.
+
+Interrupted heard history adds optional heard_partial and heard_source_guards. It contains only
+complete sentences confirmed by playback receipts, no clarification/follow-up from an unheard tail,
+and no factual source grants. Guards retain the old source fingerprints solely to remove revoked
+history; fresh retrieval must supply evidence for the corrected question. Heard text guides the next
+answer to avoid repeating completed sentences. Mid-sentence audio is not word-aligned and is omitted.
+
+VoiceReply adds web_answer_empty and web_numeric_mismatch as public-web outcomes. Existing
+verification codes distinguish numeric mismatch, semantic rejection and reviewer outage; LiveKit
+web_result carries these codes through finalization and durable playback history. web_no_sources
+is reserved for absent usable excerpts/links, not a synonym for failed verification. User-visible
+fallback text names the failure and never releases an unverified original. No new source grants
+or automatic model retries are introduced.

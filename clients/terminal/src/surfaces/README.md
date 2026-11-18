@@ -121,3 +121,19 @@ MeetingVoiceDrafts presents editable, owner-only voice task/decision proposals i
 Voice handoffs use the existing chat action with `composeOnly` and a dedicated session: reveal the rail, preserve any existing draft, and prefill for review. Handoff chat skips ambient UI grounding; Agent API resolves current owner context on each turn.
 
 Voice drafts have twenty-item pages with older/newer navigation. Counts explicitly describe the visible page; edits or in-flight saves block navigation, and switching meetings starts on page1. Review by draft ID is independent of the list page.
+
+
+Voice assistant → Meeting offers named Project sources. Choose sources once, save a name, then
+select that profile and Apply to meeting in another room. Room source options can override project defaults without editing the saved
+profile; Save as project sources creates a new immutable selection. Remove profile revokes its
+room references. Public web permission and automatic public web selection are separate switches.
+
+
+Voice assistant → Meeting → Answer agent selects Sandbox agent or Direct LLM. Newly created
+voice-capable meetings use Sandbox agent; saved legacy policies remain selectable. Sandbox source
+tools are executed and checked by TINA, and its CLI cannot directly access account workspaces.
+
+New Google Meet rooms default to all-Wiki voice retrieval from the owner's primary private
+workspace. Meeting → "Read all Wiki documents in my private workspace" explicitly shows the
+room-level grant and can disable it; source profiles do not override it. Individual document
+selection applies when all-Wiki sharing is off. It does not share other accounts or hidden files.

@@ -158,13 +158,13 @@ edges:
   agent-worker -write-> meeting-wiki-entity  # deterministically serialize the validated summary/cards and commit only kg/entities/meeting/{id}.md
   bot -read-> bot-commands  # SUBSCRIBE acts.v1 commands
   meeting-api -write-> bm-status  # PUBLISH status
-  meeting-api -write-> u-meetings  # PUBLISH per-user status
+  meeting-api -write-> u-meetings  # PUBLISH per-user lifecycle and auto-retry attempt state for Terminal; Extension reads the same owner-only retry state from GET /meetings.
   meeting-api -write-> bot-commands  # PUBLISH leave/speak
   meeting-api -write-> recording-blob  # S3 PUT stitched master
-  meeting-api -write-> postgres
+  meeting-api -write-> postgres  # Persist transient pre-admission retry state atomically with lifecycle status; the single-flight auto-join loop polls due rows. Owner cancellation and retry reopen share the row lock; cancelled, deleted and superseded rows cannot trigger a fresh automatic spawn.
   meeting-api -write-> object-store
   meeting-api -req-> runtime  # POST /workloads spawn bot
-  meeting-api -req-> admin-api  # GET /internal/calendar-configs discovers secret-gated calendar connections for sync and disconnect cleanup
+  meeting-api -req-> admin-api  # GET /internal/calendar-configs discovers secret-gated ICS/Google calendar connections; decrypts Google refresh tokens only for Meeting API sync and sends tombstones for cleanup
   meeting-api -req-> service-authority  # optional signed service-authority.v1 admit/continue decision; unset is explicit OSS allow-all, configured failure is closed
   meeting-api -req-> system-webhook  # optional signed terminal webhook.v1 delivery to a boot-frozen operator destination; customer webhook SSRF policy remains separate
   agent-api -read-> segments-stream  # XREADGROUP agent_copilot (proactive watcher)
@@ -175,10 +175,10 @@ edges:
   agent-worker -write-> out-stream  # XADD turn events, MCP approval requests and resolutions, cards, and notes
   agent-worker -read-> unit-in  # chat path XREADs prompts and matching owner decisions while Codex waits for MCP approval
   mcp -req-> gateway  # every MCP tool forwards the caller's X-API-Key to the public REST surface
-  gateway -req-> meeting-api  # proxy /bots /transcripts /meetings /recordings and per-calendar sync
+  gateway -req-> meeting-api  # proxy /bots /transcripts /meetings /recordings and per-calendar ICS/Google sync
   gateway -req-> agent-api  # proxy /agent/*
   gateway -req-> mcp  # proxy /mcp — POST buffered, GET relayed unbuffered (SSE stream)
-  gateway -req-> admin-api  # POST /internal/validate (authz oracle) plus user calendar connection CRUD
+  gateway -req-> admin-api  # POST /internal/validate (authz oracle), user calendar connection CRUD, and authenticated OAuth-grant storage from the Terminal callback
   gateway -read-> bm-status  # WS fan-out
   gateway -read-> u-meetings  # WS auto-subscribe
   gateway -read-> va-chat  # WS fan-out

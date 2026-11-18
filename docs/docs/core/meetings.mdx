@@ -53,22 +53,24 @@ later; a plan without a time sits in `idle` until you schedule it.
 
 ### Import — calendar sync
 
-Connect your calendar with its **secret ICS address** (Google Calendar and Outlook both provide
-one — see [Calendar sync](/how-to/calendar-sync)); no OAuth needed. Connecting syncs immediately
-and answers with the result — every sync failure is stamped as a human-readable status
+Connect Google Calendar from **Settings → Calendar** and approve read-only access, or use a
+**secret ICS address** from Google Calendar, Outlook, or another provider (see
+[Calendar sync](/how-to/calendar-sync)). Connecting a source syncs immediately and answers with
+the result — every sync failure is stamped as a human-readable status
 (`GET /user/calendars/{calendar_id}/sync`, surfaced on the Calendar page of the self-hosted
 Terminal at `http://localhost:13000`), never swallowed — failures
 are loud here, like everywhere in the lifecycle. A background sweep re-fetches
 the feed (`CALENDAR_SYNC_INTERVAL_S`; self-hosted default 5 minutes)
 and upserts planned meetings:
 
-- **Every upcoming event imports.** Recognizable Meet/Zoom/Teams links arm auto-join; link-less
-  events remain visible as unarmed planned meetings until a link appears.
+- **Every upcoming event imports.** Recognizable Meet/Zoom/Teams links can arm auto-join; the
+  policy belongs to each calendar. Google calendars start with auto-join off; ICS calendars keep
+  their existing on-by-default behavior. Link-less events remain visible as unarmed planned meetings.
 - **One meeting per calendar event, next occurrence only** — a weekly meeting reuses one link, so
   the importer tracks the next upcoming occurrence; the following one imports after the current
   completes.
-- Moves, cancellations, title/link changes, attendees, and complete provider metadata follow the
-  feed; a meeting the bot already joined is never touched.
+- Moves, cancellations, title/link changes, and attendee changes follow the source; ICS snapshots
+  and minimal Google event metadata are retained. A meeting the bot already joined is never touched.
 - A meeting you planned manually on the same link is **adopted** (linked to the calendar event),
   not duplicated.
 

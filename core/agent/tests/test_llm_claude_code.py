@@ -75,6 +75,26 @@ def test_parse_stream_json_normalizes():
     assert evs[3]["sessionId"] == "s1" and evs[3]["ok"] is True
 
 
+def test_native_schema_and_structured_result_are_opt_in_for_voice(tmp_path):
+    schema = {'type': 'object', 'properties': {'tool_calls': {'type': 'array'}}}
+    response = {'type': 'result', 'subtype': 'success', 'result': 'Ordinary chat prose.',
+                'structured_output': {'tool_calls': []}}
+    seen = []
+    def execute(argv, cwd):
+        seen.append(argv)
+        return [json.dumps(response)]
+    harness = ClaudeCodeHarness(exec_fn=execute)
+    voice = list(run_harness_turn(tmp_path, 'voice', harness, commit=False, output_schema=schema))[-1]
+    assert json.loads(seen[0][seen[0].index('--json-schema') + 1]) == schema
+    assert json.loads(voice['reply']) == response['structured_output']
+    chat = list(run_harness_turn(tmp_path, 'chat', harness, commit=False))[-1]
+    assert '--json-schema' not in seen[1] and chat['reply'] == response['result']
+    failed = list(parse_stream_json([json.dumps(response | {'is_error': True})], structured_output=True))[-1]
+    assert failed['ok'] is False and failed['reply'] == response['result']
+    failed = list(parse_stream_json([json.dumps(response | {'subtype':'error_max_structured_output_retries'})], structured_output=True))[-1]
+    assert failed['ok'] is False
+
+
 def test_parse_stream_json_partial_messages_stream_incrementally():
     # Captured --include-partial-messages JSONL shape: stream_event(content_block_delta/text_delta)*
     # then the consolidated assistant text block, then result. The deltas must surface incrementally
@@ -175,13 +195,20 @@ def test_exec_subprocess_launches_with_scrubbed_env(monkeypatch):
     captured: dict = {}
 
     class _FakeProc:
-        stdout = iter(())
+        import io
+        stdout = io.StringIO('')
+        class stdin:
+            @staticmethod
+            def write(value): captured['prompt'] = value
+            @staticmethod
+            def close(): pass
 
-        def wait(self):
+        def wait(self, timeout=None):
             return 0
 
     def _fake_popen(argv, **kwargs):
         captured["env"] = kwargs.get("env")
+        captured['argv'] = argv
         return _FakeProc()
 
     monkeypatch.setattr(claude_code.subprocess, "Popen", _fake_popen)
@@ -189,6 +216,36 @@ def test_exec_subprocess_launches_with_scrubbed_env(monkeypatch):
     assert "REDIS_URL" not in captured["env"]
     assert "TINA_AGENT_IDENTITY_TOKEN" not in captured["env"]
     assert captured["env"]["ANTHROPIC_API_KEY"] == "sk-model-cred"  # model cred still delivered
+    assert captured['prompt'] == 'hi' and captured['argv'] == ['claude','-p']
+
+
+@pytest.mark.parametrize('read_input',[True,False])
+def test_real_pipes_drain_startup_output_and_early_cli_errors(monkeypatch,read_input):
+    import sys
+    import threading
+    from llm import claude_code
+    real=subprocess.Popen;processes=[];lines=[];errors=[]
+    code=("import json,sys,os;" + ("" if read_input else "os.close(0);") +
+          "sys.stdout.write(json.dumps({'notice':'x'*200000})+'\\n');sys.stdout.flush();" +
+          ("assert len(sys.stdin.read())==200000;" if read_input else "") +
+          "print(json.dumps({'type':'result','result':'synthetic result','is_error':"+str(not read_input)+"}))")
+    def spawn(argv,**kwargs):
+        process=real([sys.executable,'-c',code],**kwargs);processes.append(process);return process
+    def consume():
+        try:lines.extend(claude_code._exec_subprocess(['claude','-p','p'*200000],'/tmp'))
+        except Exception as error:errors.append(type(error).__name__)
+    monkeypatch.setattr(claude_code.subprocess,'Popen',spawn)
+    thread=threading.Thread(target=consume,daemon=True);thread.start()
+    try:
+        thread.join(5)
+        assert not thread.is_alive(), 'stdin/stdout must make progress concurrently'
+        assert not errors
+        result=json.loads(lines[-1])
+        assert result['result']=='synthetic result' and result['is_error'] is not read_input
+    finally:
+        for process in processes:
+            if process.poll() is None:process.kill()
+        thread.join(3)
 
 
 # ── run_harness_turn: entity schema validation before commits ────────────────

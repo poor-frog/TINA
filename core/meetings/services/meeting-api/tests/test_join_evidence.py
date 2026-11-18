@@ -517,6 +517,28 @@ def test_owner_list_projection_adds_safe_join_failure_summary_only():
     }, viewer_is_owner=True)
 
 
+@pytest.mark.parametrize('reason,attribution,detail,expected',[
+    ('awaiting_admission_rejected','exogenous_platform','google_meet_join_refused: PRIVATE detail',
+     'Google Meet blocked the bot before an admission request could be sent.'),
+    ('awaiting_admission_rejected','host_action','PRIVATE detail',
+     "The meeting host declined the bot's request to join."),
+    ('awaiting_admission_rejected','exogenous_platform','PRIVATE detail',
+     'The meeting platform blocked the bot from joining.'),
+    ('awaiting_admission_rejected','unknown','PRIVATE detail','The meeting join request was rejected.'),
+    ('awaiting_admission_timeout','host_action','PRIVATE detail',
+     'The bot waited for admission, but did not get into the meeting.'),
+    ('never_reached_lobby','system_fault','PRIVATE detail','The bot could not reach the Google Meet lobby.'),
+])
+def test_owner_failure_copy_distinguishes_platform_host_and_lobby_without_raw_details(reason,attribution,detail,expected):
+    from meeting_api.collector.projection import project_response_data
+    data={'join_evidence':{'reason':reason,'attribution':attribution,'detail':detail},
+          'join_failure_summary':'PRIVATE caller-supplied summary'}
+    for project in (project_list_data,project_response_data):
+        assert project(data,viewer_is_owner=True)['join_failure_summary']==expected
+        assert 'join_failure_summary' not in project(data,viewer_is_owner=False)
+        assert 'join_failure_summary' not in project({'join_failure_summary':'PRIVATE'},viewer_is_owner=True)
+
+
 @pytest.mark.parametrize("endpoint", ["/meetings", "/bots"])
 def test_evidence_surfaces_on_the_list_endpoints(endpoint):
     """The list endpoints are where an operator (or a metric job) reads failures in bulk. They apply

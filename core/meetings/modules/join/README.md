@@ -36,3 +36,5 @@ walker cannot drift between the injected hook and the direct leave.
 ## Prove it
 - `pnpm --filter @tina/join build` · `pnpm --filter @tina/join test` (L1/L2 admission oracle — DOM fixtures, no browser)
 - Live smoke (on a VM): `Dockerfile.debug` + noVNC — see `scripts/` and the `Makefile`.
+
+Google Meet anonymous joins accept the observed Continue as guest screen before the name field. Only the exact guest button is selected, once, through the existing click driver; direct name-field lobbies skip this step. Both waits share the original name-input deadline and retain platform-refusal checks. Authenticated joins keep their own flow.

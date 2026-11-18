@@ -18,6 +18,11 @@
 // CSS-parses each declared entry, and text-labelled buttons are expressed as
 // `{ text: … }` matcher fields, matched in-page against textContent.
 
+export const googleGuestContinueSelectors: string[] = [
+  'button:text-is("Continue as guest")',
+  'button:has(:text-is("Continue as guest"))',
+];
+
 export const googleInitialAdmissionIndicators: string[] = [
   // DOM fallback selectors — only indicators that do NOT appear in the lobby.
   // DANGER: Leave call, toolbar, mic/camera toggles all exist in the lobby too!

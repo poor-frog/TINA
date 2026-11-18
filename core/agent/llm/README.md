@@ -228,3 +228,18 @@ never passes its sources/history to this method. Other completion adapters have 
 fallback. API/model/account support must be verified on the target deployment.
 
 OpenAI Responses completions require a response.completed terminal event for ordinary generation and verification as well as web search. Early EOF, a bare [DONE], response.incomplete, and explicit non-completed envelope status fail closed without returning accumulated deltas. Successful terminal envelopes may omit status for existing compatible gateways; explicit status must be completed.
+
+
+A voice sandbox supplies an explicitly empty TINA tool grant. Codex disables execution, apps,
+browser/image/agent tools; Claude uses `--tools ""` and an empty strict MCP config; Antigravity denies
+file reads, writes, commands and URLs. The voice worker mounts no account workspace. Claude prompts
+travel on stdin to support evidence packs larger than OS argument limits.
+The pinned Codex CLI still advertises some built-ins; `apply_patch` remains constrained by the
+read-only filesystem profile. An empty TINA grant does not mean an empty provider tool catalog.
+
+Voice sandbox calls also pass the optional `output_schema` harness argument. Codex sends it as
+`turn/start.outputSchema` and uses the completed final assistant message without concatenating
+commentary or adding citation prose. Claude sends `--json-schema` and extracts the result's
+`structured_output`; failed structured runs remain failures. Antigravity has no established native
+schema flag, so it retains prompt guidance and server validation. Ordinary chat calls omit this
+argument and keep their existing streaming, citations and session behavior.

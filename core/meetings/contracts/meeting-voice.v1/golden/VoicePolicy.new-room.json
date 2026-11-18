@@ -7,5 +7,7 @@
   "noise_suppression": true,
   "engine": "livekit",
   "allow_general_knowledge": true,
-  "allow_web_search": true
+  "allow_web_search": true,
+  "auto_web_search": true,
+  "include_workspace_wiki": true
 }

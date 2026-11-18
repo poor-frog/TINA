@@ -57,9 +57,9 @@ def test_voice_public_route_and_claim_verification(monkeypatch):
     result=agent_reach.answer_public('github redis/redis',complete,lambda p:'{"approved":true}')
     assert result['links'] == [{'url':'https://github.com/redis/redis','title':'Redis'}]
     assert calls == [('github','read','https://github.com/redis/redis')]
-    assert agent_reach.answer_public('public',complete,lambda p:'{"approved":false}')['reason'] == 'web_no_sources'
+    assert agent_reach.answer_public('public',complete,lambda p:'{"approved":false}')['reason'] == 'verification_rejected'
     unsupported=lambda p:'{"claims":[{"text":"100 users","source_ids":["s0"]}]}'
-    assert agent_reach.answer_public('public',unsupported,lambda p:'{"approved":true}')['reason'] == 'web_no_sources'
+    assert agent_reach.answer_public('public',unsupported,lambda p:'{"approved":true}')['reason'] == 'web_numeric_mismatch'
 
 
 def test_mcp_bridge_restricts_advertisement_and_execution():
@@ -117,21 +117,32 @@ def test_groq_reach_namespace_round_trip_preserves_grants_and_call_ids():
     assert original['tools'][0]['tools'][0]['name']=='reach_web_read'
 
 
-def test_voice_worker_uses_reach_for_non_search_llm_and_emits_verified_links(monkeypatch):
+@pytest.mark.parametrize('sandbox',[False,True])
+def test_voice_worker_uses_reach_for_non_search_llm_and_emits_verified_links(monkeypatch,sandbox):
     from types import SimpleNamespace
     from worker.engine import _run_meeting_knowledge
     from shared.meeting_knowledge import PREFIX
     from shared.voice_knowledge import VERIFY_SYSTEM
     monkeypatch.setenv('TINA_AGENT_REACH_URL','http://reach:8080')
     monkeypatch.setenv('TINA_CHAT_SESSION','meeting-knowledge-public-request')
+    monkeypatch.setenv('REDIS_URL','redis://synthetic')
+    monkeypatch.setattr('redis.from_url',lambda *a,**kw:SimpleNamespace(get=lambda _:'session:turn',close=lambda:None))
+    if sandbox:
+        monkeypatch.setenv('REDIS_URL','redis://synthetic')
+        monkeypatch.setattr('redis.from_url',lambda *a,**kw:SimpleNamespace(get=lambda _:'session:turn',close=lambda:None))
+        def candidate(prompt,system,schema,**kwargs):
+            assert 'PRIVATE ROOM' not in prompt and kwargs['current']()
+            return '{"claims":[{"text":"Redis is a database.","source_ids":["s0"]}]}'
+        monkeypatch.setattr('worker.voice_sandbox.complete',candidate)
     class Provider:
         def complete(self,prompt,*,system):
             assert 'PRIVATE ROOM' not in prompt
+            if sandbox: assert system==VERIFY_SYSTEM
             return SimpleNamespace(text='{"approved":true}' if system==VERIFY_SYSTEM else
                 '{"claims":[{"text":"Redis is a database.","source_ids":["s0"]}]}')
     monkeypatch.setattr('worker.engine.completion_from_env',lambda **kw:Provider())
     def retrieve(channel,action,text,**kw):
-        assert (channel,action,text)==('web','search','What is Redis?')
+        assert (channel,action,text) in (('web','search','What is Redis?'),('web','read','https://redis.io'))
         return {'ok':True,'items':[{'url':'https://redis.io','title':'Redis','text':'Redis is a database.'}]}
     monkeypatch.setattr(agent_reach,'query',retrieve)
     class Stream:
@@ -139,10 +150,11 @@ def test_voice_worker_uses_reach_for_non_search_llm_and_emits_verified_links(mon
         def xadd(self,key,body): self.events.append(json.loads(body['event']))
         def expire(self,*args): pass
     stream=Stream()
-    payload={'request_id':'public-request','text':json.dumps({'mode':'voice_web','question':'What is Redis?'})}
+    payload={'request_id':'public-request','text':json.dumps({'mode':'voice_web','question':'What is Redis?','use_sandbox_agent':sandbox}),
+             'voice_turn':{'meeting_id':1,'holder':'session:turn'}}
     _run_meeting_knowledge(stream,'out',{'entrypoint':{'inline':PREFIX+json.dumps(payload)}})
     result=json.loads(next(e['text'] for e in stream.events if e['type']=='message-delta'))
-    assert result=={'text':'Redis is a database.','links':[{'url':'https://redis.io','title':'Redis'}]}
+    assert result=={'text':'Redis is a database.','links':[{'url':'https://redis.io','title':'Redis'}],'verification':['approved']}
 
 
 def test_upstream_rate_limit_is_returned_without_retry(monkeypatch):
@@ -154,3 +166,345 @@ def test_upstream_rate_limit_is_returned_without_retry(monkeypatch):
                                        'items':[],'error':{'code':'RATE_LIMITED','message':'discard'}})
     result=agent_reach.query('github','read','redis/redis',transport=httpx.MockTransport(handler))
     assert len(calls)==1 and result=={'ok':False,'items':[],'error':{'code':'RATE_LIMITED'}}
+
+
+@pytest.mark.parametrize('case,expected',[
+ ('no_results','web_no_sources'),('retrieval_down','web_unavailable'),('model_down','llm_unavailable'),
+ ('empty','web_answer_empty'),('format','generation_format_invalid'),('numbers','web_numeric_mismatch'),
+ ('rejected','verification_rejected'),('review_down','verification_unavailable'),('valid','answered'),
+])
+def test_web_failure_categories_retain_counts_without_logging_content(monkeypatch,caplog,case,expected):
+    import logging
+    from shared.voice_trace import voice_span
+    quote='PRIVATE TEST TEXT: Redis has 10 users.'
+    def retrieve(*a,**kw):
+        if case=='retrieval_down':return {'ok':False,'error':{'code':'RATE_LIMITED'},'items':[]}
+        return {'ok':True,'items':[] if case=='no_results' else [{'title':'Redis','url':'https://redis.io','text':quote}]}
+    monkeypatch.setattr(agent_reach,'query',retrieve)
+    calls=[]
+    def complete(prompt):
+        calls.append('generation')
+        if case=='model_down':raise RuntimeError('PRIVATE PROVIDER RESPONSE')
+        if case=='empty':return '{"claims":[]}'
+        if case=='format':return 'PRIVATE INVALID JSON'
+        return json.dumps({'claims':[{'text':f'Redis has {24 if case=="numbers" else 10} users.','source_ids':['s0']}]})
+    def review(prompt):
+        calls.append('review')
+        if case=='review_down':raise RuntimeError('PRIVATE REVIEW RESPONSE')
+        return json.dumps({'approved':case!='rejected','reason':'contradiction','claim_indexes':[0]})
+    with caplog.at_level(logging.INFO),voice_span('web_search','00000000-0000-4000-8000-000000000001'):
+        result=agent_reach.answer_public('PRIVATE QUERY',complete,review)
+    assert result.get('reason','answered')==expected
+    rows=[json.loads(r.message) for r in caplog.records if r.message.startswith('{') and json.loads(r.message).get('type')=='voice_web_result']
+    assert len(rows)==1 and rows[0]['reason']==expected
+    assert rows[0]['request_id']=='00000000-0000-4000-8000-000000000001'
+    assert rows[0]['retrieved_sources']==(0 if case in ('no_results','retrieval_down') else 1)
+    assert 'PRIVATE' not in caplog.text
+    if case in ('numbers','empty','format'):assert calls==['generation']
+    if case=='numbers':assert result['verification']==['numeric_mismatch']
+    if case=='review_down':assert result['verification']==['unavailable']
+    if case=='valid':assert result['verification']==['approved'] and result['links']
+    else:assert not result.get('text') and not result.get('links')
+
+
+@pytest.mark.parametrize('status,code',[(429,'RATE_LIMITED'),(504,'TIMEOUT'),(403,'PLATFORM_BLOCKED')])
+def test_http_retrieval_failures_keep_typed_reason_without_retry(monkeypatch,caplog,status,code):
+    import logging
+    monkeypatch.setenv('TINA_AGENT_REACH_URL','http://fixture')
+    calls=[]
+    def handler(request):calls.append(True);return httpx.Response(status)
+    original=agent_reach.query
+    monkeypatch.setattr(agent_reach,'query',lambda *a,**kw:original(*a,**kw,transport=httpx.MockTransport(handler)))
+    with caplog.at_level(logging.INFO):result=agent_reach.answer_public('public query',None,None)
+    assert result=={'reason':'web_unavailable'} and calls==[True]
+    row=next(json.loads(r.message) for r in caplog.records if 'voice_web_result' in r.message)
+    assert row['retrieval_error']==code
+
+
+def test_web_reads_two_pages_in_parallel_and_verifies_original_excerpts(monkeypatch):
+    from threading import Barrier
+    barrier = Barrier(2)
+    calls = []
+    def retrieve(channel, action, target, **kwargs):
+        calls.append((action,target))
+        assert 0 < kwargs['timeout'] <= 10
+        if action == 'search':
+            return {'ok':True,'items':[{'title':str(i),'url':f'https://example.com/{i}',
+                'text':'Search snippet says 24 users.'} for i in (0,0,1,2,3)]}
+        barrier.wait(timeout=2)
+        return {'ok':True,'items':[{'title':'Original page','url':target,
+            'text':'# Release\n| Product | Users |\n| Redis | 19 |'}]}
+    monkeypatch.setattr(agent_reach,'query',retrieve)
+    def complete(prompt):
+        sources = json.loads(prompt)['sources']
+        assert len(sources) == 4
+        assert all('| Redis | 19 |' in s['quote'] for s in sources[:2])
+        assert sources[2]['quote'] == 'Search snippet says 24 users.'
+        return '{"claims":[{"text":"Redis has 19 users.","source_ids":["s0"]}]}'
+    answer = agent_reach.answer_public('Redis users',complete,lambda _:'{"approved":true}')
+    assert answer['text'] == 'Redis has 19 users.'
+    assert sorted(calls) == [('read','https://example.com/0'),('read','https://example.com/1'),('search','Redis users')]
+
+
+def test_missing_web_evidence_searches_once_more_with_three_page_total_bound(monkeypatch,caplog):
+    import logging
+    calls, generated, plans = [], [], []
+    def retrieve(channel, action, target, **kwargs):
+        calls.append((channel,action,target))
+        if action == 'search':
+            values = range(5) if target == 'Redis users' else range(4,9)
+            return {'ok':True,'items':[{'title':str(i),'url':f'https://example.com/{i}',
+                'text':'Users not published.'} for i in values]}
+        return {'ok':True,'items':[{'title':'Release','url':target,
+            'text':'Redis has 19 users.' if target.endswith('/5') else 'Users not published.'}]}
+    monkeypatch.setattr(agent_reach,'query',retrieve)
+    def complete(prompt):
+        data = json.loads(prompt); generated.append(data)
+        assert set(data) == {'question','sources'}
+        return ('{"claims":[]}' if len(generated) == 1 else
+                '{"claims":[{"text":"Redis has 19 users.","source_ids":["s5"]}]}')
+    def refine(prompt):
+        plans.append(json.loads(prompt))
+        return '{"query":"Redis release users count"}'
+    with caplog.at_level(logging.INFO):
+        result = agent_reach.answer_public('Redis users',complete,lambda _:'{"approved":true}',refine=refine)
+    assert result['links'] == [{'title':'Release','url':'https://example.com/5'}]
+    assert len(generated) == 2 and len(plans) == 1
+    assert len(generated[1]['sources']) == 6
+    assert len([c for c in calls if c[1]=='search']) == 2
+    assert len([c for c in calls if c[1]=='read']) == 3
+    row = next(json.loads(r.message) for r in caplog.records if 'voice_web_result' in r.message)
+    assert row['search_rounds'] == 2 and row['pages_read'] == 3
+
+
+@pytest.mark.parametrize('plan', ['{"query":null}','{"query":"public"}',
+    '{"query":"bad\\nquery"}','{"query":"new","private":"ignored"}', 'not JSON',
+    json.dumps({'query':'x'*201})])
+def test_invalid_or_repeated_refinement_cannot_start_another_search(monkeypatch,plan):
+    calls = []
+    monkeypatch.setattr(agent_reach,'query',lambda *a,**k:(calls.append(a) or {'ok':True,'items':[]}))
+    result = agent_reach.answer_public('public',None,None,refine=lambda _:plan)
+    assert result['reason'] == 'web_no_sources' and len(calls) == 1
+
+
+@pytest.mark.parametrize('output,reason', [('{"claims":[]}', 'web_answer_empty'),
+    ('invalid', 'generation_format_invalid'),
+    ('{"claims":[{"text":"19 users","source_ids":["s0"]}]}','web_numeric_mismatch')])
+def test_read_failures_keep_snippets_and_never_retry_format_or_numeric_errors(monkeypatch,output,reason):
+    calls, plans = [], []
+    def retrieve(c,a,q,**kw):
+        calls.append((a,q))
+        if a=='read': raise LLMError('Unavailable')
+        return {'ok':True,'items':[{'url':'https://example.com','title':'Example','text':'24 users'}]}
+    monkeypatch.setattr(agent_reach,'query',retrieve)
+    def refine(prompt):
+        plans.append(True)
+        assert json.loads(prompt)['sources'][0]['quote'] == '24 users'
+        return '{"query":"new public query"}'
+    result = agent_reach.answer_public('public',lambda _:output,lambda _:'{"approved":true}',refine=refine)
+    assert result['reason'] == reason
+    assert len(plans) == int(reason=='web_answer_empty')
+    assert len([c for c in calls if c[0]=='search']) == (2 if plans else 1)
+    assert len([c for c in calls if c[0]=='read']) == 1
+
+
+def test_stop_during_page_read_blocks_generation_and_further_search(monkeypatch):
+    from threading import Event
+    stopped, release = Event(), Event()
+    def retrieve(c,a,q,**kw):
+        if a=='search': return {'ok':True,'items':[{'title':'Page','url':'https://example.com','text':'snippet'}]}
+        stopped.set()
+        release.wait(timeout=2)
+        return {'ok':True,'items':[{'title':'Page','url':q,'text':'late content'}]}
+    monkeypatch.setattr(agent_reach,'query',retrieve)
+    def forbidden(_): pytest.fail('Stop must block model calls')
+    try:
+        with pytest.raises(RuntimeError,match='cancelled'):
+            agent_reach.answer_public('public',forbidden,forbidden,refine=forbidden,current=lambda:not stopped.is_set())
+    finally: release.set()
+
+
+def test_deadline_stops_reads_and_skips_supplemental_search_without_budget(monkeypatch):
+    now, calls = [0], []
+    monkeypatch.setattr(agent_reach.time,'monotonic',lambda:now[0])
+    def retrieve(c,a,q,**kw):
+        calls.append((a,kw['timeout']))
+        now[0] += 2
+        return {'ok':True,'items':[]}
+    monkeypatch.setattr(agent_reach,'query',retrieve)
+    def forbidden(_): pytest.fail('No budget for another round')
+    assert agent_reach.answer_public('public',forbidden,forbidden,refine=forbidden,deadline=10)['reason']=='web_no_sources'
+    assert calls == [('search',10)]
+    now[0] = 9
+    with pytest.raises(TimeoutError):
+        agent_reach.answer_public('public',forbidden,forbidden,deadline=10)
+    assert calls[-1] == ('search',1)
+
+
+@pytest.mark.parametrize('sandbox',[False,True])
+def test_web_worker_refines_public_only_and_keeps_sandbox_verification_boundary(monkeypatch,sandbox):
+    import time
+    from types import SimpleNamespace
+    from worker import engine
+    from shared.meeting_knowledge import PREFIX
+    from shared.voice_knowledge import VERIFY_SYSTEM
+    monkeypatch.setenv('TINA_AGENT_REACH_URL','http://reach:8080')
+    monkeypatch.setenv('TINA_CHAT_SESSION','meeting-knowledge-refine')
+    monkeypatch.setenv('REDIS_URL','redis://synthetic')
+    monkeypatch.setattr('redis.from_url',lambda *a,**k:SimpleNamespace(get=lambda _:'session:turn',close=lambda:None))
+    stages=[]
+    def candidate(prompt):
+        data=json.loads(prompt)
+        assert set(data)=={'question','sources'}
+        stages.append('candidate')
+        return ('{"claims":[]}' if len(data['sources'])==1 else
+                '{"claims":[{"text":"Redis has 19 users.","source_ids":["s1"]}]}')
+    class Provider:
+        def complete(self,prompt,*,system):
+            if system==VERIFY_SYSTEM:
+                stages.append('verify')
+                return SimpleNamespace(text='{"approved":true}')
+            assert not sandbox
+            return SimpleNamespace(text=candidate(prompt))
+        def complete_structured(self,prompt,*,system,schema):
+            assert set(json.loads(prompt))=={'question','sources'}
+            assert schema['properties']['query']['maxLength']==200
+            assert 'untrusted' in system
+            stages.append('refine')
+            return SimpleNamespace(text='{"query":"Redis release users"}')
+    monkeypatch.setattr(engine,'completion_from_env',lambda **k:Provider())
+    monkeypatch.setattr('worker.voice_sandbox.complete',lambda prompt,*a,**k:candidate(prompt))
+    def retrieve(c,a,q,**k):
+        assert q in ('Redis users','Redis release users','https://example.com/old','https://example.com/new')
+        new=q in ('Redis release users','https://example.com/new')
+        return {'ok':True,'items':[{'title':'Release','url':'https://example.com/'+('new' if new else 'old'),
+                                  'text':'Redis has 19 users.' if new else 'No user count.'}]}
+    monkeypatch.setattr(agent_reach,'query',retrieve)
+    events=[]
+    stream=SimpleNamespace(xadd=lambda _,body:events.append(json.loads(body['event'])),expire=lambda *a:None)
+    payload={'request_id':'refine','voice_turn':{'meeting_id':1,'holder':'session:turn'},'text':json.dumps({
+        'mode':'voice_web','question':'Redis users','use_sandbox_agent':sandbox,
+        'retrieval_deadline_ms':int(time.time()*1000)+30000})}
+    engine._run_meeting_knowledge(stream,'out',{'entrypoint':{'inline':PREFIX+json.dumps(payload)}})
+    result=json.loads(next(e['text'] for e in events if e['type']=='message-delta'))
+    assert result['text']=='Redis has 19 users.' and result['verification']==['approved']
+    assert stages==['candidate','refine','candidate','verify']
+
+
+def test_web_worker_expired_shared_deadline_does_not_contact_retrieval(monkeypatch):
+    from types import SimpleNamespace
+    from worker import engine
+    from shared.meeting_knowledge import PREFIX
+    monkeypatch.setenv('TINA_CHAT_SESSION','meeting-knowledge-expired')
+    def forbidden(*a,**k): pytest.fail('Expired job cannot contact a provider')
+    monkeypatch.setattr(engine,'completion_from_env',forbidden)
+    monkeypatch.setattr(agent_reach,'query',forbidden)
+    events=[]
+    stream=SimpleNamespace(xadd=lambda _,body:events.append(json.loads(body['event'])),expire=lambda *a:None)
+    payload={'request_id':'expired','text':json.dumps({'mode':'voice_web','question':'public','retrieval_deadline_ms':1})}
+    engine._run_meeting_knowledge(stream,'out',{'entrypoint':{'inline':PREFIX+json.dumps(payload)}})
+    assert events==[{'type':'turn-complete'}]
+
+
+@pytest.mark.parametrize('repaired,reviewed,reason,checks',[
+ ('150 triệu đồng/lượng',True,'answered',['numeric_mismatch','approved']),
+ ('150 triệu đồng/chỉ',True,'web_numeric_mismatch',['numeric_mismatch','numeric_mismatch']),
+ ('invalid',True,'web_numeric_mismatch',['numeric_mismatch','repair_failed']),
+ ('150 triệu đồng/lượng',False,'verification_rejected',['numeric_mismatch','contradiction']),
+])
+def test_public_money_repair_runs_once_and_must_pass_numeric_and_semantic_checks(monkeypatch,repaired,reviewed,reason,checks):
+    quote='Giá giả định là 150.000.000 đồng/lượng.'
+    monkeypatch.setattr(agent_reach,'query',lambda *a,**k:{'ok':True,'items':[
+        {'title':'Synthetic source','url':'https://example.com','text':quote}]})
+    def claim(text):return json.dumps({'claims':[{'text':text,'source_ids':['s0']}]})
+    repairs,reviews=[],[]
+    def repair(prompt):
+        value=json.loads(prompt);repairs.append(value)
+        assert value['sources'][0]['quote']==quote
+        assert value['rejection']=={'reason':'numeric_mismatch','claim_indexes':[0]}
+        return 'invalid' if repaired=='invalid' else claim(repaired)
+    def review(prompt):
+        reviews.append(json.loads(prompt))
+        return json.dumps({'approved':reviewed,'reason':'contradiction','claim_indexes':[0]})
+    result=agent_reach.answer_public('https://example.com',lambda _:claim('150 tỷ đồng/lượng'),review,repair=repair)
+    assert len(repairs)==1 and result.get('reason','answered')==reason and result['verification']==checks
+    assert len(reviews)==int(repaired=='150 triệu đồng/lượng')
+    if reason=='answered':assert result['text']==repaired and result['links']
+    else:assert not result.get('text') and not result.get('links')
+
+
+@pytest.mark.parametrize('stop',[False,True])
+def test_web_repair_cannot_advance_after_stop_or_deadline(monkeypatch,stop):
+    now,alive=[0],[True]
+    monkeypatch.setattr(agent_reach.time,'monotonic',lambda:now[0])
+    monkeypatch.setattr(agent_reach,'query',lambda *a,**k:{'ok':True,'items':[
+        {'title':'Synthetic source','url':'https://example.com','text':'150 triệu đồng/lượng'}]})
+    calls=[]
+    def repair(_):
+        calls.append('repair')
+        if stop:alive[0]=False
+        else:now[0]=31
+        return '{"claims":[{"text":"150 triệu đồng/lượng","source_ids":["s0"]}]}'
+    def forbidden(_):pytest.fail('Late review must be blocked')
+    with pytest.raises(RuntimeError if stop else TimeoutError):
+        agent_reach.answer_public('https://example.com',
+            lambda _:'{"claims":[{"text":"150 tỷ đồng/lượng","source_ids":["s0"]}]}',forbidden,
+            repair=repair,current=lambda:alive[0],deadline=30)
+    assert calls==['repair']
+
+
+def test_failed_web_repair_can_release_only_a_separately_verified_supported_subset(monkeypatch):
+    monkeypatch.setattr(agent_reach,'query',lambda *a,**k:{'ok':True,'items':[
+        {'title':'Synthetic source','url':'https://example.com','text':'Giá 150 triệu đồng/lượng. Bảng giá đã cập nhật.'}]})
+    raw=json.dumps({'claims':[{'text':text,'source_ids':['s0']} for text in
+        ('Giá 150 tỷ đồng/lượng.','Bảng giá đã cập nhật.')]})
+    repairs=[];reviews=[]
+    def repair(prompt):repairs.append(prompt);return raw
+    def review(prompt):
+        value=json.loads(prompt);reviews.append(value)
+        assert [c['text'] for c in value['reply']['claims']]==['Bảng giá đã cập nhật.']
+        return '{"approved":true}'
+    result=agent_reach.answer_public('https://example.com',lambda _:raw,review,repair=repair)
+    assert result['text']=='Bảng giá đã cập nhật.' and len(repairs)==len(reviews)==1
+    assert result['verification']==['numeric_mismatch','approved']
+
+
+@pytest.mark.parametrize('sandbox',[False,True])
+def test_worker_repairs_public_money_via_api_even_when_generation_uses_sandbox(monkeypatch,sandbox):
+    import time
+    from types import SimpleNamespace
+    from worker import engine
+    from shared.meeting_knowledge import PREFIX
+    from shared.voice_knowledge import VOICE_REPAIR_SYSTEM,VERIFY_SYSTEM
+    monkeypatch.setenv('TINA_AGENT_REACH_URL','http://reach:8080')
+    monkeypatch.setenv('TINA_CHAT_SESSION','meeting-knowledge-money-repair')
+    monkeypatch.setenv('REDIS_URL','redis://synthetic')
+    monkeypatch.setattr('redis.from_url',lambda *a,**k:SimpleNamespace(get=lambda _:'session:turn',close=lambda:None))
+    quote='Giá giả định là 150.000.000 đồng/lượng.'
+    monkeypatch.setattr(agent_reach,'query',lambda *a,**k:{'ok':True,'items':[
+        {'title':'Synthetic source','url':'https://example.com','text':quote}]})
+    stages=[]
+    def claim(amount):return json.dumps({'claims':[{'text':amount,'source_ids':['s0']}]})
+    def candidate(*args,**kwargs):stages.append('candidate');return claim('150 tỷ đồng/lượng')
+    class Provider:
+        def complete(self,prompt,*,system):
+            if system==VERIFY_SYSTEM:
+                stages.append('review');return SimpleNamespace(text='{"approved":true}')
+            assert not sandbox
+            return SimpleNamespace(text=candidate())
+        def complete_structured(self,prompt,*,system,schema):
+            assert system==VOICE_REPAIR_SYSTEM and schema
+            payload=json.loads(prompt)
+            assert payload['sources'][0]['quote']==quote
+            assert 'history' not in payload and 'PRIVATE ROOM' not in prompt
+            stages.append('repair');return SimpleNamespace(text=claim('150 triệu đồng/lượng'))
+    monkeypatch.setattr(engine,'completion_from_env',lambda **k:Provider())
+    monkeypatch.setattr('worker.voice_sandbox.complete',candidate)
+    events=[];stream=SimpleNamespace(xadd=lambda _,b:events.append(json.loads(b['event'])),expire=lambda *a:None)
+    payload={'request_id':'money-repair','voice_turn':{'meeting_id':1,'holder':'session:turn'},'text':json.dumps({
+        'mode':'voice_web','question':'https://example.com','use_sandbox_agent':sandbox,
+        'retrieval_deadline_ms':int(time.time()*1000)+30000})}
+    engine._run_meeting_knowledge(stream,'out',{'entrypoint':{'inline':PREFIX+json.dumps(payload)}})
+    answer=json.loads(next(e['text'] for e in events if e['type']=='message-delta'))
+    assert answer['text']=='150 triệu đồng/lượng' and answer['verification']==['numeric_mismatch','approved']
+    assert stages==['candidate','repair','review']

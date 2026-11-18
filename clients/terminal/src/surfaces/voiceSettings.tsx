@@ -149,9 +149,10 @@ export function VoiceSettings(){
         <p className={styles.helper}>{value==='default'?`Following deployment default. Voice is currently ${defaultVoice?'on':'off'}.`:value==='on'?'Voice is enabled for new bots, even if the deployment default changes.':'Voice is disabled for new bots, even if the deployment default changes.'}</p>
         <section aria-label="New meeting defaults" className={styles.defaults}>
           <div className={styles.sectionHeading}><strong>New meeting defaults</strong><span>{services?.new_meeting_policy?.engine==='livekit'?'LiveKit Agents':services?.new_meeting_policy?.engine==='tina'?'TINA':'Checking…'}</span></div>
-          <dl>{([['enabled','Voice assistant'],['include_transcript','Meeting transcript'],
+          <dl>{([['enabled','Voice assistant'],['include_transcript','Meeting transcript'],['include_workspace_wiki','Private workspace Wiki'],
             ['allow_general_knowledge','General knowledge'],['allow_web_search','Public web search']] as const).map(([key,label])=>
             <div key={key}><dt>{label}</dt><dd>{!services?.new_meeting_policy?'Unavailable':(key==='enabled'?defaultVoice:services.new_meeting_policy[key])?'On':'Off'}</dd></div>)}</dl>
+          <p className={styles.helper}>Answer agent · {!services?.new_meeting_policy?'Checking…':services.new_meeting_policy.agent_backend==='sandbox'?'Sandbox agent':'Direct LLM'}</p>
         </section>
         <p className={styles.helper}>Saved meeting settings stay unchanged. Documents require sharing in the Meeting tab.</p>
         <details className={styles.disclosure}>
@@ -178,10 +179,12 @@ export function VoiceSettings(){
   </div>;
 }
 
-interface RoomPolicy {enabled:boolean;include_transcript:boolean;include_approved_actions?:boolean;shared_meeting_ids?:number[];documents:string[];revision:number;wake_variants:string[];
-  noise_suppression:boolean;allow_general_knowledge?:boolean;allow_web_search?:boolean;engine?:'tina'|'livekit'}
+interface RoomPolicy {enabled:boolean;include_transcript:boolean;include_workspace_wiki?:boolean;include_approved_actions?:boolean;shared_meeting_ids?:number[];documents:string[];revision:number;wake_variants:string[];
+  noise_suppression:boolean;allow_general_knowledge?:boolean;allow_web_search?:boolean;auto_web_search?:boolean;engine?:'tina'|'livekit';agent_backend?:'completion'|'sandbox';source_profile_id?:string|null;source_profile_fingerprint?:string|null}
+interface SourceProfile {id:string;name:string;fingerprint:string;sources:Pick<RoomPolicy,'documents'|'shared_meeting_ids'|'include_transcript'|'include_approved_actions'|'allow_general_knowledge'|'allow_web_search'|'auto_web_search'>}
 function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:string}>}){
   const [meeting,setMeeting]=useState(''),[policy,setPolicy]=useState<RoomPolicy|null>(null);
+  const [profiles,setProfiles]=useState<SourceProfile[]>([]),[profileName,setProfileName]=useState('');
   const [savedPolicy,setSavedPolicy]=useState<RoomPolicy|null>(null);
   const [documents,setDocuments]=useState<Array<{path:string;title:string}>>([]),[reason,setReason]=useState('');
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
@@ -189,15 +192,59 @@ function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:
   const [choices,setChoices]=useState<Array<{id:number;title:string}>>([]),[choicesMessage,setChoicesMessage]=useState('');
   const identity=useRef(meeting);identity.current=meeting;
   useEffect(()=>{
-    if(!meeting)return;const abort=new AbortController();setPolicy(null);setMessage('');setDocuments([]);setReason('');setChoices([]);setChoicesMessage('');
+    if(!meeting)return;const abort=new AbortController();setPolicy(null);setMessage('');setDocuments([]);setReason('');setChoices([]);setChoicesMessage('');setProfiles([]);setProfileName('');
     void Promise.all([fetch(`/api/meetings/${meeting}/voice-assistant`,{cache:'no-store',signal:abort.signal}),
-      fetch(`/api/workspace/meeting-knowledge/${meeting}`,{cache:'no-store',signal:abort.signal})]).then(async([room,docs])=>{
+      fetch(`/api/workspace/meeting-knowledge/${meeting}`,{cache:'no-store',signal:abort.signal}),
+      fetch(`/api/workspace/meeting-knowledge/${meeting}/source-profiles`,{cache:'no-store',signal:abort.signal}).catch(()=>null)]).then(async([room,docs,presets])=>{
       if(!room.ok)throw Error();const r=await room.json(),d=docs.ok?await docs.json():{documents:[]};
       if(abort.signal.aborted)return;setPolicy(r.policy);setSavedPolicy(r.policy);setDocuments(d.documents||[]);setLivekit(r.livekit_available===true);
+      if(presets?.ok){const value=await presets.json();if(!abort.signal.aborted){
+        setProfiles(value.profiles||[]);
+        const selected=(value.profiles||[]).find((p:SourceProfile)=>p.id===r.policy.source_profile_id);
+        if(selected)setDocuments(current=>[...new Map([...current,...selected.sources.documents.map((path:string)=>({path,title:path}))].map(d=>[d.path,d])).values()]);
+      }}
       setReason(r.replies?.at(-1)?.reason||'');
     }).catch(()=>{if(!abort.signal.aborted)setMessage('Could not load room settings.');});
     return()=>abort.abort();
   },[meeting]);
+  function chooseProfile(id:string){
+    if(!policy)return;
+    const item=profiles.find(p=>p.id===id);
+    if(!item){setPolicy({...policy,source_profile_id:null,source_profile_fingerprint:null,documents:policy.source_profile_id?[]:policy.documents});return;}
+    setPolicy({...policy,...item.sources,shared_meeting_ids:(item.sources.shared_meeting_ids||[]).filter(i=>String(i)!==meeting),
+      source_profile_id:item.id,source_profile_fingerprint:item.fingerprint});
+    setDocuments(current=>[...new Map([...current,...item.sources.documents.map(path=>({path,title:path}))].map(d=>[d.path,d])).values()]);
+  }
+  async function saveProfile(){
+    if(!policy||!profileName.trim())return;
+    const id=meeting;setBusy(true);setMessage('');
+    try{
+      const sources={documents:policy.documents,shared_meeting_ids:policy.shared_meeting_ids||[],
+        include_transcript:policy.include_transcript,include_approved_actions:!!policy.include_approved_actions,
+        allow_general_knowledge:!!policy.allow_general_knowledge,allow_web_search:!!policy.allow_web_search,auto_web_search:!!policy.auto_web_search};
+      const response=await fetch(`/api/workspace/meeting-knowledge/${id}/source-profiles`,{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name:profileName.trim(),...sources})});
+      if(!response.ok)throw Error('Could not save project sources. Check the name and selected sources.');
+      const item:SourceProfile=await response.json();if(identity.current!==id)return;
+      setProfiles(current=>[...current,item]);setProfileName('');
+      setPolicy({...policy,source_profile_id:item.id,source_profile_fingerprint:item.fingerprint});
+      setMessage('Project sources saved. Apply to this meeting when ready.');
+    }catch(error){if(identity.current===id)setMessage(error instanceof Error?error.message:'Could not save project sources.');}
+    finally{if(identity.current===id)setBusy(false);}
+  }
+  async function removeProfile(){
+    const item=profiles.find(p=>p.id===policy?.source_profile_id);
+    if(!item||!window.confirm('Remove these project sources? Voice in meetings using this profile will stop until sources are applied again.'))return;
+    const id=meeting;setBusy(true);setMessage('');
+    try{
+      const response=await fetch(`/api/workspace/meeting-knowledge/${id}/source-profiles/remove`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:item.id,fingerprint:item.fingerprint})});
+      if(!response.ok)throw Error();if(identity.current!==id)return;
+      setProfiles(current=>current.filter(p=>p.id!==item.id));
+      setPolicy(current=>current?{...current,source_profile_id:null,source_profile_fingerprint:null,documents:[]}:null);
+      setMessage('Project sources removed. Apply new room sources to resume voice.');
+    }catch{if(identity.current===id)setMessage('Could not remove project sources. Reload and retry.');}
+    finally{if(identity.current===id)setBusy(false);}
+  }
   async function chooseMeetings(){
     const id=meeting;setChoicesMessage('Loading meetings…');
     try{
@@ -232,20 +279,39 @@ function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:
       <option value="">Choose a meeting</option>{sessions.map(s=><option key={s.meeting_id} value={s.meeting_id}>Meeting #{s.meeting_id}</option>)}
     </select>
     {meeting&&policy&&<>
+      <label htmlFor="voice-project-sources">Project sources</label>
+      <select id="voice-project-sources" value={policy.source_profile_id||''} disabled={busy} style={button} onChange={e=>chooseProfile(e.target.value)}>
+        <option value="">Custom meeting sources</option>{profiles.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <span className={styles.helper}>Reuse project defaults; room changes do not edit the saved profile. Apply to meeting to start using them.</span>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+        <input aria-label="Project source name" value={profileName} maxLength={80} disabled={busy} placeholder="Project name" onChange={e=>setProfileName(e.target.value)} style={button}/>
+        <button type="button" disabled={busy||!profileName.trim()} style={button} onClick={saveProfile}>Save as project sources</button>
+        {policy.source_profile_id&&<button type="button" disabled={busy} style={button} onClick={removeProfile}>Remove profile</button>}
+      </div>
       <label htmlFor="voice-runtime">Voice runtime</label>
       <select id="voice-runtime" value={policy.engine||'tina'} disabled={busy} style={button}
         onChange={e=>setPolicy({...policy,engine:e.target.value as 'tina'|'livekit'})}>
         <option value="tina">TINA</option><option value="livekit" disabled={!livekit}>LiveKit Agents{livekit?'':' · not configured'}</option>
       </select>
+      <label htmlFor="voice-answer-agent">Answer agent</label>
+      <select id="voice-answer-agent" value={policy.agent_backend||'completion'} disabled={busy} style={button}
+        onChange={e=>setPolicy({...policy,agent_backend:e.target.value as 'completion'|'sandbox'})}>
+        <option value="sandbox">Sandbox agent</option><option value="completion">Direct LLM</option>
+      </select>
+      <span className={styles.helper}>Sandbox uses your configured chat harness with meeting-approved evidence. TINA executes source tools and verifies the answer before speech.</span>
       {policy.engine==='livekit'&&<span style={{fontSize:12,color:'var(--t3)'}}>Up to 3 concurrent meetings. Uses your selected ASR, approved sources and local voice.</span>}
       {([['enabled','Enable voice'],['include_transcript','Use this meeting’s transcript'],
+        ['include_workspace_wiki','Read all Wiki documents in my private workspace'],
         ['include_approved_actions','Share approved tasks and decisions from this meeting'],
-        ['allow_general_knowledge','Allow general knowledge'],['allow_web_search','Allow public web search']] as const).map(([key,label])=>
-        <label key={key}><input type="checkbox" checked={!!policy[key]} disabled={busy} onChange={e=>setPolicy({...policy,[key]:e.target.checked})}/> {label}</label>)}
+        ['allow_general_knowledge','Allow general knowledge'],['allow_web_search','Allow public web search'],['auto_web_search','Let agent choose public web search']] as const).map(([key,label])=>
+        <label key={key}><input type="checkbox" checked={!!policy[key]} disabled={busy||key==='auto_web_search'&&!policy.allow_web_search} onChange={e=>setPolicy({...policy,[key]:e.target.checked})}/> {label}</label>)}
+      <span className={styles.helper}>All-Wiki sharing lets TINA answer aloud from your private Markdown knowledge documents. Other accounts and hidden files are excluded. Turn it off to use only selected documents below.</span>
       {!!documents.length&&<details><summary>Shared documents ({policy.documents.length})</summary>
         {documents.map(doc=><label key={doc.path} style={{display:'block',marginTop:8}}><input type="checkbox" disabled={busy} checked={policy.documents.includes(doc.path)}
           onChange={e=>setPolicy({...policy,documents:e.target.checked?[...policy.documents,doc.path]:policy.documents.filter(p=>p!==doc.path)})}/> {doc.title}</label>)}
       </details>}
+      <span className={styles.helper}>Agent may choose web for self-contained public questions. Meeting and follow-up context stays with approved local sources.</span>
       {!documents.length&&<p className={styles.helper}>Shared documents · None linked</p>}
       <details><summary>Other meeting transcripts ({policy.shared_meeting_ids?.length||0}/4)</summary>
         <p style={{fontSize:12,color:'var(--t3)'}}>Selected transcripts can be read aloud to everyone in this room. Documents and tasks from those meetings are excluded.</p>
@@ -259,7 +325,7 @@ function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:
               :(policy.shared_meeting_ids||[]).filter(id=>id!==item.id)})}/> {item.title}</label>;
         })}
       </details>
-      <span style={{fontSize:12,color:'var(--t3)',lineHeight:1.5}}>General: “ASR là gì?” or “Kiến thức chung: …”. Web: “Tìm trên web về …”. Only the spoken search query goes to web search. Requires a compatible OpenAI Responses model; provider charges may apply.</span>
+      <span style={{fontSize:12,color:'var(--t3)',lineHeight:1.5}}>General: “ASR là gì?” or “Kiến thức chung: …”. Web: “Tìm trên web về …”. Only the spoken search query leaves the room; verified public search must be configured.</span>
       {reason&&<span role="status" style={{fontSize:12,color:'var(--t3)'}}>Last answer: {reason.replaceAll('_',' ')}</span>}
       <div className={styles.meetingActions}><button type="button" disabled={busy||JSON.stringify(policy)===JSON.stringify(savedPolicy)} style={button} onClick={save}>{busy?'Applying…':'Apply to meeting'}</button>
         <span className={styles.helper}>{JSON.stringify(policy)===JSON.stringify(savedPolicy)?'No meeting changes':'Unsaved meeting changes'}</span></div>

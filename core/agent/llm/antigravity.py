@@ -192,7 +192,7 @@ def _mounts(work: Path) -> list[dict]:
 
 def _permission_settings(mounts: list[dict], allowed_tools: set[str],
                          mcp_rules: list[str]) -> dict:
-    readable = list(dict.fromkeys(item["path"] for item in mounts))
+    readable = list(dict.fromkeys(item["path"] for item in mounts)) if 'Read' in allowed_tools else []
     writable = (
         list(dict.fromkeys(item["path"] for item in mounts if item["write"]))
         if {"Write", "Edit"}.intersection(allowed_tools) else []
@@ -206,6 +206,8 @@ def _permission_settings(mounts: list[dict], allowed_tools: set[str],
         permissions["deny"].append("write_file(*)")
     if "Bash" not in allowed_tools:
         permissions["deny"].append("command(*)")
+    if not allowed_tools:
+        permissions["deny"].append("read_file(*)")
     if "WebSearch" not in allowed_tools and "WebFetch" not in allowed_tools:
         permissions["deny"].append("read_url(*)")
     return {
@@ -418,8 +420,10 @@ class AntigravityHarness:
                  mcp_config: Optional[str] = None, gated_mcp_servers: Iterable[str] = (),
                  mcp_servers: Optional[dict] = None, mcp_env: Optional[dict[str, str]] = None,
                  mcp_tools: Optional[dict[str, list[str]]] = None,
+                 output_schema: Optional[dict] = None,
                  approval_handler: Optional[Callable[[dict], Optional[bool]]] = None) -> Iterator[dict]:
-        del mcp_config, mcp_env, approval_handler
+        # No native output-schema flag is established for this runner; voice validates its JSON.
+        del mcp_config, mcp_env, approval_handler, output_schema
         preflight = self.preflight()
         if preflight:
             yield {"type": "done", "ok": False, "reply": preflight}

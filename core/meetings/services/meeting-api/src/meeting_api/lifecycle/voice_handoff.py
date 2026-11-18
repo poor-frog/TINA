@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from redis.exceptions import WatchError
 from .voice_replies import VoiceSource
 
-ELIGIBLE={'clarification_exhausted','llm_unavailable','verification_unavailable','draft_unavailable'}
+ELIGIBLE={'clarification_exhausted','llm_unavailable','verification_unavailable','draft_unavailable','generation_format_invalid'}
 
 
 class VoiceHandoffHint(BaseModel):
@@ -46,7 +46,7 @@ class HandoffDecision(BaseModel):
 
 class VoiceHandoff(VoiceHandoffHint):
     meeting_id:int=Field(gt=0)
-    reason:Literal['clarification_exhausted','llm_unavailable','verification_unavailable','draft_unavailable']
+    reason:Literal['clarification_exhausted','llm_unavailable','verification_unavailable','draft_unavailable','generation_format_invalid']
     original_request:str=Field(min_length=1,max_length=2000)
     task:HandoffTask|None
     decision:HandoffDecision|None=None

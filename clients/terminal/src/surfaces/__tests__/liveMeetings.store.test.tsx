@@ -87,6 +87,17 @@ async function startStore() {
 }
 
 describe("liveMeetings store", () => {
+  it("refreshes the owner diagnosis after a failed status frame without needing reconnect", async () => {
+    const {hook}=await startStore();
+    const summary='Google Meet blocked the bot before an admission request could be sent.';
+    fetchMock.mockImplementation(async (input:RequestInfo|URL)=>String(input).includes('/api/meetings')
+      ?jsonResp(meetingsPayload('failed',summary)):jsonResp({}));
+    await act(async()=>{FakeWebSocket.last!.push({...golden,status:'failed'});});
+    await waitFor(()=>expect(hook.result.current[0].join_failure_summary).toBe(summary));
+    const before=fetchMock.mock.calls.length;
+    await act(async()=>{FakeWebSocket.last!.push({...golden,status:'failed'});});
+    expect(fetchMock.mock.calls.length).toBe(before);
+  });
   it("(a) patches the matching row by `native` from a golden frame", async () => {
     const { hook } = await startStore();
     expect(hook.result.current[0].live_status).toBe("idle");

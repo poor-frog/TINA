@@ -1,7 +1,7 @@
 "use client";
 /** Calendar connections — the Settings → Calendar body (#1150 plural API).
  *
- *  An account holds up to ten NAMED ICS feeds, each with its own enabled flag, auto-join policy and
+ *  An account holds up to ten named ICS feeds or selected Google calendars, each with its own enabled flag, auto-join policy and
  *  bot name. This is the durable management surface: list · add · edit · disconnect · sync-one. The
  *  Meetings sidebar keeps its own first-connect card at the point of need (`meetingsOnboarding`).
  *
@@ -20,13 +20,17 @@
  *  name, enabled, a replaced feed). A rename alone changes nothing downstream, so it skips the sync.
  */
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { signIn } from "next-auth/react";
 import { Icon } from "../ui-kit";
 import { presentError } from "./apiClient";
 import { refreshMeetings } from "./liveMeetings";
+import { startGoogleCalendarLink } from "../lib/googleCalendarClient";
 import {
-  MAX_CALENDARS, listCalendars, createCalendar, updateCalendar, deleteCalendar,
-  syncCalendar, getCalendarSyncStatus,
+  MAX_CALENDARS, listCalendarState, createCalendar, createGoogleCalendarConnection,
+  updateCalendar, deleteCalendar, disconnectGoogleCalendarAccount,
+  syncCalendar, getCalendarSyncStatus, notifyCalendarConnectionsChanged,
   type CalendarConnection, type CalendarUpdateBody, type CalendarSyncStamp,
+  type GoogleCalendarAccount,
 } from "./plannedApi";
 
 const field: CSSProperties = { width: "100%", boxSizing: "border-box", fontSize: 12, padding: "6px 9px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--panel2)", color: "var(--t1)" };
@@ -60,12 +64,16 @@ export function syncLine(stamp: CalendarSyncStamp | undefined): { ok: boolean; t
 /** What the feed field says. The stored address is NEVER rendered; the mask (host + suffix) is a
  *  recognition hint the API hands out precisely because it is not the credential. */
 export function feedLine(cal: CalendarConnection): string {
+  if (cal.provider === "google") return `Google Calendar · ${cal.google_account_email || "connected account"}`;
   if (!cal.ics_url_set) return "No feed set";
   return cal.ics_url_masked ? `Feed set · ${cal.ics_url_masked}` : "Feed set";
 }
 
 /** The consequence sentence, said BEFORE the destructive click — not after it. */
-export function disconnectWarning(name: string): string {
+export function disconnectWarning(name: string, provider?: string): string {
+  if (provider === "google") {
+    return `Disconnect “${name}”? Meetings this calendar alone imported are removed from Meetings and will not be joined. Other calendars and manually planned meetings stay.`;
+  }
   return `Disconnect “${name}”? Meetings this calendar alone imported are removed from Meetings and will not be joined. Meetings from another calendar, and ones you planned by hand, stay. Its feed address is deleted.`;
 }
 
@@ -96,15 +104,17 @@ function EditPanel({ cal, busy, onSave, onCancel }: {
         <input value={botName} onChange={(e) => setBotName(e.target.value)} maxLength={100} placeholder="TINA"
           style={field} aria-label={`Bot name for ${cal.name}`} />
       </label>
-      <label style={labelled}>
-        <span style={labelCol}>Replace feed</span>
-        <input value={icsUrl} onChange={(e) => setIcsUrl(e.target.value)} type="password" autoComplete="off"
-          placeholder="paste a new secret ICS address to replace it" style={field}
-          aria-label={`Replace feed address for ${cal.name}`} />
-      </label>
-      <div style={{ ...meta, paddingLeft: 104 }}>
-        The stored address is never shown again. Leave this empty to keep the current feed.
-      </div>
+      {cal.provider !== "google" && <>
+        <label style={labelled}>
+          <span style={labelCol}>Replace feed</span>
+          <input value={icsUrl} onChange={(e) => setIcsUrl(e.target.value)} type="password" autoComplete="off"
+            placeholder="paste a new secret ICS address to replace it" style={field}
+            aria-label={`Replace feed address for ${cal.name}`} />
+        </label>
+        <div style={{ ...meta, paddingLeft: 104 }}>
+          The stored address is never shown again. Leave this empty to keep the current feed.
+        </div>
+      </>}
       <div style={{ display: "flex", gap: 8, paddingLeft: 104 }}>
         <button disabled={busy || !dirty} onClick={() => onSave(body)}
           style={{ ...(dirty ? primaryBtn : btn), opacity: busy || !dirty ? 0.5 : 1 }}>
@@ -150,7 +160,7 @@ function CalendarRow({ cal, stamp, busy, onPatch, onSync, onDisconnect }: {
         <label style={checkRow}>
           <input type="checkbox" checked={cal.enabled} disabled={locked}
             onChange={(e) => onPatch({ enabled: e.target.checked })} />
-          Enabled — keep checking this feed for new meetings
+          Enabled — keep syncing this calendar for new meetings
         </label>
         <label style={checkRow}>
           <input type="checkbox" checked={cal.auto_join} disabled={locked}
@@ -162,7 +172,7 @@ function CalendarRow({ cal, stamp, busy, onPatch, onSync, onDisconnect }: {
 
       {confirming && (
         <div role="alert" style={{ display: "flex", flexDirection: "column", gap: 7, borderTop: "1px dashed var(--line)", paddingTop: 9 }}>
-          <span style={{ fontSize: 11.5, color: "var(--danger)", lineHeight: 1.5 }}>⚠ {disconnectWarning(cal.name)}</span>
+          <span style={{ fontSize: 11.5, color: "var(--danger)", lineHeight: 1.5 }}>⚠ {disconnectWarning(cal.name, cal.provider)}</span>
           <div style={{ display: "flex", gap: 8 }}>
             <button disabled={locked} onClick={onDisconnect}
               style={{ ...btn, background: "var(--danger)", color: "var(--on-accent)", border: "none", opacity: locked ? 0.5 : 1 }}>
@@ -235,16 +245,20 @@ function AddCalendarForm({ busy, onAdd, onCancel }: {
 
 export function CalendarConnectionsPanel() {
   const [cals, setCals] = useState<CalendarConnection[] | null>(null);
+  const [googleAccounts, setGoogleAccounts] = useState<GoogleCalendarAccount[]>([]);
   const [stamps, setStamps] = useState<Record<string, CalendarSyncStamp>>({});
   const [busy, setBusy] = useState<string | null>(null);   // "new" | "<id>:sync|update|delete"
+  const [confirmGoogleAccount, setConfirmGoogleAccount] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const list = await listCalendars();
+      const state = await listCalendarState();
+      const list = state.calendars;
       setCals(list); setErr(null);
+      setGoogleAccounts(state.google_accounts);
       // One bad stamp must not blank the page — each probe is caught on its own.
       const pairs = await Promise.all(list.map(async (c) => {
         try { return [c.id, await getCalendarSyncStatus(c.id)] as const; }
@@ -252,7 +266,7 @@ export function CalendarConnectionsPanel() {
       }));
       setStamps(Object.fromEntries(pairs));
     } catch (e: unknown) {
-      setCals([]); setErr(presentError(e).headline);
+      setCals([]); setGoogleAccounts([]); setErr(presentError(e).headline);
     }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
@@ -263,6 +277,7 @@ export function CalendarConnectionsPanel() {
     setBusy("new"); setErr(null); setNote(null);
     try {
       const created = await createCalendar(body);
+      notifyCalendarConnectionsChanged();
       // The backend does not sync on create — answer the user NOW instead of leaving a silent wait.
       let stamp: CalendarSyncStamp = {};
       try { stamp = await syncCalendar(created.id); }
@@ -278,10 +293,54 @@ export function CalendarConnectionsPanel() {
     finally { setBusy(null); }
   };
 
+  const connectGoogle = async () => {
+    setBusy("google-link"); setErr(null); setNote(null);
+    try {
+      await startGoogleCalendarLink(window.location.href);
+    } catch (e: unknown) { setErr(presentError(e).headline); setBusy(null); }
+  };
+
+  const addGoogleCalendar = async (account: GoogleCalendarAccount, calendar: GoogleCalendarAccount["calendars"][number]) => {
+    setBusy(`google:${account.id}:${calendar.id}`); setErr(null); setNote(null);
+    try {
+      const created = await createGoogleCalendarConnection({
+        name: calendar.summary || calendar.id,
+        google_account_id: account.id,
+        google_calendar_id: calendar.id,
+        auto_join: false,
+      });
+      notifyCalendarConnectionsChanged();
+      let stamp: CalendarSyncStamp = {};
+      try { stamp = await syncCalendar(created.id); }
+      catch (e: unknown) { stamp = { last_error: presentError(e).headline }; }
+      setStamps((s) => ({ ...s, [created.id]: stamp }));
+      setNote(stamp.last_error
+        ? `“${created.name}” connected, but its first sync needs attention.`
+        : `“${created.name}” connected — ${(stamp.counts?.created ?? 0) + (stamp.counts?.updated ?? 0)} upcoming meetings imported. Auto-join is off.`);
+      refreshMeetings();
+      await refresh();
+    } catch (e: unknown) { setErr(presentError(e).headline); }
+    finally { setBusy(null); }
+  };
+
+  const disconnectGoogleAccount = async (account: GoogleCalendarAccount) => {
+    setBusy(`google-account:${account.id}`); setErr(null); setNote(null);
+    try {
+      await disconnectGoogleCalendarAccount(account.id);
+      notifyCalendarConnectionsChanged();
+      setConfirmGoogleAccount(null);
+      setNote(`Google Calendar account ${account.email} disconnected. TINA will remove its sources on the next sync; meetings with another source remain.`);
+      refreshMeetings();
+      await refresh();
+    } catch (e: unknown) { setErr(presentError(e).headline); }
+    finally { setBusy(null); }
+  };
+
   const patch = async (cal: CalendarConnection, body: CalendarUpdateBody) => {
     setBusy(`${cal.id}:update`); setErr(null); setNote(null);
     try {
       await updateCalendar(cal.id, body);
+      notifyCalendarConnectionsChanged();
       if (patchNeedsSync(body)) {
         // PATCH does not reconcile existing planned meetings; the follow-up sync does.
         try { setStamps((s) => ({ ...s, [cal.id]: {} })); const st = await syncCalendar(cal.id); setStamps((s) => ({ ...s, [cal.id]: st })); }
@@ -304,6 +363,7 @@ export function CalendarConnectionsPanel() {
     setBusy(`${cal.id}:delete`); setErr(null); setNote(null);
     try {
       await deleteCalendar(cal.id);
+      notifyCalendarConnectionsChanged();
       setNote(`“${cal.name}” disconnected.`);
       refreshMeetings();
       await refresh();
@@ -316,12 +376,53 @@ export function CalendarConnectionsPanel() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 640 }}>
       <div style={{ ...meta, maxWidth: 460 }}>
-        Connect a calendar&rsquo;s secret ICS feed and its scheduled meetings appear in Meetings by
-        themselves; with auto-join on, the bot joins them when they start. Each calendar carries its own
-        auto-join policy and bot name.
+        Connect Google Calendar or a secret ICS feed. Scheduled meetings sync into Meetings; auto-join
+        is a separate per-calendar setting.
       </div>
       {err && <div role="alert" style={{ fontSize: 11.5, color: "var(--danger)" }}>⚠ {err}</div>}
       {note && <div role="status" style={{ fontSize: 11.5, color: "var(--green)" }}>✓ {note}</div>}
+
+      <div style={{ ...row, borderStyle: "dashed" }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--t1)" }}>Google Calendar</div>
+        <div style={meta}>TINA asks for read-only Calendar access. Choose which calendars to sync below; imported events do not auto-join until you enable that per calendar.</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button disabled={busy !== null} onClick={() => void connectGoogle()}
+            style={{ ...primaryBtn, opacity: busy !== null ? 0.5 : 1 }}>
+            {busy === "google-link" ? "Opening Google…" : googleAccounts.length ? "Connect another Google account" : "Connect Google Calendar"}
+          </button>
+          {googleAccounts.length > 0 && <span style={meta}>{googleAccounts.length} Google account{googleAccounts.length === 1 ? "" : "s"} connected</span>}
+        </div>
+        {googleAccounts.map((account) => (
+          <div key={account.id} style={{ ...row, background: "var(--panel2)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "var(--t1)" }}>{account.email}</span>
+              <button disabled={busy !== null} onClick={() => setConfirmGoogleAccount(account.id)}
+                style={{ ...btn, color: "var(--danger)" }}>Disconnect account</button>
+            </div>
+            {account.calendars.map((calendar) => {
+              const selected = cals?.find((cal) => cal.provider === "google"
+                && cal.google_account_id === account.id && cal.google_calendar_id === calendar.id);
+              return <div key={calendar.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ flex: 1, fontSize: 11.5, color: "var(--t2)" }}>
+                  {calendar.summary}{calendar.primary ? " · Primary" : ""}
+                </span>
+                {selected
+                  ? <span style={{ ...meta, color: "var(--green)" }}>Added to TINA</span>
+                  : <button disabled={busy !== null || atCap} onClick={() => void addGoogleCalendar(account, calendar)} style={btn}>
+                      {busy === `google:${account.id}:${calendar.id}` ? "Syncing…" : "Add to TINA"}
+                    </button>}
+              </div>;
+            })}
+            {confirmGoogleAccount === account.id && <div role="alert" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ ...meta, color: "var(--danger)", flex: 1 }}>This removes this account’s calendar sources from Meetings; events also present in another calendar or planned manually remain.</span>
+              <button disabled={busy !== null} onClick={() => void disconnectGoogleAccount(account)} style={{ ...btn, color: "var(--danger)" }}>
+                {busy === `google-account:${account.id}` ? "Disconnecting…" : "Confirm disconnect"}
+              </button>
+              <button disabled={busy !== null} onClick={() => setConfirmGoogleAccount(null)} style={btn}>Keep account</button>
+            </div>}
+          </div>
+        ))}
+      </div>
 
       {cals === null ? (
         <div style={meta}>Loading calendars…</div>

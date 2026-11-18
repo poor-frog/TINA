@@ -165,7 +165,7 @@ def test_plural_calendars_are_independent_and_never_echo_secret_urls(client):
     active = next(c for c in internal if c.get("calendar_id") == personal.json()["id"])
     assert active == {
         "user_id": uid, "calendar_id": personal.json()["id"], "calendar_name": "Family",
-        "ics_url": ICS_2, "auto_join": True, "bot_name": "Family Notes",
+        "provider": "ics", "ics_url": ICS_2, "auto_join": True, "bot_name": "Family Notes",
     }
     retired = next(c for c in internal if c.get("calendar_id") == work.json()["id"])
     # The first connection is the legacy claimant even as a tombstone: its sweep

@@ -188,6 +188,37 @@ function acousticFixture(answer?: () => Promise<{text: string; clarification?: b
   return {...f, ready, wake, wakeFor, fail: () => fail(), kws: emit, messages};
 }
 
+for (const model of ['hey_tina','tina_oi']) for (const score of [.399,.4,.45])
+test(`KWS ${model} accepts the runtime 0.4 threshold (${score})`,async()=>{
+  const f=acousticFixture();
+  try {
+    await f.voice.start();f.emit({event:'state',state:'LISTENING'});f.ready();
+    const start=Date.now()+1;await tick(5);f.wake(start,{model,score});
+    assert.equal(f.states.at(-1),score>=.4?'CAPTURING':'LISTENING');
+    assert.deepEqual(f.questions,[]);
+  } finally {await f.voice.stop();}
+});
+
+for (const replay of [false, true]) for (const question of ['', 'ai phụ trách demo?'])
+test(`KWS pre-roll ${replay ? 'replay' : 'live ASR'} dispatches only the request after the call (${question || 'name only'})`, async () => {
+  const f = acousticFixture();
+  try {
+    await f.voice.start(); f.emit({event: 'state', state: 'LISTENING'}); f.ready();
+    const start = Date.now() + 1; await tick(5);
+    const hypothesis = {channel: 2, participant: 'transport-id', speakerKey: 's',
+      startMs: start + 10, endMs: start + 300,
+      text: `Lan đã trình bày kế hoạch. Hey TINA${question ? ', ' + question : '.'}`, final: true};
+    if (replay) f.voice.hypothesis(hypothesis);
+    f.wake(start + 200, {source_start_ms: start});
+    if (!replay) f.voice.hypothesis(hypothesis);
+    f.emit({event: 'activity', channel: 2, speech: false, endMs: start + 300, stamp: start + 300});
+    await tick(450);
+    assert.deepEqual(f.questions, question ? [question] : []);
+    if (!question) assert.deepEqual(f.spoken, [VOICE_NOTICES.wake[0]]);
+    assert.equal(hypothesis.text, `Lan đã trình bày kế hoạch. Hey TINA${question ? ', ' + question : '.'}`);
+  } finally { await f.voice.stop(); }
+});
+
 test('only whole-meeting recap-like requests get the fixed waiting notice', () => {
   for (const question of ['Tổng hợp toàn bộ quyết định trong cuộc họp.', 'Tóm tắt cuộc họp', 'Summarize the entire meeting'])
     assert.equal(summaryWaitNotice(question), SUMMARY_NOTICE);
@@ -380,7 +411,7 @@ test('ASR arriving before KWS is replayed once, without any ASR name match', asy
 });
 
 test('a standalone KWS call acknowledges and accepts only its caller continuation', async () => {
-  for (const name of ['tin anh ơi', 'TINA ơi ạ', 'ti nà ơi', 'hey tiên na']) {
+  for (const name of ['hey TINA', 'Hey, TINA!', 'tin anh ơi', 'TINA ơi ạ', 'ti nà ơi', 'hey tiên na']) {
     const f = acousticFixture();
     try {
       await f.voice.start(); f.emit({event: 'state', state: 'LISTENING'}); f.ready();
@@ -398,6 +429,39 @@ test('a standalone KWS call acknowledges and accepts only its caller continuatio
       assert.equal(f.spoken.filter(s => s === 'Dạ, em nghe.').length, 1);
     } finally {await f.voice.stop();}
   }
+});
+
+test('primary VAD preserves a timely caller reply past the five-second ASR deadline', async () => {
+  const f=acousticFixture();const clock=Date.now;let now=clock();
+  try{
+    await f.voice.start();f.emit({event:'state',state:'LISTENING'});f.ready();
+    const after=clock();now=after+4500;Date.now=()=>now;
+    (f.voice as any).trigger=new VoiceTrigger(()=>now,[],true);
+    (f.voice as any).trigger.continueAfter(after,{channel:2,participant:'transport-id'},after+5000);
+    f.voice.feed(2,new Float32Array(1024),now,'transport-id',0);
+    f.emit({event:'activity',channel:2,speech:true,stamp:now});
+    now=after+7000;(f.voice as any).finishQuestion();
+    f.voice.hypothesis({channel:2,participant:'transport-id',speakerKey:'s',startMs:after+4500,
+      endMs:after+6500,text:'Backend.',final:true});
+    f.emit({event:'activity',channel:2,speech:false,stamp:after+6500,endMs:after+6500});
+    now+=350;(f.voice as any).finishQuestion();await tick(20);
+    assert.deepEqual(f.questions,['Backend.']);assert.match(f.speakerKeys[0]!,/^[0-9a-f]{64}$/);
+    assert(!f.diagnostics.some(d=>d.code==='no_input'));
+  }finally{Date.now=clock;await f.voice.stop();}
+});
+
+test('hey and TINA split across ASR windows acknowledge without dispatching or waiting notices',async()=>{
+  const f=acousticFixture();
+  try{
+    await f.voice.start();f.emit({event:'state',state:'LISTENING'});f.ready();
+    const start=Date.now()+1;await tick(5);f.wake(start);
+    for(const [i,text] of ['hey','TINA'].entries())f.voice.hypothesis({channel:2,participant:'transport-id',
+      speakerKey:'s',startMs:start+i*50,endMs:start+(i+1)*50,text,final:true});
+    f.emit({event:'activity',channel:2,speech:false,endMs:start+100,stamp:start+100});
+    await tick(1400);
+    assert.deepEqual(f.questions,[]);assert.deepEqual(f.spoken,['Dạ, em nghe.']);
+    assert(!f.states.includes('THINKING'));assert.deepEqual(f.reports,[]);
+  }finally{await f.voice.stop();}
 });
 
 test('failed KWS refuses ASR-only activation and stale worker events cannot wake', async () => {
@@ -1050,6 +1114,22 @@ test('missing evidence and upstream failure stay visible after the turn settles'
   try{await g.voice.start();await g.capture();assert.equal(g.diagnostics.at(-1)?.code,'answer_failed');
     assert(!g.logs.join(' ').includes('PRIVATE'));}
   finally{await g.voice.stop();}
+});
+
+test('spoken service failures keep error diagnostics and timing distinct from missing evidence',async()=>{
+  for(const reason of ['llm_unavailable','verification_unavailable','draft_unavailable','web_unavailable','insufficient_evidence']){
+    const f=fixture(async()=>({text:'Em chưa trả lời được.',reason,evidence_available:false}));
+    const expected=reason==='insufficient_evidence'?'no_evidence':'answer_failed';
+    try{
+      await f.voice.start();await f.capture();
+      assert(f.diagnostics.some(d=>d.code===expected));
+      if(expected==='answer_failed')assert(!f.diagnostics.some(d=>d.code==='no_evidence'));
+      const timing=f.logs.map(line=>{try{return JSON.parse(line);}catch{return {};}})
+        .find(row=>row.type==='voice_timing'&&row.stage==='turn_finished');
+      assert.equal(timing?.outcome,expected);
+      assert.deepEqual(f.reports,['started','completed']);
+    }finally{await f.voice.stop();}
+  }
 });
 
 test('not-ready services emit a reason instead of presenting a listening worker', async () => {

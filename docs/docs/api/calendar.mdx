@@ -1,9 +1,9 @@
 ---
 title: "Calendar API"
-description: "Connect and manage multiple ICS calendars, run synchronization, and inspect the calendar metadata persisted on planned meetings."
+description: "Connect and manage ICS or Google calendars, run synchronization, and inspect calendar metadata persisted on planned meetings."
 ---
 
-The Calendar API manages named ICS connections and imports upcoming events into the ordinary
+The Calendar API manages named ICS and Google Calendar connections and imports upcoming events into the ordinary
 [`meetings`](/api/meetings) lifecycle. Each connection has its own auto-join policy and bot name.
 
 All requests use the same base URL and API-key authentication as the rest of TINA
@@ -39,6 +39,7 @@ full. See [Calendar sync](/how-to/calendar-sync) for Google Calendar and Outlook
 | `auto_join` | boolean | Whether meetings imported from this source arm unattended join. |
 | `bot_name` | string | Bot display name for this calendar, 1–100 characters. |
 | `enabled` | boolean | Whether background discovery includes this connection. |
+| `provider` | string | Present on Google connections and set to `google`; those connections also return their linked account email. |
 
 ## List calendars
 
@@ -58,11 +59,21 @@ curl "$API_BASE/user/calendars" -H "X-API-Key: $API_KEY"
       "bot_name": "Work Notes",
       "enabled": true
     }
+  ],
+  "google_accounts": [
+    {
+      "id": "account-uuid",
+      "email": "person@example.com",
+      "calendars": [
+        { "id": "primary", "summary": "My Calendar", "primary": true, "connected": false }
+      ]
+    }
   ]
 }
 ```
 
-Deleted connections are omitted. An account can have up to ten active connections.
+Deleted connections are omitted. `google_accounts` contains safe account/calendar metadata only; OAuth
+tokens are never returned. An account can have up to ten active connections.
 
 ## Connect a calendar
 
@@ -95,9 +106,29 @@ Returns the masked Calendar connection with **201 Created**.
 The eleventh active connection returns **409 Conflict**. Invalid names, bot names, or feed URLs
 return **422 Unprocessable Entity**.
 
-Creating the connection does not itself wait for provider publication. Call the connection's
-[Sync now](#sync-now) endpoint immediately when you want a fresh result. The self-hosted Terminal
-calls it after Connect; clients driving this API directly must make the call.
+### Add a Google calendar
+
+Link a Google account in **Terminal → Settings → Calendar → Connect Google Calendar** first. The
+signed OAuth flow asks for `calendar.calendarlist.readonly` and `calendar.events.readonly`; TINA does
+not request write access. After consent, choose calendars in the Terminal. Clients that have already
+linked an account can add one of its listed calendars with:
+
+```json
+{
+  "name": "Work",
+  "google_account_id": "account-uuid",
+  "google_calendar_id": "work@example.com",
+  "auto_join": false
+}
+```
+
+The selected account and calendar IDs must appear in the caller's `GET /user/calendars` response.
+New Google calendar connections default to `auto_join: false`. The OAuth refresh token stays
+server-side and is never accepted from a browser-facing Calendar UI request.
+
+Creating a connection does not sync it immediately. Call the connection's [Sync now](#sync-now)
+endpoint when you want a fresh result. The self-hosted Terminal calls it after Connect; clients
+driving this API directly must make the call.
 
 ## Update one calendar
 
@@ -112,7 +143,7 @@ Supply any subset of:
 | Field | Effect |
 |---|---|
 | `name` | Rename only this connection. |
-| `ics_url` | Replace its secret feed address. |
+| `ics_url` | Replace its secret feed address on an ICS connection. Google connections cannot be changed to ICS. |
 | `auto_join` | Change this source's policy. The next sync recomputes planned-meeting auto-join. |
 | `bot_name` | Change this source's bot display name. The next sync copies it into planned-meeting provenance. |
 | `enabled` | Include/exclude the feed from background discovery without deleting its stored configuration. |
@@ -136,6 +167,9 @@ remaining source is removed; an adopted manual plan remains. Live and terminal m
 rewritten by calendar cleanup.
 
 An unknown or already deleted ID returns **404 Not Found**.
+To disconnect a linked Google account and remove all of its selected calendar sources, use
+`DELETE /user/calendars/google-account-{account_id}`. Meetings that still have another calendar
+source remain.
 
 ## Synchronization
 
@@ -194,8 +228,8 @@ plural API above.
 
 | Endpoint | Behavior |
 |---|---|
-| `GET /user/calendar` | Returns the first active connection's masked URL and auto-join state; `bot_name` is the legacy user-wide fallback. |
-| `PUT /user/calendar` | Creates or updates the first active connection. `ics_url: null` disconnects it. `bot_name` also updates the legacy user-wide fallback. |
+| `GET /user/calendar` | Returns the first active ICS connection's masked URL and auto-join state; `bot_name` is the legacy user-wide fallback. |
+| `PUT /user/calendar` | Creates or updates the first active ICS connection. `ics_url: null` disconnects it. `bot_name` also updates the legacy user-wide fallback. |
 | `GET /user/calendar/sync` | Returns the aggregate last-sync stamp across active connections, or `{}` before a sync. |
 | `POST /user/calendar/sync` | Synchronizes all active connections and returns aggregate counts plus a `calendars` array of per-connection stamps. |
 
@@ -246,3 +280,8 @@ See [What TINA stores](/how-to/calendar-sync#what-tina-stores) for the complete 
 | `409` | create | Ten active connections already exist. |
 | `422` | create/update/singular put | Invalid name, bot name, or ICS URL. |
 | `503` | sync endpoints | Calendar sync is not wired in this deployment. |
+
+Google Calendar all-day events retain their original dates but import without a scheduled join
+time and with auto-join off. They are never interpreted as midnight UTC meetings. Removing a Google
+conference link disarms its calendar-managed plan unless another calendar still supplies a valid
+link. Existing manually planned meetings and already running bots keep their own lifecycle.

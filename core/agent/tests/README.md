@@ -1,5 +1,11 @@
 # tests — agent-api (L1 + L2 of the validation pyramid)
 
+`test_agent_reach.py` covers parallel original-page reads, retained Markdown/URL provenance,
+snippet fallback, two public-search rounds/three-page/six-excerpt limits, query-only refinement,
+shared deadlines and Stop fences. Worker integration checks both sandbox and direct generation
+with API-only refinement and independent claim verification. Meeting voice tests check deadline
+propagation without exporting private sources and rejection after a room revision changes.
+
 Reranker regressions distinguish valid empty/no-match selections from malformed/provider/budget
 fallback, preserve recent/heard pins without automatic unrelated meeting seeds, restrict empty
 generation/repair source IDs and keep full contradiction review. Lookup budgets and service-error
@@ -99,6 +105,10 @@ and bounded clarifications; `test_meeting_voice.py` checks approved-source isola
 voice CompletionPort prompt. These use synthetic sources and no provider credentials.
 Conversation tests retain authorized clarification context for short answers, expire pending
 clarification hints, and reject history whose source fingerprints changed.
+Social-routing regressions cover natural thanks, compound questions, malformed classifier output,
+provider failure, the selected worker's four-second structured completion and private-source isolation.
+Dialogue-note regressions cover chained follow-ups, corrections, expiry/revocation and propagation
+to both LiveKit tool planning and final answers; these notes are intent only, not evidence.
 Missing-evidence regressions keep verifier diagnostics and empty evidence while avoiding an
 unnecessary clarification question for an already clear request. Delivery guidance stays inside
 the same JSON and source-verification path; synthetic routing is not a naturalness listening score.
@@ -121,6 +131,10 @@ restored source text again without returning the previous revision's translation
 `test_meeting_voice.py` covers LiveKit tool planning, authorized retrieval, explicit public-query isolation, heard-history revocation and final generation without a nested tool loop.
 
 Voice regression cases cover conservative assistant intents, partial replies, one-repair limits, forged citations, verifier outages and bounded completion timeouts.
+
+Direct-LLM voice regression tests require the selected CompletionPort even when the chat runner is
+Codex; those jobs must not start a CLI. Sandbox voice has separate isolation and verification tests
+in `test_voice_sandbox.py`.
 
 test_llm_openai_responses_voice.py covers valid JSON generation/verdict deltas followed by early EOF, [DONE], incomplete/failed events, or invalid terminal status, plus successful completion with/without deltas and existing web citation validation. All provider calls are synthetic.
 
@@ -147,3 +161,32 @@ run it only against a running Agent Reach service. See deploy/agent-reach/README
 Draft recovery regression tests cover eight-input and character-capacity confirmation/cancel/correction with retained literal provenance, and a successfully written task whose response is lost: an uncertain retry must leave exactly one draft.
 
 Voice draft pagination regression uses21 drafts:20 newer discarded records cannot prevent the owner listing/reviewing the older pending record. Direct lookup retains existing authorization and stale-policy/readback checks.
+
+
+`test_voice_sandbox.py` checks empty native/MCP grants, no workspace mounts or CLI resume,
+subprocess group cleanup on timeout/Stop, credential scrubbing and independent verification.
+The API regression freezes only the current authenticated voice lease, rejecting cancelled turns.
+
+Whole-Wiki voice cases cover unlinked documents beyond the eight-document selection budget,
+private owner isolation, hidden/symlink exclusion, unchanged generic Knowledge scope, oversized
+source failures and fingerprint invalidation after edits, deletion or broad-grant revocation.
+
+Sandbox structured-output regressions exercise native Codex/Claude schema forwarding, final JSON
+extraction without commentary, unchanged ordinary chat calls, one format repair, malformed plans,
+source verification and Stop during repair. Generation-format failures survive reply storage and
+owner handoff and count as service failures rather than evidence refusals in retrieval evaluation.
+The explicit `codex_web_smoke.py` additionally proves outputSchema propagation through the real
+container CLI to a local Responses fixture, with no model credentials or live provider inference.
+
+Voice cancellation regressions cover revoking a Direct LLM lease, stopping only its isolated worker,
+250 ms cancelable output reads with unchanged chat polling, and interrupted heard-prefix history
+whose source guards invalidate edited/deleted evidence without granting citations for unheard text.
+
+Public-web diagnostic cases distinguish retrieval empty/unavailable, generation empty/malformed/
+unavailable, numeric rejection, semantic rejection and verification outages. They prove content-free
+UUID-correlated logs, typed HTTP retrieval errors without retry, and preservation through LiveKit
+lookup/final answers and durable Meeting API replies. Verification thresholds remain unchanged.
+
+Money verification tests cover Vietnamese grouped currency amounts, explicit mixed separators, exact scale/sign preservation and distinct per-lượng/per-chỉ units. Single ambiguous separators without Vietnamese locale evidence, dates and technical version strings remain conservative. Public-web tests cover one repair for direct/sandbox generation, API-only repair, Stop/deadline fences and separately reviewed partial answers.
+
+`test_voice_prices.py` checks exact source fragments, wrong product/amount/currency/unit/scale, swapped buy/sell rejection by the independent reviewer, preserved dates/clocks and unknown/old/future/invalid timestamps, separate suppliers, one repair and Stop. Worker tests exercise direct and sandbox extraction with API-only verification; Meeting Knowledge tests drive public clarification, fixed product follow-up and finalization without exporting private sources. Live supplier accuracy is not proved by synthetic fixtures.

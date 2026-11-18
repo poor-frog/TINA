@@ -1213,6 +1213,26 @@ def create_app(
                 try: trace_id = str(uuid.UUID(request.headers.get('x-tina-voice-request-id', '')))
                 except ValueError: pass
             if trace_id: payload['voice_trace_id'] = trace_id
+            source = json.loads(text)
+            sandbox_voice = source.get('use_sandbox_agent') is True
+            live_voice_id = request.headers.get('x-tina-voice-request-id')
+            if str(source.get('mode','')).startswith('voice') and live_voice_id and request.path_params.get('meeting_id') is not None:
+                try: live_voice_id = str(uuid.UUID(live_voice_id))
+                except ValueError: raise HTTPException(409,'Invalid voice request id') from None
+                raw_mid = str(request.path_params.get('meeting_id', ''))
+                if not redis_url or not raw_mid.isdecimal():
+                    raise HTTPException(409,'Current voice turn required')
+                else:
+                    mid = int(raw_mid)
+                    import redis as _redis
+                    connection = _redis.from_url(redis_url, decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
+                    try: held = connection.get(f'meeting:voice:{mid}:lock')
+                    finally: connection.close()
+                    if not isinstance(held,str) or not held.endswith(':'+live_voice_id):
+                        raise HTTPException(409, 'Voice turn was cancelled')
+                    payload['voice_turn'] = {'meeting_id': mid, 'holder': held}
+            elif sandbox_voice:
+                raise HTTPException(409, 'Current voice turn required for sandbox')
         if target_language is not None:
             payload["target_language"] = target_language
         inline = prefix + json.dumps(payload, ensure_ascii=False)
@@ -1232,8 +1252,35 @@ def create_app(
         output_parts: list[str] = []
         translation_complete = False
         deadline = time.monotonic() + 60.0
+        voice_cancelled = False
+        voice_redis = None
+        should_continue = None
+        if payload.get('voice_turn'):
+            import redis as _redis
+            voice_redis = _redis.from_url(redis_url,decode_responses=True,socket_timeout=1,socket_connect_timeout=1)
+            def voice_still_current():
+                nonlocal voice_cancelled
+                if voice_cancelled: return False
+                turn=payload['voice_turn']
+                try:
+                    held=voice_redis.get(f"meeting:voice:{turn['meeting_id']}:lock")
+                    current=held==turn['holder']
+                except Exception as exc:
+                    current=False
+                    logger.warning('voice worker lease probe failed error=%s',type(exc).__name__)
+                if current:return True
+                voice_cancelled=True
+                try: dispatcher.stop_workload(unit_id)
+                except Exception as exc: logger.warning('cancelled voice worker stop failed error=%s',type(exc).__name__)
+                return False
+            should_continue=voice_still_current
         try:
-            for item in stream_reader.read(unit_id, resume="0-0"):
+            reader=(stream_reader.read_cancelable(unit_id,resume='0-0',should_continue=should_continue)
+                    if should_continue and callable(getattr(stream_reader,'read_cancelable',None))
+                    else stream_reader.read(unit_id,resume='0-0'))
+            for item in reader:
+                if should_continue and not should_continue():
+                    raise HTTPException(409,detail='Voice turn was cancelled')
                 if item is None:
                     if time.monotonic() >= deadline:
                         raise HTTPException(status_code=504, detail=f"{label} timed out")
@@ -1256,12 +1303,15 @@ def create_app(
                             status = TRANSLATION_FAILURE_STATUS.get(code, 503) if isinstance(code, str) else 503
                             raise HTTPException(status_code=status, detail='Live translation could not complete')
                     break
+            if should_continue and not should_continue():
+                raise HTTPException(409,detail='Voice turn was cancelled')
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001 — stream/provider details stay server-side
             logger.warning("transcript completion stream failed task=%s error=%s", task, type(exc).__name__)
             raise HTTPException(status_code=502, detail=f"{label} is unavailable") from exc
         finally:
+            if voice_redis is not None: voice_redis.close()
             if redis_url:
                 try:
                     import redis as _redis

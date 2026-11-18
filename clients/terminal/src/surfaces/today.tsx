@@ -56,6 +56,21 @@ export interface AgendaDay { key: string; date: Date; groups: MeetingGroup[] }
 const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
 
+function greetingForHour(hour: number): string {
+  if (hour >= 5 && hour < 12) return "Good Morning";
+  if (hour >= 12 && hour < 18) return "Good Afternoon";
+  return "Good Evening";
+}
+
+function agendaRangeLabel(now: Date, weekOffset: number): string {
+  const start = startOfDay(now);
+  start.setDate(start.getDate() + weekOffset * 7);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const format = (date: Date) => date.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" });
+  return `(${format(start)}–${format(end)})`;
+}
+
 /** The agenda window: day-grouped upcoming (+live) meetings for the week starting at
  *  today + 7·weekOffset days. Unscheduled plans attach to TODAY (offset 0 only) — they need
  *  attention but have no place on a time axis. Days without events are omitted, except today. */
@@ -338,21 +353,37 @@ function TodayView() {
   const reviewedIds = useReviewed();
   const ownTree = useOwnWorkspaceTree();
   const [weekOffset, setWeekOffset] = useState(0);
+  const [displayName, setDisplayName] = useState("");
   const now = new Date();
   const groups = groupMeetings(meetings);
   const days = agendaWindow(groups, now, weekOffset);
   const past = pastFeed(groups);
   const todayKey = dayKey(now);
   const empty = meetings.length === 0;
+  useEffect(() => {
+    let active = true;
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() as Promise<{ user?: { name?: string | null; email?: string | null } }> : null)
+      .then((data) => {
+        const user = data?.user;
+        const name = user?.name?.trim() || user?.email?.split("@")[0] || "";
+        if (active) setDisplayName(name);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
   return (
     <div className={styles.screen}>
       <div className={styles.content}>
+        <p className={styles.greeting}>
+          {greetingForHour(now.getHours())}{displayName ? <><span>, </span><strong>{displayName}</strong></> : null}
+        </p>
         <header className={styles.header}>
-          <h1 className={styles.title}>Coming up</h1>
+          <div className={styles.headingGroup}>
+            <h1 className={styles.title}>Coming up</h1>
+            <span className={styles.weekLabel}>{agendaRangeLabel(now, weekOffset)}</span>
+          </div>
           <div className={styles.weekNavigation}>
-            {weekOffset > 0 && <span className={styles.weekLabel}>
-              {days[0]?.date.toLocaleDateString(undefined, { month: "short", day: "numeric" }) ?? ""}
-            </span>}
             <button aria-label="previous week" className={styles.pager} disabled={weekOffset === 0}
               onClick={() => setWeekOffset((v) => Math.max(0, v - 1))}><Icon name="chevL" size={18} /></button>
             <button aria-label="next week" className={styles.pager}

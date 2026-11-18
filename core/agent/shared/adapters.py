@@ -399,6 +399,13 @@ class RedisStreamReader(StreamReader):
         self._giveup = idle_giveup_ms
 
     def read(self, unit_id: str, *, resume: str | None = None):
+        yield from self._read(unit_id,resume=resume)
+
+    def read_cancelable(self, unit_id: str, *, resume: str | None = None, should_continue):
+        """Read with a short poll interval so an owner-cancelled voice lease can stop its worker."""
+        yield from self._read(unit_id,resume=resume,should_continue=should_continue)
+
+    def _read(self, unit_id: str, *, resume: str | None = None, should_continue=None):
         import redis
 
         client = redis.from_url(self._url, decode_responses=True)
@@ -412,11 +419,13 @@ class RedisStreamReader(StreamReader):
         # output arrived' failure was the reader giving up / the stream ending before any resume).
         last_id = resume or "$"
         waited = 0
+        block_ms = min(self._block,250) if should_continue else self._block
         try:
             while True:
-                resp = client.xread({topic: last_id}, count=50, block=self._block)
+                if should_continue and not should_continue(): return
+                resp = client.xread({topic: last_id}, count=50, block=block_ms)
                 if not resp:
-                    waited += self._block
+                    waited += block_ms
                     if waited >= self._giveup:
                         return
                     yield None  # idle tick → SSE ``: keepalive`` comment (bytes keep flowing mid-think)

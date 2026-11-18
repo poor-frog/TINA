@@ -210,15 +210,17 @@ tunable on a self-host — see [Configuration](/configuration).
 
 ## Calendar sync
 
-Connect up to ten named ICS feeds through the [Calendar API](/api/calendar). Each connection owns
-its auto-join policy and bot name. Sync imports every upcoming event as a planned meeting: events
-with Meet/Zoom/Teams links are armed for auto-join, while link-less events remain visible with
-`platform: "unknown"` until a link appears.
+Connect up to ten named ICS feeds or selected Google calendars through the
+[Calendar API](/api/calendar). Each connection owns its auto-join policy and bot name. Sync imports
+every upcoming event as a planned meeting: events with Meet/Zoom/Teams links can be armed for
+auto-join, while link-less events remain visible with `platform: "unknown"` until a link appears.
+Google calendar connections start with auto-join off; ICS keeps its existing default.
 
-Imported rows retain normalized scheduling/participant fields and the complete per-source ICS
-snapshot under `data.calendar_sources[].event`. Moves, cancellations, attendee changes, and custom
-provider metadata follow the feed only while the meeting remains planned; calendar sync never
-rewrites a meeting after the bot lifecycle claims it.
+Imported rows retain normalized scheduling/participant fields under `data.calendar_sources[]`.
+ICS sources carry their event snapshot; Google sources retain minimal event IDs/timestamps rather
+than full descriptions. Moves, cancellations, attendee changes, and source metadata follow the
+calendar only while the meeting remains planned; calendar sync never rewrites a meeting after the
+bot lifecycle claims it.
 
 <Note>
 The endpoints below are the **singular** compatibility routes, which address one feed. An account can

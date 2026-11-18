@@ -12,6 +12,8 @@ control-plane background loops alongside the HTTP app via the FastAPI lifespan:
     write) and drains the copilot's ``proc:meeting:{id}`` notes into ``meeting.data`` JSONB.
   * **webhook retry-drain** — one ``drain_retry_queue`` sweep per interval over the redis retry
     queue (failed ``meeting.status_change`` deliveries are retried with backoff).
+  * **bot join-retry** — the auto-join sweep also dispatches durable owner-requested retries for
+    transient pre-admission failures; retry request fields stay private in meeting JSONB.
 
 Each loop is a single-tick function the eval drives explicitly; here the entrypoint wraps it in the
 ``while True: tick; sleep`` poll the deployment uses. uvicorn-target: ``uvicorn meeting_api.__main__:app``.
@@ -19,8 +21,8 @@ Each loop is a single-tick function the eval drives explicitly; here the entrypo
 #637 — at ``meetingApi.replicaCount>1`` every replica starts these same loops, so each live tick body
 is wrapped in a per-loop Postgres advisory lock (``sweeps.single_flight``): the real work runs once per
 interval, not once per replica. ``segment-consumer`` is intentionally left unguarded (Redis competing
-consumer). The former ``scheduler-tick`` loop was dead code (``app.state.scheduler`` was never wired —
-the ``Scheduler`` in ``scheduling/`` is an eval-only engine) and has been removed.
+consumer). The ``Scheduler`` in ``scheduling/`` remains an eval-only engine; production join-retries
+are durable row state processed by the auto-join sweep.
 """
 from __future__ import annotations
 
@@ -575,15 +577,31 @@ def _attach_background_loops(
 
         fetch_bot_context = _bot_context_fetcher(admin_api_url, internal_secret)
 
-        async def publish_status(*, user_id, meeting_id, native_id, status, when):
+        async def publish_status(*, user_id, meeting_id, native_id, status, when, auto_retry=None):
             frame = {"type": "meeting.status", "meeting_id": meeting_id,
                      "native": native_id, "status": status, "when": when}
+            if isinstance(auto_retry, dict):
+                frame["auto_retry"] = auto_retry
             try:
                 await redis_client.publish(f"u:{user_id}:meetings", _json.dumps(frame))
             except Exception:
                 pass  # best-effort, like the collector's publish
 
         async def _tick():
+            from .bot_spawn.join_retry import join_retry_tick
+
+            try:
+                await join_retry_tick(
+                    meeting_repo, runtime,
+                    authority=service_authority,
+                    publish_status=publish_status,
+                    token_secret=os.getenv("ADMIN_TOKEN") or None,
+                    redis_url=os.getenv("REDIS_URL"),
+                    meeting_api_url=os.getenv("MEETING_API_URL"),
+                    internal_secret=os.getenv("INTERNAL_API_SECRET"),
+                )
+            except Exception:
+                log.exception("automatic join-retry sweep failed")
             await auto_join_tick(
                 meeting_repo, runtime,
                 authority=service_authority,
@@ -607,8 +625,8 @@ def _attach_background_loops(
                 log.exception("auto-join tick failed")
             await asyncio.sleep(auto_join_interval)
 
-    # Calendar sync: each sweep discovers every user with a connected ICS feed (admin-api internal
-    # edge), fetches it over the SSRF-pinned transport, and upserts planned meetings (one row per
+    # Calendar sync: each sweep discovers ICS and selected Google calendar sources (admin-api internal
+    # edge), fetches them over the guarded transport or fixed Google API, and upserts planned meetings (one row per
     # calendar UID — next occurrence only). Per-user try/except: one bad feed never stalls the
     # sweep. Unset ADMIN_API_URL/INTERNAL_API_SECRET → no-op (capability degrade, not boot-fail).
     calendar_interval = float(os.getenv("CALENDAR_SYNC_INTERVAL_S", "300"))

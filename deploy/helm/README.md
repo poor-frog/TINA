@@ -57,14 +57,16 @@ Docker to build the images. It proves the control plane stands up and `/health` 
 |---|---|---|
 | `global.imageTag` | `""` | Set to a pinned `YYMMDD-HHMM` tag — overrides every service tag (build-once). |
 | `runtime.backend` | `k8s` | `k8s` spawns Pods via RBAC (real cloud); `docker` mounts the host socket (single-node only); `process` runs child processes. |
-| `secrets.*` | placeholders | `adminApiToken`, `internalApiSecret`, `transcriptionServiceToken`, `dispatchSigningKey`, `nextauthSecret`, `anthropic*`. Or set `secrets.existingSecretName` (must carry `ADMIN_API_TOKEN`, `INTERNAL_API_SECRET`, `TRANSCRIPTION_SERVICE_TOKEN`, `TINA_DISPATCH_SIGNING_KEY`, `NEXTAUTH_SECRET`). |
+| `secrets.*` | placeholders | `adminApiToken`, `internalApiSecret`, `transcriptionServiceToken`, `dispatchSigningKey`, `nextauthSecret`, `googleClientId`, `googleClientSecret`, `anthropic*`. Or set `secrets.existingSecretName` (must carry the corresponding keys). |
 | `storage.s3.endpoint` / `bucket` / `existingSecret` | required | Your S3 bucket for recordings and a Secret with its key pair (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`). Optional: `region`, `forcePathStyle`, `caBundle`. No object store runs in the chart; `minio.enabled: true` is refused. |
 | `postgres.enabled` / `redis.enabled` | `true` | Flip to `false` to use managed backing; then set `database.*` / `redisConfig.*` and a pre-existing `postgres.credentialsSecretName`. |
 | `pgbouncer.enabled` | `false` | Transaction pooler for managed Postgres with a fixed slot budget. |
-| `terminal.enabled` | `true` | The web UI. Set `terminal.publicUrl` (NEXTAUTH_URL/TERMINAL_URL) when fronted by ingress; add OAuth via `terminal.extraEnv`. |
+| `terminal.enabled` | `true` | The web UI. Set `terminal.publicUrl` (NEXTAUTH_URL/TERMINAL_URL) when fronted by ingress; set Google OAuth credentials under `secrets.*` to enable sign-in and Calendar linking. |
 | `ingress.enabled` | `false` | Fronts the **terminal** by default; set `host`/`className`/`tls`. Add a second path to `gateway` to also expose the raw API. |
 
 ## Known boundaries (v0.12)
+
+- Google Calendar linking requests read-only CalendarList and event scopes after TINA sign-in. The OAuth client keys must be set under `secrets.googleClientId` / `secrets.googleClientSecret`; meeting-api uses the same server-side client to refresh grants. `calendar.auto_join` remains an explicit per-calendar setting.
 
 - **Bot spawn** works on k8s (the bot's config arrives as one env var). **Agent-worker** Pods mount
   the workspace store with **per-mount tenant isolation**: one `subPath` + `readOnly` volumeMount per
@@ -93,3 +95,6 @@ GATEWAY_URL=http://<node>:<nodePort> make probe SURFACE=helm   # drive a NodePor
 The full-journey smoke (spawn → schedule → boot → join → transcribe → live-view → stop) plus a
 one-shot `kubectl logs` sweep of every deployment. Mints its API key through the release secret's
 `ADMIN_API_TOKEN` unless `TINA_API_KEY` is given. See `deploy/helm/probe.sh`.
+
+Google Cloud must allow both redirect URIs: `${terminal.publicUrl}/api/auth/callback/google`
+for sign-in and `${terminal.publicUrl}/api/auth/callback/google-calendar` for Calendar linking.

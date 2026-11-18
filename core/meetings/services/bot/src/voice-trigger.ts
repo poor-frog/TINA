@@ -78,12 +78,22 @@ export function turnPauseMs(text: string): number {
   return unfinished ? 2000 : 0;
 }
 interface Candidate { parts: VoiceHypothesis[]; confirmed: boolean; matches: number; seen: number; started: number; direct?: boolean; acoustic?: boolean; }
+const normalizedSpeech = (text: string) => text.normalize('NFKC').trim().replace(/\s+/gu, ' ');
+// KWS receives whole 64 ms capture frames; this is not a speech/word alignment estimate.
+const WAKE_FRAME_MS = 64;
+function timedSegments(value: VoiceHypothesis): VoiceHypothesis['segments'] {
+  const segments=value.segments;
+  return segments && segments.length<=256 && segments.every((s,i)=>typeof s.text==='string'
+    && Number.isFinite(s.startMs) && Number.isFinite(s.endMs) && s.startMs>=value.startMs
+    && s.endMs<=value.endMs+2 && s.endMs>s.startMs && (!i||s.startMs>=segments[i-1].endMs-2))
+    && normalizedSpeech(segments.map(s=>s.text).join(' '))===normalizedSpeech(value.text) ? segments : undefined;
+}
 export interface AcousticWake { channel: number; participant?: string | null; startMs: number; endMs: number; }
 export class VoiceTrigger {
   private candidate?: Candidate;
   private acoustic?: AcousticWake & {started: number};
   private after = 0;
-  private continuation?: {channel: number; participant?: string | null; expires: number; after: number};
+  private continuation?: {channel: number; participant?: string | null; expires: number; after: number; speechStarted?: number};
   heard?: VoiceHypothesis;
   reason: 'waiting' | 'invalid_asr' | 'stale_asr' | 'name_not_matched' | 'name_unconfirmed' | 'ambiguous_window' | 'other_channel' = 'waiting';
   constructor(private now: () => number = Date.now, private variants: string[] = [], private acousticOnly = false) {}
@@ -100,10 +110,19 @@ export class VoiceTrigger {
     this.reset(after); this.continuation = {...caller, expires, after};
   }
   get answeringContinuation() { return this.candidate?.direct === true && !this.candidate.acoustic; }
-  get hasContinuation() { return this.continuation !== undefined && this.now() < this.continuation.expires; }
+  get hasContinuation() { return this.continuation !== undefined
+    && this.now() < (this.continuation.speechStarted === undefined ? this.continuation.expires : this.continuation.speechStarted + 20_000); }
+  continuationSpeech(channel: number, participant: string | null | undefined, stamp: number) {
+    const c = this.continuation;
+    if (!c || c.speechStarted !== undefined || this.now() >= c.expires
+        || !Number.isFinite(stamp) || stamp < c.after || stamp >= c.expires || stamp > this.now() + 1000
+        || channel !== c.channel || !c.participant || participant !== c.participant) return false;
+    c.speechStarted = this.now();
+    return true;
+  }
   get continuationCaller() { return this.hasContinuation ? {...this.continuation!} : undefined; }
   takeExpiredContinuation() {
-    if (this.candidate || !this.continuation || this.now()<this.continuation.expires) return;
+    if (this.candidate || !this.continuation || this.hasContinuation) return;
     const value=this.continuation;this.continuation=undefined;return value;
   }
   get acceptAfter() { return this.after; }
@@ -128,20 +147,17 @@ export class VoiceTrigger {
     }
     if (speechStart < this.after) {
       // Background PCM can keep the channel onset old; only timed ASR speech intervals prove fresh words.
-      const segments = value.segments;
-      const normalize = (text: string) => text.trim().replace(/\s+/gu, ' ');
-      const valid = segments && segments.length <= 256 && segments.every((s, i) =>
-        typeof s.text === 'string' && Number.isFinite(s.startMs) && Number.isFinite(s.endMs)
-        && s.startMs >= value.startMs && s.endMs <= value.endMs + 2 && s.endMs > s.startMs
-        && (!i || s.startMs >= segments[i - 1].endMs - 2))
-        && normalize(segments.map(s => s.text).join(' ')) === normalize(value.text);
-      const fresh = valid ? segments.filter(s => s.startMs >= this.after) : [];
-      if (!fresh.length) { this.reason = 'stale_asr'; return 'ignore'; }
-      value = { ...value, startMs: fresh[0].startMs, speechStartMs: fresh[0].startMs,
-        text: fresh.map(s => s.text).join(' '), segments: fresh };
+      const fresh = timedSegments(value)?.filter(s=>s.startMs>=this.after) || [];
+      if (!fresh.length) {
+        if (!this.acoustic || value.endMs<this.acoustic.endMs-WAKE_FRAME_MS) {
+          this.reason = 'stale_asr'; return 'ignore';
+        }
+        // A window spanning the wake may acknowledge it; old untimed text cannot become a request.
+      } else value = { ...value, startMs: fresh[0].startMs, speechStartMs: fresh[0].startMs,
+          text: fresh.map(s => s.text).join(' '), segments: fresh };
     }
     this.heard = value;
-    let text = value.text.trim();
+    const text = value.text.trim();
     if (!text) return 'ignore';
     if (this.acoustic && (value.channel !== this.acoustic.channel
         || this.acoustic.participant && value.participant && value.participant !== this.acoustic.participant)) {
@@ -155,12 +171,6 @@ export class VoiceTrigger {
       this.candidate = undefined; c = undefined;
     }
     const acoustic = this.acoustic !== undefined;
-    // Acoustic evidence authorizes the call; removing a recognized prefix changes only this copy.
-    if (acoustic && (!c || c.parts.length === 1 && value.startMs === c.parts[0].startMs)) {
-      const names = [...this.variants, 'hây ti na', 'ti na', 'ti nà ơi', 'ti nà',
-        'tiên na', 'anh ơi', 'kina ơi', 'khi na ơi', 'pina ơi', 'kỳ na ơi'];
-      text = invocation(text, names) ?? invocation(text.replace(/^hey\s+/iu, ''), names) ?? text;
-    }
     if (!c) {
       if (this.acousticOnly && !acoustic && (!this.hasContinuation || value.channel !== this.continuation!.channel
           || this.continuation!.participant && value.participant !== this.continuation!.participant)) {
@@ -168,14 +178,15 @@ export class VoiceTrigger {
       }
       const direct = acoustic || invocation(text, this.variants) === null;
       if (direct && this.continuation && noticeEchoes.has(echoKey(text))) return 'ignore';
-      if (direct && !acoustic && (!this.continuation || this.now() >= this.continuation.expires
+      if (direct && !acoustic && (!this.continuation || !this.hasContinuation
           || value.channel !== this.continuation.channel
           || (this.continuation.participant && value.participant !== this.continuation.participant))) {
         this.reason = 'name_not_matched'; return 'ignore';
       }
+      const started = this.continuation?.speechStarted;
       this.continuation = undefined;
       this.candidate = { parts: [{ ...value, text }], confirmed: value.final, matches: 1, seen: this.now(),
-        started: this.acoustic?.started ?? this.now(), direct, acoustic };
+        started: this.acoustic?.started ?? started ?? this.now(), direct, acoustic };
       this.reason = value.final ? 'waiting' : 'name_unconfirmed';
       return value.final ? 'wake' : 'update';
     }
@@ -202,14 +213,49 @@ export class VoiceTrigger {
     return 'update';
   }
   private discard(reason: 'ambiguous_window' | 'name_not_matched' = 'ambiguous_window'): 'discard' { this.reset(this.now()); this.reason = reason; return 'discard'; }
+  private questionText(c: Candidate): string | null {
+    const text=c.parts.map(p=>p.text).join(' ').trim();
+    if(!c.acoustic)return c.direct?text:invocation(text,this.variants);
+    const wake=this.acoustic!;
+    let offset=0;
+    const spans=c.parts.flatMap(p=>timedSegments(p)||[p]).map(p=>{
+      const value=normalizedSpeech(p.text),start=offset;offset+=value.length+1;
+      return {...p,text:value,from:start,to:start+value.length};
+    });
+    const assembled=spans.map(s=>s.text).join(' ');
+    const names=[...VOICE_NAMES,...this.variants,'hây ti na','ti na','ti nà ơi','ti nà','tiên na','anh ơi',
+      'kina ơi','khi na ơi','pina ơi','kỳ na ơi'];
+    const alternatives=[...new Set(names.map(normalizedSpeech))].filter(Boolean).sort((a,b)=>b.length-a.length)
+      .map(name=>name.split(' ').map(word=>word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('[\\s,.!?:;…—–-]+'));
+    const markers=[...assembled.matchAll(new RegExp(`(?<![\\p{L}\\p{N}_])(?:(?:hey|hây)[\\s,.!?:;…—–-]+)?(?:${alternatives.join('|')})(?=$|[^\\p{L}\\p{N}_])`,'giu'))]
+      .filter(m=>{
+        const first=spans.find(s=>s.to>m.index!),last=spans.find(s=>s.to>=m.index!+m[0].length);
+        return first && last && first.startMs>=wake.startMs && first.startMs<=wake.endMs+WAKE_FRAME_MS
+          && last.endMs>=wake.endMs-800;
+      });
+    const strong=markers.filter(m=>/^(?:hey|hây)(?=$|[^\p{L}\p{N}_])/iu.test(m[0])
+      || /ơi(?=$|[^\p{L}\p{N}_])/iu.test(m[0]) && normalizedSpeech(m[0]).toLowerCase()!=='anh ơi');
+    if(strong.length>1)return '';
+    const marker=strong[0]||markers.find(m=>{
+      const span=spans.find(s=>s.to>m.index!)!;
+      return span.startMs>=wake.endMs-WAKE_FRAME_MS;
+    });
+    if(marker){
+      const rest=assembled.slice(marker.index!+marker[0].length).replace(/^[\s,.!?:;…—–-]+/u,'').trim();
+      return /^(?:(?:ạ|à|ơi)[\s,.!?:;…—–-]*)+$/iu.test(rest)?'':rest;
+    }
+    // Without a reliable name boundary, use only complete intervals after the detected wake.
+    const fresh=spans.filter(s=>s.startMs>=wake.endMs-WAKE_FRAME_MS).map(s=>s.text).join(' ').trim();
+    return invocation(fresh,names)===''?'':fresh;
+  }
   question(quietEndMs: number | undefined, observeBeforeLexicalPause = false): string | null {
     const c = this.candidate;
     if (!c || !c.confirmed || quietEndMs === undefined) return null;
     const last = c.parts.at(-1)!;
+    if(this.acoustic && last.endMs<this.acoustic.endMs-WAKE_FRAME_MS)return null;
     // Both clocks come from capture samples; only rounding slack is safe for a short final word.
     if (last.endMs < quietEndMs - 2 || this.now() - c.seen < 300) return null;
-    const text = c.parts.map(p => p.text).join(' ');
-    const question = c.direct ? text : invocation(text, this.variants);
+    const question = this.questionText(c);
     const pause = question ? turnPauseMs(question) : 0;
     if (!observeBeforeLexicalPause && pause > 0 && this.now() - quietEndMs < pause) return null;
     return question !== null && question.length <= 2000 ? question : null;
@@ -217,8 +263,7 @@ export class VoiceTrigger {
   expired() {
     const c = this.candidate;
     if (!c) return this.acoustic !== undefined && this.now() - this.acoustic.started > 20_000;
-    const joined = c.parts.map(p => p.text).join(' ');
-    const text = c.direct ? joined : invocation(joined, this.variants);
+    const text = this.questionText(c);
     return this.now() - c.started > (text ? 20_000 : 5000);
   }
 }

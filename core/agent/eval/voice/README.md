@@ -191,6 +191,8 @@ Add `--timing-log /path/to/bot.log` to either report. The existing `voice_timing
 speech-end-to-answer-playback, speech-end-to-answer-PCM, answer-service, ASR, wake acknowledgment
 and waiting-notice durations separately. The reader deduplicates repeated snapshots by request,
 reports sample counts and p50/p95, and separates completed turns from interrupted/unfinished ones.
+Service-error notices use `answer_failed` and stay outside completed-answer latency, even when
+the bot successfully played the notice; missing-evidence replies retain `no_evidence`.
 Only numeric allowlisted fields are copied to the report; raw request IDs and other log content
 are not copied. Use a log from the matching run for meaningful comparison. A missing timing log
 means **not measured**; answer-service duration never stands in for end-to-end audio latency.

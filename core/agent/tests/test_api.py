@@ -98,6 +98,8 @@ def test_voice_dispatch_preserves_trace_metadata_separately_from_model_input(tmp
 
 
 # ── SSE ownership gate (P0) test helpers ──────────────────────────────────────────────────────────
+
+
 # The live SSE feed now OWNER-SCOPES every request (subject_of → meeting-api ownership lookup) before it
 # opens the redis stream. In L2 we inject a fake owner-lookup: a map of {(user_id, row_id): native}, and
 # every /api/meeting/stream request carries an X-User-Id. `None` from the lookup == not-owned → 403.
@@ -2122,3 +2124,60 @@ def test_empty_research_command_requests_a_topic_without_dispatch():
     assert response.status_code == 422
     assert '/research' in response.json()['detail']
     assert runtime.spawned == []
+
+
+def test_sandbox_dispatch_freezes_the_live_voice_lease_and_rejects_cancelled_turns(monkeypatch,tmp_path):
+    from starlette.requests import Request
+    from control_plane import meeting_knowledge
+    from control_plane.workspace_reader import WorkspaceReader
+    from shared.meeting_knowledge import PREFIX
+    captured=[];invocations=[];holder=['session:00000000-0000-4000-8000-000000000001']
+    monkeypatch.setattr(meeting_knowledge,'register',lambda *args:captured.append(args[-1]))
+    class Connection:
+        def get(self,key):assert key=='meeting:voice:1:lock';return holder[0]
+        def delete(self,*args):pass
+        def close(self):pass
+    monkeypatch.setattr('redis.from_url',lambda *args,**kwargs:Connection())
+    class Reader:
+        def read(self,*args,**kwargs):
+            yield {'type':'message-delta','text':'{"tool_calls":[]}'}
+            yield {'type':'turn-complete'}
+    dispatcher=Dispatcher(load_settings(),_FakeRuntime(),_FakeIdentity())
+    monkeypatch.setattr(dispatcher,'dispatch',lambda inv:invocations.append(inv) or 'private-job')
+    create_app(dispatcher,reader=WorkspaceReader(str(tmp_path)),stream_reader=Reader(),redis_url='redis://synthetic')
+    request=Request({'type':'http','path_params':{'meeting_id':'1'},'headers':[(b'x-user-id',b'u_jane'),
+        (b'x-tina-voice-request-id',b'00000000-0000-4000-8000-000000000001')]})
+    text=json.dumps({'mode':'voice_plan','question':'Synthetic','use_sandbox_agent':True})
+    assert captured[0](request,text)=='{"tool_calls":[]}'
+    payload=json.loads(invocations[-1]['start']['entrypoint']['inline'][len(PREFIX):])
+    assert payload['voice_turn']=={'meeting_id':1,'holder':holder[0]}
+    holder[0]=None
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc:captured[0](request,text)
+    assert exc.value.status_code==409 and len(invocations)==1
+
+
+def test_direct_voice_revocation_stops_only_its_worker(monkeypatch,tmp_path):
+    from starlette.requests import Request
+    from control_plane import meeting_knowledge
+    from control_plane.workspace_reader import WorkspaceReader
+    captured=[];stopped=[];holder=['session:00000000-0000-4000-8000-000000000001']
+    monkeypatch.setattr(meeting_knowledge,'register',lambda *args:captured.append(args[-1]))
+    class Connection:
+        def get(self,key):return holder[0]
+        def delete(self,*args):pass
+        def close(self):pass
+    monkeypatch.setattr('redis.from_url',lambda *a,**kw:Connection())
+    class Reader:
+        def read_cancelable(self,*args,should_continue,**kwargs):
+            assert should_continue();holder[0]=None;assert not should_continue()
+            if False:yield None
+    dispatcher=Dispatcher(load_settings(),_FakeRuntime(),_FakeIdentity())
+    monkeypatch.setattr(dispatcher,'dispatch',lambda _: 'this-voice-worker')
+    monkeypatch.setattr(dispatcher,'stop_workload',lambda uid:stopped.append(uid))
+    create_app(dispatcher,reader=WorkspaceReader(str(tmp_path)),stream_reader=Reader(),redis_url='redis://synthetic')
+    request=Request({'type':'http','path_params':{'meeting_id':'1'},'headers':[(b'x-user-id',b'u_jane'),
+        (b'x-tina-voice-request-id',b'00000000-0000-4000-8000-000000000001')]})
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc:captured[0](request,json.dumps({'mode':'voice','question':'Synthetic','sources':[]}))
+    assert exc.value.status_code==409 and stopped==['this-voice-worker']

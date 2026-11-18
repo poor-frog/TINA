@@ -19,6 +19,7 @@ from meeting_api.lifecycle import (
     classify_retry,
     is_transient,
 )
+from meeting_api.lifecycle.retry import next_retry_state
 from meeting_api.scheduling import FakeClock, Scheduler
 
 MEETING_ID = 99
@@ -50,6 +51,28 @@ def test_permanent_reasons(reason):
 
 def test_unknown_reason_is_permanent_failsafe():
     assert classify_retry(None) is RetryClass.PERMANENT
+
+
+def test_persisted_retry_state_is_bounded_and_only_retries_unserved_failures():
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 11, 17, tzinfo=timezone.utc)
+    state = next_retry_state(
+        {"attempt": 1}, CompletionReason.JOIN_FAILURE, "joining", now=now,
+    )
+    assert state == {
+        "state": "scheduled", "attempt": 1, "max_attempts": 3,
+        "next_at": "2026-11-17T00:00:30+00:00",
+    }
+    assert next_retry_state(
+        {"attempt": 1}, CompletionReason.JOIN_FAILURE, "active", now=now,
+    )["state"] == "not_retryable"
+    assert next_retry_state(
+        {"attempt": 1}, CompletionReason.STOPPED, "joining", stop_requested=True, now=now,
+    )["state"] == "cancelled"
+    assert next_retry_state(
+        {"attempt": 3}, CompletionReason.JOIN_FAILURE, "joining", now=now,
+    )["state"] == "exhausted"
 
 
 # ── harness ─────────────────────────────────────────────────────────────────────────────────────

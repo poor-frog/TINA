@@ -9,6 +9,11 @@ chart's ServiceAccount/RBAC); they are not long-running services.
 The chart defaults to `imagePullPolicy: Never`. TINA does not publish images yet: build the images
 from this checkout and preload them on every cluster node before installing the chart.
 
+Google sign-in and direct Calendar linking are optional. Set `secrets.googleClientId` and
+`secrets.googleClientSecret` (or provide `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the
+existing Secret). TINA first signs the user in, then asks separately for read-only Calendar access;
+selected calendars sync into Meetings, while auto-join stays off until enabled for that calendar.
+
 ```
             ┌──────────┐
   client ──>│ gateway  │──> admin-api ──┐
@@ -125,3 +130,6 @@ helm template tina . -n tina -f values-test.yaml
 `values-test.yaml` points `storage.s3` at the test-only S3 fixture in
 [`../../tests/s3-fixture.yaml`](../../tests/s3-fixture.yaml); an install from it needs that fixture
 running first (the file's header has the commands).
+
+Google Cloud must allow both redirect URIs: `${terminal.publicUrl}/api/auth/callback/google`
+for sign-in and `${terminal.publicUrl}/api/auth/callback/google-calendar` for Calendar linking.

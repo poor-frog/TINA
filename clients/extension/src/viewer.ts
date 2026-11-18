@@ -42,7 +42,8 @@ let translation: TranslationSnapshot | null = null;
 let translationError = false;
 let stopTranslation = () => {};
 let activeMeeting: BotTarget | null = null;
-let sendBotState: { key: string; phase: 'sending' | 'sent' | 'error'; message: string } | null = null;
+let sendBotState: { key: string; phase: 'sending' | 'sent' | 'retrying' | 'cancelling' | 'error'; message: string } | null = null;
+let autoRetryPoll: ReturnType<typeof setTimeout> | null = null;
 let activeTabRead = 0;
 
 function renderTranslationControls(): void {
@@ -116,10 +117,59 @@ function failBot(key: string, message = 'Bot failed. You can send it again.'): v
 }
 
 function syncFailedBotState(): void {
-  if (!activeMeeting || sendBotState?.phase === 'sending') return;
-  const failed = meetings.filter(row => row.platform === activeMeeting!.platform
+  if (!activeMeeting || (sendBotState?.phase === 'sending' || sendBotState?.phase === 'cancelling')) return;
+  const key = botTargetKey(activeMeeting);
+  const latest = meetings.filter(row => row.platform === activeMeeting!.platform
     && row.nativeMeetingId === activeMeeting!.nativeMeetingId).sort((a, b) => b.startMs - a.startMs)[0];
-  if (failed?.status === 'failed') failBot(botTargetKey(activeMeeting));
+  const retry = latest?.autoRetry;
+  if (retry && (retry.state === 'scheduled' || retry.state === 'in_progress' && retry.attempt > 1)) {
+    const attempt = retry.attempt + (retry.state === 'scheduled' ? 1 : 0);
+    sendBotState = { key, phase: 'retrying', message: `TINA is retrying automatically (${attempt}/${retry.max_attempts}).` };
+    scheduleAutoRetryPoll(key);
+  } else if (retry?.state === 'succeeded') {
+    sendBotState = { key, phase: 'sent', message: retry.attempt > 1
+      ? 'The automatically retried bot joined the meeting.' : 'The bot joined the meeting.' };
+    clearAutoRetryPoll();
+  } else if (latest?.status === 'failed') {
+    failBot(key, latest.joinFailureSummary || (retry?.state === 'exhausted'
+      ? 'Automatic retries are exhausted. You can send the bot again.'
+      : retry?.state === 'failed'
+        ? 'Automatic retry failed. You can send the bot again.'
+        : retry?.state === 'manual_only'
+          ? 'This meeting needs a passcode. Send the bot again manually.'
+        : retry?.state === 'not_retryable'
+          ? 'This failure is not eligible for automatic retry. You can send the bot again.'
+        : undefined));
+    clearAutoRetryPoll();
+  }
+  if (latest && TERMINAL_MEETING_STATUSES.has(latest.status) && latest.status !== 'failed') {
+    sendBotState = null;
+    clearAutoRetryPoll();
+  }
+  renderSendBot();
+}
+
+function clearAutoRetryPoll(): void {
+  if (autoRetryPoll) clearTimeout(autoRetryPoll);
+  autoRetryPoll = null;
+}
+
+function scheduleAutoRetryPoll(key: string): void {
+  if (autoRetryPoll) return;
+  autoRetryPoll = setTimeout(async () => {
+    autoRetryPoll = null;
+    if (!activeMeeting || botTargetKey(activeMeeting) !== key || sendBotState?.phase !== 'retrying') return;
+    try {
+      const current = sendBotState, gateway = config.botGatewayUrl, apiKey = config.apiKey;
+      const rows = await listBotMeetings({ botGatewayUrl: gateway, apiKey });
+      if (sendBotState !== current || config.botGatewayUrl !== gateway || config.apiKey !== apiKey
+          || !activeMeeting || botTargetKey(activeMeeting) !== key) return;
+      meetings = rows;
+      syncFailedBotState();
+      renderMeetings();
+    } catch { /* the next poll can recover a transient gateway error */ }
+    if (sendBotState?.key === key && sendBotState.phase === 'retrying') scheduleAutoRetryPoll(key);
+  }, 5000);
 }
 
 function renderSendBot(): void {
@@ -134,8 +184,8 @@ function renderSendBot(): void {
   $('sendBotStatus').textContent = state?.message
     ?? (config.apiKey.trim() ? 'The bot may wait for host admission.' : 'Add your TINA API key in Settings.');
   panel.dataset.state = state?.phase ?? 'ready';
-  button.disabled = !config.apiKey.trim() || state?.phase === 'sending' || state?.phase === 'sent';
-  button.textContent = state?.phase === 'sending' ? 'Sending…' : state?.phase === 'sent' ? 'Bot sent' : state?.phase === 'error' ? 'Send Bot Again' : 'Send Bot';
+  button.disabled = !config.apiKey.trim() || state?.phase === 'sending' || state?.phase === 'cancelling' || state?.phase === 'sent';
+  button.textContent = state?.phase === 'sending' ? 'Sending…' : state?.phase === 'cancelling' ? 'Cancelling…' : state?.phase === 'retrying' ? 'Cancel retry' : state?.phase === 'sent' ? 'Bot sent' : state?.phase === 'error' ? 'Send Bot Again' : 'Send Bot';
   button.title = `Send a TINA bot to this ${platform} meeting`;
 }
 
@@ -151,12 +201,38 @@ async function refreshActiveMeeting(): Promise<void> {
       nativeMeetingId: detected.nativeMeetingId,
       url: tab.url,
     };
-    if ((activeMeeting ? botTargetKey(activeMeeting) : null) !== (next ? botTargetKey(next) : null)) sendBotState = null;
+    if ((activeMeeting ? botTargetKey(activeMeeting) : null) !== (next ? botTargetKey(next) : null)) {
+      sendBotState = null;
+      clearAutoRetryPoll();
+    }
     activeMeeting = next;
     syncFailedBotState();
   } catch {
     if (read !== activeTabRead) return;
     activeMeeting = null; sendBotState = null;
+  }
+  renderSendBot();
+}
+
+async function cancelBotRetry(): Promise<void> {
+  const meeting = activeMeeting;
+  if (!meeting) return;
+  const key = botTargetKey(meeting);
+  sendBotState = { key, phase: 'cancelling', message: 'Cancelling automatic retry…' };
+  clearAutoRetryPoll();
+  renderSendBot();
+  try {
+    const response = await fetch(`${botBase(config.botGatewayUrl)}/bots/${meeting.platform}/${encodeURIComponent(meeting.nativeMeetingId)}`, {
+      method: 'DELETE', headers: { 'X-API-Key': config.apiKey }, credentials: 'omit',
+      redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) throw new Error('Could not confirm cancellation. Refresh the meeting status and try again.');
+    if (!activeMeeting || botTargetKey(activeMeeting) !== key) return;
+    sendBotState = { key, phase: 'error', message: 'Automatic retry cancelled.' };
+  } catch (error) {
+    if (!activeMeeting || botTargetKey(activeMeeting) !== key) return;
+    sendBotState = { key, phase: 'retrying', message: error instanceof Error ? error.message : 'Could not cancel retry.' };
+    scheduleAutoRetryPoll(key);
   }
   renderSendBot();
 }
@@ -286,6 +362,7 @@ function watchMeeting(meeting: BotMeeting, token: number): void {
       returnToMeetingHome(status === 'failed'
         ? 'The bot failed. Select the meeting from the list to inspect its saved transcript.'
         : 'Meeting ended. Select it from the list to review the saved transcript.');
+      void refreshMeetings(true);
       return;
     }
     segments = rows;
@@ -362,7 +439,7 @@ function selectBotTranscript(target: BotTarget): void {
     .sort((a, b) => b.startMs - a.startMs)[0];
   if (!meeting) return;
   if (TERMINAL_MEETING_STATUSES.has(meeting.status)) {
-    if (meeting.status === 'failed') failBot(botTargetKey(target));
+    if (meeting.status === 'failed') syncFailedBotState();
     returnToMeetingHome(meeting.status === 'failed'
       ? 'The bot failed. Select the meeting from the list to inspect its saved transcript.'
       : 'Meeting ended. Select it from the list to review the saved transcript.');
@@ -445,7 +522,10 @@ function bindSettings(): void {
   $('meetingSelect').addEventListener('change', selectMeeting);
   $('refreshBtn').addEventListener('click', () => void refreshMeetings(true));
   $('openTerminal').addEventListener('click', openTerminal);
-  $('sendBotBtn').addEventListener('click', () => void sendBotToActiveMeeting());
+  $('sendBotBtn').addEventListener('click', () => {
+    if (sendBotState?.phase === 'retrying') void cancelBotRetry();
+    else void sendBotToActiveMeeting();
+  });
   chrome.tabs.onActivated.addListener(() => void refreshActiveMeeting());
   chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
     if (tab.active && (changeInfo.url || changeInfo.status === 'complete')) void refreshActiveMeeting();
