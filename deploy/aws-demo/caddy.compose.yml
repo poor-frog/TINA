@@ -1,0 +1,13 @@
+name: tina-edge
+services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    network_mode: host # Linux EC2 host networking: can reach 127.0.0.1:13000
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+volumes:
+  caddy-data:
+  caddy-config:

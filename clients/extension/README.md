@@ -60,17 +60,17 @@ The settings page keeps the existing configuration fields:
 
 - **API key** — account key used for Bot reads; sending a bot requires the **Join meetings** (`bot`) scope.
 - **Deployment** — retained deployment profile.
-- **Meeting Bot API gateway** — Bot transcript API, default Compose port `http://127.0.0.1:18056`.
-- **TINA Terminal URL** — meeting destination, default Compose port `http://127.0.0.1:13000`.
+- **Meeting Bot API gateway** — Bot transcript API, defaults to `https://tinabot.duckdns.org/extension-api`.
+- **TINA Terminal URL** — meeting destination, defaults to `https://tinabot.duckdns.org`.
 - **Capture server, Language, Auto-start** — retained for compatibility and shown inactive. This extension build cannot use these settings to capture audio.
 
 Existing values are preserved when the extension is upgraded. A previously selected Desktop archive
 source now opens the Meeting Bot list; legacy endpoint values remain stored but are no longer shown
-or used by this viewer. The repository defaults match a standard local Compose deployment; per-user
-Bot and Terminal endpoint overrides remain intact. For the `tina-production` OrbStack project, set
+or used by this viewer. For a standard local Compose deployment, set the Bot gateway to
+`http://127.0.0.1:18056` and Terminal to `http://127.0.0.1:13000`. For the `tina-production` OrbStack project, set
 the Bot gateway to `http://127.0.0.1:28056` and Terminal to `http://127.0.0.1:23000`. This build
-grants HTTP access to loopback hosts; a remote HTTPS host needs a matching host permission in the
-manifest.
+grants HTTP access to loopback hosts and HTTPS access to `tinabot.duckdns.org`. Other HTTPS hosts
+require a matching host permission in the manifest.
 
 ## Build and install
 
@@ -78,7 +78,7 @@ manifest.
 node build.mjs
 ```
 
-In Chrome, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `clients/extension/dist`. The manifest grants only storage, tabs, side-panel, and loopback HTTP access. It includes no meeting-site content scripts, tab-capture, microphone, offscreen, or ingest-WebSocket permissions.
+In Chrome, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `clients/extension/dist`. The manifest grants storage, tabs, side-panel, loopback HTTP, and HTTPS access to `tinabot.duckdns.org`. It includes no meeting-site content scripts, tab-capture, microphone, offscreen, or ingest-WebSocket permissions.
 
 Voice status shows fresh same-session recovery diagnostics for silent expiry, paused clarification, answer-service failure and failed audio. Rebuild `dist/` and reload the unpacked extension to load changes.
 

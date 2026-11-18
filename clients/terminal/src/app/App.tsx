@@ -42,7 +42,7 @@ function InviteGate({ children }: { children: ReactNode }) {
     acceptTranscriptShare(tshare)
       .then((r) => { if (r?.meeting_id != null) localStorage.setItem("tina.openMeeting", String(r.meeting_id)); })
       .catch((e) => console.error("transcript share redeem failed:", e))
-      .finally(() => { if (!invite) window.location.replace(window.location.pathname); });
+      .finally(() => { if (!invite) window.location.replace(window.location.pathname + window.location.hash); });
   }, [tshare, invite]);
 
   if (!invite) return <>{children}</>;

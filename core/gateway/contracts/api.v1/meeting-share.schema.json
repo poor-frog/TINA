@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:api.v1:meeting-share",
+  "title": "Meeting share recording permission extension",
+  "description": "Additive extension to the owner-scoped POST /meetings/{meeting_id}/share and platform/native alias. Existing transcript-only requests are unchanged.",
+  "type": "object",
+  "properties": {
+    "include_recordings": {
+      "type": "boolean",
+      "default": false,
+      "description": "Redeeming a restricted share also grants read-only playback while that grant is valid. Does not grant deletion or meeting mutation."
+    }
+  },
+  "if": {
+    "required": ["include_recordings"],
+    "properties": { "include_recordings": { "const": true } }
+  },
+  "then": {
+    "required": ["mode"],
+    "properties": { "mode": { "const": "restricted" } }
+  }
+}

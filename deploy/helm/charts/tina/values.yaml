@@ -565,6 +565,9 @@ flows:
   mail:
     address: ""
     appPassword: ""
+    notifyChannel: "smtp"             # smtp or resend
+    resendApiKey: ""                  # supply privately; never commit a real key
+    resendFrom: ""                    # verified sender; onboarding@resend.dev for account-owner tests
     # WHO THE MAILBOX WILL ACT FOR. A sender who is neither a known user nor inside this list
     # gets no account, no agent turn and no model call — one quarantine row (R-B12).
     # EMPTY IS NOT "EVERYONE": it means the mailbox's own domain, exactly as an unset attendee

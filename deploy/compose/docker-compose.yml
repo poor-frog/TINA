@@ -839,6 +839,8 @@ services:
       - TINA_MAILPIT_URL=${TINA_MAILPIT_URL:-}
       - TINA_MAILPIT_LOOKBACK_S=${TINA_MAILPIT_LOOKBACK_S:-300}
       - TINA_NOTIFY_CHANNEL=${TINA_NOTIFY_CHANNEL:-smtp}
+      - TINA_RESEND_API_KEY=${TINA_RESEND_API_KEY:-}
+      - TINA_RESEND_FROM=${TINA_RESEND_FROM:-}
       # ── who the mailbox will act for (R-B12) ────────────────────────────────────────────────
       # UNSET IS NOT `EVERYONE`: unset means the mailbox's own domain. Empty here is therefore the
       # safe value and not a hole.
@@ -944,6 +946,8 @@ services:
       - TINA_MAILPIT_URL=${TINA_MAILPIT_URL:-}
       - TINA_MAILPIT_LOOKBACK_S=${TINA_MAILPIT_LOOKBACK_S:-300}
       - TINA_NOTIFY_CHANNEL=${TINA_NOTIFY_CHANNEL:-smtp}
+      - TINA_RESEND_API_KEY=${TINA_RESEND_API_KEY:-}
+      - TINA_RESEND_FROM=${TINA_RESEND_FROM:-}
       # ── who the mailbox will act for (R-B12) ────────────────────────────────────────────────
       # UNSET IS NOT `EVERYONE`: unset means the mailbox's own domain. Empty here is therefore the
       # safe value and not a hole.
@@ -1049,6 +1053,8 @@ services:
       - TINA_MAILPIT_URL=${TINA_MAILPIT_URL:-}
       - TINA_MAILPIT_LOOKBACK_S=${TINA_MAILPIT_LOOKBACK_S:-300}
       - TINA_NOTIFY_CHANNEL=${TINA_NOTIFY_CHANNEL:-smtp}
+      - TINA_RESEND_API_KEY=${TINA_RESEND_API_KEY:-}
+      - TINA_RESEND_FROM=${TINA_RESEND_FROM:-}
       # ── who the mailbox will act for (R-B12) ────────────────────────────────────────────────
       # UNSET IS NOT `EVERYONE`: unset means the mailbox's own domain. Empty here is therefore the
       # safe value and not a hole.

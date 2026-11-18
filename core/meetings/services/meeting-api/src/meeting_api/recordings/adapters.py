@@ -232,18 +232,25 @@ class SqlAlchemyRecordingRepo:
                 return prepared
             return None
 
-    async def list_meeting_recordings(self, user_id):
-        from sqlalchemy import select
+    async def list_meeting_recordings(self, user_id, *, include_shared=False):
+        from sqlalchemy import or_, select
 
         from ..sessions.models import Meeting
+        from ..collector.adapters import recording_share_allows
 
         async with self._session_factory() as db:
+            access = Meeting.user_id == user_id
+            if include_shared:
+                access = or_(access, Meeting.data["share_grants"].contains(
+                    [{"include_recordings": True, "recording_viewers": [user_id]}]))
             rows = (
-                await db.execute(select(Meeting).where(Meeting.user_id == user_id))
+                await db.execute(select(Meeting).where(access))
             ).scalars().all()
             out = []
             for m in rows:
                 data = m.data if isinstance(m.data, dict) else {}
+                if m.user_id != user_id and not recording_share_allows(data, user_id):
+                    continue
                 for r in data.get("recordings", []):
                     out.append({**r, "meeting_id": m.id})
             return out

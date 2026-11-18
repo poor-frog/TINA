@@ -260,6 +260,7 @@ edges:
   agent-worker -call-> agent-reach  # Explicit voice public query or granted interactive read-only MCP tool; no room transcript/history/model keys are sent.
   agent-reach -call-> public-content-providers  # Public requests to fixed hosted Exa/Jina or anonymous GitHub REST endpoints; no private credentials or workspace access.
   livekit-agent -call-> transcription  # Signed session-bound audio capability pins the existing selected ASR endpoint/model/token. Standalone SDK STT forwards bounded WAV windows and original response offsets/timings for both transcript and voice. No LLM invocation or canonical writes on continuous audio.
+  flows-worker -call-> mail-relay  # Individual post-meeting thank-you emails via the notify port, selecting the mailbox SMTP adapter or Resend SMTPS adapter.
   bot, agent-worker deployed-in runtime
   gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription, asr-control deployed-in deploy
   flows-api, flows-worker deployed-in deploy
@@ -270,3 +271,4 @@ flows:
   native-live-translation-flow: native-capture-desktop -> native-capture-desktop-live -> native-capture-live-translation -> desktop-live-translation
   dispatch-flow: aa-runtime -> workers-deployed -> aw-unitout -> aa-unitout
   meeting-wiki-flow: agent-worker-meeting-summary-completion -> agent-worker-validates-workspace-entity -> agent-worker-writes-meeting-entity
+  post-meeting-email-flow: flows-worker-calls-agent-api -> flows-worker-calls-gateway -> flows-worker-sends-followup-mail -> flows-worker-writes-rows

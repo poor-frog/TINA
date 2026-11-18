@@ -70,6 +70,16 @@ _H1 = re.compile(r"^#\s+(.+?)\s*$")
 # and every one of them is his to rewrite by editing the matching file in `_global/mail/`. They say
 # the substance plainly and do not embellish it.
 DEFAULTS: dict[str, str] = {
+    "meeting-followup": (
+        "subject: Tina — Tóm tắt và bản ghi: {{meeting}}\n---\n"
+        "Xin chào,\n\n"
+        "Cảm ơn bạn đã sử dụng Tina.\n\n"
+        "Xem tóm tắt cuộc họp:\n{{summary_link}}\n\n"
+        "Xem bản ghi cuộc họp:\n{{recording_link}}\n\n"
+        "Đăng nhập Tina bằng email nhận thư này để xem nội dung. "
+        "Bản ghi chỉ có nếu cuộc họp được ghi âm.\n\n"
+        "Trân trọng,\nTina\n"
+    ),
     # The ATTENDEE follow-up head -- for most people in a large meeting this is the first time they
     # hear from TINA at all, so it is the whole introduction: whose TINA this is, what it does,
     # which meeting, who had it in the room, where the report now lives, and who can see it.

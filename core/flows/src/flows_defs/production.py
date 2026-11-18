@@ -1021,6 +1021,11 @@ def build(reg: Registry, db) -> None:
     # does not run agents, so the absent door is never knocked on.
     # ALSO REACHES MEETINGS — stamps the meeting's date and mints the link's refs (`_meeting_stamp` → `mt.meeting_start`).
     @reg.step(needs=("agent", "meetings"))
+    def email_meeting_followup(ctx: StepCtx):
+        from flows_steps.followup import send
+        return send(ctx)
+
+    @reg.step(needs=("agent", "meetings"))
     def email_minutes(ctx: StepCtx):
         """Send the committed note VERBATIM in the body + the feedback ask + ONE link into the
         minutes terminal, already primed on this meeting. Cannot run before the commit: its input
@@ -1034,6 +1039,9 @@ def build(reg: Registry, db) -> None:
         drive somebody else's agent.
 
         Reads: refs.{uid,organizer,title,meeting_id} · Effect: one notification."""
+        if "email_meeting_followup" in ctx.prior:
+            result = ctx.prior["email_meeting_followup"]
+            return Done({"link": result.get("owner_link"), "skipped": "follow-up already delivered"})
         if not setting(ctx.refs["uid"], "mail_minutes"):
             return Done({"skipped": "mail_minutes is off for this person"})
         # THE ONE ARTEFACT, off the receipt. It used to be re-read out of the organiser's desk
@@ -1174,7 +1182,8 @@ def build(reg: Registry, db) -> None:
         import datetime
         stamp = _meeting_stamp(ctx, uid)
         try:
-            return datetime.datetime.strptime(stamp[:10], "%Y-%m-%d").strftime("%-d %B %Y")
+            date = datetime.datetime.strptime(stamp[:10], "%Y-%m-%d")
+            return f"{date.day} {date.strftime('%B %Y')}"
         except Exception:  # noqa: BLE001
             return stamp[:10]
 
@@ -1277,6 +1286,8 @@ def build(reg: Registry, db) -> None:
         to, carrying the exact link they were given, so the next step neither recomputes the
         fan-out nor mints a second share capability per attendee. It does mean the receipt holds
         those links, tokens included: see the step below."""
+        if "email_meeting_followup" in ctx.prior:
+            return Done(ctx.prior["email_meeting_followup"])
         on = _followup_on(ctx)
         who = _attendees(ctx)
         if not on or not who:
@@ -1599,6 +1610,9 @@ def build(reg: Registry, db) -> None:
 
         Prior: process_meeting{report}, email_attendees{drops}, email_minutes{link}
         Effect: N desk writes · Result: {dropped, to, failed, entity}."""
+        followup = ctx.prior.get("email_meeting_followup")
+        if followup:
+            ctx.refs.update({k: followup[k] for k in ("organizer", "participants", "title")})
         pm = ctx.prior.get("process_meeting") or {}
         report = _readable(pm.get("report") or "").strip()
         if not report:
@@ -1892,8 +1906,9 @@ def build(reg: Registry, db) -> None:
     # 3 were authored through the API against this same flow name and `match()` takes the newest
     # number wherever it came from; a code change that does not clear the highest DB version is
     # inert, which is exactly the defect `Registry.shadowing_versions` now warns about.
-    reg.flow(name="post_meeting", version=4, on=COMPLETED,
-             steps=[s["process_meeting"], s["email_minutes"],
+    # VERSION 5 sends recipient-bound summary/recording links; legacy mail steps only relay receipts.
+    reg.flow(name="post_meeting", version=5, on=COMPLETED,
+             steps=[s["process_meeting"], s["email_meeting_followup"], s["email_minutes"],
                     s["email_attendees"], s["drop_to_attendees"]])
     # THE QUEUE FLOW THIS FILE KEEPS (PRD decision 42.2). It is one step and produces no effect:
     # what it produces is a REACTION ROW in a state a person can be told about — pending while a

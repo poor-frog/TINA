@@ -43,6 +43,8 @@ def _fixture(*, status: str = "completed", storage_cls=InMemoryStorage):
             "recordings": [_recording()],
             "processed": {"views": [{"doc": {"notes": ["derived"]}}]},
             "notes": "derived summary",
+            "metadata": {"tina_summary": "emailed summary", "customer_tag": "keep"},
+            "summary": "saved Vietnamese report",
             "voice_replies": {"reply": {"text": "Previously spoken answer"}},
             "share_grants": [{"id": "share"}],
             "transcript_viewers": [OTHER],
@@ -79,6 +81,12 @@ def test_owner_deletes_completed_artifacts_but_terminal_meeting_row_survives():
     assert "recordings" not in meeting["data"]
     assert "processed" not in meeting["data"]
     assert "notes" not in meeting["data"]
+    assert meeting["data"]["metadata"] == {"customer_tag": "keep"}
+    assert "summary" not in meeting["data"]
+    assert client.post(f"/meetings/{MEETING_ID}/annotate", headers={"x-user-id": str(OWNER)},
+                       json={"summary": "late report"}).status_code == 404
+    assert client.post(f"/meetings/{MEETING_ID}/annotate", headers={"x-user-id": str(OWNER)},
+                       json={"metadata": {"tina_summary": "late summary"}}).status_code == 404
     assert "voice_replies" not in meeting["data"]
     assert meeting["data"]["artifact_deletion"]["backup_residuals"] == (
         "expire_under_deployment_retention_policy"

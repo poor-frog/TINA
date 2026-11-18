@@ -150,6 +150,12 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
   const [audioFragments, setAudioFragments] = useState<MeetingAudioFragment[]>([]);
   const [audioLoading, setAudioLoading] = useState(false);
   const [audioMessage, setAudioMessage] = useState("");
+  useEffect(() => {
+    const target = window.location.hash.slice(1);
+    if (target === `meeting-summary-${meetingId}` || target === `meeting-recording-${meetingId}`) {
+      document.getElementById(target)?.scrollIntoView?.({ block: "start" });
+    }
+  }, [meetingId, meetingRecord?.summary, audioFragments.length, audioMessage]);
   const [playbackPosition, setPlaybackPosition] = useState<MeetingAudioPosition | null>(null);
   const [playbackActive, setPlaybackActive] = useState(false);
   const audioPlayerRef = useRef<MeetingAudioPlayerHandle>(null);
@@ -211,7 +217,10 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
     setAudioFragments([]);
     setAudioMessage("");
     setAudioLoading(candidates.length > 0);
-    if (!candidates.length) return () => { cancelled = true; };
+    if (!candidates.length) {
+      setAudioMessage("No recording is available for this meeting.");
+      return () => { cancelled = true; };
+    }
 
     void Promise.all(candidates.map(async (recording) => {
       const response = await fetch(`/api/recordings/${recording.id}/master?type=audio`, { cache: "no-store" });
@@ -370,6 +379,10 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
         <TranscriptReview hideTrigger meetingId={dialogMeetingId} openRef={reviewOpen} />
       </>}
       <MeetingHealthBanner hideEnded={!!meetingRecord && meetingPhase(meetingRecord) === "post"} />
+      {meetingRecord?.summary && <section id={`meeting-summary-${meetingId}`} className={dossierStyles.section} aria-label="Meeting summary">
+        <h2 className={dossierStyles.sectionTitle}>Tóm tắt cuộc họp</h2>
+        <p className={dossierStyles.note}>{meetingRecord.summary}</p>
+      </section>}
       <section className={dossierStyles.transcriptPanel}>
         <header className={transcriptStyles.toolbar} data-recap={durableTerminal}>
           <div className={transcriptStyles.headingRow}>
@@ -438,7 +451,7 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
                   playableSegmentIds={playableSegmentIds} activeSegmentId={activeSegmentId} />}
           </div>
         </main>
-        {canPlayMeetingAudio && (audioLoading || audioMessage || audioFragments.length > 0) && <div className={transcriptStyles.recordingDock} role="group" aria-label="Meeting recording">
+        {canPlayMeetingAudio && (audioLoading || audioMessage || audioFragments.length > 0) && <div id={`meeting-recording-${meetingId}`} className={transcriptStyles.recordingDock} role="group" aria-label="Meeting recording">
           {audioFragments.length > 0
             ? <div className={dossierStyles.recordingPlayer}><MeetingAudioPlayer ref={audioPlayerRef} fragments={audioFragments} onPositionChange={handleAudioPosition} /></div>
             : <div className={dossierStyles.recordingMessage} role="status">{audioLoading ? "Preparing recording…" : audioMessage}</div>}

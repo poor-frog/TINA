@@ -85,6 +85,46 @@ def test_title_is_capped_at_512_chars():
     assert len(store._meetings[mid]["data"]["title"]) == 512
 
 
+def test_full_vietnamese_summary_is_saved_without_using_the_metadata_budget():
+    client, store, mid = _client(status="completed")
+    metadata = {"customer_context": "x" * 15_000}
+    assert _annotate(client, {"metadata": metadata}).status_code == 200
+    report = ("Quyết định: triển khai vào thứ Sáu. " * 200)[:6000]
+    assert _annotate(client, {"metadata": {"tina_summary": report}}).status_code == 413
+    response = client.post(f"/meetings/{mid}/annotate", headers=H, json={"summary": report})
+    assert response.status_code == 200, response.text
+    assert store._meetings[mid]["data"]["summary"] == report
+    assert store._meetings[mid]["data"]["metadata"] == metadata
+    grant = client.post(f"/meetings/{mid}/share", headers=H, json={
+        "mode": "restricted", "allowed_emails": ["guest@example.test"],
+    }).json()
+    guest = {"x-user-id": "8", "x-user-email": "guest@example.test"}
+    assert client.post("/transcripts/share/accept", headers=guest,
+                       json={"token": grant["token"]}).status_code == 200
+    assert client.get(f"/meetings/{mid}", headers=guest).json()["data"]["summary"] == report
+
+
+def test_summary_native_alias_clear_and_owner_scope():
+    client, store, mid = _client(status="completed")
+    assert _annotate(client, {"metadata": {"tina_summary": "old report", "crm_id": "keep"}}).status_code == 200
+    assert _annotate(client, {"summary": "Saved report"}).status_code == 200
+    assert store._meetings[mid]["data"]["summary"] == "Saved report"
+    assert store._meetings[mid]["data"]["metadata"] == {"crm_id": "keep"}
+    assert client.post(f"/meetings/{mid}/annotate", headers={"x-user-id": "8"},
+                       json={"summary": "overwrite"}).status_code == 404
+    assert _annotate(client, {"summary": ""}).status_code == 200
+    assert "summary" not in store._meetings[mid]["data"]
+    assert "tina_summary" not in store._meetings[mid]["data"]["metadata"]
+
+
+def test_summary_validation_does_not_modify_metadata():
+    client, store, mid = _client()
+    for value in (None, 42, {}, "x" * 6001):
+        assert _annotate(client, {"summary": value, "metadata": {"changed": True}}).status_code == 422
+    assert "summary" not in store._meetings[mid]["data"]
+    assert "metadata" not in store._meetings[mid]["data"]
+
+
 # ---- metadata merge semantics --------------------------------------------------------
 
 def test_metadata_merges_key_wise():

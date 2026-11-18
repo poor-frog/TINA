@@ -348,5 +348,5 @@ def test_the_baked_defaults_match_the_files_in_behavior_mail():
     for name, baked in mailtext.DEFAULTS.items():
         f = mail_dir / f"{name}.md"
         assert f.is_file(), f"{f} is missing — the baked default has no source to be edited in"
-        assert f.read_text().strip() == baked.strip(), (
+        assert f.read_text(encoding="utf-8").strip() == baked.strip(), (
             f"{f} and mailtext.DEFAULTS[{name!r}] have drifted apart")

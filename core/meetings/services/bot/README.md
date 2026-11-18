@@ -18,6 +18,10 @@ and the requirement for acoustic confirmation stay unchanged.
 The runtime KWS threshold is 0.4 for both `hey_tina` and `tina_oi`, checked in the native worker
 and bot controller. Their per-model 1.5-second detection cooldown remains in place.
 
+After native KWS verifies a call, question assembly removes observed STT spellings of the
+vocative, including `KINA ƠI`, `PINA ƠI`, `khi na ơi` and `kỳ na ơi`. Cleanup preserves the raw transcript and keeps
+the existing channel, participant, freshness and acoustic-activation requirements.
+
 `voice_timing` logs retain only request UUID/channel, timestamps and durations. Speech timing is
 split into `ack_*` (name acknowledgment), `notice_*` (question/recap wait) and `answer_*`.
 Each group records `tts_requested`, `pcm_received`, `buffer_ready` and `playback_started`;

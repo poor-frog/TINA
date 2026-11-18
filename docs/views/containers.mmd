@@ -56,6 +56,7 @@ flowchart LR
   livekit_server["Self-hosted LiveKit server"]
   agent_reach["Public Agent Reach retrieval worker"]
   public_content_providers["Public content providers"]
+  mail_relay["configured SMTP relay"]
   meeting_api -->|"write"| segments_table
   bot -->|"HTTPS"| transcription
   meeting_api -->|"JDBC"| postgres
@@ -120,3 +121,4 @@ flowchart LR
   agent_worker -->|"HTTP"| agent_reach
   agent_reach -->|"HTTP"| public_content_providers
   livekit_agent -->|"HTTP"| transcription
+  flows_worker -->|"SMTP"| mail_relay

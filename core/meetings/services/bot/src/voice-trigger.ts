@@ -223,7 +223,8 @@ export class VoiceTrigger {
       return {...p,text:value,from:start,to:start+value.length};
     });
     const assembled=spans.map(s=>s.text).join(' ');
-    const names=[...VOICE_NAMES,...this.variants,'hây ti na','ti na','ti nà ơi','ti nà','tiên na','anh ơi'];
+    const names=[...VOICE_NAMES,...this.variants,'hây ti na','ti na','ti nà ơi','ti nà','tiên na','anh ơi',
+      'kina ơi','khi na ơi','pina ơi','kỳ na ơi'];
     const alternatives=[...new Set(names.map(normalizedSpeech))].filter(Boolean).sort((a,b)=>b.length-a.length)
       .map(name=>name.split(' ').map(word=>word.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('[\\s,.!?:;…—–-]+'));
     const markers=[...assembled.matchAll(new RegExp(`(?<![\\p{L}\\p{N}_])(?:(?:hey|hây)[\\s,.!?:;…—–-]+)?(?:${alternatives.join('|')})(?=$|[^\\p{L}\\p{N}_])`,'giu'))]

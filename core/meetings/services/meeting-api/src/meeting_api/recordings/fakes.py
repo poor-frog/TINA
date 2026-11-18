@@ -125,10 +125,11 @@ class InMemoryRecordingRepo:
             return prepared
         return None
 
-    async def list_meeting_recordings(self, user_id: int) -> list[dict]:
+    async def list_meeting_recordings(self, user_id: int, *, include_shared=False) -> list[dict]:
+        from ..collector.adapters import recording_share_allows
         out: list[dict] = []
         for mid, m in self._meetings.items():
-            if m.get("user_id") == user_id:
+            if m.get("user_id") == user_id or (include_shared and recording_share_allows(m, user_id)):
                 for r in m.get("recordings", []):
                     out.append({**r, "meeting_id": mid})
         return out
