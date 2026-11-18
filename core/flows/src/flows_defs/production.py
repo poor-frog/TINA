@@ -805,6 +805,13 @@ def build(reg: Registry, db) -> None:
     @reg.step(needs=("agent", "meetings"))
     def process_meeting(ctx: StepCtx):
         """Generate one owner-scoped report from the completed meeting transcript."""
+        # Preserve the deployment's behavior capability check. The Agent API supplies
+        # the transcript-only instructions for this turn.
+        try:
+            if not prompt_for(ctx, "process-meeting.md").strip():
+                raise PromptAbsent("process-meeting.md")
+        except PromptAbsent as absent:
+            return NotPresent("behavior", detail=str(absent))
         uid = str(ctx.refs["uid"])
         row = mt.meeting_row(uid, ctx.refs.get("meeting_id"), ctx.refs.get("native"))
         if not isinstance(row, dict) or not str(row.get("id", "")).isdigit():

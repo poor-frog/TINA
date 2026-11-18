@@ -107,6 +107,7 @@ def _process_rig(monkeypatch, *, code, body, row_id=412):
     reg = Registry()
     production.build(reg, _StubDB())
     seen = {}
+    monkeypatch.setattr(production, "prompt_for", lambda ctx, name: "fixture prompt")
     monkeypatch.setattr(production.mt, "meeting_row",
                         lambda uid, m, native=None: {"id": row_id} if row_id else None)
     monkeypatch.setattr(production._common, "agent_door", lambda: "http://agent")
