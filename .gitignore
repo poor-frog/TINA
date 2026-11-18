@@ -59,12 +59,8 @@ architecture.svg
 
 output/
 
-# Local design captures and per-machine Git/Codex hooks
+# Local design captures and per-machine Codex hooks
 .hallmark/
-.githooks/post-checkout
-.githooks/post-commit
-.githooks/post-merge
-.githooks/post-rewrite
 .codex/hooks.json
 
 
