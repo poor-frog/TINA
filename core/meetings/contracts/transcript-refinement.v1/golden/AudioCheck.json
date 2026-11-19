@@ -1,0 +1,29 @@
+{
+  "version": "transcript-refinement.v1",
+  "id": "quality-example",
+  "meeting": "1",
+  "status": "completed",
+  "model": "",
+  "backend": "audio-check",
+  "created_at": "2026-11-05T00:00:00Z",
+  "mode": "check",
+  "items": [
+    {
+      "segment_id": "s1",
+      "expected_revision": 0,
+      "state": "checked",
+      "audio_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "quality": {
+        "needs_review": true,
+        "reasons": [
+          "low_volume",
+          "mostly_quiet"
+        ],
+        "rms": 0,
+        "clipping_ratio": 0,
+        "quiet_ratio": 1,
+        "text_check": "no_text_flags"
+      }
+    }
+  ]
+}

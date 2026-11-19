@@ -13,7 +13,7 @@ import numpy as np
 import soundfile as sf
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from engine import VieGemEngine, verify_model_assets
+from engine import VieGemEngine, verify_model_assets, name_biased_decoder, contextual_biased_decoder
 from gipformer.engine import AudioInputError
 from gipformer.telemetry import AsrMetrics
 from http_worker import create_app
@@ -26,6 +26,41 @@ def wav(pcm):
 
 
 class EngineTests(unittest.TestCase):
+    def test_name_bias_is_opt_in_bounded_and_preserves_baseline_decoder(self):
+        base = SimpleNamespace(vocab={'tin', 'anh'}, prefixes={'t', 'ti', 'tin', 'a', 'an', 'anh'},
+                               bias_words=set(), bias_weight=0)
+        self.assertIs(name_biased_decoder(base, 0), base)
+        biased = name_biased_decoder(base, .25)
+        self.assertEqual(biased.bias_words, {'tina'})
+        self.assertIn('tina', biased.vocab)
+        self.assertIn('tina', biased.prefixes)
+        self.assertEqual(biased.bias_weight, .25)
+        self.assertNotIn('tina', base.vocab)
+        self.assertEqual(base.bias_weight, 0)
+        for value in (-1, 2.1, float('nan'), float('inf')):
+            with self.assertRaises(ValueError): name_biased_decoder(base, value)
+
+    def test_custom_bias_reserves_tina_for_the_name_weight(self):
+        class FakeDecoder:
+            def __init__(self):
+                self.vocab, self.prefixes = {'release'}, {'r', 're', 'rel', 'rele', 'relea', 'releas', 'release'}
+                self.bias_words, self.bias_weight = set(), 0
+
+            def _word(self, state, word):
+                return state, 2.0
+
+        base = FakeDecoder()
+        custom = contextual_biased_decoder(base, ['release', 'TINA'], name_weight=0, custom_weight=1)
+        self.assertEqual(custom.bias_words, {'release'})
+        self.assertNotIn('tina', custom.vocab)
+        self.assertEqual(custom._word(None, 'release')[1], 3.0)
+        self.assertEqual(custom._word(None, 'tina')[1], 2.0)
+
+        named = contextual_biased_decoder(base, ['release', 'tina'], name_weight=.25, custom_weight=1)
+        self.assertEqual(named.bias_weights, {'release': 1.0, 'tina': .25})
+        self.assertEqual(named._word(None, 'tina')[1], 2.25)
+        self.assertEqual(base.bias_words, set())
+
     def test_speech_samples_and_source_offsets(self):
         vad = Mock()
         vad.generate.return_value = [{'value': [[250, 500], [1000, 1500]]}]

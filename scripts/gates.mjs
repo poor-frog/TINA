@@ -306,8 +306,17 @@ function gatePython() {
   const pkgs = walkDirs().filter((d) => existsSync(join(d, "pyproject.toml")) && existsSync(join(d, "tests")));
   if (!pkgs.length) { console.log("  ✓ gate:python — no Python packages yet (green-on-empty)"); return true; }
   for (const d of pkgs) {
-    try { execSync("uv run pytest -q", { cwd: d, stdio: "pipe" }); }
-    catch (e) { return fail([`pytest ${rel(d)}:\n${errText(e)}`]); }
+    const started = Date.now();
+    console.log(`  ▶ pytest ${rel(d)}`);
+    try {
+      // Stream installs and individual tests: buffered output hid 40-minute stalls.
+      // faulthandler prints the blocked stack; CI's step timeout bounds the whole run.
+      execFileSync("uv", ["run", "pytest", "-v", "-o", "faulthandler_timeout=120", "--durations=10"], {
+        cwd: d, stdio: "inherit", env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      });
+    }
+    catch (e) { return fail([`pytest ${rel(d)} failed (${e.status ?? e.code ?? "unknown exit"}); see streamed output above`]); }
+    console.log(`  ✓ pytest ${rel(d)} — ${((Date.now() - started) / 1000).toFixed(1)}s`);
   }
   console.log(`  ✓ gate:python — ${pkgs.length} package(s) · pytest green`);
   return true;

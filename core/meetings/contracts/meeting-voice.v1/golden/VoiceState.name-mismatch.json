@@ -1,0 +1,12 @@
+{
+  "state": "LISTENING",
+  "diagnostic": {
+    "event_id": "00000000-0000-4000-8000-000000000002",
+    "code": "name_not_matched",
+    "observed_at_ms": 1800000000000,
+    "heard_prefix": "tiên na ơi",
+    "heard_at_ms": 1800000000000,
+    "channel": 0,
+    "source_start_ms": 1799999999000
+  }
+}

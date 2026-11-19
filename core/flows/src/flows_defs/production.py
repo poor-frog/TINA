@@ -801,225 +801,40 @@ def build(reg: Registry, db) -> None:
     # REACHES THE AGENT DOMAIN (PRD decision 40.7). Declared, not checked inside the body:
     # the engine answers `not_present` for this step without entering it when a deployment
     # does not run agents, so the absent door is never knocked on.
-    # ALSO REACHES MEETINGS — reads the room order, the meeting row and the transcript (`mt.room_order`, `mt.meeting_row`, `mt.transcript_text`).
+    # Resolve the meeting row before requesting its report from the Agent API.
     @reg.step(needs=("agent", "meetings"))
     def process_meeting(ctx: StepCtx):
-        """ONE REAL AGENT TURN on session meet-<id>, producing ONE SHARED ARTEFACT: the meeting's
-        report, the same words for everybody who was in the room.
+        """Generate one owner-scoped report from the completed meeting transcript."""
+        # Preserve the deployment's behavior capability check. The Agent API supplies
+        # the transcript-only instructions for this turn.
+        try:
+            if not prompt_for(ctx, "process-meeting.md").strip():
+                raise PromptAbsent("process-meeting.md")
+        except PromptAbsent as absent:
+            return NotPresent("behavior", detail=str(absent))
+        uid = str(ctx.refs["uid"])
+        row = mt.meeting_row(uid, ctx.refs.get("meeting_id"), ctx.refs.get("native"))
+        if not isinstance(row, dict) or not str(row.get("id", "")).isdigit():
+            raise StepError("Cannot resolve the owned meeting for its report")
+        code, body = _common.http(
+            "POST", f"{_common.agent_door()}/internal/post-meeting/report/{int(row['id'])}",
+            {"X-User-Id": uid, "X-Internal-Secret": _common.require_internal_secret()},
+            {}, timeout=80,
+        )
+        if code != 200:
+            raise StepError(f"Meeting report service returned HTTP {code}",
+                            retryable=code >= 500 or code in (409, 429))
+        report = body.get("report") if isinstance(body, dict) else None
+        if not isinstance(report, str) or not report.strip():
+            raise StepError("Meeting report service returned no report")
+        return Done({"report": report, "group": str(ctx.refs.get("group") or "").strip(),
+                     "room_read": []})
 
-        IT WRITES INTO NO DESK (founder decision 22, 2026-09-02). Not the organiser's either. The
-        canonical home of the note is THE MEETING ROW AND ITS TRANSCRIPT STORE; every attendee's
-        desk — the organiser's included, nobody special — receives the artefact itself afterwards,
-        from `drop_to_attendees`. One meeting, one artefact, and the desks are where it lands, not
-        where it lives.
+    @reg.step(needs=("agent", "meetings"))
+    def email_meeting_followup(ctx: StepCtx):
+        from flows_steps.followup import send
+        return send(ctx)
 
-        COMPLETION IS THE REPLY, GROUNDED IN THE TRANSCRIPT. It used to be a new commit touching
-        `kg/entities/meeting/` in the organiser's repo (`ag.latest_meeting_note`, now deleted with
-        its baseline). With no desk write that commit never happens, so that detector would wait
-        fifteen minutes and fail every meeting — a silently never-completing step, which is worse
-        than a loud one. The turn's own reply IS the artefact: the kick already required the reply
-        to BE the report, because it was already being mailed verbatim.
-
-        THE GROUNDING GATE IS UNCHANGED and now matters more, since the reply is no longer
-        cross-checkable against a committed file: does the report share any six-word run with the
-        actual transcript? If not the agent is told exactly that, once, and asked again; if it
-        still cannot ground it the reaction FAILS LOUDLY rather than mailing a report nobody can
-        trace to the meeting.
-
-        THE ROOM. The turn may READ the desks of the people on the invite, prioritised by speaking
-        time and capped by `room_read_max`. Flows proposes; agent-api verifies, resolves each
-        address to a subject, and mounts only those who already have a desk — so nothing here
-        mounts anything and no account is ever minted for the room.
-
-        THE GROUP, and ONLY when there is one: the group desk is mounted read/write and this turn
-        MAINTAINS it — its people, decisions, open items, README — rather than appending an
-        artefact to it. A meeting with no group gets none of that.
-
-        Reads: refs.{uid,meeting_id,native,participants?,participant_names?,group?}
-        Effect: one agent turn · Result: {report, group, room_read}."""
-        uid = ctx.refs["uid"]
-        session = f"meet-{ctx.refs['meeting_id']}"
-        group = str(ctx.refs.get("group") or "").strip()
-        if "baseline" not in ctx.scratch:
-            # NO KICK, NO TURN. An unmounted behavior tree is a deployment fact (decision 43.12),
-            # so it lands as the same terminal `not_present` an absent agent domain does — never as
-            # an exception, and never as a turn dispatched with an empty instruction, which would
-            # bill a model to produce a report nobody could ground.
-            try:
-                kick = prompt_for(ctx, "process-meeting.md").format(
-                    mid=ctx.refs["meeting_id"], native=ctx.refs["native"],
-                    date=_meeting_stamp(ctx, uid))
-            except PromptAbsent as absent:
-                return NotPresent("behavior", detail=str(absent))
-            # WHOSE DESKS THIS TURN MAY READ — the invite, ordered by who spoke, capped. Computed
-            # here because flows is where the transcript is reachable, and sent as a PROPOSAL:
-            # agent-api verifies membership itself and mounts only people who already have a desk.
-            # A matcher that cannot match degrades to invite order, never to an empty room.
-            # THE FULL ORDERED LIST, uncut (R-B17). The cap used to be applied HERE, to
-            # ADDRESSES, and again in agent-api, to MOUNTED DESKS — and agent-api's own comment
-            # says why the second one is the right one: "capping before resolution would silently
-            # under-fill the room". Twelve addresses of which nine have no desk is a three-desk
-            # room. Flows orders; agent-api resolves, then cuts at `read_max`.
-            read_max = _room_read_max(ctx)
-            room_read = mt.room_order(uid, ctx.refs["meeting_id"],
-                                      ctx.refs.get("participants") or [],
-                                      ctx.refs.get("participant_names") or {})
-            ctx.scratch["room_read"] = room_read
-            # THE ROW ID, not refs["meeting_id"] — the room gate resolves a MEETINGS-DOMAIN ROW,
-            # and refs may still carry a native id from meeting_ref(). This is the same identity
-            # bug that mailed meeting 97's attendees a link with no token: `platform='unknown'`
-            # with an empty native is addressed by NO pair, and only the row id always exists.
-            row = mt.meeting_row(uid, ctx.refs.get("meeting_id"), ctx.refs.get("native"))
-            row_id = (row or {}).get("id") if isinstance(row, dict) else None
-            # THE ROW ID, STASHED. The grounding gate below needs the same identity this dispatch
-            # used, and it was reading `refs["meeting_id"]` instead — the ref, which may still be a
-            # native id (R-B19).
-            ctx.scratch["row_id"] = row_id
-            # The PROMPT names only as many desks as agent-api will actually mount: the wire
-            # carries the whole ordered room, the sentence must not claim more than the cap allows.
-            kick += _shared_report_rules(room_read[:read_max] if read_max else room_read, group)
-            ctx.scratch["baseline"] = ag.dispatch_turn(
-                uid, session, kick,
-                room={"meeting_id": row_id, "read": room_read,
-                      "names": ctx.refs.get("participant_names") or {},
-                      "read_max": read_max} if row_id else None)
-            # THE BEFORE WITNESS for the no-desk-write detector below. Taken here, once, rather
-            # than at the check: the regrounding branch re-dispatches, and a witness re-read after
-            # a stray commit would have already absorbed it.
-            ctx.scratch["head_before"] = ag.head_sha(uid)
-            return Wait(seconds=12)
-        reply = ag.collect_reply(uid, session, ctx.scratch["baseline"])
-        if reply is not None:
-            # THE GROUNDING GATE. Removing the transcript from the event made the report depend on
-            # the agent CHOOSING to fetch it, and measured on Haiku it chooses to about half the
-            # time — and when it does not, it writes a confident report anyway, from the title and
-            # the prompt. That is strictly worse than the truncated copy it replaced: a shallow
-            # report is visibly shallow, a fabricated one is not. An instruction is not a gate.
-            # THE RESOLVED ROW, not the ref (R-B19). The dispatch two screens up already resolved
-            # one and said why: `platform='unknown'` with an empty native is addressed by no pair,
-            # and only the row id always exists. This line kept using the ref, so on exactly those
-            # meetings the read 404'd — and an unreadable transcript used to answer `""`, which
-            # `grounded_in` treats as "no speech captured" and passes. The gate switched itself off
-            # precisely when the identity was broken, which is when it was the only thing left.
-            transcript = mt.transcript_text(uid, ctx.scratch.get("row_id")
-                                            or ctx.refs["meeting_id"])
-            if transcript is None:
-                raise StepError(
-                    "the meeting's transcript could not be read, so the report cannot be checked "
-                    f"against it (meeting row {ctx.scratch.get('row_id') or '?'}, ref "
-                    f"{ctx.refs['meeting_id']}). Refusing to mail an unverifiable report — this is "
-                    "a broken read, not a quiet meeting, and the two must not look the same.",
-                    retryable=True)
-            if not mt.grounded_in(reply, transcript):
-                if not ctx.scratch.get("regrounded"):
-                    ctx.scratch["regrounded"] = True
-                    ctx.scratch["baseline"] = ag.dispatch_turn(
-                        uid, session,
-                        "STOP. The report you just wrote contains nothing that appears in the "
-                        f"meeting. You did not read it. Call mcp__tina__meeting_transcript with "
-                        f"meeting_id={ctx.refs['meeting_id']} and tail=0 NOW, read every segment, "
-                        "then write it again from what it returns — quoting one verbatim "
-                        "sentence with its speaker. If you cannot call that tool, say so.")
-                    return Wait(seconds=12)
-                raise StepError(
-                    "the report is not grounded in the transcript — the agent did not read the "
-                    "meeting, twice. Refusing to mail a report that cannot be traced to it.",
-                    retryable=False)
-            # THE NO-DESK-WRITE DETECTOR (decision 22). This step's contract is that it writes
-            # into NO desk, and until now NOTHING CHECKED. On 2026-09-02 the turn committed a
-            # 639-line raw transcript dump to the root of the organiser's desk, this step returned
-            # Done, the minutes mail went out, and it surfaced only because somebody read the git
-            # log by hand. The old completion test — a commit touching `kg/entities/meeting/` —
-            # was deleted when the contract inverted, and its replacement watches the REPLY. So
-            # the single most likely way for this turn to misbehave became the one unobserved
-            # thing, which is the same defect shape as every other silent success here.
-            #
-            # ONLY the organiser's desk. Room desks are mounted read-only by agent-api; the GROUP
-            # desk is the one place this turn is meant to write. Neither belongs in this check.
-            #
-            # LOUD, and NOT retryable: a retry re-runs the turn and the stray commit is still
-            # there. Failing costs one meeting its mail and names the commit to remove. Passing
-            # silently costs every meeting the desk it was supposed to land on — which is what
-            # happened, four times over, before anyone noticed.
-            before = ctx.scratch.get("head_before") or ""
-            after = ag.head_sha(uid)
-            if before and after and before != after:
-                raise StepError(
-                    "this turn committed to the organiser's desk, and it must not (decision 22): "
-                    f"HEAD moved {before[:9]} -> {after[:9]}. Landed: "
-                    f"{'; '.join(ag.head_subjects(uid)) or '(unreadable)'}. The report IS the "
-                    "reply; desks are written by drop_to_attendees. Remove the stray commit, then "
-                    "check the LIVE kick (`_global/prompts/process-meeting.md` if an admin wrote "
-                    "one, else the baked `behavior/prompts/process-meeting.md`) for a "
-                    "file-writing instruction that came back.",
-                    retryable=False)
-            return Done({"report": reply[:6000], "group": group,
-                         "room_read": ctx.scratch.get("room_read", [])})
-        # Still running: the long wait stays, because a turn that is genuinely working is allowed
-        # to take its time. What is GONE is the "turn ended but wrote no note" branch — with the
-        # reply itself as the artefact, a finished turn and a finished artefact are the same
-        # event, and there is no longer a state where one exists without the other.
-        if ctx.clock_now - ctx.scratch.get("t0", ctx.scratch.setdefault("t0", ctx.clock_now)) > 900:
-            raise StepError("the agent turn never finished (no reply after 15min)", retryable=False)
-        return Wait(seconds=10)
-
-    def _shared_report_rules(room_read: list, group: str) -> str:
-        """What the post-meeting turn is told on top of the behavior-domain kick.
-
-    ⚠ IT ONCE CONTRADICTED THAT KICK, and the contradiction shipped. `behavior/prompts/
-        process-meeting.md` still said "write the meeting note at kg/entities/meeting/... update
-        the index... update README.md" — the desk writes decision 22 removed — while this block
-        said the opposite, and the model was left to resolve it. It resolved it by writing a raw
-        transcript dump to the organiser's desk root. That file has since been corrected (F54,
-        2026-09-02) and `process_meeting` now VERIFIES the desk did not move rather than trusting
-        either text.
-
-        The WRITE NO FILES clause below stays anyway, and deliberately: `prompt_for` reads a live
-        `_global/prompts/<name>` override before the baked file, so an admin can put the old
-        instruction back without touching this repo. Belt and braces, with the detector as the
-        actual guarantee. (Until R-B18 that override was asserted here and performed nowhere — the
-        sentence was true of the design and false of the code for as long as both existed.)
-        """
-        block = (
-            "\n\nTHE REPORT IS SHARED, AND IT IS YOUR REPLY. One report for this meeting, the "
-            "same words to everybody who was in the room — the organiser and every attendee read "
-            "the identical mail. Do not write a section per person, do not address anyone "
-            "individually, and do not write anything only one reader is meant to see.\n\n"
-            "WRITE NO FILES FOR THIS REPORT. Ignore any instruction above to save the note into a "
-            "workspace, to update an index, or to update a README: this report is not filed "
-            "anywhere by you. Its home is the meeting itself, and every person in the room gets a "
-            "copy on their own desk afterwards, which is not your job either. Your REPLY is the "
-            "artefact — it is mailed verbatim, so no preamble and no meta-commentary.\n\n"
-            "MEETING-RELEVANT FACTS ONLY, ATTRIBUTED — a person's desk informs the report, it is "
-            "never quoted into it. ")
-        if room_read:
-            block += (
-                "You have READ-ONLY access to the desks of the people who were in this meeting ("
-                + ", ".join(room_read) + "). Use them to understand what was said and to attribute "
-                "it correctly, and never copy a line, a note or a phrase out of one into this "
-                "report — a report that goes to everyone in the room is not a place where one "
-                "person's own notes can appear. ")
-        block += ("Everything in the report was said, decided, committed or asked IN THIS ROOM.\n\n"
-                  "Anything person-centric happens when they click the link in the mail, not here.")
-        if group:
-            block += (
-                f"\n\nTHIS MEETING BELONGS TO THE GROUP #{group}, AND ITS DESK IS YOURS TO "
-                "MAINTAIN. You have it mounted READ/WRITE — the one desk you write to in this "
-                "turn. Maintaining is not appending: bring the group's own pages up to date with "
-                "what this meeting changed.\n"
-                "  - its PEOPLE: who is in this group, what each of them is carrying now\n"
-                "  - its DECISIONS: add what was decided, and correct anything this meeting "
-                "overturned rather than leaving both\n"
-                "  - its OPEN ITEMS: close what closed, add what opened, re-own what moved\n"
-                "  - its README: the dashboard a member reads first — make it true as of today\n"
-                "Edit the pages that exist before creating new ones, and never copy one person's "
-                "desk into the group's.")
-        return block
-
-    # REACHES THE AGENT DOMAIN (PRD decision 40.7). Declared, not checked inside the body:
-    # the engine answers `not_present` for this step without entering it when a deployment
-    # does not run agents, so the absent door is never knocked on.
-    # ALSO REACHES MEETINGS — stamps the meeting's date and mints the link's refs (`_meeting_stamp` → `mt.meeting_start`).
     @reg.step(needs=("agent", "meetings"))
     def email_minutes(ctx: StepCtx):
         """Send the committed note VERBATIM in the body + the feedback ask + ONE link into the
@@ -1034,6 +849,9 @@ def build(reg: Registry, db) -> None:
         drive somebody else's agent.
 
         Reads: refs.{uid,organizer,title,meeting_id} · Effect: one notification."""
+        if "email_meeting_followup" in ctx.prior:
+            result = ctx.prior["email_meeting_followup"]
+            return Done({"link": result.get("owner_link"), "skipped": "follow-up already delivered"})
         if not setting(ctx.refs["uid"], "mail_minutes"):
             return Done({"skipped": "mail_minutes is off for this person"})
         # THE ONE ARTEFACT, off the receipt. It used to be re-read out of the organiser's desk
@@ -1174,7 +992,8 @@ def build(reg: Registry, db) -> None:
         import datetime
         stamp = _meeting_stamp(ctx, uid)
         try:
-            return datetime.datetime.strptime(stamp[:10], "%Y-%m-%d").strftime("%-d %B %Y")
+            date = datetime.datetime.strptime(stamp[:10], "%Y-%m-%d")
+            return f"{date.day} {date.strftime('%B %Y')}"
         except Exception:  # noqa: BLE001
             return stamp[:10]
 
@@ -1206,27 +1025,6 @@ def build(reg: Registry, db) -> None:
         if v is None:
             return True                 # UNSET IS ON. Spelled out because `str(None)` is the
         return str(v).strip().lower() not in ("off", "none", "false", "0")   # string "none".
-
-    def _room_read_max(ctx) -> int:
-        """`room_read_max` — DEFAULT 12. How many DESKS the post-meeting turn may have read-only
-        mounts for.
-
-        Founder, 2026-09-02: *"need to make sure agent will not die if it has 200 folders in it."*
-        The cap is on MOUNTS, not on people: everybody on the invite still gets the mail and the
-        artefact on their desk, because those are a write per person and cost nothing per head.
-        Reading is what does not scale.
-
-        It caps a room whose MEMBERSHIP is the invite — speaking time only decides who is at the
-        front of the list, so the cap is what turns "everyone in the room" into "the twelve most
-        likely to explain it". A non-numeric or non-positive value is the default, never an error:
-        zero would be indistinguishable from "unset" while meaning the opposite, so it is not a way
-        to say "mount nobody"; agent-api's own verification owns that."""
-        raw = (ctx.flow.param("room_read_max") if ctx.flow else None)
-        try:
-            n = int(raw)
-        except (TypeError, ValueError):
-            return 12
-        return n if n > 0 else 12
 
     def _attendees(ctx) -> list:
         """Inside-domain attendees, minus the organizer. PRD §16.2: outside the domain, NEVER —
@@ -1277,6 +1075,8 @@ def build(reg: Registry, db) -> None:
         to, carrying the exact link they were given, so the next step neither recomputes the
         fan-out nor mints a second share capability per attendee. It does mean the receipt holds
         those links, tokens included: see the step below."""
+        if "email_meeting_followup" in ctx.prior:
+            return Done(ctx.prior["email_meeting_followup"])
         on = _followup_on(ctx)
         who = _attendees(ctx)
         if not on or not who:
@@ -1599,6 +1399,9 @@ def build(reg: Registry, db) -> None:
 
         Prior: process_meeting{report}, email_attendees{drops}, email_minutes{link}
         Effect: N desk writes · Result: {dropped, to, failed, entity}."""
+        followup = ctx.prior.get("email_meeting_followup")
+        if followup:
+            ctx.refs.update({k: followup[k] for k in ("organizer", "participants", "title")})
         pm = ctx.prior.get("process_meeting") or {}
         report = _readable(pm.get("report") or "").strip()
         if not report:
@@ -1892,8 +1695,9 @@ def build(reg: Registry, db) -> None:
     # 3 were authored through the API against this same flow name and `match()` takes the newest
     # number wherever it came from; a code change that does not clear the highest DB version is
     # inert, which is exactly the defect `Registry.shadowing_versions` now warns about.
-    reg.flow(name="post_meeting", version=4, on=COMPLETED,
-             steps=[s["process_meeting"], s["email_minutes"],
+    # VERSION 5 sends recipient-bound summary/recording links; legacy mail steps only relay receipts.
+    reg.flow(name="post_meeting", version=5, on=COMPLETED,
+             steps=[s["process_meeting"], s["email_meeting_followup"], s["email_minutes"],
                     s["email_attendees"], s["drop_to_attendees"]])
     # THE QUEUE FLOW THIS FILE KEEPS (PRD decision 42.2). It is one step and produces no effect:
     # what it produces is a REACTION ROW in a state a person can be told about — pending while a

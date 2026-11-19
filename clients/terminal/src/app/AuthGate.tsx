@@ -126,12 +126,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         )}
 
         {providers.google && (
-          <button onClick={() => signIn("google", { callbackUrl: window.location.pathname + window.location.search })} style={oauthBtn}>
+          <button onClick={() => signIn("google", { callbackUrl: window.location.pathname + window.location.search + window.location.hash })} style={oauthBtn}>
             <GoogleMark /> Continue with Google
           </button>
         )}
         {providers.microsoft && (
-          <button onClick={() => signIn("microsoft", { callbackUrl: window.location.pathname + window.location.search })} style={oauthBtn}>
+          <button onClick={() => signIn("microsoft", { callbackUrl: window.location.pathname + window.location.search + window.location.hash })} style={oauthBtn}>
             <MicrosoftMark /> Continue with Microsoft
           </button>
         )}

@@ -27,6 +27,11 @@ import { loadInvocation, InvocationError, speakerStreamConfigFromEnv, type Invoc
 import type { Act, LifecycleEvent, TranscriptSegment } from './contracts.js';
 import { createOrchestrator } from './orchestrator.js';
 import { createHttpLifecycleSink } from './adapters/lifecycle-http.js';
+import { MeetingVoice, voiceApi, voiceAsrReady, nativeKwsWorker, nativeTurnWorker } from './meeting-voice.js';
+import { NoiseSuppressor, livekitNoiseFactory } from './noise-suppression.js';
+import { LiveKitStt } from './livekit-stt.js';
+import { livekitVadFactory } from './vad-shadow.js';
+import { createTtsPlayback } from './tts-playback.js';
 import { createSpeechHandler, createSpeechReporter } from './speech-status.js';
 import { createRedisTranscriptSink, redisClientFrom } from './adapters/transcript-redis.js';
 import { createRedisActsSource, redisActsClientFrom } from './adapters/acts-redis.js';
@@ -246,9 +251,29 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
   try {
     session = await launchBrowser(inv, { signal: restoreAbort.signal });  // L4 (O6/VM)
     join = createBrowserJoinDriver(session.page, inv);
+    const api = env.TINA_VOICE_URL && env.TINA_VOICE_TOKEN ? voiceApi(env.TINA_VOICE_URL, env.TINA_VOICE_TOKEN) : undefined;
+    const speak = createSpeakController(session.page, inv, log => createTtsPlayback(log,
+      {meetingId:inv.meeting_id,service:text=>api?.speechService?.(text),profile:()=>api?.speechProfile?.()}));
+    const reporter = createSpeechReporter(inv);
+    const remoteNoise=env.TINA_AUDIO_BRIDGE_URL&&env.TINA_AUDIO_BRIDGE_TOKEN
+      ?new NoiseSuppressor(livekitNoiseFactory(env.TINA_AUDIO_BRIDGE_URL,env.TINA_AUDIO_BRIDGE_TOKEN)):undefined;
+    remoteNoise?.setEnabled(true);
+    const sttStream=env.TINA_AUDIO_BRIDGE_URL&&env.TINA_AUDIO_BRIDGE_TOKEN
+      ?new LiveKitStt(env.TINA_AUDIO_BRIDGE_URL,env.TINA_AUDIO_BRIDGE_TOKEN):undefined;
+    const transcribe=createTranscribe(inv,{windowRequest:sttStream?.requestWindow});
+    const voice = inv.platform === 'google_meet' && inv.voiceAgentEnabled && env.TINA_VOICE_URL && env.TINA_VOICE_TOKEN
+      ? new MeetingVoice(api!, speak, reporter, undefined, undefined, () => voiceAsrReady(inv),
+          (channel, endMs) => botPipeline?.requestEndpoint?.(channel, endMs), nativeKwsWorker,
+          env.TINA_VOICE_TURN_SHADOW==='1'?nativeTurnWorker:undefined,remoteNoise,
+          env.TINA_LIVEKIT_VAD_SHADOW==='1'&&env.TINA_AUDIO_BRIDGE_URL&&env.TINA_AUDIO_BRIDGE_TOKEN
+            ?livekitVadFactory(env.TINA_AUDIO_BRIDGE_URL,env.TINA_AUDIO_BRIDGE_TOKEN):undefined)
+      : undefined;
     botPipeline = createBotPipeline(inv, transcript, {
+      onHypothesis: voice ? value => voice.hypothesis(value) : undefined,
+      onAsrDiagnostic: voice ? event => voice.asrDiagnostic(event) : undefined,
       // When recording, tee every STT round-trip to <session>.stt.jsonl (the capture/STT/assembly bisect).
-      transcribe: signalRecorder ? wrapTranscribeWithTap(createTranscribe(inv), signalRecorder.path) : undefined,
+      transcribe: signalRecorder ? wrapTranscribeWithTap(transcribe, signalRecorder.path) : transcribe,
+      stream:sttStream,
       config: speakerStreamConfig,
       // Every STT fault is counted and carried out on the terminal lifecycle event (see
       // sttFaults). Logging it here as well keeps the raw line for anyone tailing the container.
@@ -299,9 +324,13 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
     // each failure surfaces LOUD via onFault (console with a full-fidelity serr(e)) instead of
     // throwing into the orchestrator's leave-on-fail backstop (which would hang the bot up).
     pipeline = createLivePipeline({
-      startCapture: () => startCaptureBridge(sess.page, inv, bp, signalRecorder?.sink, publishChat, remoteAudioActivity),   // on the live meeting page
+      startCapture: () => startCaptureBridge(sess.page, inv, bp, signalRecorder?.sink, publishChat, remoteAudioActivity,
+        voice ? (channel, pcm, stamp, participant, startSample) => voice.feed(channel, pcm, stamp, participant, startSample) : undefined,
+        remoteNoise ? (frame,deliver)=>remoteNoise.feed(frame,deliver)
+          : voice ? (frame,deliver)=>voice.processAudio(frame,deliver) : undefined),   // on the live meeting page
       startRecording: rec ? () => startRecording(sess.page, inv, rec) : undefined,          // MediaRecorder → recording.v1
-      engine: bp,
+      engine: voice || remoteNoise ? {start:()=>bp.start(),stop:async()=>{
+        try{if(voice)await voice.stop();else await remoteNoise?.close();}finally{await bp.stop();}}} : bp,
       onFault: (stage, e) => {
         liveFaults.record(stage);
         console.error(`[bot] live-pipeline: ${stage} failed (non-fatal, bot stays seated): ${serr(e)}`);
@@ -320,8 +349,21 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
       },
     });
     // Voice: tee acts so `speak`/`speak_stop` reach the SpeakController (gated on voiceAgentEnabled).
-    const speak = createSpeakController(session.page, inv);
-    acts = teeActs(liveActs, createSpeechHandler(speak, createSpeechReporter(inv)));
+    const speechHandler = createSpeechHandler(speak, reporter);
+    acts = teeActs(liveActs, act => voice ? voice.external(act, speechHandler) : speechHandler(act));
+    const transcriptPipeline = pipeline;
+    pipeline = {
+      async start() {
+        await transcriptPipeline.start();
+        // Voice readiness is independent; the transcript starts before any voice preflight.
+        void voice?.start().catch(() => console.error('[bot] meeting-voice startup failed'));
+      },
+      async stop() {
+        voice?.disarm();
+        try { await speak.stop(); }
+        finally { await transcriptPipeline.stop(); }
+      },
+    };
   } catch (e) {
     console.error(`[bot] browser launch/capture wiring failed — falling back to clean terminal failed: ${String(e)}`);
     join = noBrowserJoinDriver(String(e));

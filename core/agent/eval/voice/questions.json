@@ -1,0 +1,384 @@
+{
+  "kind": "synthetic-regression-not-real-meeting-benchmark",
+  "segments": [
+    {
+      "segment_id": "demo",
+      "text": "Lan phụ trách bản demo. Hạn bàn giao đã chốt là thứ Sáu.",
+      "offset_ms": -600000
+    },
+    {
+      "segment_id": "budget",
+      "text": "Ngân sách demo đã được duyệt là 100 triệu đồng.",
+      "offset_ms": -599000
+    },
+    {
+      "segment_id": "proposal",
+      "text": "Minh đề xuất chuyển hạn production sang thứ Hai. Nhóm chưa chốt thay đổi này.",
+      "offset_ms": -598000
+    },
+    {
+      "segment_id": "testing",
+      "text": "Huy phụ trách kiểm thử bản production.",
+      "offset_ms": -597000
+    },
+    {
+      "segment_id": "correction",
+      "text": "Lan nói: hạn demo thứ Sáu vẫn giữ nguyên. Không đổi sang thứ Hai.",
+      "offset_ms": -596000
+    },
+    {
+      "segment_id": "cancel",
+      "text": "Nhóm đã hủy kế hoạch chạy quảng cáo trên TikTok.",
+      "offset_ms": -595000
+    },
+    {
+      "segment_id": "infra",
+      "text": "Môi trường staging dùng PostgreSQL 17. Production dùng PostgreSQL 16.",
+      "offset_ms": -594000
+    },
+    {
+      "segment_id": "next",
+      "text": "Buổi họp tiếp theo đã chốt vào 9 giờ sáng thứ Ba.",
+      "offset_ms": -593000
+    },
+    {
+      "segment_id": "owner",
+      "text": "Người phê duyệt phát hành là Mai. Huy chỉ thực hiện kiểm thử.",
+      "offset_ms": -592000
+    },
+    {
+      "segment_id": "risk",
+      "text": "Rủi ro còn mở là lỗi mất kết nối khi thanh toán. Chưa có ngày sửa xong.",
+      "offset_ms": -591000
+    }
+  ],
+  "documents": {
+    "wiki/shared.md": "Dự án có mã Aster. SLA được chốt là 99.9 phần trăm."
+  },
+  "cases": [
+    {
+      "id": 1,
+      "question": "Ai phụ trách demo?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Lan"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 2,
+      "question": "Demo do ai làm?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Lan"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 3,
+      "question": "Hạn demo là khi nào?",
+      "mode": "meeting",
+      "expected_terms": [
+        "thứ Sáu"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 4,
+      "question": "Demo đổi sang thứ Hai rồi à?",
+      "mode": "meeting",
+      "expected_terms": [
+        "thứ Sáu"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 5,
+      "question": "Ngân sách demo đã duyệt bao nhiêu?",
+      "mode": "meeting",
+      "expected_terms": [
+        "100"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 6,
+      "question": "Kinh phí demo bao nhiêu?",
+      "mode": "meeting",
+      "expected_terms": [
+        "100"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 7,
+      "question": "Minh đã chốt đổi hạn production chưa?",
+      "mode": "meeting",
+      "expected_terms": [
+        "chưa"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 8,
+      "question": "Hạn production thứ Hai là đề xuất hay quyết định?",
+      "mode": "meeting",
+      "expected_terms": [
+        "đề xuất"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 9,
+      "question": "Ai kiểm thử production?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Huy"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 10,
+      "question": "Ai phê duyệt phát hành?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Mai"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 11,
+      "question": "Huy phê duyệt phát hành phải không?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Mai"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 12,
+      "question": "Có chạy quảng cáo TikTok không?",
+      "mode": "meeting",
+      "expected_terms": [
+        "hủy"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 13,
+      "question": "Staging dùng PostgreSQL phiên bản nào?",
+      "mode": "meeting",
+      "expected_terms": [
+        "17"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 14,
+      "question": "Production dùng PostgreSQL phiên bản nào?",
+      "mode": "meeting",
+      "expected_terms": [
+        "16"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 15,
+      "question": "Cuộc họp tiếp theo mấy giờ?",
+      "mode": "meeting",
+      "expected_terms": [
+        "9"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 16,
+      "question": "Cuộc họp tiếp theo thứ mấy?",
+      "mode": "meeting",
+      "expected_terms": [
+        "thứ Ba"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 17,
+      "question": "Rủi ro thanh toán là gì?",
+      "mode": "meeting",
+      "expected_terms": [
+        "mất kết nối"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 18,
+      "question": "Lỗi thanh toán đã có ngày sửa xong chưa?",
+      "mode": "meeting",
+      "expected_terms": [
+        "chưa"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 19,
+      "question": "SLA trong tài liệu chia sẻ là bao nhiêu?",
+      "mode": "meeting",
+      "expected_terms": [
+        "99.9"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 20,
+      "question": "Mã dự án trong tài liệu là gì?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Aster"
+      ],
+      "expect_evidence": true
+    },
+    {
+      "id": 21,
+      "question": "Ai làm thiết kế logo?",
+      "mode": "meeting",
+      "expected_terms": [],
+      "expect_evidence": false
+    },
+    {
+      "id": 22,
+      "question": "Mật khẩu production là gì?",
+      "mode": "meeting",
+      "expected_terms": [],
+      "expect_evidence": false
+    },
+    {
+      "id": 23,
+      "question": "Ngân sách quý sau bao nhiêu?",
+      "mode": "meeting",
+      "expected_terms": [],
+      "expect_evidence": false
+    },
+    {
+      "id": 24,
+      "question": "Người phụ trách đã hứa ngày nào?",
+      "mode": "meeting",
+      "expected_terms": [],
+      "expect_evidence": false
+    },
+    {
+      "id": 25,
+      "question": "ASR là gì?",
+      "mode": "general",
+      "expected_terms": []
+    },
+    {
+      "id": 26,
+      "question": "What is VAD?",
+      "mode": "general",
+      "expected_terms": []
+    },
+    {
+      "id": 27,
+      "question": "Kiến thức chung: giải thích KWS",
+      "mode": "general",
+      "expected_terms": []
+    },
+    {
+      "id": 28,
+      "question": "Tìm trên web về Redis là gì",
+      "mode": "web",
+      "expected_terms": []
+    },
+    {
+      "id": 29,
+      "question": "Search the web for PostgreSQL documentation",
+      "mode": "web",
+      "expected_terms": []
+    },
+    {
+      "id": 30,
+      "question": "Tra cứu web về HTTP status 503",
+      "mode": "web",
+      "expected_terms": []
+    },
+    {
+      "id": 31,
+      "question": "Ai phụ trách demo và bàn giao hôm nào?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Lan",
+        "thứ Sáu"
+      ],
+      "expect_evidence": true,
+      "review_focus": "Direct answer; combine related facts without report-style preamble."
+    },
+    {
+      "id": 32,
+      "question": "Vậy còn hạn bàn giao?",
+      "mode": "meeting",
+      "expected_terms": [
+        "thứ Sáu"
+      ],
+      "expect_evidence": true,
+      "review_focus": "Answer only the follow-up detail; keep the same demo topic.",
+      "history": [
+        {
+          "question": "Ai phụ trách demo?",
+          "answer": "Lan phụ trách demo.",
+          "segment_ids": [
+            "demo"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "question": "Demo chuyển sang thứ Hai rồi đúng không?",
+      "mode": "meeting",
+      "expected_terms": [
+        "thứ Sáu"
+      ],
+      "expect_evidence": true,
+      "review_focus": "Correct the premise gently; preserve the negation."
+    },
+    {
+      "id": 34,
+      "question": "Ai phụ trách demo và số điện thoại của người đó là gì?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Lan"
+      ],
+      "expect_evidence": true,
+      "review_focus": "Answer the known owner; do not invent a phone number or claim nobody shared it."
+    },
+    {
+      "id": 35,
+      "question": "Hạn nào đã chốt vậy?",
+      "mode": "meeting",
+      "expected_terms": [
+        "thứ Sáu"
+      ],
+      "expect_evidence": true,
+      "review_focus": "Resolve the short follow-up from heard history, without inventing a new topic.",
+      "history": [
+        {
+          "question": "Ai phụ trách demo?",
+          "answer": "Lan phụ trách demo.",
+          "segment_ids": [
+            "demo"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "question": "Bạn nhắc lại phần phê duyệt và kiểm thử giúp tôi nhé.",
+      "mode": "meeting",
+      "expected_terms": [
+        "Mai",
+        "Huy"
+      ],
+      "expect_evidence": true,
+      "review_focus": "Distinguish approval from testing in ordinary spoken Vietnamese."
+    }
+  ]
+}

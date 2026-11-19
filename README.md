@@ -20,6 +20,10 @@ Run the complete system on infrastructure you control. TINA has no hosted API or
 
 ## Transcript translation
 
+After a meeting ends and its summary is ready, the optional automation stack can email each known
+attendee a Vietnamese thank-you message with links to the saved summary and recording. Access is
+bound to the recipient's signed-in email. See [post-meeting email setup](core/flows/README.md#email-after-a-meeting).
+
 Meeting Bot transcripts in Terminal and the Chrome extension share a language dropdown:
 **Tiếng Việt**, **English**, and **Song ngữ** (the default). English/bilingual views use the
 saved **Meeting model** in Settings → Models. Provider credentials remain on the server.
@@ -66,7 +70,7 @@ the repository root. It must contain the `DOTENV_PRIVATE_KEY` matching `deploy/c
 file is ignored by Git and must never be committed or pasted into documentation, shell commands, or
 chat. A newly generated key will not decrypt this repository's config.
 
-Optional speech/TTS has a separate encrypted env and private key; see
+Optional speech/TTS has its own encrypted env, protected by that same root key; see
 [`deploy/tts/README.md`](deploy/tts/README.md#setup-on-another-machine-ubuntuwsl-or-linux).
 
 ### 4. Preview and start TINA

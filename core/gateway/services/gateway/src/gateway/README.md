@@ -19,3 +19,5 @@ The production edge logic, injectable. Modules:
 
 Import direction is one-way: conformance imports this package; this package imports no
 conformance code.
+
+Voice evidence source reads forward through the owner-authenticated meetings edge at GET /meetings/{meeting_id}/voice-assistant/sources/{request_id}; the bot/tx scope declaration and URL-escaped request identifier stay aligned with the core route.

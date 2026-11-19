@@ -44,29 +44,33 @@ function renderList() {
 beforeEach(() => {
   sessionStorage.clear();
   vi.mocked(api.readActiveSet).mockResolvedValue(activeSet);
-  vi.mocked(api.listWorkspaceTree).mockResolvedValue(["README.md", "kg/index.md"]);
+  vi.mocked(api.listWorkspaceTree).mockResolvedValue(["README.md", "CLAUDE.md", "agents/README.md", "kg/index.md"]);
   vi.mocked(api.readAttachedWorkspaces).mockResolvedValue(view);
   vi.mocked(api.listSharedMemberships).mockResolvedValue([]);
   vi.mocked(api.readWorkspaceGit).mockResolvedValue({ branch: "", changes: [], commits: [] } as Awaited<ReturnType<typeof api.readWorkspaceGit>>);
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-describe("FilesList — workspaces-first Knowledge rail", () => {
-  it("leads with the WORKSPACES section, open by default", async () => {
+describe("FilesList — workspace-first Knowledge rail", () => {
+  it("shows the active workspace first and opens the picker on request", async () => {
     renderList();
-    expect(screen.getByText("workspaces")).toBeTruthy();
-    await screen.findByText("leo");           // the workspace row is visible without any toggle
-    expect(screen.getByText(/Attach repo…/)).toBeTruthy();
+    const picker = await screen.findByRole("button", { name: /Workspace: leo, Mounted/i });
+    expect(picker).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Manage leo" })).toBeNull();
+    fireEvent.click(picker);
+    await screen.findByRole("button", { name: "Manage leo" });
+    expect(screen.getByRole("button", { name: "Attach repo" })).toBeTruthy();
   });
 
-  it("keeps FILES collapsed by default — Find-file visible, tree hidden — and expands on the caret", async () => {
+  it("defaults to Knowledge files plus the workspace README", async () => {
     renderList();
-    expect(screen.getByPlaceholderText("Find file…")).toBeTruthy();
-    await screen.findByText(/files · leo/);   // header carries the home workspace label
-    expect(screen.queryByText("kg")).toBeNull();          // tree hidden while collapsed
-    fireEvent.click(screen.getByText(/files · leo/));
-    await screen.findByText("kg");                        // caret expands the home tree
-    expect(sessionStorage.getItem("ws.files.open")).toBe("1");
+    expect(screen.getByRole("textbox", { name: "Find files" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Files" })).toBeTruthy();
+    await screen.findByText("kg");
+    expect(screen.getByText("README.md")).toBeTruthy();
+    expect(screen.queryByText("CLAUDE.md")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View options" }));
+    expect((screen.getByLabelText("Show only Knowledge files") as HTMLInputElement).checked).toBe(true);
   });
 
   it("lands on the home workspace's README as a slug-addressed preview", async () => {
@@ -86,7 +90,7 @@ describe("FilesList — workspaces-first Knowledge rail", () => {
         <FilesList />
       </ServicesProvider>,
     );
-    await screen.findByText(/files · leo/);
+    await screen.findByRole("button", { name: "Files" });
     expect(layout.openPreview).not.toHaveBeenCalled();
   });
 });

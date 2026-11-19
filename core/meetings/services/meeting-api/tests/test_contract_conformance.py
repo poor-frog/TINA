@@ -38,6 +38,10 @@ from meeting_api import create_app
 # responsibility — they forward to admin-api (/admin), agent-api (/api/*), the mcp service (/mcp), or
 # are gateway-local (/auth/me, /b/{token}, /public/transcripts) — so they are NOT meeting-api's to serve.
 API_V1_MEETING_SURFACE: set[tuple[str, str]] = {
+    ("GET", "/bots/voice/services"),
+    ("POST", "/bots/voice/preview"),
+    ("GET", "/meetings/{meeting_id}/voice-assistant"),
+    ("PUT", "/meetings/{meeting_id}/voice-assistant"),
     ('GET', '/transcripts/by-id/{meeting_id}/processed-notes'),
     ('POST', '/transcripts/by-id/{meeting_id}/processed-notes'),
     ('POST', '/transcripts/by-id/{meeting_id}/processed-notes/validate'),

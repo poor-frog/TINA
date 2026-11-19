@@ -1,0 +1,34 @@
+# Merge WITH deploy/compose/docker-compose.yml. Always run `up --no-build`.
+# The original source-defined build: keys are inherited, but ignored with --no-build.
+services:
+  agent-reach:
+    image: ghcr.io/poor-frog/tina-agent-reach:demo
+  admin-api:
+    image: ghcr.io/poor-frog/tina-admin-api:demo
+    # The original compose points to host.docker.internal:18002; use private Speech IP instead.
+    environment:
+      TINA_GIPFORMER_URL: ${TRANSCRIPTION_SERVICE_URL:?Set private Speech IP in core-env}
+  runtime:
+    image: ghcr.io/poor-frog/tina-runtime:demo
+  agent-worker:
+    image: ghcr.io/poor-frog/tina-agent-worker:demo
+  agent-api:
+    image: ghcr.io/poor-frog/tina-agent-api:demo
+  meeting-api:
+    image: ghcr.io/poor-frog/tina-meeting-api:demo
+  storage-init:
+    image: ghcr.io/poor-frog/tina-meeting-api:demo
+  gateway:
+    image: ghcr.io/poor-frog/tina-gateway:demo
+  flows-api:
+    image: ghcr.io/poor-frog/tina-flows:demo
+  flows-worker:
+    image: ghcr.io/poor-frog/tina-flows:demo
+  flows-mailbox:
+    image: ghcr.io/poor-frog/tina-flows:demo
+  mcp:
+    image: ghcr.io/poor-frog/tina-mcp:demo
+  terminal:
+    image: ghcr.io/poor-frog/tina-terminal:demo
+  dashboard:
+    image: ghcr.io/poor-frog/tina-dashboard:demo

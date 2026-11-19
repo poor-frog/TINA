@@ -1,0 +1,14 @@
+{
+  "operation": "plan",
+  "question": "đồng ý",
+  "revision": 1,
+  "task_state": {
+    "title": "demo",
+    "assignee": "Lan",
+    "due": "",
+    "utterances": [
+      "Tạo task demo giao Lan"
+    ],
+    "save_uncertain": true
+  }
+}

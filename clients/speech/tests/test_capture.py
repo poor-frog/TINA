@@ -8,9 +8,9 @@ import wave
 import numpy as np
 import pytest
 
-from tina_speech.capture import QuestionCapture
+from tina_meeting_voice.capture import QuestionCapture
 from tina_speech.session import SpeechSession
-from tina_speech.wakeword import WakeDetector, WakeEvent
+from tina_meeting_voice.wakeword import WakeDetector, WakeEvent
 
 VOICE = np.ones(320, dtype=np.float32) * .2
 QUIET = np.zeros(320, dtype=np.float32)
@@ -55,13 +55,36 @@ def test_capture_no_speech_and_duration_are_bounded():
 
 def test_question_entirely_in_pre_roll_is_not_lost_when_kws_reports_late():
     capture = QuestionCapture(event(), Vad())
+    for _ in range(59): assert capture.feed(QUIET) is None
+    assert capture.feed(QUIET) is not None
+
+
+def test_question_already_endpointed_in_pre_roll_waits_for_possible_continuation():
+    vad = SimpleNamespace(feed=Mock(side_effect=[(False, True)] + [(False, False)] * 60))
+    capture = QuestionCapture(event(), vad)
+    for _ in range(59): assert capture.feed(QUIET) is None
+    assert capture.feed(QUIET) is not None
+
+
+def test_pause_after_wake_does_not_upload_the_wake_without_its_question():
+    vad = SimpleNamespace(feed=Mock(side_effect=[(False, True)] + [(False, False)] * 10
+        + [(True, False)] * 20 + [(False, False)] * 39 + [(False, True)]))
+    capture = QuestionCapture(event(), vad)
+    for _ in range(10): assert capture.feed(QUIET) is None
+    for _ in range(20): assert capture.feed(VOICE) is None
     for _ in range(39): assert capture.feed(QUIET) is None
     assert capture.feed(QUIET) is not None
 
 
-def test_question_already_endpointed_in_pre_roll_completes_on_next_block():
-    vad = SimpleNamespace(feed=Mock(side_effect=[(False, True), (False, False)]))
-    assert QuestionCapture(event(), vad).feed(QUIET) is not None
+def test_wake_endpoint_just_after_detection_waits_for_the_question():
+    vad = SimpleNamespace(feed=Mock(side_effect=[(True, False), (False, True)]
+        + [(False, False)] * 9 + [(True, False)] * 20
+        + [(False, False)] * 39 + [(False, True)]))
+    capture = QuestionCapture(event(), vad)
+    for _ in range(10): assert capture.feed(QUIET) is None
+    for _ in range(20): assert capture.feed(VOICE) is None
+    for _ in range(39): assert capture.feed(QUIET) is None
+    assert capture.feed(QUIET) is not None
 
 
 class Client:

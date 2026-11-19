@@ -217,6 +217,13 @@ class DockerBackend:
                 })
             else:
                 binds.append(f"{b.source}:{b.target}:ro" if b.read_only else f"{b.source}:{b.target}")
+        if workload_id.startswith('mtg-') and env.get('TINA_VOICE_URL'):
+            source = os.environ.get('TINA_MEETING_VOICE_MODELS_VOLUME', '')
+            if not source:
+                raise ValueError('Meeting voice model volume is not configured')
+            # The operator selects the cache; a workload cannot choose a host path/volume.
+            api_mounts.append({'Type': 'volume', 'Source': source, 'Target': '/models/meeting-voice',
+                               'ReadOnly': True, 'VolumeOptions': {'NoCopy': True}})
         if api_mounts:
             host_config["Mounts"] = api_mounts
 

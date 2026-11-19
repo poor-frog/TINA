@@ -185,6 +185,35 @@ class InMemoryMeetingRepo:
         self._meetings[mid] = row
         return dict(row)
 
+    async def cancel_join_retries(self, user_id, platform, native_meeting_id) -> list[dict]:
+        cancelled = []
+        for row in self._meetings.values():
+            retry = (row.get("data") or {}).get("auto_retry") or {}
+            if (row["user_id"] == user_id and row["platform"] == platform
+                    and row["native_meeting_id"] == native_meeting_id
+                    and row["status"] == "failed" and retry.get("state") == "scheduled"):
+                retry = dict(retry, state="cancelled")
+                retry.pop("next_at", None)
+                row["data"].update(stop_requested=True, auto_retry=retry)
+                cancelled.append(dict(row))
+        return cancelled
+
+    async def list_due_join_retries(self, *, now, limit=50) -> list:
+        from datetime import datetime
+
+        due = []
+        for meeting in self._meetings.values():
+            retry = (meeting.get("data") or {}).get("auto_retry") or {}
+            if meeting.get("status") != "failed" or retry.get("state") != "scheduled":
+                continue
+            try:
+                next_at = datetime.fromisoformat(retry["next_at"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if next_at <= now:
+                due.append(dict(meeting))
+        return due[:limit]
+
     async def list_scheduled_meetings(self) -> list:
         return [
             dict(m) for m in self._meetings.values()
@@ -213,6 +242,22 @@ class InMemoryMeetingRepo:
             else:
                 m["data"][k] = v
 
+    async def save_voice_reply(self, meeting_id, session_uid, reply):
+        from ..lifecycle.voice_replies import merge_reply
+        row = self._meetings[meeting_id]
+        row['data'] = merge_reply(row.get('data'), session_uid, reply)
+
+    async def set_voice_policy(self, meeting_id, user_id, expected_revision, policy):
+        row = self._meetings.get(meeting_id)
+        if row is None or row['user_id'] != user_id:
+            raise ValueError('Meeting unavailable')
+        current = (row.get('data') or {}).get('voice_assistant') or {}
+        if current.get('revision', 0) != expected_revision:
+            raise ValueError('Policy changed')
+        saved = dict(policy, revision=expected_revision + 1)
+        row.setdefault('data', {})['voice_assistant'] = saved
+        return saved
+
     async def get_meeting(self, meeting_id) -> Optional[dict]:
         row = self._meetings.get(meeting_id)
         # A COPY, like every other read: the spawn fence must observe committed row state, never
@@ -231,6 +276,12 @@ class InMemoryMeetingRepo:
         )
         if row.get("status") not in ("completed", "failed") or deletion_pending:
             raise DuplicateMeeting("Terminal meeting is no longer reusable")
+        next_retry = (data_patch or {}).get("auto_retry")
+        if next_retry is not None:
+            current_retry = data.get("auto_retry") or {}
+            if (row.get("status") != "failed" or current_retry.get("state") != "scheduled"
+                    or current_retry.get("attempt") != next_retry.get("attempt", 0) - 1):
+                raise DuplicateMeeting("Automatic retry was cancelled or superseded")
         row["status"] = "requested"
         row["end_time"] = None
         row["bot_container_id"] = None
@@ -317,6 +368,7 @@ class InMemoryMeetingRepo:
         row = self._meetings.get(sess["meeting_id"])
         if row is None:
             return
+        previous_status = row["status"]
         row["status"] = status
         if completion_reason is not None:
             row["data"]["completion_reason"] = completion_reason
@@ -324,6 +376,8 @@ class InMemoryMeetingRepo:
             row["data"]["failure_stage"] = failure_stage
         for k, v in (data or {}).items():
             row["data"][k] = v
+        from ..lifecycle.retry import persist_retry_transition
+        persist_retry_transition(row["data"], previous_status, status)
         return dict(row)
 
     async def count_active_bots(self, *, user_id, exclude_meeting_id=None) -> int:

@@ -194,8 +194,23 @@ def test_04_transcript_dataflow(stack):
     try:
         ws.send_text(json.dumps({"action": "subscribe",
                                  "meetings": [{"platform": platform, "native_id": native_id}]}))
-        ack = json.loads(ws.recv_text(timeout=10))
-        assert ack.get("type") == "subscribed" and ack.get("meetings"), f"subscribe ack: {ack}"
+        # The gateway auto-subscribes user-scoped meeting events at connect, so an existing
+        # memory/status revision can arrive before this per-meeting subscribe acknowledgement.
+        ack = None
+        deadline = time.monotonic() + 10
+        while ack is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                message = json.loads(ws.recv_text(timeout=min(1, remaining)))
+            except TimeoutError:
+                continue
+            if message.get("type") == "subscribed":
+                ack = message
+            elif message.get("type") == "error":
+                raise AssertionError(f"subscribe failed: {message}")
+        assert ack is not None and ack.get("type") == "subscribed" and ack.get("meetings"), f"subscribe ack: {ack}"
 
         # XADD a golden segment to the REAL transcription_segments stream (the bot's producer path).
         seg_id = f"seg-{uuid.uuid4().hex[:8]}"

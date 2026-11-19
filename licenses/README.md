@@ -17,3 +17,5 @@ SBOM ([`scripts/sbom.mjs`](../scripts/sbom.mjs)).
 **Adding an artifact:** drop its verbatim upstream licence here, `COPY` it next to the
 artifact in the Dockerfile(s) that bake it, add a row to `THIRD_PARTY_LICENSES.md`, and (for
 a fully-specified licence) register it in `scripts/sbom.mjs`.
+
+`multilingual-e5-small.LICENSE.txt` covers the MIT local voice retrieval model baked into Agent API.

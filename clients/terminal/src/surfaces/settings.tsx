@@ -16,11 +16,14 @@ import { ModelPicker } from "./modelPicker";
 import { BEDROCK_REGIONS, fallbackChoicesForMode } from "./modelCatalog";
 import { AsrStatusPanel } from "./asrStatus";
 import { TranscriptionPicker } from "./transcriptionPicker";
+import { VoiceSettings } from './voiceSettings';
 import transcriptionStyles from "./transcriptionPicker.module.css";
+import navigationStyles from "./settingsNavigation.module.css";
+import modelStyles from "./agentModelSettings.module.css";
 import { apiModelProvider, canSaveModelPrefs, getModelPrefs, setModelPrefs, getTranscriptionPrefs, setTranscriptionPrefs, getGlobalSetting, setGlobalSetting, testModels, testTranscription, type ConfigTestResult } from "./settingsApi";
 import { getAsrRuntime, setAsrRuntime, type AsrRuntime } from "./settingsApi";
 
-type SectionId = "calendar" | "models" | "asr" | "tokens" | "github" | "account";
+type SectionId = "calendar" | "models" | "voice" | "asr" | "tokens" | "github" | "account";
 type ModelSettingsScope = "agent" | "transcription" | "global";
 // shortcut: recognize legacy custom URLs; managed VieGem selections resolve their endpoint on the server.
 const TRANSCRIPTION_PRESETS: Record<string, { url: string; label: string }> = {
@@ -50,6 +53,7 @@ function transcriptionDisplay(value: { backend?: string | null; url?: string | n
 const SECTIONS: Array<{ id: SectionId; label: string }> = [
   { id: "calendar", label: "Calendar" },
   { id: "models", label: "Models" },
+  { id: "voice", label: "Voice assistant" },
   { id: "asr", label: "ASR status" },
   { id: "tokens", label: "API tokens" },
   { id: "github", label: "GitHub" },
@@ -57,13 +61,17 @@ const SECTIONS: Array<{ id: SectionId; label: string }> = [
 ];
 const SECTION_GROUPS: Array<{ label: string; ids: SectionId[] }> = [
   { label: "Workspace", ids: ["calendar"] },
-  { label: "AI & capture", ids: ["models", "asr"] },
+  { label: "AI & capture", ids: ["models", "voice", "asr"] },
   { label: "Connections", ids: ["tokens", "github"] },
   { label: "Profile", ids: ["account"] },
 ];
+const SECTION_ICONS: Record<SectionId, string> = {
+  calendar: "cal", models: "gear", voice: "mic", asr: "radio", tokens: "key", github: "github", account: "user",
+};
 const SECTION_SEARCH_TERMS: Record<SectionId, string> = {
   calendar: "calendar meeting schedule",
   models: "models agent transcription speech to text backend provider stt",
+  voice: 'voice wake word wakeword kws tts tina',
   asr: "asr recognition speech health backend",
   tokens: "api tokens credentials key secret",
   github: "github repositories connection",
@@ -72,6 +80,7 @@ const SECTION_SEARCH_TERMS: Record<SectionId, string> = {
 const SECTION_DESCRIPTIONS: Record<SectionId, string> = {
   calendar: "Manage the calendars connected to TINA.",
   models: "Choose the services behind agent replies, meeting notes and speech-to-text.",
+  voice: "A familiar voice, ready when you need it.",
   asr: "View the speech recognition services available to this deployment.",
   tokens: "Manage API tokens used to connect clients and integrations.",
   github: "Manage the GitHub credential TINA uses for repository access.",
@@ -165,16 +174,20 @@ export function ChatGPTPlanConnection() {
     finally { setBusy(false); }
   };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 7, maxWidth: 460, margin: "0 0 4px" }}>
-      <div style={{ fontSize: 12, color: "var(--t2)" }}>
-        ChatGPT plan {connected ? `connected · ${email}` : "not connected"}
+    <div className={modelStyles.connection}>
+      <div className={modelStyles.connectionHeader}>
+        <Icon name="user" size={18} />
+        <div className={modelStyles.connectionIdentity}>
+          <span>ChatGPT plan {connected ? "connected" : "not connected"}</span>
+          {connected && email && <span className={modelStyles.accountEmail}>{email}</span>}
+        </div>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
-        <button disabled={busy} onClick={() => void connect()} style={{ ...btn, opacity: busy ? 0.5 : 1 }}>
+      <div className={modelStyles.connectionActions}>
+        <button disabled={busy} onClick={() => void connect()} className={modelStyles.secondary}>
           {busy ? "Please wait…" : connected ? "Reconnect with ChatGPT" : "Continue with ChatGPT"}
         </button>
-        {connected && <button disabled={busy} onClick={() => void disconnect()} style={btn}>Disconnect ChatGPT</button>}
-        {err && <span role="alert" style={{ fontSize: 11.5, color: "var(--danger)" }}>{err}</span>}
+        {connected && <button disabled={busy} onClick={() => void disconnect()} className={modelStyles.disconnect}>Disconnect ChatGPT</button>}
+        {err && <span role="alert" className={modelStyles.error}>{err}</span>}
       </div>
       {signInUrl && <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -190,7 +203,9 @@ export function ChatGPTPlanConnection() {
         </label>
         <button disabled={busy || !callbackUrl.trim()} onClick={() => void finishConnection()} style={{ ...btn, alignSelf: "flex-start" }}>Finish connection</button>
       </div>}
-      <p style={{ fontSize: 11.5, color: "var(--t3)", margin: 0 }}>Disconnect removes this TINA account’s saved ChatGPT connection. Then connect the new account. It does not sign you out of TINA or ChatGPT in your browser; already running tasks may retain their current token.</p>
+      <details className={modelStyles.accountDetails}><summary>About switching accounts</summary>
+        <p>Disconnect removes this TINA account’s saved ChatGPT connection. Then connect the new account. It does not sign you out of TINA or ChatGPT in your browser; already running tasks may retain their current token.</p>
+      </details>
     </div>
   );
 }
@@ -253,9 +268,9 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 560 }}>
+    <div className={chatGPTConnection ? modelStyles.form : undefined} style={chatGPTConnection ? undefined : { display: "flex", flexDirection: "column", gap: 10, maxWidth: 560 }}>
       {note && <div style={{ fontSize: 12.5, color: "var(--t3)", lineHeight: 1.55 }}>{note}</div>}
-      {err && <div role="alert" style={{ fontSize: 13, color: "var(--danger)" }}>⚠ {err}</div>}
+      {err && <div role="alert" className={modelStyles.error}><Icon name="alert" size={16} />{err}</div>}
       {renderWarning?.(values)}
       {fields.map((f) => {
         if (f.showIf && !f.showIf(values)) return null;
@@ -273,19 +288,20 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
         const hint = f.hint?.(values);
         return (
           <Fragment key={f.key}>
-            <label style={{ display: "flex", alignItems: useModelPicker ? "flex-start" : "center", gap: 12, fontSize: 13.5, color: "var(--t2)" }}>
-              <span style={{ width: 128, flex: "none", color: "var(--t3)", ...(useModelPicker ? { paddingTop: 9 } : {}) }}>{f.label}</span>
+            <label className={chatGPTConnection ? modelStyles.field : undefined} data-field={f.key}
+              style={chatGPTConnection ? undefined : { display: "flex", alignItems: useModelPicker ? "flex-start" : "center", gap: 12, fontSize: 13.5, color: "var(--t2)" }}>
+              <span style={chatGPTConnection ? undefined : { width: 128, flex: "none", color: "var(--t3)", ...(useModelPicker ? { paddingTop: 9 } : {}) }}>{f.label}</span>
               {options ? (
                 <select value={values[f.key] ?? ""}
                   onChange={(e) => updateField(f.key, e.target.value)}
-                  style={{ ...field, width: "auto", flex: 1 }}>
+                  style={chatGPTConnection ? undefined : { ...field, width: "auto", flex: 1 }}>
                   {options.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
                 </select>
               ) : chatGPTModelCatalog && f.key === "model" && values.mode === "openai-subscription" ? (
                 <ChatGPTModelInput
                   value={values[f.key] ?? ""}
                   onChange={(value) => updateField(f.key, value)}
-                  style={field}
+                  style={chatGPTConnection ? { ...field, background: "var(--panel)", padding: "10px 12px" } : field}
                 />
               ) : useModelPicker ? (
                 <ModelPicker
@@ -299,34 +315,36 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
                   requiresTools={f.key === "model"}
                   suggestDefault={values.mode === "bedrock" && f.key === "model"}
                   emptyLabel={f.modelEmptyLabel?.(values) ?? "Provider default"}
-                  style={field}
+                  style={chatGPTConnection ? { ...field, background: "var(--panel)", padding: "10px 12px" } : field}
                 />
               ) : (
                 <><input value={values[f.key] ?? ""} aria-label={f.label} placeholder={typeof f.placeholder === "function" ? f.placeholder(values) : f.placeholder}
                   type={f.secret ? "password" : "text"}
                   list={f.key === "region" ? regionSuggestionsId : undefined}
                   onChange={(e) => updateField(f.key, e.target.value)}
-                  style={field} />
+                  style={chatGPTConnection ? undefined : field} />
                   {f.key === "region" && <datalist id={regionSuggestionsId}>
                     {BEDROCK_REGIONS.map((region) => <option key={region.value} value={region.value}>{region.label}</option>)}
                   </datalist>}</>
               )}
             </label>
             {hint && (
-              <p style={{ margin: "0 0 0 140px", fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5 }}>{hint}</p>
+              <p className={chatGPTConnection ? modelStyles.hint : undefined} style={chatGPTConnection ? undefined : { margin: "0 0 0 140px", fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5 }}>{hint}</p>
             )}
             {chatGPTConnection && f.key === "mode" && values.mode === "openai-subscription" && <ChatGPTPlanConnection />}
           </Fragment>
         );
       })}
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div className={chatGPTConnection ? modelStyles.saveRow : undefined} style={chatGPTConnection ? undefined : { display: "flex", alignItems: "center", gap: 10 }}>
         <button disabled={busy || !dirty || (saveGuard !== undefined && !saveGuard(values))} onClick={() => void doSave()}
-          style={{ ...btn, background: dirty ? "var(--accent)" : "var(--panel2)", color: dirty ? "var(--on-accent)" : "var(--t3)", border: dirty ? "none" : btn.border, opacity: busy ? 0.5 : 1 }}>
+          className={chatGPTConnection ? modelStyles.primary : undefined}
+          style={chatGPTConnection ? undefined : { ...btn, background: dirty ? "var(--accent)" : "var(--panel2)", color: dirty ? "var(--on-accent)" : "var(--t3)", border: dirty ? "none" : btn.border, opacity: busy ? 0.5 : 1 }}>
           {busy ? "Saving…" : "Save"}
         </button>
         {saved && <span style={{ fontSize: 11.5, color: "var(--green)" }}>{savedNote}</span>}
+        {chatGPTConnection && <div className={modelStyles.validation}>{footer?.({ dirty, values })}</div>}
       </div>
-      {footer?.({ dirty, values })}
+      {!chatGPTConnection && footer?.({ dirty, values })}
     </div>
   );
 }
@@ -351,12 +369,12 @@ function TestRow({ label, run, disabled = false, hint }: {
     catch (e: unknown) { setErr(presentError(e).headline); }
     finally { setBusy(false); }
   };
-  const provenance = res ? [res.mode, res.source && `via ${res.source}`].filter(Boolean).join(" · ") : "";
+  const provenance = res ? [res.mode, res.source && `via ${res.source}`].filter(Boolean).join(", ") : "";
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, maxWidth: 460, marginTop: 6 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    <div className={modelStyles.testRow}>
+      <div>
         <button disabled={busy || disabled} onClick={() => void doTest()}
-          style={{ ...btn, opacity: busy || disabled ? 0.5 : 1 }}>
+          className={modelStyles.secondary}>
           {busy ? "Testing…" : label}
         </button>
         {disabled && hint && (
@@ -368,7 +386,7 @@ function TestRow({ label, run, disabled = false, hint }: {
             {res.summary}
           </span>
         )}
-        {err && <span role="alert" style={{ fontSize: 11.5, color: "var(--danger)" }}>⚠ test failed: {err}</span>}
+        {err && <span role="alert" className={modelStyles.error}>Test failed: {err}</span>}
       </div>
     </div>
   );
@@ -521,26 +539,21 @@ export function ModelsSection() {
   const activeTranscriptionBackend = transcriptionSummary.backend === "default"
     ? transcriptionSummary.default_backend || "deployment"
     : transcriptionSummary.backend || "deployment";
-  const summaryTile: CSSProperties = {
-    flex: 1, minWidth: 0, padding: "12px 14px", border: "1px solid var(--line)",
-    borderRadius: 10, background: "var(--panel)", display: "flex", flexDirection: "column", gap: 4,
-  };
-
   return (
-    <div style={{ maxWidth: 720 }}>
-      {scope !== "transcription" && <div aria-label="Current model settings" style={{ display: "flex", gap: 12, marginBottom: 22 }}>
-        <div style={summaryTile}>
-          <span style={{ fontSize: 11.5, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".07em" }}>Agent model</span>
-          <strong style={{ fontSize: 14.5, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{modelSummary.model || "Deployment default"}</strong>
-          <span style={{ fontSize: 12, color: "var(--t3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{providerLabels[modelSummary.mode ?? ""] ?? "Deployment default"}</span>
+    <div className={modelStyles.root}>
+      {scope !== "transcription" && <div aria-label="Current model settings" className={modelStyles.summary}>
+        <div>
+          <span>Agent model</span>
+          <strong>{modelSummary.model || "Deployment default"}</strong>
+          <span>{providerLabels[modelSummary.mode ?? ""] ?? "Deployment default"}</span>
         </div>
-        <div style={summaryTile}>
-          <span style={{ fontSize: 11.5, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".07em" }}>Speech to text</span>
-          <strong style={{ fontSize: 14.5, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{effectiveTranscription?.label ?? transcriptionLabels[activeTranscriptionBackend] ?? "Deployment default"}</strong>
-          <span style={{ fontSize: 12, color: "var(--t3)" }}>{effectiveTranscription ? { user: "Personal preference", platform: "Platform default", environment: "Deployment environment" }[effectiveTranscription.source] : "Choose and save a backend"} · next session</span>
+        <div>
+          <span>Speech to text</span>
+          <strong>{effectiveTranscription?.label ?? transcriptionLabels[activeTranscriptionBackend] ?? "Deployment default"}</strong>
+          <span>{effectiveTranscription ? { user: "Personal preference", platform: "Platform default", environment: "Deployment environment" }[effectiveTranscription.source] : "Choose and save a backend"}, next session</span>
         </div>
       </div>}
-      <div role="tablist" aria-label="Model settings scope" style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--line)", marginBottom: 16 }}>
+      <div role="tablist" aria-label="Model settings scope" className={modelStyles.tabs}>
         {scopeTabs.map((tab, index) => {
           const selected = scope === tab.id;
           return <button key={tab.id} ref={(element) => { tabRefs.current[index] = element; }}
@@ -552,13 +565,13 @@ export function ModelsSection() {
                   : event.key === "Home" ? 0 : event.key === "End" ? scopeTabs.length - 1 : -1;
               if (nextIndex >= 0) { event.preventDefault(); setScope(scopeTabs[nextIndex].id); tabRefs.current[nextIndex]?.focus(); }
             }}
-            style={{ ...btn, fontSize: 13.5, border: "none", borderBottom: selected ? "2px solid var(--accent)" : "2px solid transparent", borderRadius: "7px 7px 0 0", background: selected ? "var(--panel2)" : "transparent", color: selected ? "var(--t1)" : "var(--t2)", padding: "8px 14px" }}>
+            >
             {tab.label}
           </button>;
         })}
       </div>
-      <div id="models-panel-agent" role="tabpanel" aria-labelledby="models-tab-agent" hidden={scope !== "agent"}>
-        <div style={head}>Your models</div>
+      <div id="models-panel-agent" className={modelStyles.agentPanel} role="tabpanel" aria-labelledby="models-tab-agent" hidden={scope !== "agent"}>
+        <h2 className={modelStyles.panelTitle}>Your models</h2>
         <ConfigForm fields={modelFields} load={async () => asStrings(await getModelPrefs())}
           save={async (u) => { const saved = await setModelPrefs(u); window.dispatchEvent(new Event("tina-models-changed")); return asStrings(saved); }} chatGPTModelCatalog chatGPTConnection onValues={setModelSummary}
           renderWarning={renderModelWarning} saveGuard={modelSaveGuard}
@@ -642,6 +655,7 @@ function SettingsBody({ hideHeading = false }: { hideHeading?: boolean } = {}) {
   const bodies: Record<SectionId, ReactNode> = {
     calendar: <CalendarConnectionsPanel />,
     models: <ModelsSection />,
+    voice: <VoiceSettings />,
     asr: <AsrStatusPanel />,
     tokens: <TokensPanel />,
     github: <GitHubTokenCard />,
@@ -668,40 +682,36 @@ function SettingsBody({ hideHeading = false }: { hideHeading?: boolean } = {}) {
   };
   return (
     <div style={{ height: "100%", display: "flex", minHeight: 0 }}>
-      <aside style={{ width: "clamp(180px, 22vw, 228px)", flex: "none", borderRight: "1px solid var(--line)", padding: "20px 14px", background: "var(--sidebar)", overflowY: "auto" }}>
-        {!hideHeading && <div style={{ fontSize: 16, fontWeight: 700, color: "var(--t1)", padding: "0 9px 16px" }}>Settings</div>}
-        <label style={{ height: 38, display: "flex", alignItems: "center", gap: 9, border: "1px solid var(--line2)", borderRadius: 8, background: "var(--canvas)", padding: "0 10px", margin: "0 2px 22px" }}>
-          <Icon name="search" size={14} style={{ color: "var(--t3)", flex: "none" }} />
+      <aside className={navigationStyles.sidebar}>
+        {!hideHeading && <div className={navigationStyles.title}>Settings</div>}
+        <label className={navigationStyles.search}>
+          <Icon name="search" size={16} />
           <input aria-label="Search settings" type="search" placeholder="Search settings" value={search}
-            onChange={(event) => updateSearch(event.target.value)}
-            style={{ width: "100%", minWidth: 0, border: 0, background: "transparent", color: "var(--t1)", font: "13px var(--sans)" }} />
+            onChange={(event) => updateSearch(event.target.value)} />
         </label>
-        <nav aria-label="Settings sections">
+        <nav aria-label="Settings sections" className={navigationStyles.navigation}>
           {SECTION_GROUPS.map((group) => {
             const items = visibleSections.filter((item) => group.ids.includes(item.id));
             if (!items.length) return null;
-            return <section key={group.label} style={{ marginBottom: 15, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
-              <div role="heading" aria-level={2} style={{ display: "flex", alignItems: "center", gap: 8, font: "10.5px var(--mono)", color: "var(--t3)", letterSpacing: ".12em", textTransform: "uppercase", padding: "0 10px 8px", cursor: "default", pointerEvents: "none", userSelect: "none" }}>
-                <span>{group.label}</span><span aria-hidden="true" style={{ flex: 1, height: 1, background: "var(--line)" }} />
-              </div>
+            return <section key={group.label} className={group.label === "Profile" && !query ? navigationStyles.profile : navigationStyles.group}>
+              <div role="heading" aria-level={2} className={navigationStyles.groupTitle}>{group.label}</div>
               {items.map((item) => <button key={item.id} type="button" aria-current={section === item.id ? "page" : undefined}
                 onClick={() => selectSection(item.id)}
-                onMouseEnter={(event) => { if (section !== item.id) event.currentTarget.style.background = "var(--panel)"; }}
-                onMouseLeave={(event) => { if (section !== item.id) event.currentTarget.style.background = "transparent"; }}
-                style={{ display: "flex", alignItems: "center", width: "100%", minHeight: 38, textAlign: "left", fontSize: 13.5, fontWeight: section === item.id ? 600 : 400,
-                  padding: "8px 10px", borderRadius: 7, border: "none", cursor: "pointer",
-                  color: section === item.id ? "var(--t1)" : "var(--t2)", background: section === item.id ? "var(--panel2)" : "transparent",
-                  boxShadow: section === item.id ? "inset 2px 0 var(--accent)" : "none" }}>
-                {item.label}
+                className={navigationStyles.item}>
+                <Icon name={SECTION_ICONS[item.id]} size={17} />
+                <span>{item.label}</span>
+                {section === item.id && <Icon name="check" size={14} />}
               </button>)}
             </section>;
           })}
-          {!visibleSections.length && <div role="status" style={{ padding: "8px 10px", color: "var(--t3)", fontSize: 13 }}>No matching settings</div>}
+          {!visibleSections.length && <div role="status" className={navigationStyles.empty}>No matching settings</div>}
         </nav>
       </aside>
-      <main style={{ flex: 1, overflowY: "auto", padding: "clamp(20px, 3vw, 32px) clamp(20px, 3vw, 38px)", minWidth: 0 }}>
-        <div style={{ margin: "8px 0 24px" }}>
-          <div style={{ font: "11px var(--mono)", color: "var(--accent)", letterSpacing: ".09em", textTransform: "uppercase", marginBottom: 8 }}>{selectedGroup}</div>
+      <main style={{ flex: 1, overflowY: section === "voice" ? "hidden" : "auto", display: section === "voice" ? "flex" : undefined,
+        flexDirection: "column", minHeight: 0, padding: "clamp(20px, 3vw, 32px) clamp(20px, 3vw, 38px)",
+        paddingTop: section === "models" ? 24 : undefined, paddingBottom: section === "voice" ? 0 : section === "models" ? 24 : undefined, minWidth: 0 }}>
+        <div style={{ margin: section === "voice" ? "0 0 20px" : section === "models" ? "0 0 16px" : "8px 0 24px", flexShrink: 0 }}>
+          {section !== "models" && <div style={{ font: "11px var(--mono)", color: "var(--accent)", letterSpacing: ".09em", textTransform: "uppercase", marginBottom: 8 }}>{selectedGroup}</div>}
           <h1 style={{ font: "26px var(--display)", fontWeight: 400, letterSpacing: "-.02em", color: "var(--t1)", margin: "0 0 7px" }}>{selected.label}</h1>
           <p style={{ fontSize: 14, lineHeight: 1.5, color: "var(--t2)", margin: 0 }}>{SECTION_DESCRIPTIONS[section]}</p>
         </div>

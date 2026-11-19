@@ -52,7 +52,7 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "src"
 #: stopped being read rather than a step that stopped declaring.
 MEETINGS_STEPS_CORE = {
     "await_start", "dispatch_bot", "run_meeting", "first_meeting",
-    "process_meeting", "email_minutes", "email_attendees", "drop_to_attendees",
+    "process_meeting", "email_meeting_followup", "email_minutes", "email_attendees", "drop_to_attendees",
 }
 #: `prepare_meeting` needs BOTH domains and lives in the optional `flows_defs/production_agent.py`,
 #: so it is in this contract only where that module is (see `tests/agent_half.py`).
@@ -199,7 +199,7 @@ def test_a_step_may_need_two_domains_and_four_of_these_do():
     `production_agent`'s and needs both."""
     reg = _production_registry()
     both = {s for s, n in reg.step_needs.items() if {"agent", "meetings"} <= set(n)}
-    assert both == {"process_meeting", "email_minutes", "email_attendees",
+    assert both == {"process_meeting", "email_meeting_followup", "email_minutes", "email_attendees",
                     "drop_to_attendees"} | agent_half.only_if_present({"prepare_meeting"})
 
 

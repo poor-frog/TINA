@@ -71,6 +71,18 @@ spec:
                 secretKeyRef:
                   name: {{ include "tina.adminTokenSecretName" . }}
                   key: NEXTAUTH_SECRET
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tina.adminTokenSecretName" . }}
+                  key: GOOGLE_CLIENT_ID
+                  optional: true
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tina.adminTokenSecretName" . }}
+                  key: GOOGLE_CLIENT_SECRET
+                  optional: true
             # Admin internal edge: internalRequest()/validateAuthToken() need this to claim the
             # admin role + mint per-session keys on sign-in; without it the edge returns 503 and
             # bootstrap-admin fails closed. Same secret+key every other service reads.

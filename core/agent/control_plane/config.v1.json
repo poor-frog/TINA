@@ -3,6 +3,13 @@
   "service": "agent-api",
   "keys": [
     {
+      "key": "TINA_VOICE_EMBED_DIR",
+      "class": "defaulted",
+      "default": "~/.cache/tina/voice-retrieval",
+      "targets": ["compose"],
+      "description": "Pinned local multilingual-E5-small model directory; Agent API Docker image sets /opt/tina/voice-retrieval. Missing/corrupt assets retain BM25 with a content-free warning."
+    },
+    {
       "key": "TINA_OPENAI_AUTH_DIR",
       "class": "defaulted",
       "default": "/var/lib/tina/openai-auth",
@@ -216,6 +223,13 @@
       "class": "defaulted",
       "default": "[]",
       "description": "JSON array of tool.v1 names enabled for interactive chat; client bodies cannot add tools",
+      "targets": ["compose"]
+    },
+    {
+      "key": "TINA_AGENT_REACH_URL",
+      "class": "defaulted",
+      "default": "",
+      "description": "Private public-only Agent Reach retrieval worker URL, forwarded to dispatched workers; empty retains provider web search",
       "targets": ["compose"]
     },
     {

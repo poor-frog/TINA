@@ -111,7 +111,7 @@ def _resolve_transcribe_enabled(value: Optional[object]) -> bool:
         raise HTTPException(status_code=422, detail=str(e))
 
 
-def _resolve_voice_agent_enabled(value: Optional[object], platform: str) -> bool:
+def _resolve_voice_agent_enabled(value: Optional[object], platform: str) -> Optional[bool]:
     """Enable Speak for manually spawned browser bots only when server-side TTS is configured."""
     if value is not None and not isinstance(value, bool):
         raise HTTPException(status_code=422, detail="voice_agent_enabled must be a boolean")
@@ -119,6 +119,7 @@ def _resolve_voice_agent_enabled(value: Optional[object], platform: str) -> bool
         if value is True:
             raise HTTPException(status_code=422, detail="Speak is not supported for Discord bots")
         return False
+    if value is None and platform == 'google_meet': return None  # Account preference is resolved with the existing spawn context.
     enabled = value if isinstance(value, bool) else bool(os.getenv("TTS_SERVICE_URL", "").strip())
     if enabled and not os.getenv("TTS_SERVICE_URL", "").strip():
         raise HTTPException(status_code=503, detail="Speak requires server-side TTS_SERVICE_URL configuration")

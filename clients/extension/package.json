@@ -1,14 +1,14 @@
 {
   "name": "@tina/extension",
   "version": "0.1.0",
-  "description": "Read-only TINA transcript viewer for Meeting Bot and the Desktop archive; no audio capture permissions.",
+  "description": "Send TINA Bot to supported meeting tabs and view Meeting Bot or Desktop transcripts; no audio capture permissions.",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
     "dev": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test": "tsx src/endpoints.test.ts && tsx src/bot-transcript.test.ts && tsx src/capture-liveness.test.ts && node src/session-lifecycle.test.mjs && node src/panel-state.test.mjs && tsx src/audio-clock.test.ts && tsx src/pcm-replay.test.ts && tsx src/translation.test.ts"
+    "test": "tsx src/endpoints.test.ts && tsx src/bot-transcript.test.ts && tsx src/capture-liveness.test.ts && node src/bot-retry.test.mjs && node src/session-lifecycle.test.mjs && node src/panel-state.test.mjs && tsx src/audio-clock.test.ts && tsx src/pcm-replay.test.ts && tsx src/translation.test.ts"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",

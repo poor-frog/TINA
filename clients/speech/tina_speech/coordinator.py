@@ -60,7 +60,7 @@ def question_text(text):
         raise ValueError("Invalid transcription")
     # Audio includes bounded wake pre-roll. Require that ASR begins with the wake;
     # reject preceding conversation instead of deleting arbitrary transcript words.
-    match = re.match(r"^\s*(?:hey|hi|hây|hêy)[\s,.!?-]+ti\s*na\b[\s,.!?;:-]*", text, re.IGNORECASE)
+    match = re.match(r"^\s*(?:hey|hi|hay|hây|hêy)[\s,.!?-]+ti\s*na\b[\s,.!?;:-]*", text, re.IGNORECASE)
     if not match:
         raise ValueError("Transcription did not begin with the captured wake phrase")
     result = text[match.end():].strip()

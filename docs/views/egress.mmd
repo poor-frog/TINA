@@ -34,6 +34,10 @@ flowchart LR
     speech_coordinator["Optional single-room speech coordinator"]
     meeting_translation_cache["Private meeting translation SQLite cache"]
     asr_control["ASR host controller"]
+    livekit_agent["Optional local LiveKit Agents pilot"]
+    livekit_server["Self-hosted LiveKit server"]
+    agent_reach["Public Agent Reach retrieval worker"]
+    public_content_providers["Public content providers"]
   end
   transcription["transcription"]
   bot ==>|"audio -> tenant-hosted"| transcription
@@ -47,3 +51,5 @@ flowchart LR
   discord_connector ==>|"audio -> tenant-hosted"| transcription
   completion_provider["configured completion provider"]
   agent_worker ==>|"transcript -> external-saas"| completion_provider
+  mail_relay["configured SMTP relay"]
+  flows_worker ==>|"notification -> operator-configured"| mail_relay

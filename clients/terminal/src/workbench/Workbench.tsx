@@ -1,6 +1,6 @@
 "use client";
 /** term-workbench — the structured 3-pane shell.
- *  LEFT (resizable/collapsible): capture-first actions + grouped navigation + the active list.
+ *  LEFT (resizable/collapsible): grouped navigation + the active list.
  *  CENTER: dockview TABS — a "tab" host resolves each panel by params.kind via the tab registry.
  *  RIGHT (resizable/collapsible): the persistent workspace chat, grounded by the active center tab.
  *  Reuses the Phase-C ⌘K palette + keybindings; the kernel's services do the rest. */
@@ -51,14 +51,14 @@ import { registry } from "../contributions";
 import { Icon } from "../ui-kit";
 import { updatesBadge, markUpdatesSeen, updatesSeenTs } from "../surfaces/updatesBadge";
 import { readActiveSet, readWorkspaceGit } from "../surfaces/workspaceApi";
+import { FilesList } from "../surfaces/workspace";
 import { ContextMenu, copyText } from "../ui-kit/ContextMenu";
 import { Chat } from "../surfaces/chat";
-import { SidebarMeetingCapture } from "../surfaces/meeting";
 import { SettingsDialog } from "../surfaces/settings";
 import { resolveDocRef } from "../ui-kit/docLinks";
 import { liveMeetingsNow } from "../surfaces/liveMeetings";
 import { ContextRail } from "../surfaces/context";
-import { shellStore, setShellVersion, isShellV2, THREAD_TAB_KIND } from "./shell";
+import { shellStore, THREAD_TAB_KIND } from "./shell";
 import { firstViewPlan } from "./firstView";
 import { isOwnedPath, meetingIdFromPath, meetingPath } from "../app/meetingRoute";
 import { OPEN_ENTITY_EVENT } from "../canvas/actions";
@@ -113,8 +113,17 @@ function TabHeader(props: IDockviewPanelHeaderProps) {
   const pinned = Boolean(params.pinned);
   const [title, setTitle] = useState<string>(props.api.title ?? "");
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const tabRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const d = props.api.onDidTitleChange((e: { title: string }) => setTitle(e.title));
+    return () => d.dispose();
+  }, [props.api]);
+  useEffect(() => {
+    const reveal = () => window.requestAnimationFrame(() => {
+      if (props.api.isActive) tabRef.current?.closest(".dv-tab")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+    reveal();
+    const d = props.api.onDidActiveChange((e) => { if (e.isActive) reveal(); });
     return () => d.dispose();
   }, [props.api]);
   const path = typeof params.p?.path === "string" ? params.p.path : null;
@@ -132,6 +141,7 @@ function TabHeader(props: IDockviewPanelHeaderProps) {
       : [];
   return (
     <div
+      ref={tabRef}
       className="dv-default-tab"
       onMouseDown={(e) => {
         if (e.button !== 1) return;
@@ -184,10 +194,10 @@ function TabHeader(props: IDockviewPanelHeaderProps) {
 }
 const dvTabComponents = { default: TabHeader };
 
-// ── LEFT pane (Direction C): capture action, grouped navigation, active list, profile ──
-function LeftPane({ onSelect }: { onSelect?: () => void }) {
+// ── LEFT pane: grouped navigation, active list, profile ──
+function LeftPane({ onSelect }: { onSelect?: (listId?: string) => void }) {
   const layout = useService(LayoutServiceId);
-  const { activeList } = useStore(layout.store);
+  const { activeList, leftCollapsed } = useStore(layout.store);
   // re-render on LATE registrations (e.g. the admin surface appears after its async gate check)
   useSyncExternalStore(registry.subscribe, registry.version, registry.version);
   const lists = registry.lists();
@@ -204,11 +214,11 @@ function LeftPane({ onSelect }: { onSelect?: () => void }) {
         display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: 36,
         padding: "0 9px", border: 0, borderRadius: 6, textAlign: "left", cursor: "pointer",
         color: selected ? "var(--t1)" : "var(--t2)", background: selected ? "color-mix(in srgb, var(--t1) 5.5%, transparent)" : "transparent",
-        fontSize: 13, fontWeight: selected ? 600 : 430, transition: "background .12s ease, color .12s ease",
+        fontSize: "var(--ui-type-label)", fontWeight: selected ? 600 : 400, transition: "background .12s ease, color .12s ease",
       }} onClick={() => {
         layout.setActiveList(list.id);
         if (list.centerTab) layout.openTab(list.centerTab);
-        onSelect?.();
+        onSelect?.(list.id);
       }} title={list.label}>
         <Icon name={list.icon} size={17} style={{ color: selected ? "var(--accent)" : "var(--t3)" }} />
         <span style={{ flex: 1, minWidth: 0 }}>{list.label}</span>
@@ -219,23 +229,23 @@ function LeftPane({ onSelect }: { onSelect?: () => void }) {
       </button>
     );
   };
-  const groupLabel: CSSProperties = { padding: "9px 10px 5px", color: "var(--t3)", fontSize: 10, fontWeight: 650, letterSpacing: ".09em", textTransform: "uppercase" };
+  const groupLabel: CSSProperties = { padding: "var(--space-2) var(--space-2) var(--space-1)", color: "var(--t3)", fontSize: "var(--ui-type-meta)", fontWeight: 600, letterSpacing: "normal", textTransform: "none" };
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--sidebar)", borderRight: "1px solid var(--line)", minHeight: 0 }}>
+    <div aria-hidden={leftCollapsed || undefined} inert={leftCollapsed}
+      style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--sidebar)", borderRight: "1px solid var(--line)", minHeight: 0 }}>
       <div style={{ height: 60, display: "flex", alignItems: "center", gap: 10, padding: "0 18px", flex: "none", borderBottom: "1px solid var(--line)" }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/tina-logo.svg" alt="TINA" width={25} height={27} style={{ borderRadius: 7, display: "block", flex: "none" }} />
-        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--t1)", letterSpacing: "-0.01em" }}>TINA <span style={{ fontWeight: 400, color: "var(--t3)" }}>terminal</span></span>
+        <span style={{ fontSize: "var(--ui-type-label)", fontWeight: 600, color: "var(--t1)", letterSpacing: "-0.01em" }}>TINA <span style={{ fontWeight: 400, color: "var(--t3)" }}>terminal</span></span>
       </div>
       <nav aria-label="Workspace sections" style={{ flex: "none", padding: "5px 9px 8px" }}>
         {workspaceLists.length > 0 && <div style={groupLabel}>Workspace</div>}
         <div style={{ display: "grid", gap: 2 }}>{workspaceLists.map(renderList)}</div>
-        {toolLists.length > 0 && <div style={{ ...groupLabel, paddingTop: 13 }}>Tools</div>}
+        {toolLists.length > 0 && <div style={{ ...groupLabel, paddingTop: "var(--space-3)" }}>Tools</div>}
         <div style={{ display: "grid", gap: 2 }}>{toolLists.map(renderList)}</div>
       </nav>
-      {activeList === "meetings" && <SidebarMeetingCapture />}
-      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }} onClickCapture={() => onSelect?.()}>{Comp && <Comp />}</div>
-      <UserProfile />
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }} onClickCapture={() => onSelect?.()}>{!leftCollapsed && Comp && <Comp />}</div>
+      {!leftCollapsed && <UserProfile />}
     </div>
   );
 }
@@ -469,7 +479,7 @@ function UserProfile({ compact = false }: { compact?: boolean }) {
               background: "transparent",
               border: "none",
               borderRadius: 6,
-              color: "var(--danger, #f43f5e)",
+              color: "var(--danger)",
               fontSize: 12.5,
               cursor: "pointer",
               textAlign: "left",
@@ -576,7 +586,9 @@ function useUpdatesBadge(activeList: string): number {
  *  (contributions/index.ts), so no surface has to change to appear here — the label moves to a
  *  tooltip and the active marker becomes a left pill. Settings (a modal, not a list) and the account
  *  menu sit at the rail foot. */
-function IconRail({ width = 56 }: { width?: number }) {
+function IconRail({ width = 56, knowledgeOpen = false, onSectionSelect }: {
+  width?: number; knowledgeOpen?: boolean; onSectionSelect?: (listId: string) => void;
+}) {
   const layout = useService(LayoutServiceId);
   const { activeList, leftCollapsed } = useStore(layout.store);
   // re-render on LATE registrations (the admin surface appears only after its async gate check)
@@ -600,14 +612,18 @@ function IconRail({ width = 56 }: { width?: number }) {
       <div style={{ height: 1, width: 28, background: "var(--line)", margin: "4px 0 6px", flex: "none" }} />
       {lists.map((l) => {
         const on = l.id === active?.id;
+        const knowledgeButton = l.id === "files" && !!onSectionSelect;
+        const label = knowledgeButton ? (knowledgeOpen ? "Close Knowledge sidebar" : "Open Knowledge sidebar") : l.label;
         return (
-          <button key={l.id} type="button" style={btn(on)} title={l.label} aria-label={l.label} aria-current={on ? "page" : undefined}
+          <button key={l.id} type="button" style={btn(on)} title={label} aria-label={label} aria-current={on ? "page" : undefined}
+            aria-expanded={knowledgeButton ? knowledgeOpen : undefined}
             onClick={() => {
               layout.setActiveList(l.id);
               if (l.centerTab) layout.openTab(l.centerTab);
+              onSectionSelect?.(l.id);
               // A closed icon rail stays compact while changing sections. When the drawer is
               // already open, clicking its active section closes it; other selections keep it open.
-              if (on && drawerOpen) layout.toggleLeft();
+              if (!onSectionSelect && on && drawerOpen) layout.toggleLeft();
             }}>
             {on && <span aria-hidden="true" style={{ position: "absolute", left: -8, top: 8, bottom: 8, width: 2, borderRadius: 2, background: "var(--accent)" }} />}
             <Icon name={l.icon} size={17} />
@@ -633,21 +649,24 @@ function IconRail({ width = 56 }: { width?: number }) {
  *  switcher and the account menu have moved to the rail. It closes with ⌘B / the rail icon / this ✕.
  *  It deliberately does NOT auto-close on row click: several lists own inline ⋯ menus, and a
  *  capture-phase close would unmount them mid-open. */
-function ListDrawer() {
+function ListDrawer({ width = 240, onClose, knowledgeOnly = false }: { width?: number; onClose?: () => void; knowledgeOnly?: boolean } = {}) {
   const layout = useService(LayoutServiceId);
   const { activeList } = useStore(layout.store);
   useSyncExternalStore(registry.subscribe, registry.version, registry.version);
   const active = registry.list(activeList) ?? registry.lists()[0];
   const Comp = active?.component;
+  const isKnowledge = knowledgeOnly && activeList === "files";
   return (
-    <aside aria-label={active?.label ?? "Library"} style={{ width: 240, flex: "none", height: "100%", display: "flex", flexDirection: "column", background: "var(--sidebar)", borderRight: "1px solid var(--line)", minHeight: 0 }}>
-      <div style={{ height: 40, flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "0 6px 0 14px", borderBottom: "1px solid var(--line)" }}>
-        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--t1)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active?.label}</span>
-        <button type="button" className="panel-toggle-btn" style={{ marginLeft: "auto" }} aria-label="Close library" title="Close library (⌘B)" onClick={() => layout.toggleLeft()}>
-          <Icon name="x" size={11} />
-        </button>
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>{Comp && <Comp />}</div>
+    <aside aria-label={isKnowledge ? "Knowledge" : active?.label ?? "Library"} style={{ width, flex: "none", height: "100%", display: "flex", flexDirection: "column", background: "var(--sidebar)", borderRight: "1px solid var(--line)", minHeight: 0 }}>
+      {isKnowledge ? <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}><FilesList /></div> : <>
+        <div style={{ height: 40, flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "0 6px 0 14px", borderBottom: "1px solid var(--line)" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--t1)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{active?.label}</span>
+          <button type="button" className="panel-toggle-btn" style={{ marginLeft: "auto" }} aria-label={`Close ${active?.label ?? "library"}`} title={`Close ${active?.label ?? "library"} (⌘B)`} onClick={() => onClose ? onClose() : layout.toggleLeft()}>
+            <Icon name="x" size={11} />
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>{Comp && <Comp />}</div>
+      </>}
     </aside>
   );
 }
@@ -708,6 +727,19 @@ export function Workbench() {
   const [mobileTab, setMobileTab] = useState<"left" | "center" | "right">("center");
   // Narrow tier (560px-899px): left sidebar defaults to collapsed, but user can toggle with ⌘B / button.
   const [narrowLeftOpen, setNarrowLeftOpen] = useState(false);
+  const [knowledgePaneOpen, setKnowledgePaneOpen] = useState(false);
+  const initialKnowledgeRoute = useRef(activeList === "files");
+  const initialKnowledgeRouteHandled = useRef(false);
+  const knowledgePaneWidth = Math.max(216, Math.min(300, Math.round(winW * 0.22 - 4)));
+  useEffect(() => {
+    if (tier !== "full" || !leftCollapsed || activeList !== "files") setKnowledgePaneOpen(false);
+  }, [tier, leftCollapsed, activeList]);
+  useEffect(() => {
+    if (!initialKnowledgeRoute.current || initialKnowledgeRouteHandled.current || tier !== "full" || activeList !== "files") return;
+    initialKnowledgeRouteHandled.current = true;
+    setKnowledgePaneOpen(true);
+    if (!leftCollapsed) layout.toggleLeft();
+  }, [tier, activeList, leftCollapsed, layout]);
   const activeMeetingId = activeTab?.kind === "meeting" ? String(activeTab.params.meetingId ?? "") : "";
   const meetingDossierActive = activeMeetingId.length > 0;
   // Agent visibility is global across meeting, README, and other Dockview tabs. Only rightCollapsed
@@ -895,37 +927,43 @@ export function Workbench() {
     firstViewDone.current = true;
     void resolveFirstView(e.api.panels.length === 0);
   };
+  const resetLayout = () => {
+    try { localStorage.removeItem(PANES_KEY); localStorage.removeItem(SHELL_PANES_KEY); } catch {}
+    layout.resetLayout();
+  };
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "var(--bg)", color: "var(--t1)" }}>
       {(() => {
-        const isLeftActive = tier === "single" ? mobileTab === "left" : (tier === "narrow" ? narrowLeftOpen : !leftCollapsed);
+        const isLeftActive = tier === "single" ? mobileTab === "left" : (tier === "narrow" ? narrowLeftOpen : (!leftCollapsed || knowledgePaneOpen));
         const isRightActive = tier === "single" ? mobileTab === "right" : !rightCollapsed;
+        const leftLabel = tier === "single"
+          ? (mobileTab === "left" ? "Back to content (⌘B)" : "Open navigation (⌘B)")
+          : v2
+            ? (isLeftActive ? "Close library (⌘B)" : "Open library (⌘B)")
+          : tier === "narrow"
+            ? (narrowLeftOpen ? "Close navigation (⌘B)" : "Open navigation (⌘B)")
+            : knowledgePaneOpen
+              ? "Close Knowledge sidebar (⌘B)"
+              : (leftCollapsed ? "Expand sidebar (⌘B)" : "Collapse sidebar (⌘B)");
         return (
           <div style={{ height: 38, display: "flex", alignItems: "center", gap: 12, padding: "0 12px", borderBottom: "1px solid var(--line)", background: "var(--sidebar)", flex: "none" }}>
             <button
               type="button"
               className="panel-toggle-btn shell-topbar-toggle"
               aria-pressed={isLeftActive}
-              aria-label={
-                tier === "single"
-                  ? (mobileTab === "left" ? "Back to content (⌘B)" : "Open navigation (⌘B)")
-                  : v2
-                    ? (isLeftActive ? "Close library (⌘B)" : "Open library (⌘B)")
-                    : (isLeftActive ? "Collapse sidebar (⌘B)" : "Expand sidebar (⌘B)")
-              }
-              title={
-                tier === "single"
-                  ? (mobileTab === "left" ? "Back to content (⌘B)" : "Open navigation (⌘B)")
-                  : v2
-                    ? (isLeftActive ? "Close library (⌘B)" : "Open library (⌘B)")
-                    : (isLeftActive ? "Collapse sidebar (⌘B)" : "Expand sidebar (⌘B)")
-              }
+              aria-label={leftLabel}
+              title={leftLabel}
               onClick={() => {
                 if (tier === "single") {
                   setMobileTab((cur) => (cur === "left" ? "center" : "left"));
                 } else if (tier === "narrow") {
                   setNarrowLeftOpen((o) => !o);
+                } else if (knowledgePaneOpen) {
+                  setKnowledgePaneOpen(false);
+                } else if (tier === "full" && activeList === "files") {
+                  setKnowledgePaneOpen(true);
+                  if (!leftCollapsed) layout.toggleLeft();
                 } else {
                   layout.toggleLeft();
                 }
@@ -935,12 +973,12 @@ export function Workbench() {
             </button>
             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 12, minWidth: 0 }}>
               {tier === "single" && mobileTab === "left" ? (
-                <span style={{ fontSize: 12, fontWeight: 500, color: "var(--t2)", letterSpacing: "-0.01em" }}>Navigation</span>
+                <span className="shell-context-label">Navigation</span>
               ) : tier === "single" && mobileTab === "right" ? (
-                <span style={{ fontSize: 12, fontWeight: 500, color: "var(--t2)", letterSpacing: "-0.01em" }}>TINA Agent</span>
+                <span className="shell-context-label">TINA Agent</span>
               ) : (
-                <span style={{ color: "var(--t3)", fontSize: 11, letterSpacing: ".04em", whiteSpace: "nowrap" }}>
-                  TINA TERMINAL <span style={{ color: "var(--line2)", margin: "0 6px" }}>/</span> WORKSPACE
+                <span className="shell-context-label">
+                  TINA Terminal <span className="shell-context-separator">/</span> Workspace
                 </span>
               )}
               <OpsNotice />
@@ -971,6 +1009,10 @@ export function Workbench() {
                 <AgentRailIcon open={isRightActive} />
               </button>
             )}
+            <button type="button" className="panel-toggle-btn shell-topbar-toggle"
+              aria-label="Reset layout" title="Reset layout" onClick={resetLayout}>
+              <Icon name="rotateCcw" size={16} />
+            </button>
           </div>
         );
       })()}
@@ -981,8 +1023,18 @@ export function Workbench() {
              Only the CHROME around the dockview changes: the same onReady/resolveFirstView/dvComponents
              run, and the rail + drawer render the same ListContribution registry the v1 sidebar did. */
           <div style={{ height: "100%", display: "flex", minHeight: 0 }}>
-            <IconRail />
-            {!leftCollapsed && <ListDrawer />}
+            <IconRail knowledgeOpen={knowledgePaneOpen} onSectionSelect={(id) => {
+              if (id === "files") {
+                setKnowledgePaneOpen((open) => !open);
+                if (!knowledgePaneOpen && !leftCollapsed) layout.toggleLeft();
+              } else {
+                setKnowledgePaneOpen(false);
+                if (!leftCollapsed && id === activeList) layout.toggleLeft();
+              }
+            }} />
+            {knowledgePaneOpen && activeList === "files" ? (
+              <ListDrawer width={knowledgePaneWidth} knowledgeOnly onClose={() => setKnowledgePaneOpen(false)} />
+            ) : !leftCollapsed && <ListDrawer />}
             <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <Allotment
                 proportionalLayout={false}
@@ -1022,7 +1074,12 @@ export function Workbench() {
             : (chatOnly || !rightCollapsed));
           return (
             <div style={{ height: "100%", display: "flex", minWidth: 0, minHeight: 0 }}>
-              {tier === "full" && leftCollapsed && <IconRail width={64} />}
+              {tier === "full" && leftCollapsed && <IconRail width={64}
+                knowledgeOpen={knowledgePaneOpen}
+                onSectionSelect={(id) => setKnowledgePaneOpen(id === "files" ? (isOpen) => !isOpen : false)} />}
+              {tier === "full" && leftCollapsed && knowledgePaneOpen && activeList === "files" && (
+                <ListDrawer width={knowledgePaneWidth} knowledgeOnly onClose={() => setKnowledgePaneOpen(false)} />
+              )}
               <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
                 <Allotment
                   proportionalLayout={false}
@@ -1042,7 +1099,13 @@ export function Workbench() {
                 maxSize={tier === "single" ? undefined : 360}
                 preferredSize={282}
               >
-                <LeftPane onSelect={() => { if (tier === "single") setMobileTab("center"); }} />
+                <LeftPane onSelect={(listId) => {
+                  if (tier === "single") setMobileTab("center");
+                  if (tier === "full" && listId === "files") {
+                    setKnowledgePaneOpen(true);
+                    layout.toggleLeft();
+                  } else if (listId) setKnowledgePaneOpen(false);
+                }} />
               </Allotment.Pane>
               {!chatOnly && (
                 <Allotment.Pane
@@ -1077,14 +1140,6 @@ export function Workbench() {
         </>
         )}
       </div>
-
-      <footer style={{ height: 24, flex: "none", background: "var(--sidebar)", borderTop: "1px solid var(--line)", display: "flex", alignItems: "center", fontSize: 11.5, color: "var(--t2)" }}>
-        <div style={{ flex: 1 }} />
-        {v2 && (
-          <button onClick={() => setShellVersion(isShellV2() ? "v1" : "v2")} style={{ padding: "0 10px", height: "100%", background: "none", border: "none", color: "var(--t3)", cursor: "pointer" }} title="Switch shell (v1 = 3-pane chat-right, v2 = agent chat first)">shell v2</button>
-        )}
-        <button onClick={() => { try { localStorage.removeItem(PANES_KEY); localStorage.removeItem(SHELL_PANES_KEY); } catch {} layout.resetLayout(); }} style={{ padding: "0 10px", height: "100%", background: "none", border: "none", color: "var(--t3)", cursor: "pointer" }} title="Reset layout">reset layout</button>
-      </footer>
 
       <CommandPalette />
       {settingsOpen && <SettingsDialog onClose={layout.closeSettings} />}

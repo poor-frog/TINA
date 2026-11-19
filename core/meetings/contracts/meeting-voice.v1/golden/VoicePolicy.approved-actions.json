@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "include_approved_actions": true,
+  "revision": 2,
+  "engine": "livekit"
+}

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Local-only microphone and wake-word pilot for TINA"
 requires-python = ">=3.11,<3.14"
 dependencies = [
+    "tina-meeting-voice",
     "numpy==2.4.6",
     "sherpa-onnx==2.0.1",
     "sounddevice==0.5.6",
@@ -28,3 +29,6 @@ dev = ["pytest==9.0.3", "pytest-asyncio==1.4.1.post1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv.sources]
+tina-meeting-voice = { path = "../../core/meetings/modules/voice-engine", editable = true }

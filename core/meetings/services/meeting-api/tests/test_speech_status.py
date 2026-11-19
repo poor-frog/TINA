@@ -83,6 +83,14 @@ def test_only_real_ordered_authenticated_receipts_can_complete(speech):
     assert set(public) == {'meeting_id', 'command_id', 'state'}
 
 
+def test_manual_playback_cannot_invent_voice_history_progress(speech):
+    client,_=speech;identifier=str(uuid4())
+    client.post(PATH,headers=HEADERS,json={'text':'manual','command_id':identifier})
+    assert report(client,identifier,'started').status_code==200
+    assert report(client,identifier,'started',played_text='manual').status_code==409
+    assert report(client,identifier,'started',played_text='x'*4001).status_code==422
+
+
 def test_stop_before_publication_blocks_late_speak(speech):
     client, messages = speech
     identifier = str(uuid4())
@@ -118,3 +126,22 @@ async def test_concurrent_identical_claim_has_one_publisher_and_terminal_release
     await store.report(42, identifier, 'session', 'failed')
     assert not await redis.exists('speech:active:42')
     assert await store.get(42, identifier)
+
+
+async def test_retiring_old_playback_cannot_clear_a_replacement_command(monkeypatch):
+    redis = FakeRedis(decode_responses=True)
+    store = PlaybackStore(redis)
+    old, new = str(uuid4()), str(uuid4())
+    await store.begin(42, old, 'retired', 'old', 'auto')
+    await store.report(42, old, 'retired', 'started')
+    get = store.get
+    async def replaced(mid, command):
+        snapshot = await get(mid, command)
+        await store.report(42, old, 'retired', 'completed')
+        await store.begin(42, new, 'current', 'new', 'auto')
+        return snapshot
+    monkeypatch.setattr(store, 'get', replaced)
+    await store.retire_previous_sessions(42, ['retired'])
+    assert await redis.get('speech:active:42') == new
+    assert (await get(42, new))['state'] == 'queued'
+    await redis.aclose()

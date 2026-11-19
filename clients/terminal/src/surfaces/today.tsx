@@ -26,6 +26,7 @@ import { findBriefNote } from "./briefNote";
 import { listWorkspaceTree, readActiveSet } from "./workspaceApi";
 import { meetingFocusFor } from "./chatContext";
 import { ASK_CHAT_EVENT } from "../canvas/actions";
+import styles from "./today.module.css";
 
 // ── reviewed-recaps store (localStorage) — opening a recap retires its phrase ──────────────────
 const REVIEWED_KEY = "tina.reviewedMeetings";
@@ -54,6 +55,21 @@ export interface AgendaDay { key: string; date: Date; groups: MeetingGroup[] }
 
 const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+
+function greetingForHour(hour: number): string {
+  if (hour >= 5 && hour < 12) return "Good Morning";
+  if (hour >= 12 && hour < 18) return "Good Afternoon";
+  return "Good Evening";
+}
+
+function agendaRangeLabel(now: Date, weekOffset: number): string {
+  const start = startOfDay(now);
+  start.setDate(start.getDate() + weekOffset * 7);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const format = (date: Date) => date.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" });
+  return `(${format(start)}–${format(end)})`;
+}
 
 /** The agenda window: day-grouped upcoming (+live) meetings for the week starting at
  *  today + 7·weekOffset days. Unscheduled plans attach to TODAY (offset 0 only) — they need
@@ -185,39 +201,28 @@ function EventRow({ g, ownTree }: { g: MeetingGroup; ownTree: string[] | null })
     && !!findBriefNote(ownTree, { title: label(m), nativeId: m.native_id, meetingId: m.id });
   const dev = deviationPhrase(g, hasOwnBrief);
   return (
-    <div onClick={nav.onClick} onDoubleClick={nav.onDoubleClick}
-      style={{ display: "flex", alignItems: "baseline", gap: 9, padding: "3px 2px", cursor: "pointer", flexWrap: "wrap" }}>
-      <span style={{ width: 3, height: 14, borderRadius: 2, alignSelf: "center", flex: "none",
-        background: g.phase === "live" ? "var(--green)" : "var(--panel2)" }} />
-      <span style={{ fontSize: 13.5, fontWeight: 500, color: "var(--t1)", minWidth: 0,
-        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label(m)}</span>
-      <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--t3)", flex: "none" }}>{timeShort(m.scheduled_at)}</span>
-      {dev && (
-        <span style={{ fontSize: 12, color: toneColor[dev.tone], borderBottom: `1px dotted ${toneColor[dev.tone]}`, flex: "none" }}>
-          {dev.text}
-        </span>
-      )}
+    <div className={styles.eventRow} onClick={nav.onClick} onDoubleClick={nav.onDoubleClick}
+      role="button" tabIndex={0} onKeyDown={e => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); e.currentTarget.click(); } }}>
+      <span className={styles.eventTitle}>{label(m)}</span>
+      <time className={styles.eventTime}>{timeShort(m.scheduled_at)}</time>
+      {dev && <span className={styles.deviation} style={{ color: toneColor[dev.tone] }}>{dev.text.replace(/ →$/, "")}</span>}
     </div>
   );
 }
 
 function DayRow({ day, isToday, ownTree }: { day: AgendaDay; isToday: boolean; ownTree: string[] | null }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "clamp(52px, 15vw, 64px) 1fr", gap: "0 clamp(8px, 2vw, 14px)", padding: "11px clamp(10px, 2.5vw, 14px)",
-      borderTop: "1px solid var(--line)" }}>
-      <div style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
-        <span style={{ fontSize: 19, fontWeight: 600, color: "var(--t1)", fontVariantNumeric: "tabular-nums" }}>
-          {day.date.getDate()}
-        </span>
-        <span style={{ fontSize: 10, color: "var(--t3)", lineHeight: 1.3 }}>
-          {day.date.toLocaleString(undefined, { month: "long" })}
-          {isToday && <span style={{ display: "inline-block", width: 4, height: 4, borderRadius: "50%", background: "var(--accent)", marginLeft: 3, verticalAlign: 4 }} />}
-          <br />{day.date.toLocaleString(undefined, { weekday: "short" })}
-        </span>
+    <div className={styles.dayRow} data-today={isToday}>
+      <div className={styles.dayDate}>
+        <span className={styles.dayNumber}>{day.date.getDate()}</span>
+        <div className={styles.dayCopy}>
+          <span>{day.date.toLocaleString(undefined, { month: "long" })}</span>
+          <span>{isToday ? "Today" : day.date.toLocaleString(undefined, { weekday: "short" })}</span>
+        </div>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+      <div className={styles.dayEvents}>
         {day.groups.length === 0
-          ? <span style={{ fontSize: 12.5, color: "var(--t3)", padding: "2px 0" }}>No events today</span>
+          ? <span className={styles.emptyDay}>No events today</span>
           : day.groups.map((g) => <EventRow key={g.key} g={g} ownTree={ownTree} />)}
       </div>
     </div>
@@ -245,7 +250,7 @@ function PastLine({ m }: { m: MeetingMock }) {
   })();
   const when = m.start_time
     ? new Date(m.start_time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
-  return <>{[when, dur, line].filter(Boolean).join(" · ")}</>;
+  return <>{[when, dur, line].filter(Boolean).join(", ")}</>;
 }
 
 function PlatformBadge({ platform }: { platform?: string }) {
@@ -268,8 +273,8 @@ function PlatformBadge({ platform }: { platform?: string }) {
     title = "Microsoft Teams";
   } else if (p.includes("discord")) {
     logoSrc = "/platform-logos/discord.svg";
-    logoBackground = "#5865f2";
-    color = "#ffffff";
+    logoBackground = "var(--panel2)";
+    color = "var(--t1)";
     title = "Discord";
   }
 
@@ -305,7 +310,6 @@ function PlatformBadge({ platform }: { platform?: string }) {
 function PastRow({ e, reviewedIds }: { e: PastEntry; reviewedIds: Set<string> }) {
   const run = e.run;
   const layout = useService(LayoutServiceId);
-  const [hovered, setHovered] = useState(false);
   const open = () => { markReviewed(run.id); layout.openTab(meetingTab(run)); };
   const unreviewed = !reviewedIds.has(run.id);
   const meetingTitle = label(run);
@@ -324,91 +328,20 @@ function PastRow({ e, reviewedIds }: { e: PastEntry; reviewedIds: Set<string> })
   };
 
   return (
-    <div
-      onClick={open}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        display: "grid",
-        gridTemplateColumns: "auto 1fr auto",
-        alignItems: "center",
-        gap: 10,
-        padding: "6px 8px",
-        borderRadius: 7,
-        cursor: "pointer",
-        background: hovered ? "var(--panel)" : "transparent",
-        transition: "background .12s ease",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 6, flex: "none" }}>
-        <PlatformBadge platform={run.platform} />
-        <Faces m={run.attendees?.length ? run : e.group.current} />
+    <div className={styles.pastRow} onClick={open} role="button" tabIndex={0}
+      onKeyDown={ev => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); open(); } }}>
+      <div className={styles.pastIdentity}><PlatformBadge platform={run.platform} /><Faces m={run.attendees?.length ? run : e.group.current} /></div>
+      <div className={styles.pastTitle}>
+        <span>{meetingTitle}</span>
+        {run.has_recording
+          ? <span className={styles.recap} data-unreviewed={unreviewed}>{unreviewed ? "recap ready" : "recap"}</span>
+          : <span className={styles.pastNote}>nothing captured</span>}
       </div>
-      <span style={{ display: "flex", gap: 9, alignItems: "center", minWidth: 0, overflow: "hidden" }}>
-        <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {meetingTitle}
-        </span>
-        {run.has_recording ? (
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 500,
-              padding: "1px 6px",
-              borderRadius: 4,
-              background: unreviewed ? "var(--accentbg)" : "var(--panel2)",
-              color: unreviewed ? "var(--accent)" : "var(--t3)",
-              border: `1px solid ${unreviewed ? "var(--accent)" : "var(--line)"}`,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              flex: "none",
-            }}
-          >
-            {unreviewed && <span style={{ width: 4, height: 4, borderRadius: "50%", background: "currentColor" }} />}
-            {unreviewed ? "recap ready" : "recap"}
-          </span>
-        ) : (
-          <span style={{ fontSize: 11, color: "var(--t3)", flex: "none" }}>
-            nothing captured
-          </span>
-        )}
-      </span>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
-        {hovered && run.has_recording && (
-          <button
-            type="button"
-            title="Ask agent about this meeting"
-            onClick={askAgent}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              fontSize: 11,
-              fontWeight: 500,
-              color: "var(--t1)",
-              background: "var(--panel2)",
-              border: "1px solid var(--line2)",
-              borderRadius: 5,
-              padding: "2px 7px",
-              cursor: "pointer",
-              transition: "all .12s ease",
-            }}
-            onMouseEnter={(ev) => {
-              ev.currentTarget.style.borderColor = "var(--accent)";
-              ev.currentTarget.style.color = "var(--accent)";
-            }}
-            onMouseLeave={(ev) => {
-              ev.currentTarget.style.borderColor = "var(--line2)";
-              ev.currentTarget.style.color = "var(--t1)";
-            }}
-          >
-            <Icon name="spark" size={11} />
-            <span>Ask agent</span>
-          </button>
-        )}
-        <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--t3)" }}>
-          <PastLine m={run} />
-        </span>
+      <div className={styles.pastActions}>
+        {run.has_recording && <button type="button" className={styles.askAgent} title="Ask agent about this meeting" onClick={askAgent}>
+          <Icon name="spark" size={14} /><span>Ask agent</span>
+        </button>}
+        <span className={styles.pastTime}><PastLine m={run} /></span>
       </div>
     </div>
   );
@@ -420,88 +353,58 @@ function TodayView() {
   const reviewedIds = useReviewed();
   const ownTree = useOwnWorkspaceTree();
   const [weekOffset, setWeekOffset] = useState(0);
+  const [displayName, setDisplayName] = useState("");
   const now = new Date();
   const groups = groupMeetings(meetings);
   const days = agendaWindow(groups, now, weekOffset);
   const past = pastFeed(groups);
   const todayKey = dayKey(now);
   const empty = meetings.length === 0;
-  const pager = {
-    background: "var(--panel)",
-    border: "1px solid var(--line)",
-    color: "var(--t2)",
-    borderRadius: 6,
-    width: 26,
-    height: 26,
-    cursor: "pointer",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    transition: "background .12s, border-color .12s, color .12s",
-  } as const;
+  useEffect(() => {
+    let active = true;
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() as Promise<{ user?: { name?: string | null; email?: string | null } }> : null)
+      .then((data) => {
+        const user = data?.user;
+        const name = user?.name?.trim() || user?.email?.split("@")[0] || "";
+        if (active) setDisplayName(name);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
   return (
-    <div style={{ height: "100%", overflowY: "auto", padding: "20px clamp(16px, 3vw, 32px)" }}>
-      <div style={{ maxWidth: 800, margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span style={{ fontFamily: "var(--display, var(--font-display, Georgia, serif))", fontSize: 18, fontWeight: 600, letterSpacing: "-0.015em", color: "var(--t1)", flex: 1, minWidth: 120 }}>
-            Coming up
-          </span>
-          {weekOffset > 0 && (
-            <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--t3)" }}>
-              {days[0]?.date.toLocaleDateString(undefined, { month: "short", day: "numeric" }) ?? ""} →
-            </span>
-          )}
-          <button
-            aria-label="previous week"
-            style={{ ...pager, opacity: weekOffset === 0 ? 0.35 : 1 }}
-            disabled={weekOffset === 0}
-            onClick={() => setWeekOffset((v) => Math.max(0, v - 1))}
-            onMouseEnter={(e) => { if (weekOffset > 0) { e.currentTarget.style.background = "var(--panel2)"; e.currentTarget.style.color = "var(--t1)"; } }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "var(--panel)"; e.currentTarget.style.color = "var(--t2)"; }}
-          >
-            <Icon name="chevL" size={13} />
-          </button>
-          <button
-            aria-label="next week"
-            style={pager}
-            onClick={() => setWeekOffset((v) => Math.min(8, v + 1))}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--panel2)"; e.currentTarget.style.color = "var(--t1)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "var(--panel)"; e.currentTarget.style.color = "var(--t2)"; }}
-          >
-            <Icon name="chevR" size={13} />
-          </button>
-        </div>
-
-        {empty ? (
-          /* user onboarding, frame 4: three paths (calendar primary / plan / drop bot) */
-          <MeetingsOnboarding variant="full" />
-        ) : (
-          <>
-            {/* the STANDING calendar affordance — stays while this user has no calendar connected */}
-            <MeetingsOnboarding variant="slim" />
-            <div style={{ marginTop: 14, border: "1px solid var(--line)", borderRadius: 12, background: "var(--panel)" }}>
-              {days.length === 0
-                ? <div style={{ padding: "14px 16px", fontSize: 12.5, color: "var(--t3)" }}>Nothing this week.</div>
-                : days.map((d) => <DayRow key={d.key} day={d} isToday={d.key === todayKey} ownTree={ownTree} />)}
-            </div>
-          </>
-        )}
-
-        {past.map((day) => (
-          <div key={day.key}>
-            <div style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase",
-              color: "var(--t3)", margin: "18px 0 4px" }}>
-              {day.date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
-            </div>
-            {day.entries.map((e) => <PastRow key={e.run.id} e={e} reviewedIds={reviewedIds} />)}
+    <div className={styles.screen}>
+      <div className={styles.content}>
+        <p className={styles.greeting}>
+          {greetingForHour(now.getHours())}{displayName ? <><span>, </span><strong>{displayName}</strong></> : null}
+        </p>
+        <header className={styles.header}>
+          <div className={styles.headingGroup}>
+            <h1 className={styles.title}>Coming up</h1>
+            <span className={styles.weekLabel}>{agendaRangeLabel(now, weekOffset)}</span>
           </div>
-        ))}
-
-        {!empty && (
-          <div style={{ fontSize: 11.5, color: "var(--t3)", margin: "24px 2px 10px", lineHeight: 1.5 }}>
-            Older meetings live in Knowledge — ask the agent about anything that was said or decided.
+          <div className={styles.weekNavigation}>
+            <button aria-label="previous week" className={styles.pager} disabled={weekOffset === 0}
+              onClick={() => setWeekOffset((v) => Math.max(0, v - 1))}><Icon name="chevL" size={18} /></button>
+            <button aria-label="next week" className={styles.pager}
+              onClick={() => setWeekOffset((v) => Math.min(8, v + 1))}><Icon name="chevR" size={18} /></button>
           </div>
-        )}
+        </header>
+        <MeetingsOnboarding variant={empty ? "full" : "slim"} />
+        {!empty && <div className={styles.timelineLayout} data-has-past={past.length > 0}>
+          <section className={styles.agenda} aria-label="Upcoming meetings">
+            {days.length === 0 ? <p className={styles.emptyDay}>Nothing this week.</p>
+              : days.map((d) => <DayRow key={d.key} day={d} isToday={d.key === todayKey} ownTree={ownTree} />)}
+          </section>
+          {past.length > 0 && <section className={styles.pastFeed} aria-label="Recent meetings">
+            <h2 className={styles.sectionTitle}>Recent meetings</h2>
+            {past.map((day) => <div key={day.key} className={styles.pastGroup}>
+              <h3 className={styles.pastDate}>{day.date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</h3>
+              {day.entries.map((e) => <PastRow key={e.run.id} e={e} reviewedIds={reviewedIds} />)}
+            </div>)}
+          </section>}
+        </div>}
+        {!empty && <p className={styles.historyHint}>Older meetings live in Knowledge. Ask the agent about anything that was said or decided.</p>}
       </div>
     </div>
   );

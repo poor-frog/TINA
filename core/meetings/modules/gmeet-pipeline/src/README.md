@@ -24,3 +24,20 @@ preserves transcripts and request timing; it is disabled by default.
 `context-short.test.ts` covers forced short-window flushes: inherited confirmed text is omitted
 below two seconds, while two-second/longer windows keep it. Audio, confirmation policy and sample
 timestamps are unchanged; the same shared selector is used by the mixed/Teams pipelines.
+
+`onHypothesis` is an optional local observer of the original ASR result, its channel and submitted source-clock span before LocalAgreement. Observer failures never interrupt transcript handling; it creates no extra ASR requests. It carries no account authorization.
+
+`requestEndpoint(channel, endMs)` lets an enabled voice session advance the same ASR window below
+the usual minimum/cadence. It coalesces VAD endpoints, reuses covered results, and defers an uncovered
+tail until the in-flight request settles. Its `final` hint is local to voice; LocalAgreement and PCM
+retention are unchanged. Optional hypothesis timestamps measure ASR dispatch/completion. Tests in
+`voice-endpoint.test.ts` cover short calls, reused requests, missing tails and resumed speech.
+VAD onset calls `requestEndpoint(channel, null)` to cancel an old pending endpoint. Energy used for
+PCM retention never overrides VAD; source-onset bounds reject late endpoints for a rotated channel.
+`speechStartMs` distinguishes observed onset from pre-roll. Buffer reset/deferred-close fences run
+before `onHypothesis`; a result rejected as stale cannot enter the voice trigger or its local cache.
+
+`onAsrDiagnostic` is an optional content-free request observer: channel, local request sequence,
+start/completion/failure, window-end-to-dispatch age, round-trip and optional measured backend queue.
+Throwing observers cannot change ASR requests or transcript confirmation; `voice-observer.test.ts`
+covers the same original request with successful/failing voice and ASR diagnostic observers.

@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import email.utils
 import smtplib
+import ssl
 import time
 from email.message import EmailMessage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import flows_config
+from .email_design import LOGO_CID, LOGO_PATH
 
 
 def creds(*, login: bool = True) -> tuple[str, str]:
@@ -69,19 +71,48 @@ def _smtp():
                         flows_config.get_int("TINA_MAIL_SMTP_PORT"), timeout=20), False
 
 
-def send(to: str, subject: str, body: str, *, in_reply_to: str | None = None) -> str:
-    addr, pw = creds(login=_needs_login())
+def _message(addr: str, to: str, subject: str, body: str, *, in_reply_to=None, html_body=None):
     m = EmailMessage()
-    m["From"], m["To"], m["Subject"] = f"TINA <{addr}>", to, subject
+    m["From"], m["To"], m["Subject"] = f"Tina <{addr}>", to, subject
     m["Message-ID"] = email.utils.make_msgid(domain=addr.split("@")[1])
     if in_reply_to:
         m["In-Reply-To"] = m["References"] = in_reply_to
     m.set_content(body)
+    if html_body is not None:
+        m.add_alternative(html_body, subtype="html")
+        if f'cid:{LOGO_CID}' in html_body:
+            m.get_payload()[-1].add_related(LOGO_PATH.read_bytes(), maintype="image", subtype="png",
+                                           cid=f"<{LOGO_CID}>", disposition="inline", filename="tina-logo.png")
+    return m
+
+
+def send(to: str, subject: str, body: str, *, in_reply_to: str | None = None,
+         html_body: str | None = None) -> str:
+    addr, pw = creds(login=_needs_login())
+    m = _message(addr, to, subject, body, in_reply_to=in_reply_to, html_body=html_body)
     conn, needs_login = _smtp()
     with conn as s:
         if needs_login:
             s.login(addr, pw)
         s.send_message(m)
+    return m["Message-ID"]
+
+
+def send_resend(to: str, subject: str, body: str, *, in_reply_to=None, html_body=None) -> str:
+    key = flows_config.require("TINA_RESEND_API_KEY")
+    addr = flows_config.require("TINA_RESEND_FROM")
+    if email.utils.parseaddr(addr)[1] != addr or addr.count("@") != 1:
+        raise flows_config.ConfigError("TINA_RESEND_FROM must be a bare sender email address")
+    m = _message(addr, to, subject, body, in_reply_to=in_reply_to, html_body=html_body)
+    reply_to = flows_config.get("TINA_MAIL_ADDR")
+    if reply_to:
+        m["Reply-To"] = reply_to
+    try:
+        with smtplib.SMTP_SSL("smtp.resend.com", 465, timeout=20, context=ssl.create_default_context()) as s:
+            s.login("resend", key)
+            s.send_message(m)
+    except smtplib.SMTPException as exc:
+        raise RuntimeError(f"Resend SMTP failed ({type(exc).__name__})") from None
     return m["Message-ID"]
 
 

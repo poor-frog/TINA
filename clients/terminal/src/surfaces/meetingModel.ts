@@ -5,6 +5,7 @@ export interface Participant { name: string; role: string; initials: string }
 /** A calendar-invited human (data.attendees, prep-v3 slice b) — email is the identity key. */
 export interface Attendee { email: string; name?: string; partstat?: string }
 export interface MeetingStatusTransition { from?: string; to: string; timestamp: string; reason?: string }
+export interface MeetingAutoRetry { state: string; attempt: number; max_attempts: number; next_at?: string }
 export interface MeetingAudioRecording {
   id: number;
   session_uid?: string;
@@ -34,11 +35,13 @@ export interface MeetingMock {
   calendar_uid?: string;      // calendar-import provenance (data.calendar_uid)
   attendees?: Attendee[];     // invited humans from the calendar (data.attendees)
   notes?: string;
+  summary?: string;
   languages?: string[];
   calendar_sources?: { name: string }[];
   status_transition?: MeetingStatusTransition[];
   auto_join?: boolean;        // "scheduled means the bot joins" toggle (data.auto_join; absent = on)
   auto_join_error?: string;   // the auto-join sweep's LOUD failure (data.auto_join_error)
+  auto_retry?: MeetingAutoRetry;
   join_failure_summary?: string; // safe owner-only explanation derived from typed join evidence
   meeting_url?: string;       // the joinable link (constructed_meeting_url) — send-bot uses it verbatim
   platform: string;

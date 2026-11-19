@@ -9,6 +9,119 @@ name: tina-v012
 # mounted /var/run/docker.sock. That published ~3.6GB image is a REFERENCE here, never built.
 
 services:
+  agent-reach:
+    image: tina/agent-reach:${IMAGE_TAG:-dev}
+    build: {context: ../agent-reach}
+    networks: [tina]
+    read_only: true
+    tmpfs: [/tmp]
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  livekit:
+    profiles: ["livekit"]
+    image: livekit/livekit-server:v1.13.11
+    environment:
+      LIVEKIT_KEYS: ${LIVEKIT_KEYS:-}
+      LIVEKIT_CONFIG: |
+        port: 7880
+        bind_addresses: ["0.0.0.0"]
+        rtc:
+          use_external_ip: false
+          tcp_port: 7881
+          port_range_start: 50000
+          port_range_end: 50100
+        logging:
+          level: warn
+    networks: [tina]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:7880/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+  livekit-agent:
+    profiles: ["livekit"]
+    image: tina/livekit-agent:${IMAGE_TAG:-dev}
+    build:
+      context: ../..
+      dockerfile: deploy/livekit/Dockerfile
+      args: {TINA_BOT_IMAGE: "${BROWSER_IMAGE:-tina/tina-bot:dev}"}
+    environment:
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
+      MEETING_API_URL: http://meeting-api:8080
+      TINA_LIVEKIT_AUDIO: ${TINA_LIVEKIT_AUDIO:-0}
+      TINA_LIVEKIT_VAD_SHADOW: ${TINA_LIVEKIT_VAD_SHADOW:-0}
+      TINA_AUDIO_DENOISER: ${TINA_AUDIO_DENOISER:-webrtc}
+      TTS_SERVICE_URL: ${TTS_SERVICE_URL:-http://tts:8000}
+      TTS_API_TOKEN: ${TTS_API_TOKEN:-}
+    networks: [tina]
+    volumes: ["meeting-voice-models:/models/meeting-voice:ro"]
+    depends_on:
+      livekit: {condition: service_healthy}
+    read_only: true
+    tmpfs: [/tmp]
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready',timeout=12)"]
+      interval: 10s
+      timeout: 15s
+      retries: 12
+      start_period: 120s
+  # Optional room voice inference. Models persist once and are never downloaded by a bot.
+  meeting-voice-models:
+    profiles: ["speech"]
+    image: ${BROWSER_IMAGE:-tina/tina-bot:dev}
+    entrypoint: ["/opt/tina-voice/bin/python", "-m", "tina_meeting_voice.bot"]
+    command: ["/models/meeting-voice", "--vad-only", "--setup"]
+    volumes: ["meeting-voice-models:/models/meeting-voice"]
+    networks: [tina]
+    restart: "no"
+  tts-models:
+    profiles: ["speech"]
+    image: tina/tts:dev
+    user: "0:0"
+    command: ["python", "install_models.py"]
+    environment:
+      HF_HUB_OFFLINE: "0"
+      HF_HUB_DISABLE_XET: "1"
+    volumes: ["tts-models:/models"]
+    networks: [tina]
+    restart: "no"
+  tts:
+    profiles: ["speech"]
+    image: tina/tts:dev
+    build:
+      context: ../tts
+    environment:
+      TTS_API_TOKEN: ${TTS_API_TOKEN:-}
+      TINA_TTS_PROFILE_KEY: ${TINA_TTS_PROFILE_KEY:-}
+      TINA_TTS_THREADS: ${TINA_TTS_THREADS:-2}
+    volumes: ["tts-models:/models:ro"]
+    networks: [tina]
+    read_only: true
+    tmpfs: [/tmp]
+    init: true
+    restart: unless-stopped
+    depends_on:
+      tts-models: {condition: service_completed_successfully}
+      meeting-voice-models: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+
   # ─── Infrastructure ───────────────────────────────────────────────────────────────────────────
   redis:
     # Valkey (Linux Foundation BSD-3 fork of Redis 7.2.4): parity with the Lite witness surface
@@ -205,8 +318,9 @@ services:
       # Spawn the bot onto THIS compose network so it resolves meeting-api:8080 (lifecycle callback)
       # + redis. Must equal the project-prefixed network name (DockerBackend → HostConfig.NetworkMode).
       - DOCKER_NETWORK=${COMPOSE_PROJECT_NAME:-tina-v012}_tina
+      - TINA_MEETING_VOICE_MODELS_VOLUME=${COMPOSE_PROJECT_NAME:-tina-v012}_meeting-voice-models
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${TINA_DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
       # Mirror of HOST_CLAUDE_CREDENTIALS (a DOCKER-HOST path — see .env.example) into THIS container,
       # so the config.v1 `model_inference` file probe can verify the host file actually exists before
       # any worker spawns: docker bind-mounts a MISSING host path as an empty DIRECTORY, which is how
@@ -257,6 +371,7 @@ services:
         required: false
     environment:
       - TINA_AGENT_API_PORT=8100
+      - TINA_VOICE_EMBED_DIR=${TINA_VOICE_EMBED_DIR:-/opt/tina/voice-retrieval}
       - TINA_RUNTIME_API_URL=http://runtime:8090
       # P0 SSE ownership: agent-api verifies meeting-row ownership before opening /api/meeting/stream (owner-scoped like /ws).
       - TINA_MEETING_API_URL=http://meeting-api:8080
@@ -277,7 +392,8 @@ services:
       # agent-api and X-User-Id is always present — then a missing header fails closed (401).
       - TINA_AGENT_DEFAULT_SUBJECT=${TINA_AGENT_DEFAULT_SUBJECT:-u_live}
       # Server-owned tool.v1 names available to interactive chat; request bodies cannot add tools.
-      - TINA_CHAT_TOOLBELT=${TINA_CHAT_TOOLBELT:-[]}
+      - 'TINA_CHAT_TOOLBELT=${TINA_CHAT_TOOLBELT:-["reach.web.search","reach.web.read","reach.github.search","reach.github.read"]}'
+      - TINA_AGENT_REACH_URL=${TINA_AGENT_REACH_URL-http://agent-reach:8080}
       - TINA_AGENT_MODEL=${TINA_AGENT_MODEL:-}
       - TINA_MEETING_MODEL=${TINA_MEETING_MODEL:-}
       - TINA_OPENAI_AUTH_DIR=/var/lib/tina/openai-auth
@@ -393,9 +509,12 @@ services:
       # participants see; set DEFAULT_BOT_NAME in .env and restart meeting-api (no terminal rebuild).
       - DEFAULT_BOT_NAME=${DEFAULT_BOT_NAME:-TINA}
       # The background sweeps' internal lookups: auto-join fetches per-user spawn context
-      # (/internal/users/{id}/bot-context) and calendar sync discovers connected ICS feeds
+      # (/internal/users/{id}/bot-context) and calendar sync discovers connected ICS/Google sources
       # (/internal/calendar-configs). Unset -> calendar sync no-ops, auto-join spawns uncapped.
       - ADMIN_API_URL=http://admin-api:8001
+      # Shared OAuth client used only to refresh the user's read-only Google Calendar grant.
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       # MeetingToken is signed (mint) AND verified (recordings upload) with ADMIN_TOKEN — the SAME
       # admin secret admin-api holds (admin-api gets ADMIN_API_TOKEN=${ADMIN_TOKEN}). Exactly like
       # main (meeting-api ADMIN_TOKEN = admin-api ADMIN_API_TOKEN). __main__ passes token_secret=ADMIN_TOKEN.
@@ -412,8 +531,16 @@ services:
       - TRANSCRIPTION_MODEL=${TRANSCRIPTION_MODEL:-}
       # Optional OpenAI-compatible TTS endpoint for the bot's Speak acts. These stay server-side;
       # meeting-api forwards them only into voice-enabled bot workloads.
+      - TINA_MEETING_VOICE=${TINA_MEETING_VOICE:-0}
+      - TINA_VOICE_TURN_SHADOW=${TINA_VOICE_TURN_SHADOW:-1}
+      - TINA_LIVEKIT_AUDIO=${TINA_LIVEKIT_AUDIO:-0}
+      - TINA_LIVEKIT_VAD_SHADOW=${TINA_LIVEKIT_VAD_SHADOW:-0}
+      - LIVEKIT_AGENT_URL=${LIVEKIT_AGENT_URL:-}
+      - AGENT_API_URL=${AGENT_API_URL:-http://agent-api:8100}
       - TTS_SERVICE_URL=${TTS_SERVICE_URL:-}
       - TTS_API_TOKEN=${TTS_API_TOKEN:-}
+      - TINA_TTS_PROFILE_KEY=${TINA_TTS_PROFILE_KEY:-}
+      - TINA_TTS_PREBUFFER_MS=${TINA_TTS_PREBUFFER_MS:-150}
       - DIARIZATION_SERVICE_URL=${DIARIZATION_SERVICE_URL:-}
       - DIARIZATION_SERVICE_TOKEN=${DIARIZATION_SERVICE_TOKEN:-}
       - ALIGNMENT_SERVICE_URL=${ALIGNMENT_SERVICE_URL:-}
@@ -541,6 +668,9 @@ services:
       - TINA_VIEGEM_HOST=0.0.0.0
       - TINA_VIEGEM_PORT=8000
       - TINA_VIEGEM_DEVICE=cpu
+      - TINA_VIEGEM_NAME_BIAS=${TINA_VIEGEM_NAME_BIAS:-0}
+      - TINA_VIEGEM_CUSTOM_WEIGHT=${TINA_VIEGEM_CUSTOM_WEIGHT:-1.0}
+      - TINA_VIEGEM_CUSTOM_WORDS_FILE=${TINA_VIEGEM_CUSTOM_WORDS_FILE:-}
       - TINA_VIEGEM_DRAIN_KEY=${TINA_VIEGEM_DRAIN_KEY:-}
       - TINA_VIEGEM_MODEL_DIR=/app/models/viegem-fsmn
       - TINA_VIEGEM_TOKEN=${TINA_VIEGEM_TOKEN:-}
@@ -709,6 +839,8 @@ services:
       - TINA_MAILPIT_URL=${TINA_MAILPIT_URL:-}
       - TINA_MAILPIT_LOOKBACK_S=${TINA_MAILPIT_LOOKBACK_S:-300}
       - TINA_NOTIFY_CHANNEL=${TINA_NOTIFY_CHANNEL:-smtp}
+      - TINA_RESEND_API_KEY=${TINA_RESEND_API_KEY:-}
+      - TINA_RESEND_FROM=${TINA_RESEND_FROM:-}
       # ── who the mailbox will act for (R-B12) ────────────────────────────────────────────────
       # UNSET IS NOT `EVERYONE`: unset means the mailbox's own domain. Empty here is therefore the
       # safe value and not a hole.
@@ -814,6 +946,8 @@ services:
       - TINA_MAILPIT_URL=${TINA_MAILPIT_URL:-}
       - TINA_MAILPIT_LOOKBACK_S=${TINA_MAILPIT_LOOKBACK_S:-300}
       - TINA_NOTIFY_CHANNEL=${TINA_NOTIFY_CHANNEL:-smtp}
+      - TINA_RESEND_API_KEY=${TINA_RESEND_API_KEY:-}
+      - TINA_RESEND_FROM=${TINA_RESEND_FROM:-}
       # ── who the mailbox will act for (R-B12) ────────────────────────────────────────────────
       # UNSET IS NOT `EVERYONE`: unset means the mailbox's own domain. Empty here is therefore the
       # safe value and not a hole.
@@ -919,6 +1053,8 @@ services:
       - TINA_MAILPIT_URL=${TINA_MAILPIT_URL:-}
       - TINA_MAILPIT_LOOKBACK_S=${TINA_MAILPIT_LOOKBACK_S:-300}
       - TINA_NOTIFY_CHANNEL=${TINA_NOTIFY_CHANNEL:-smtp}
+      - TINA_RESEND_API_KEY=${TINA_RESEND_API_KEY:-}
+      - TINA_RESEND_FROM=${TINA_RESEND_FROM:-}
       # ── who the mailbox will act for (R-B12) ────────────────────────────────────────────────
       # UNSET IS NOT `EVERYONE`: unset means the mailbox's own domain. Empty here is therefore the
       # safe value and not a hole.
@@ -1102,6 +1238,7 @@ services:
       # secret to expose that sign-in button on the login page; leave empty to hide it (the dev
       # type-any-email login still works). Register the redirect URI in the provider console:
       #   Google    → ${NEXTAUTH_URL}/api/auth/callback/google
+      # Calendar linking also requires: ${NEXTAUTH_URL}/api/auth/callback/google-calendar
       #   Microsoft → ${NEXTAUTH_URL}/api/auth/callback/microsoft
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
@@ -1170,6 +1307,8 @@ services:
     restart: unless-stopped
 
 volumes:
+  meeting-voice-models:
+  tts-models:
   redis-data:
   postgres-data:
   storage-data:

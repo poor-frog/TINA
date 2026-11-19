@@ -42,3 +42,91 @@ and recording bytes are never overwritten. Ordinary shared/list/webhook response
 The review clients highlight added/deleted whitespace tokens, offer a changed-only filter, and put
 source playback next to each proposal. For very long legacy text, diff falls back to whole-text
 replacement to bound browser memory. These are textual differences, not word-aligned audio marks.
+
+## Advisory audio checks for bot recordings
+
+Bot `/by-id/{id}/refinement/start` additionally accepts `mode`: `all` (default),
+`check`, or `flagged`. Desktop start options remain unchanged. `check` requires no
+ASR credentials and does not invoke inference; `flagged` recomputes diagnostics on
+each eligible saved clip and decodes only flagged clips. Analysis uses the same
+30-second/recording limits, live-meeting scheduling and explicit cancellation.
+Jobs optionally return `mode`; items optionally return `quality` containing
+`needs_review`, reason codes (`low_volume`, `clipping`, `mostly_quiet`, `repetition`),
+normalized RMS, clipping ratio and quiet-frame ratio. Thresholds: RMS <0.003,
+absolute PCM16 >=32700 for >=1% of samples, >=80% of 20ms frames below RMS 0.001,
+or an exact phrase of 1-10 whitespace tokens repeated at least four times.
+These heuristics do not establish transcription accuracy, SNR, speech presence or
+model confidence. Text comparison retains Vietnamese accents. No text is deleted.
+`checked` items contain diagnostics and audio hash but no proposal, and cannot be
+applied. Completed jobs may contain only checked items. UI warnings/filters are
+valid only at their expected text revision. New checks replace the latest job view
+just like an ordinary refinement start; previously accepted revisions remain intact.
+Source audio and the original transcript remain immutable.
+
+### Text/audio comparison and second-pass checks
+
+Bot `quality` optionally includes `text_check`: `no_text_flags`, `text_flag`, or
+`text_and_quiet_audio`. Text cues are four consecutive repetitions of 1-10 tokens
+(NFC/casefold with token-edge punctuation trimmed, accents retained), or nonempty
+text without letters/numbers (`non_lexical`, an additional advisory reason).
+Short replies, proper names and numbers have no minimum length rule or blacklist.
+The combined cue requires a text warning AND >=80% quiet original 20 ms frames;
+low RMS or clipping alone is insufficient. Energy is not a speech classifier, so
+even combined cues never prove hallucination or authorize deletion.
+
+Ready bot items optionally include `proposal_quality` with the same diagnostic shape.
+It evaluates the suggested text against the original clip's acoustic metrics, not
+boosted ASR input, and does not inherit text warnings from the source. Legacy jobs
+and Desktop may omit these fields. Both review clients include source/proposal
+warnings in their current-revision filter, label each separately, and hide obsolete
+checks after a text edit. After Apply, only proposal evidence matching the exact
+applied revision/text remains visible. There is no automatic deletion or Apply.
+`golden/TextAudioReview.json` demonstrates a second-pass warning on quiet audio.
+
+## Manual retry of failed bot ASR segments
+
+POST `/by-id/{id}/refinement/start` with `{"retry_job_id":"latest-job-id"}`
+creates a new job (202) carrying settled ready/applied/checked/skipped items unchanged.
+Only failed items marked retryable with a saved audio hash are queued. The original
+mode and vocabulary stay fixed; overrides are rejected (422). Wrong/stale jobs, active
+work/live meetings, no retryable work, or a changed backend/model return 409.
+The backend SHA-256 covers endpoint/model/backend and excludes credentials: correcting
+a token on the same backend is allowed. URLs and credentials never enter the job.
+Retry clips must still match expected text revision and audio SHA-256 before ASR;
+changed input is skipped with `source_changed`. Apply retains its existing CAS/hash checks.
+`retry_of` records the prior job ID; per-item `attempts` counts actual HTTP submissions.
+Item error codes distinguish `asr_timeout`, `asr_busy` (429/503), `asr_auth` (401/403),
+`asr_unavailable`, `asr_rejected`, `asr_invalid_response`, `audio_unavailable`, and
+`source_changed`. Safe fixed reasons never echo upstream bodies, URLs or credentials.
+Only ASR failures offer manual retry; missing/unsafe audio requires a new refinement
+after resolving the recording issue. Legacy jobs without a backend hash need a new
+start. Unattempted pending items from an interrupted/cancelled job are skipped by retry,
+not resumed. There is no automatic retry, crash resume, alternate-model fallback or auto-Apply.
+
+## Schema seal and line endings
+
+Schema files use LF line endings, as required by `.gitattributes`. The contract seal
+hashes exact schema bytes, so generators and editors on Windows must also write LF
+before running `pnpm seal:contracts`. Check `git ls-files --eol` for the schema:
+both the index and working copy should report `lf`. Validate with `pnpm gate:schema`
+and `pnpm gate:contract-version`; back-compatible contract updates still require
+the existing contract review.
+
+## Opt-in prepared bot audio
+
+Bot Start optionally accepts `normalize_audio` (boolean, default false), only for
+ASR modes. Jobs optionally pin `audio_preprocessing` (`none` or `bounded-gain.v1`);
+legacy jobs without it use original audio. Check-only and retry requests cannot
+turn preparation on. Retry preserves the previous policy and prepared-input hash.
+
+`bounded-gain.v1` applies at most +12 dB toward RMS 0.01 only below RMS 0.003,
+with peak capped at 0.9. RMS below 0.0001, >=80% quiet frames, detected clipping
+and peak-limited clips are left unchanged. It is not VAD, denoising or a confidence
+estimate. It never changes sample count, source clock or persisted original bytes.
+Optional item `preprocessing` reports method/applied/gain_db/reason and prepared
+`audio_sha256`; the item's existing `audio_sha256` still hashes the original clip.
+Playback/Apply/Restore retain the original source checks. Optional `asr_elapsed_ms`
+records the last HTTP attempt only, including failed attempts, without queue wait.
+Desktop retains its existing start behavior. All additions are optional.
+
+Explicit Apply also copies preparation metadata into transcript-document.v1 history, so a later job or Restore cannot erase the prepared-input provenance.

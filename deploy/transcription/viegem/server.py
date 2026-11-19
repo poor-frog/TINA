@@ -15,7 +15,8 @@ PORT = int(os.getenv('TINA_VIEGEM_PORT', '18005'))
 HOST = os.getenv('TINA_VIEGEM_HOST', '127.0.0.1')
 app = create_app(model_id=MODEL, name='VieGem + KenLM', prefix='TINA_VIEGEM',
                  default_directory=Path(__file__).resolve().parent.parent / 'models/viegem-fsmn',
-                 load_engine=VieGemEngine.load, device=DEVICE, decoder='pytorch-ctc-kenlm', languages=('vi', 'en'))
+                 load_engine=VieGemEngine.load, device=DEVICE, decoder='pytorch-ctc-kenlm', languages=('vi', 'en'),
+                 default_silence_ms=1200)
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)

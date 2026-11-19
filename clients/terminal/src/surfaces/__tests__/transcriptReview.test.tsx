@@ -320,3 +320,104 @@ describe("aligned word playback", () => {
     expect(play).toHaveBeenCalledTimes(1);
   });
 });
+
+
+it("checks audio without ASR and filters quality flags by current revision", async () => {
+  const doc = { status: "completed", segments: [{ ...segment, audio: [{ kind: "recording-span" }] }] };
+  const job = { id: "quality", status: "completed", model: "", backend: "audio-check", items: [{ segment_id: "s/1", expected_revision: 0, state: "checked", quality: { needs_review: true, reasons: ["low_volume"] } }] };
+  fetchMock.mockImplementation(async (url: string, init?: RequestInit) => ({ ok: true, json: async () => {
+    if (url.endsWith("/refinement/start")) { expect(JSON.parse(init!.body as string).mode).toBe("check"); return job; }
+    return url.endsWith("/document") ? doc : url.endsWith("/alignment") ? { available: false, job: null } : null;
+  } }));
+  render(<TranscriptReview meetingId="42" />);
+  fireEvent.click(screen.getByRole("button", { name: "Review transcript" }));
+  await screen.findByLabelText(/Corrected transcript/);
+  fireEvent.click(screen.getByRole("button", { name: "Check audio" }));
+  await screen.findByText("Needs review: Low volume");
+  fireEvent.click(screen.getByLabelText("Only segments needing review"));
+  expect(screen.getByRole("option", { name: /Review/ })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Apply refinement" })).toBeNull();
+});
+
+it("includes a flagged second-pass suggestion in review and hides evidence after the source changes", async () => {
+  let doc = { status: "completed", segments: [{ ...segment, audio: [{ kind: "recording-span" }] }] };
+  const quality = { needs_review: false, reasons: [], text_check: "no_text_flags", rms: .02, quiet_ratio: 0, clipping_ratio: 0 };
+  const job = { id: "second-pass", status: "completed", model: "custom", backend: "viegem", items: [{
+    segment_id: "s/1", expected_revision: 0, state: "ready", text: "TINA TINA TINA TINA", quality,
+    proposal_quality: { ...quality, needs_review: true, reasons: ["repetition"], text_check: "text_flag" },
+  }] };
+  fetchMock.mockImplementation(async (url: string, init?: RequestInit) => ({ ok: true, json: async () => {
+    if (init?.method === "PATCH") doc = { ...doc, segments: [{ ...doc.segments[0], text: "Owner correction", revision: 1 }] };
+    return url.endsWith("/refinement") ? job : url.endsWith("/alignment") ? { available: false, job: null } : doc;
+  } }));
+  render(<TranscriptReview meetingId="42" />);
+  fireEvent.click(screen.getByRole("button", { name: "Review transcript" }));
+  await screen.findByRole("region", { name: "Suggestion checks" });
+  expect(screen.getByText(/Text warning without mostly quiet audio/)).toBeTruthy();
+  expect(screen.getByText(/The suggestion also needs review/)).toBeTruthy();
+  expect(screen.getByLabelText(/Corrected transcript/)).toHaveProperty("value", segment.text);
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  fireEvent.click(screen.getByLabelText("Only segments needing review"));
+  expect(screen.getByRole("option", { name: /Review/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Apply refinement" })).toHaveProperty("disabled", false);
+  fireEvent.change(screen.getByLabelText(/Corrected transcript/), { target: { value: "Owner correction" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save revision" }));
+  await screen.findByText(/No current segments flagged/);
+  expect(screen.queryByRole("region", { name: "Suggestion checks" })).toBeNull();
+});
+
+it("retries the saved job without replacing vocabulary or successful suggestions", async () => {
+  const doc = { status: "completed", segments: [{ ...segment, audio: [{ kind: "recording-span" }] }, { ...segment, segment_id:"failed", audio:[{kind:"recording-span"}] }] };
+  const kept = { segment_id:"s/1", expected_revision:0, state:"ready", text:"API thứ Sáu." };
+  const job = { id:"failed-job", status:"completed", model:"custom", backend:"viegem", backend_sha256:"a".repeat(64), items:[kept, {segment_id:"failed",expected_revision:0,state:"failed",retryable:true,error_code:"asr_busy",reason:"ASR is busy. Wait briefly, then retry."}] };
+  let requests = 0;
+  fetchMock.mockImplementation(async (url:string, init?:RequestInit) => ({ ok:true, json:async () => {
+    if (url.endsWith("/refinement/start")) {
+      requests++;
+      expect(JSON.parse(init!.body as string)).toEqual({retry_job_id:"failed-job"});
+      return {...job,id:"retried",status:"running",items:[kept,{segment_id:"failed",expected_revision:0,state:"pending"}]};
+    }
+    return url.endsWith("/document") ? doc : url.endsWith("/alignment") ? {available:false,job:null} : job;
+  }}));
+  render(<TranscriptReview meetingId="42" />);
+  fireEvent.click(screen.getByRole("button",{name:"Review transcript"}));
+  await screen.findByLabelText(/Corrected transcript/);
+  expect(screen.getByText(/1 segment\(s\) failed/)).toBeTruthy();
+  const retry=screen.getByRole("button",{name:"Retry failed segments"});
+  fireEvent.click(retry);
+  await screen.findByText(/running · 1\/2 segments/);
+  expect(requests).toBe(1);
+  expect(screen.getByLabelText("Suggested changes").textContent).toContain("API thứ Sáu.");
+});
+
+it("keeps quiet-audio optimization opt-in and excludes it from check-only requests", async () => {
+  const doc = { status:"completed", segments:[{...segment,audio:[{kind:"recording-span"}]}] };
+  const payloads: Array<Record<string, unknown>> = [];
+  fetchMock.mockImplementation(async (url:string, init?:RequestInit) => ({ok:true,json:async () => {
+    if (url.endsWith("/refinement/start")) {
+      const body=JSON.parse(init!.body as string); payloads.push(body);
+      return {id:"job",status:"completed",model:"custom",backend:"viegem",items:[{
+        segment_id:"s/1",expected_revision:0,state:body.mode === "check" ? "checked" : "ready",text:"API thứ Sáu.",
+        ...(body.normalize_audio ? {preprocessing:{applied:true,gain_db:12,reason:"gain_applied"}} : {}),
+      }]};
+    }
+    return url.endsWith("/document") ? doc : url.endsWith("/alignment") ? {available:false,job:null} : null;
+  }}));
+  render(<TranscriptReview meetingId="42" />);
+  fireEvent.click(screen.getByRole("button",{name:"Review transcript"}));
+  await screen.findByLabelText(/Corrected transcript/);
+  fireEvent.click(screen.getByText("Refinement options"));
+  const option=screen.getByRole("checkbox",{name:"Optimize quiet audio"});
+  expect(option).toHaveProperty("checked",false);
+  fireEvent.click(screen.getByRole("button",{name:"Refine after meeting"}));
+  await waitFor(() => expect(payloads).toHaveLength(1));
+  expect(payloads[0]).toEqual({glossary:[]});
+  await waitFor(() => expect(option).toHaveProperty("disabled",false));
+  fireEvent.click(option);
+  fireEvent.click(screen.getByRole("button",{name:"Refine flagged segments"}));
+  await screen.findByText("ASR used audio boosted by 12 dB. Playback uses the original.");
+  expect(payloads[1]).toEqual({mode:"flagged",normalize_audio:true,glossary:[]});
+  fireEvent.click(screen.getByRole("button",{name:"Check audio"}));
+  await waitFor(() => expect(payloads).toHaveLength(3));
+  expect(payloads[2]).toEqual({mode:"check",glossary:[]});
+});

@@ -43,7 +43,15 @@ This is enforced statically by **`tests/test_tx_scope.py`** (stdlib `ast`, no de
 session and awaits another backend. A genuinely-legitimate case goes in that file's `ALLOWLIST` with
 a one-line justification — a reviewed decision, never a silent hole.
 
-## P3 seams (NOT built here)
-continue_meeting, max-bots / join-retry (bot_spawn), the always-on segments consumer loop
-(collector), the master byte-stream download (recordings), and the production composition root that
-wires the real adapters. Behavioral diagnostics + fixtures are P3.
+## Production retry behavior
+Transient failures before admission are retried up to three total attempts (30s, then 120s) by the
+single-flight auto-join loop. Retry state is stored on the meeting row; the in-memory scheduler under
+`scheduling/` remains an eval harness. User stops, host rejection, configuration failures, and failures
+after admission do not trigger an automatic resend.
+
+Pending retries can be cancelled through the existing owner-scoped `DELETE /bots/{platform}/{native}`
+route (Terminal and Extension: **Cancel retry**). Cancellation and retry claims share the meeting row
+lock. Deleted rows and superseded attempts cannot fall back to a fresh automatic spawn. Lifecycle
+persistence updates retry state in the same transaction as status; callbacks never mutate FSM projections.
+
+Owner list/detail responses derive fixed join-failure summaries from typed evidence. Google pre-admission blocks, host denials, lobby expiry and missing signed-in sessions remain distinct; raw details are not UI copy and non-owners do not receive this summary. Deploy the retry entrypoint, repository adapters and transition policy from the same checkout; a partial image can strand failed rows in ready state. Existing failed rows are not automatically replayed after deployment.

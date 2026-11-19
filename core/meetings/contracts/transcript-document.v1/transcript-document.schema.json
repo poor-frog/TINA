@@ -108,6 +108,45 @@
                 "audio_sha256": {
                   "type": "string",
                   "pattern": "^[0-9a-f]{64}$"
+                },
+                "preprocessing": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "method",
+                    "applied",
+                    "gain_db",
+                    "reason",
+                    "audio_sha256"
+                  ],
+                  "properties": {
+                    "method": {
+                      "const": "bounded-gain.v1"
+                    },
+                    "applied": {
+                      "type": "boolean"
+                    },
+                    "gain_db": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 12
+                    },
+                    "reason": {
+                      "enum": [
+                        "gain_applied",
+                        "not_low_volume",
+                        "low_signal",
+                        "mostly_quiet",
+                        "clipping",
+                        "peak_limited"
+                      ]
+                    },
+                    "audio_sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  },
+                  "description": "Prepared ASR input fingerprint. The item audio_sha256 still identifies the unchanged original clip."
                 }
               },
               "allOf": [

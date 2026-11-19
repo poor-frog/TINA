@@ -25,6 +25,12 @@ from the local paplay process, and `completed` requires successful PCM playback 
 cleanup. This proves the bot playback substrate, not audibility at a remote meeting participant.
 Callback delivery retries receipts only, never synthesis. Missing/expired receipts fail closed.
 
+`PlaybackReport.played_text` is an optional bounded prefix for voice-assistant replies. While
+started, it advances only after each complete sentence plays; a stopped receipt may carry the
+same prefix. The receiver rejects non-prefix/regressing values and progress on manual commands.
+Terminal receipts stay immutable. This is sentence-level local playback completion, not a claim
+of remote audibility or word alignment. Older producers omit the field and retain their behavior.
+
 The optional single-process coordinator has one operator-configured room and an explicitly
 enrolled list of TINA user IDs. Each request validates the participant's own X-API-Key through
 Gateway `/auth/me`; the client never supplies room, user ID, document paths or shared secrets.

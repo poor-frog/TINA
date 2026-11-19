@@ -8,8 +8,8 @@ A stdlib-``ast`` gate over ``src/meeting_api/**/*.py``. It fails on either shape
       positive — that helper is itself checked by Rule 2.
 
   Rule 2 (semantic) — an ``async def`` that RECEIVES a live session (a param named ``db``/``session``
-      or annotated ``*Session``) and awaits anything not rooted at that param (and not passing it
-      along). This is the rule that catches the helper indirection a purely lexical scan misses:
+      without a scalar annotation, or annotated ``*Session``) and awaits anything not rooted at that
+      param (and not passing it along). This is the rule that catches the helper indirection a purely lexical scan misses:
       the pre-fix ``_transcript_doc(self, db, meeting)`` awaited ``self._redis.hgetall`` while holding
       the caller's session — the exact 2026-07-09 lock-convoy source.
 
@@ -87,15 +87,14 @@ def _session_params(fn: ast.AST) -> set[str]:
     names: set[str] = set()
     args = fn.args
     for a in list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs):
-        if a.arg in _SESSION_PARAM_NAMES:
+        annotation_types = {
+            node.id if isinstance(node, ast.Name) else node.attr
+            for node in ast.walk(a.annotation) if isinstance(node, (ast.Name, ast.Attribute))
+        } if a.annotation else set()
+        if a.arg in _SESSION_PARAM_NAMES and "str" not in annotation_types:
             names.add(a.arg)
-        ann = a.annotation
-        # unwrap Optional[AsyncSession] etc.
-        for sub in ast.walk(ann) if ann is not None else []:
-            if isinstance(sub, ast.Name) and sub.id.endswith("Session"):
-                names.add(a.arg)
-            if isinstance(sub, ast.Attribute) and sub.attr.endswith("Session"):
-                names.add(a.arg)
+        if any(name.endswith("Session") for name in annotation_types):
+            names.add(a.arg)
     return names
 
 
@@ -204,6 +203,13 @@ def test_gate_detects_a_planted_violation(tmp_path):
     bad_awaits = [aw for aw in _awaits_in(fn)
                   if _root_name(aw) not in {"db"} and not _passes_alias(aw, "db")]
     assert len(bad_awaits) == 1 and bad_awaits[0].lineno == 5
+
+
+def test_string_session_identifier_is_not_a_live_database_session():
+    fn = next(n for n in ast.walk(ast.parse(
+        "async def f(session: str):\n await redis.get('k')\n"))
+        if isinstance(n, ast.AsyncFunctionDef))
+    assert _session_params(fn) == set()
 
 
 def _first_await(src: str) -> ast.Await:

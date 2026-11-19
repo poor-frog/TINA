@@ -1,0 +1,26 @@
+{
+  "state": "LISTENING",
+  "audio": {
+    "observed_at_ms": 1800000000000,
+    "channels": [
+      {
+        "channel": 0,
+        "frames": 100,
+        "samples": 102400,
+        "last_frame_ms": 1800000000000,
+        "rms": 0.05,
+        "sample_clock": true,
+        "gap_samples": 1024,
+        "overlap_samples": 0,
+        "clock_resets": 0,
+        "asr_inflight": 0,
+        "asr_errors": 0,
+        "capture_lag_ms": 12,
+        "capture_age_ms": 20,
+        "queue_ms": 8,
+        "roundtrip_ms": 120,
+        "asr_at_ms": 1800000000000
+      }
+    ]
+  }
+}

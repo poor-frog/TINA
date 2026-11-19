@@ -59,4 +59,8 @@ architecture.svg
 
 output/
 
+# Local design captures and per-machine Codex hooks
+.hallmark/
+.codex/hooks.json
+
 

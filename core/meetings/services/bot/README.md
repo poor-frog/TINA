@@ -1,5 +1,44 @@
 # bot — the meetings ephemeral join+capture worker (Node/TS)
 
+Fixed voice notices rotate independently within each bot/meeting: four name-only acknowledgments,
+four generic question-wait phrases and four recap-wait phrases in `VOICE_NOTICES`. A completed
+question never uses the name-only group. Fast answers skip filler, including a result arriving while
+the notice's policy check is pending. Slow new questions receive at most one notice after 900ms;
+ordinary follow-ups keep their existing no-extra-ack behavior. Every fixed phrase bypasses the busy
+Agents session and pure normalized notice echoes are ignored during caller continuation. The TTS
+`WAKE_TEXTS`/`WAIT_TEXTS`/`SUMMARY_TEXTS` catalog must match these phrases. No LLM chooses filler.
+After acoustic KWS confirmation, the assembled ASR question copy starts after the located invocation,
+including names split across windows and punctuation after “hey”. Pre-roll speech before that name
+is context only, including cached ASR replayed when KWS fires. If ASR omits the name, only complete
+intervals starting after detection (with one 64 ms capture frame of slack) supply a question.
+Uncertain boundaries or multiple possible calls take the name acknowledgment path and wait for the
+caller; they never dispatch old speech as a request. Original ASR text, source timing, caller ownership
+and the requirement for acoustic confirmation stay unchanged.
+
+The runtime KWS threshold is 0.4 for both `hey_tina` and `tina_oi`, checked in the native worker
+and bot controller. Their per-model 1.5-second detection cooldown remains in place.
+
+After native KWS verifies a call, question assembly removes observed STT spellings of the
+vocative, including `KINA ƠI`, `PINA ƠI`, `khi na ơi` and `kỳ na ơi`. Cleanup preserves the raw transcript and keeps
+the existing channel, participant, freshness and acoustic-activation requirements.
+
+`voice_timing` logs retain only request UUID/channel, timestamps and durations. Speech timing is
+split into `ack_*` (name acknowledgment), `notice_*` (question/recap wait) and `answer_*`.
+Each group records `tts_requested`, `pcm_received`, `buffer_ready` and `playback_started`;
+durations include `first_pcm`, `prebuffer` and `mic_start_after_buffer`. Answer timestamps retain
+the first sentence rather than being overwritten by lookahead. `answer_pcm_after_end` and
+`answer_playback_after_end` start at the final question speech-end timestamp. Playback starts only
+after the meeting mic is verified, the player spawns and its first PCM write succeeds. This proves
+local microphone injection, not receipt or audibility at another participant's speaker.
+
+Slow whole-meeting recap requests receive one fixed, prewarmed waiting notice instead of the
+ordinary acknowledgment. Transcript capture continues; the same voice turn waits for the verified
+result and plays it automatically. Stop/departure, caller correction, generation replacement and
+policy revision fence late results. The notice is not a factual answer or a heard-history turn.
+It uses direct shared TTS to avoid the busy Agents session, with a six-second notice deadline. Service wait is bounded to 170 seconds
+and the whole turn to 330 seconds, inside the 360-second server reservation. Only one voice turn
+runs per meeting; this does not enable simultaneous questions or unbounded background playback.
+
 ## Purpose
 
 The disposable meeting-joining browser bot (P7 worker). It boots from a single `invocation.v1`
@@ -51,6 +90,10 @@ in `src/contracts.ts` and validated against the sealed registry goldens (`contra
 
 ## Isolated evaluation
 
+Voice diagnostics and `voice_timing` outcomes distinguish service failures (`answer_failed`) from
+missing or unverifiable evidence (`no_evidence`), even when the spoken recovery audio completes.
+The playback receipt still records the audio as completed; it does not imply a factual answer.
+
 Unit/integration: `pnpm test` (chained `tsx` runs — no build step). Levels:
 **L1** config ajv goldens · **L2** orchestrator `lifecycle.v1` state machine (fake ports) — incl. the
 #530 reachability gate (both-channels-down ⇒ no join, exit 3, `control_plane_unreachable`; either-channel
@@ -88,3 +131,16 @@ node core/meetings/services/bot/dist/audio-archive.js capture.jsonl observations
 The reader is bounded to 30 seconds, keeps channels separate, and refuses missing/overlapping data
 rather than filling silence. Existing recordings lacking source-clock annotations still have their
 original playback/replay path, but cannot claim exact sample-index recovery through this reader.
+
+Voice audio uses separate PulseAudio sinks: meeting_rx receives browser playback, while tts_sink
+feeds virtual_mic. The source stays unmuted so Meet sees a usable device; TTS sink mute plus the
+verified meeting UI gate speech. This does not change captured PCM or either ASR backend.
+The TTS sink starts at 70% volume for all bot speech, independently of meeting receive audio.
+
+VoiceInterruption uses caller identity, source-clock/ASR agreement, final soft-correction timing and a bounded recent-playback text echo fence. MeetingVoice mutes locally and persists the completed-sentence prefix before remote cancellation; failed receipt/release prevents automatic continuation. See docs/tina-voice-speaking-interruption.md.
+
+After a spoken prompt, the same caller has five seconds to begin a reply. A primary VAD onset
+with matching recent transport identity reserves that reply while ASR completes, bounded by the
+existing 20-second capture limit. Other callers, stale audio, Stop and policy changes cannot extend it.
+
+Before any playback/unmute attempt, cleanup stops the TTS sink without searching for a meeting microphone on a rejected lobby page. After an unmute attempt, Stop still verifies mute strictly, including failed or timed-out attempts that could complete later.

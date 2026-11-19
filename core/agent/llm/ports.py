@@ -130,6 +130,7 @@ class CompletionResult:
 
     text: str
     model: str = ""
+    sources: tuple[dict, ...] = ()
 
 
 def schema_system(system: Optional[str], response_schema: Optional[dict]) -> Optional[str]:
@@ -161,6 +162,7 @@ class HarnessPort(Protocol):
                  mcp_config: Optional[str] = None, gated_mcp_servers: Iterable[str] = (),
                  mcp_servers: Optional[dict] = None, mcp_env: Optional[dict[str, str]] = None,
                  mcp_tools: Optional[dict[str, list[str]]] = None,
+                 output_schema: Optional[dict] = None,
                  approval_handler: Optional[Callable[[dict], Optional[bool]]] = None) -> Iterator[dict]: ...
 
     def prepare(self, work: Path, chat_root: Optional[Path] = None) -> None:
@@ -432,6 +434,7 @@ def run_harness_turn(
     mcp_servers: Optional[dict] = None,
     mcp_env: Optional[dict[str, str]] = None,
     mcp_tools: Optional[dict[str, list[str]]] = None,
+    output_schema: Optional[dict] = None,
     approval_handler: Optional[Callable[[dict], Optional[bool]]] = None,
 ) -> Iterator[dict]:
     """Run one harness turn over ``work``, streaming normalized UnitEvents, then commit EACH mount.
@@ -477,13 +480,14 @@ def run_harness_turn(
         for _mount in mounts:
             policy_baselines[str(_mount.resolve())] = _policy_head_sha(_mount)
     done: Optional[dict] = None
+    structured = {'output_schema': output_schema} if output_schema is not None else {}
     with _harness_git_commit_guard():
         for ev in harness.run_turn(work, prompt, allowed_tools=allowed_tools, session=session,
                                    model=model, mcp_config=mcp_config,
                                    gated_mcp_servers=gated_mcp_servers,
                                    mcp_servers=mcp_servers, mcp_env=mcp_env,
                                    mcp_tools=mcp_tools,
-                                   approval_handler=approval_handler):
+                                   approval_handler=approval_handler, **structured):
             if ev.get("type") == "done":
                 done = ev
             yield ev

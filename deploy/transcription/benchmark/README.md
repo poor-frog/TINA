@@ -1,5 +1,49 @@
 # ASR system benchmark / Đánh giá ASR
 
+`noise_ab.py` is the opt-in WebRTC NS Low experiment. `prepare` selects the first ten VI/five EN
+test entries by the existing frozen FLEURS selection index, adds seeded synthetic colored noise at
+10 dB SNR, appends an existing private meeting manifest and adds silence/noise-only controls. No
+new dataset download occurs. `filter` runs inside the Linux bot runtime with the pinned C shim;
+it verifies the 96-sample impulse latency, compensates it and asserts exact per-clip sample counts.
+`evaluate --model viegem|gipformer` reuses the unchanged local engines in both conditions and
+alternates off/low order. `score` uses this folder's existing accent-preserving WER/CER scorer.
+Audio, references and hypotheses stay in the private external directory; the output report contains
+only counts/hashes/timing. No service, account preference or meeting policy is changed by evaluation.
+
+```sh
+.venv/viegem/bin/python deploy/transcription/benchmark/noise_ab.py prepare /private/ns-eval \
+  --fleurs /private/fleurs/manifest.json --meeting /private/meeting-clips/manifest.json
+# In the built bot image, mount the repository read-only at /repo and private ns-eval at /eval:
+# /opt/tina-voice/bin/python /repo/deploy/transcription/benchmark/noise_ab.py filter /eval
+TINA_VIEGEM_DEVICE=mps HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  .venv/viegem/bin/python deploy/transcription/benchmark/noise_ab.py evaluate /private/ns-eval \
+  --model viegem --output output/meeting-voice/ns-ab-viegem.json
+```
+
+These are small whole-window ASR comparisons, not proof of live-meeting quality, wake recall,
+keyboard/fan removal or CUDA performance. NS was off during the original trial. The owner later requested it on for new capable Google Meet
+rooms; this default change is not new accuracy evidence.
+
+`capture_frames.py` compares 4096/1024-sample delivery to native Silero using the same private mono
+16 kHz clips (up to 12 seconds), with 1.5 seconds of zero tail padded to a common full frame boundary.
+It verifies exact PCM hashes/order, counts frames, measures first endpoint delivery and replay/native
+VAD process CPU. This CPU measure includes Python IPC encoding but excludes browser/Playwright and
+the total bot. Optional `--asr-engine viegem|gipformer` evaluates each first-endpoint window through
+the unchanged pinned local engine; no service or account preference is started/changed.
+Reports contain hashes/counts/timings, never transcript text, tokens or private source paths.
+
+```sh
+TINA_VIEGEM_DEVICE=mps HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  .venv/viegem/bin/python deploy/transcription/benchmark/capture_frames.py \
+  /private/manifest.json output/meeting-voice/frame-ab.json \
+  --vad-directory /private/pinned-vad-cache --asr-engine viegem
+.venv/viegem/bin/python -m unittest discover -s deploy/transcription/benchmark -p test_capture_frames.py
+```
+
+This is a packetization/VAD experiment, not streaming LocalAgreement or a labeled WER/wake-recall
+benchmark. Complete-frame padding avoids conflating a finite file's unsent partial last frame with
+missing samples inside the replay; real Worklet stream teardown can still discard its partial tail.
+
 This harness measures the existing loopback transcription APIs against **human-recorded**
 FLEURS Vietnamese/English test audio. It is separate from the mixed-speaker tape-loss oracle
 in `core/meetings/eval`: that oracle compares live output against another ASR pass, whereas
@@ -326,3 +370,41 @@ requires a fresh output directory. `probe-only` is a parser/warmup check, not sc
 `trace-only` outputs per-word VAD midpoint/coverage with deletions; it does not rerun the paired A/B.
 The paired comparison changes the service's internal segmentation path as well as the number of
 Qwen decoder calls; it does not isolate the standalone acoustic accuracy of FSMN boundaries.
+
+## Paired TINA name-prior experiment
+
+`name_bias.py` loads the pinned VieGem/FSMN/KenLM stack locally and computes VAD ranges/CTC
+probabilities once per clip. It compares baseline and name-prior weights 0.25/0.5/1 on those
+identical probabilities (alpha=0.35, beta=1.5, beam=32). Use a private JSON manifest with
+`id`, absolute `path`, `kind` and optional `reference`. Real meeting snippets without manually
+verified references must use `real-candidate` or `real-unlabeled-control`; never report them as
+positive accuracy or WER ground truth. Synthetic controls may use `synthetic-positive` and
+`synthetic-negative`. The summary contains counts, hashes and timings, never audio/hypothesis text.
+
+```sh
+TINA_VIEGEM_DEVICE=mps HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  .venv/viegem/bin/python deploy/transcription/benchmark/name_bias.py \
+  /private/path/manifest.json /private/path/report.json
+```
+
+This sweep intentionally sets the baseline prior to zero regardless of the caller's ambient
+configuration. No model weights or production settings are changed by running it.
+
+## Paired VieGem custom-word experiment
+
+custom_words_ab.py scores a private manifest of 1-32 labeled clips (each at most 12 seconds)
+with the bundled or supplied UTF-8 custom word list. It computes FSMN ranges and CTC probabilities
+once per clip, then decodes those same probabilities with custom bias weights 0, 0.25, 0.5, and 1.
+The default silence endpoint is the production VieGem value, 1200 ms. Reports contain aggregate
+WER/CER, per-clip error counts, target-term recall/false insertions, hashes, and timings, but no
+transcript text or source paths; write the manifest/report outside Git in a private directory.
+
+```sh
+TINA_VIEGEM_DEVICE=mps HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  .venv/viegem/bin/python deploy/transcription/benchmark/custom_words_ab.py \
+  /private/path/manifest.json /private/path/report.json
+```
+
+Real meeting clips need manually checked references and consent. Keep unlabeled clips separate;
+they can show output changes but cannot support WER/CER or target recall claims. A synthetic fixture
+only measures the words and voices it actually contains and is not meeting-quality evidence.

@@ -1,0 +1,47 @@
+{
+  "version": "transcript-document.v1",
+  "meeting_id": 1,
+  "status": "completed",
+  "archive_error": null,
+  "segments": [
+    {
+      "segment_id": "ch-1000:1:1792490000000",
+      "speaker": "You",
+      "start_ms": 1792490000000,
+      "end_ms": 1792490001000,
+      "raw_text": "  API   thứ sáu  ",
+      "normalized_text": "API thứ sáu",
+      "text": "API thứ Sáu.",
+      "revision": 1,
+      "history": [
+        {
+          "revision": 1,
+          "text": "API thứ Sáu.",
+          "kind": "refinement",
+          "at": "2026-10-20T12:00:00Z",
+          "job_id": "prepared-job",
+          "model": "custom",
+          "audio_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "preprocessing": {
+            "method": "bounded-gain.v1",
+            "applied": true,
+            "gain_db": 12,
+            "reason": "gain_applied",
+            "audio_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        }
+      ],
+      "audio": [
+        {
+          "chunk_id": "frame-1",
+          "session_id": "capture-1",
+          "channel": 1000,
+          "start_ms": 1792490000000,
+          "end_ms": 1792490000256,
+          "kind": "capture-span",
+          "chunk_count": 1
+        }
+      ]
+    }
+  ]
+}

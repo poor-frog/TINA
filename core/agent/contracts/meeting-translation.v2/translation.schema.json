@@ -87,6 +87,10 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 10000
+                },
+                "revision": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               }
             }
@@ -117,7 +121,70 @@
           },
           "end_ms": {
             "type": "number"
+          },
+          "status": {
+            "enum": [
+              "waiting",
+              "pending",
+              "running",
+              "retrying",
+              "failed",
+              "complete"
+            ]
+          },
+          "retry_after": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "error_code": {
+            "$ref": "#/$defs/failure_code"
           }
+        }
+      }
+    },
+    "can_advance": {
+      "type": "boolean",
+      "description": "Whether an ordinary POST can start an eligible phrase now. Manual retry still respects the active lease."
+    },
+    "service_error": {
+      "enum": [
+        "auth",
+        "configuration",
+        "rate_limit",
+        "unavailable"
+      ],
+      "description": "Sanitized owner-scoped service cooldown, shared across that owner's meetings."
+    }
+  },
+  "$defs": {
+    "failure_code": {
+      "enum": [
+        "auth",
+        "configuration",
+        "rate_limit",
+        "unavailable",
+        "timeout",
+        "request_rejected",
+        "invalid_translation",
+        "interrupted"
+      ]
+    },
+    "worker_completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "turn-complete"
+        },
+        "translation_error": {
+          "$ref": "#/$defs/failure_code"
         }
       }
     }

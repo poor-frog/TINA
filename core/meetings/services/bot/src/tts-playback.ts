@@ -1,202 +1,162 @@
-/**
- * TTS playback adapter (2b) — the OS-level half of the SPEAK path.  // L4 (O6/VM).
- *
- * The browser half (unmute the meeting-UI mic) lives in capture-bridge.ts's SpeakController; this
- * is the audio half: synthesize `text` via the TINA TTS service and play the returned PCM through
- * the container's PulseAudio `tts_sink` (→ `virtual_mic`, which Chromium captures as its mic). The
- * `tts_sink → virtual_mic` graph is created by entrypoint.sh; here we only unmute it during
- * playback, stream PCM to `paplay`, and re-mute after.
- *
- * Ported (focused: the streaming-PCM path only — no ffmpeg) from the production bot
- *   services/tina-bot/core/src/services/tts-playback.ts (synthesizeViaTtsService + (un)mute).
- * acts.v1 `speak` already carries {text, voice} — no contract change. Config is infrastructure
- * (the TTS service URL/token), read from env like production (TTS_SERVICE_URL / TTS_API_TOKEN),
- * NOT the sealed invocation.v1. Gated by the SpeakController on inv.voiceAgentEnabled.
- *
- * Node-only (child_process + http/https) — no DOM, no workspace imports → gate:isolation-clean.
- */
+/** Authenticated PCM stream -> bounded prebuffer -> PulseAudio virtual microphone. */
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
+import { PassThrough } from 'node:stream';
 import https from 'node:https';
 import http from 'node:http';
-import type { ClientRequest } from 'node:http';
+import type { ClientRequest, IncomingMessage } from 'node:http';
 
 const PAPLAY_ARGS = ['--raw', '--format=s16le', '--rate=24000', '--channels=1', '--device=tts_sink'];
-
-function setTtsMute(muted: boolean, log: (m: string) => void): void {
-  const v = muted ? '1' : '0';
-  try {
-    execSync(`pactl set-sink-mute tts_sink ${v}`, { stdio: 'pipe' });
-    execSync(`pactl set-source-mute virtual_mic ${v}`, { stdio: 'pipe' });
-  } catch (err) {
-    log(`[tts] pactl ${muted ? 'mute' : 'unmute'} failed: ${(err as Error).message}`);
-    throw new Error('TTS microphone control failed');
-  }
+const MAX_BYTES = 24000 * 2 * 120;
+function setTtsMute(muted: boolean): void {
+  execSync(`pactl set-sink-mute tts_sink ${muted ? '1' : '0'}`, { stdio: 'pipe' });
+  // The source must stay available to Chromium; Meet UI + the dedicated TTS sink gate speech.
+  execSync('pactl set-source-mute virtual_mic 0', { stdio: 'pipe' });
 }
-
+export type PlaybackOutcome = 'completed' | 'failed' | 'stopped';
+export interface SpeechTiming {
+  requestedAtMs: number;
+  firstPcmAtMs?: number;
+  readyAtMs?: number;
+  playbackAtMs?: number;
+}
+export interface PreparedSpeech {
+  ready: Promise<boolean>;
+  readonly timing?: Readonly<SpeechTiming>;
+  readonly failedBeforePlayback?: boolean;
+  play(onStarted?: (timing?: Readonly<SpeechTiming>) => void): Promise<PlaybackOutcome>;
+  cancel(): void;
+}
 export interface TtsPlayback {
-  /** Synthesize `text` (voice optional) and play it into the meeting via tts_sink. Resolves when
-   *  playback finishes. Best-effort: a synthesis/playback failure logs + resolves (never throws out
-   *  — the voice handler must not break the orchestrator). */
-  speak(text: string, voice?: string, onStarted?: () => void): Promise<PlaybackOutcome | void>;
-  /** Interrupt any in-flight playback (barge-in) + re-mute. */
+  speak(text: string, voice?: string, onStarted?: (timing?: Readonly<SpeechTiming>) => void, timeoutMs?: number): Promise<PlaybackOutcome | void>;
+  prepare?(text: string, voice?: string, timeoutMs?: number): PreparedSpeech;
   stop(): void;
 }
-
-export type PlaybackOutcome = 'completed' | 'failed' | 'stopped';
-
 export interface TtsPlaybackOptions {
-  /** Injected by offline tests; production uses the PulseAudio mute helper. */
+  prebufferMs?:number;
+  profile?:()=>string|undefined;
+  meetingId?: number;
   setMute?: (muted: boolean) => void;
-  /** Deterministic process boundary for tests; production always spawns paplay. */
   spawnProcess?: () => ChildProcess;
-  /** Total synthesis + playback budget, below the coordinator's 175 s receipt wait. */
   requestTimeoutMs?: number;
+  service?: (text:string) => {baseUrl:string;token:string;revision:number;requestId:string} | undefined;
 }
 
-/** Build a TtsPlayback that streams the TTS service's PCM straight to paplay. */
-export function createTtsPlayback(
-  log: (m: string) => void = () => { /* */ },
-  options: TtsPlaybackOptions = {},
-): TtsPlayback {
-  const mute = options.setMute ?? ((muted: boolean) => setTtsMute(muted, log));
-  const setMute = (muted: boolean): boolean => {
-    try { mute(muted); return true; }
+export function createTtsPlayback(log: (m: string) => void = () => {}, options: TtsPlaybackOptions = {}): TtsPlayback {
+  const configured=options.prebufferMs??Number(process.env.TINA_TTS_PREBUFFER_MS??150);
+  const prebuffer=24000*2*(Number.isFinite(configured)&&configured>=80&&configured<=1000?configured:150)/1000;
+  const mute = (value: boolean): boolean => {
+    try { (options.setMute ?? setTtsMute)(value); return true; }
     catch { log('[tts] microphone control failed'); return false; }
   };
   const spawnProcess = options.spawnProcess ?? (() => spawn('paplay', PAPLAY_ARGS, { stdio: ['pipe', 'pipe', 'pipe'] }));
-  let proc: ChildProcess | null = null;
-  let request: ClientRequest | null = null;
-  let cancelActive: (() => void) | null = null;
-  let generation = 0;
-
-  const stop = (): void => {
-    generation++;
-    const child = proc;
-    proc = null;
-    const cancel = cancelActive;
-    cancelActive = null;
-    if (cancel) {
-      cancel();
-    } else if (request) {
-      const currentRequest = request;
-      request = null;
-      try { currentRequest.destroy(new Error('TTS playback stopped')); } catch { /* */ }
-    }
-    if (child) {
-      try { child.stdin?.destroy(); child.kill('SIGKILL'); } catch { /* */ }
-    }
-    setMute(true);
-  };
-
-  const speak = async (text: string, voice = 'auto', onStarted?: () => void): Promise<PlaybackOutcome> => {
-    // A newer speech command supersedes any request or playback still in flight.
-    if (request || proc) stop();
-    const base = process.env.TTS_SERVICE_URL?.trim();
-    if (!base) { log('[tts] TTS_SERVICE_URL not set — speak is a no-op'); return 'failed'; }
-    const speechGeneration = ++generation;
-    const postData = JSON.stringify({ model: 'tts-1', input: text, voice, response_format: 'pcm' });
-    let url: URL;
-    try { url = new URL(`${base.replace(/\/$/, '')}/v1/audio/speech`); }
-    catch { log('[tts] bad TTS_SERVICE_URL'); return 'failed'; }
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Content-Length': String(Buffer.byteLength(postData)),
+  const handles = new Set<PreparedSpeech>();
+  let active: PreparedSpeech | undefined;
+  function prepare(text: string, voice = 'auto', timeoutMs?: number): PreparedSpeech {
+    const timing: SpeechTiming = { requestedAtMs: Date.now() };
+    const buffer = new PassThrough({ highWaterMark: 24000 });
+    let request: ClientRequest | undefined, response: IncomingMessage | undefined, proc: ChildProcess | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined, settled = false, ended = false, bytes = 0, playing = false;
+    let failedBeforePlayback = false;
+    let readyResolve!: (ready: boolean) => void, doneResolve!: (outcome: PlaybackOutcome) => void;
+    const ready = new Promise<boolean>(resolve => { readyResolve = resolve; });
+    const done = new Promise<PlaybackOutcome>(resolve => { doneResolve = resolve; });
+    const finish = (outcome: PlaybackOutcome) => {
+      if (settled) return;
+      failedBeforePlayback = outcome === 'failed' && !playing;
+      settled = true; clearTimeout(timer); handles.delete(handle); readyResolve(false);
+      request?.destroy(); response?.destroy(); buffer.destroy();
+      try { proc?.stdin?.destroy(); proc?.kill('SIGKILL'); } catch { /* Cleanup must settle cancellation. */ }
+      if (active === handle || !active) { active = undefined; if (!mute(true) && outcome === 'completed') outcome = 'failed'; }
+      doneResolve(outcome);
     };
-    const token = process.env.TTS_API_TOKEN?.trim();
-    if (token) headers['X-API-Key'] = token;
-
-    return await new Promise<PlaybackOutcome>((resolve) => {
-      let settled = false;
-      let req: ClientRequest;
-      let deadline: ReturnType<typeof setTimeout> | undefined;
-      const finish = (outcome: PlaybackOutcome = 'failed'): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(deadline);
-        if (request === req) request = null;
-        if (cancelActive === cancel) cancelActive = null;
-        resolve(outcome);
-      };
-      const cancel = (): void => {
-        if (settled) return;
-        try { req.destroy(new Error('TTS playback stopped')); } catch { /* */ }
-        finish('stopped');
-      };
-      const fail = (): void => {
-        if (settled) return;
-        finish('failed');
-        if (speechGeneration !== generation) return;
-        req.destroy();
-        const child = proc;
-        proc = null;
-        try { child?.stdin?.destroy(); child?.kill('SIGKILL'); } catch { /* */ }
-        setMute(true);
-      };
-      req = (url.protocol === 'https:' ? https : http).request({
-        hostname: url.hostname,
-        port: url.port || (url.protocol === 'https:' ? 443 : 80),
-        path: url.pathname + url.search,
-        method: 'POST',
-        headers,
-      }, (res) => {
-        if (speechGeneration !== generation) {
-          res.resume();
-          finish('stopped');
-          return;
-        }
-        if (res.statusCode !== 200) {
-          let responseBytes = 0;
-          res.on('data', (chunk: Buffer) => { responseBytes += chunk.length; });
-          res.on('end', () => {
-            if (speechGeneration === generation) log(`[tts] service ${res.statusCode}: ${responseBytes} response bytes`);
-            finish();
-          });
-          res.on('aborted', finish);
-          return;
-        }
-        if (!setMute(false)) { setMute(true); res.resume(); finish('failed'); return; }
-        let p: ChildProcess;
-        try { p = spawnProcess(); }
-        catch { fail(); return; }
-        proc = p;
-        p.stderr?.on('data', (d: Buffer) => log(`[tts] paplay: ${d.toString().trim()}`));
-        let bytes = 0;
-        let received = false;
-        res.on('data', (chunk: Buffer) => {
-          bytes += chunk.length;
-          if (bytes > 24000 * 2 * 120) {
-            res.destroy(); p.kill('SIGKILL');
-          }
-        });
-        res.on('end', () => { received = bytes > 0 && bytes % 2 === 0; });
-        res.on('aborted', () => { p.kill('SIGKILL'); });
-        res.on('error', () => { p.kill('SIGKILL'); });
-        p.stdin?.on('error', () => { p.kill('SIGKILL'); });
-        p.once('spawn', () => {
-          if (!settled && speechGeneration === generation) {
-            try { onStarted?.(); }
-            catch { fail(); }
-          }
-        });
-        const done = (code: number | null = null) => {
-          if (proc === p) proc = null;
-          const muted = speechGeneration !== generation || setMute(true);
-          finish(speechGeneration !== generation ? 'stopped' : code === 0 && received && muted ? 'completed' : 'failed');
+    const handle: PreparedSpeech = {
+      ready,
+      get timing() { return {...timing}; },
+      get failedBeforePlayback() { return failedBeforePlayback; },
+      cancel: () => finish('stopped'),
+      async play(onStarted) {
+        await ready;
+        if (settled) return done;
+        if (playing) return done;
+        if (active && active !== handle) { finish('failed'); return done; }
+        playing = true; active = handle;
+        if (!mute(false)) { finish('failed'); return done; }
+        try { proc = spawnProcess(); } catch { finish('failed'); return done; }
+        const player = proc;
+        player.stderr?.on('data', () => { log('[tts] player diagnostic'); });
+        player.stdin?.on('error', () => finish('failed'));
+        let spawned = false, written = false;
+        const notify = () => {
+          if (settled || !spawned || !written || timing.playbackAtMs !== undefined) return;
+          timing.playbackAtMs = Date.now();
+          try { onStarted?.({...timing}); } catch { finish('failed'); }
         };
-        p.on('exit', done);
-        p.on('error', (e) => { log(`[tts] paplay error: ${String(e)}`); done(); });
-        res.pipe(p.stdin!);                           // stream PCM straight to the mic sink
+        player.once('spawn', () => { spawned = true; notify(); });
+        player.once('error', () => finish('failed'));
+        player.once('exit', code => {
+          // Null the exited child before cleanup so cancellation cannot re-kill it.
+          proc = undefined;
+          finish(code === 0 && ended && bytes > 0 && bytes % 2 === 0 ? 'completed' : 'failed');
+        });
+        buffer.removeAllListeners('readable');
+        // Process spawn alone does not prove that PCM reached the virtual microphone player.
+        const first = buffer.read() as Buffer | null;
+        if (!first || !player.stdin) { finish('failed'); return done; }
+        player.stdin.write(first, error => {
+          if (error) { finish('failed'); return; }
+          written = true; notify();
+        });
+        buffer.pipe(player.stdin!);
+        return done;
+      },
+    };
+    buffer.on('error', () => finish('failed'));
+    // Current stream + exactly one lookahead, never a private-answer cache.
+    if (handles.size >= 2) { finish('failed'); return handle; }
+    handles.add(handle);
+    const service = options.service?.(text);
+    const base = service?.baseUrl ?? process.env.TTS_SERVICE_URL?.trim();
+    let url: URL;
+    try { if (!base) throw new Error(); url = new URL(base.replace(/\/$/, '') + '/v1/audio/speech'); }
+    catch { finish('failed'); return handle; }
+    const data = JSON.stringify({ model: 'tts-1', input: text, voice, response_format: 'pcm',
+      ...(options.profile?.()?{profile:options.profile()}:{}),
+      ...(Number.isSafeInteger(options.meetingId) && options.meetingId! > 0 ? { meeting_id: options.meetingId } : {}) });
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(data)) };
+    if (service) {
+      headers.Authorization = `Bearer ${service.token}`;
+      headers['X-Voice-Revision'] = String(service.revision);
+      headers['X-Voice-Request-Id'] = service.requestId;
+    } else if (process.env.TTS_API_TOKEN?.trim()) headers['X-API-Key'] = process.env.TTS_API_TOKEN.trim();
+    try {
+      request = (url.protocol === 'https:' ? https : http).request({ hostname: url.hostname,
+        port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname + url.search, method: 'POST', headers }, res => {
+        response = res;
+        if (settled) { res.destroy(); return; }
+        if (res.statusCode !== 200 || (res.headers['x-audio-sample-rate'] && res.headers['x-audio-sample-rate'] !== '24000')
+            || (res.headers['x-audio-channels'] && res.headers['x-audio-channels'] !== '1')) {
+          log(`[tts] service status ${res.statusCode}`); finish('failed'); return;
+        }
+        res.on('aborted', () => finish('failed')); res.on('error', () => finish('failed'));
+        res.on('data', (chunk: Buffer) => {
+          if (chunk.length && timing.firstPcmAtMs === undefined) timing.firstPcmAtMs = Date.now();
+          bytes += chunk.length;
+          if (bytes > MAX_BYTES) finish('failed');
+        });
+        const buffered = () => { timing.readyAtMs ??= Date.now(); readyResolve(true); };
+        buffer.on('readable', () => { if (buffer.readableLength >= prebuffer) buffered(); });
+        res.on('end', () => {
+          ended = true;
+          if (!bytes || bytes % 2) finish('failed'); else buffered();
+        });
+        res.pipe(buffer);
       });
-      request = req;
-      cancelActive = cancel;
-      req.on('error', (e) => {
-        if (speechGeneration === generation) log(`[tts] request error: ${String(e)}`);
-        fail();
-      });
-      deadline = setTimeout(fail, options.requestTimeoutMs ?? 150_000);
-      req.write(postData); req.end();
-    });
-  };
-
-  return { speak, stop };
+      request.on('error', () => finish('failed'));
+      timer = setTimeout(() => finish('failed'), Math.min(options.requestTimeoutMs ?? 150000, timeoutMs ?? 150000));
+      request.end(data);
+    } catch { finish('failed'); }
+    return handle;
+  }
+  const stop = () => { for (const handle of [...handles]) handle.cancel(); mute(true); };
+  return { prepare, stop, async speak(text, voice, onStarted, timeoutMs) { if (handles.size) stop(); return prepare(text, voice, timeoutMs).play(onStarted); } };
 }

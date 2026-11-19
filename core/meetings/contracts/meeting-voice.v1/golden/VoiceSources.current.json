@@ -1,0 +1,21 @@
+{
+  "sources": [
+    {
+      "kind": "transcript",
+      "quote": "Lan phụ trách demo.",
+      "segment_id": "segment-demo",
+      "speaker_name": "Lan",
+      "start_ms": 42000,
+      "end_ms": 45000,
+      "id": "ctx-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "kind": "document",
+      "quote": "Hạn bàn giao là thứ Sáu.",
+      "path": "wiki/demo.md",
+      "paragraph": 2,
+      "id": "ctx-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "unavailable": 1
+}

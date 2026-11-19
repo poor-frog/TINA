@@ -65,7 +65,9 @@
     {
       "method": "GET",
       "path": "/bots/{platform}/{native_meeting_id}/speak/{command_id}",
-      "scopes": ["bot"]
+      "scopes": [
+        "bot"
+      ]
     },
     {
       "method": "GET",
@@ -400,6 +402,59 @@
       "path": "/transcripts/by-id/{meeting_id}/replicas/{meeting_uid}",
       "scopes": [
         "tx"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/meetings/{meeting_id}/voice-assistant/handoff/{request_id}",
+      "scopes": ["bot", "tx"]
+    },
+    {
+      "method": "GET",
+      "path": "/meetings/{meeting_id}/voice-assistant/handoff/{request_id}",
+      "scopes": ["bot", "tx"]
+    },
+    {
+      "method": "POST",
+      "path": "/meetings/{meeting_id}/voice-assistant/navigation/{request_id}",
+      "scopes": ["bot", "tx"]
+    },
+    {
+      "method": "GET",
+      "path": "/meetings/{meeting_id}/voice-assistant/sources/{request_id}",
+      "scopes": [
+        "bot",
+        "tx"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/meetings/{meeting_id}/voice-assistant",
+      "scopes": [
+        "bot",
+        "tx"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/meetings/{meeting_id}/voice-assistant",
+      "scopes": [
+        "bot",
+        "tx"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/bots/voice/services",
+      "scopes": [
+        "bot"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/bots/voice/preview",
+      "scopes": [
+        "bot"
       ]
     }
   ]

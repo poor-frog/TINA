@@ -27,6 +27,30 @@ class RuntimeEnvTests(unittest.TestCase):
         self.env = {'DOTENVX_BIN': 'fixture-dotenvx', 'TINA_TTS_ENV_FILE': str(self.env_file),
                     'TINA_TTS_KEYS_FILE': str(self.key_file)}
 
+    def test_local_encrypted_pair_is_selected_without_overrides(self):
+        home = Path(self.temp.name) / 'home'
+        local = home / '.config/tina/tts-local'
+        local.mkdir(parents=True)
+        (local / '.env').write_text('TTS_API_TOKEN=encrypted:local-fixture\n')
+        (local / '.env.keys').write_text('fixture-local-key')
+        result = subprocess.CompletedProcess([], 0, 'fixture-local-token', '')
+        with patch.object(runner.Path, 'home', return_value=home), patch.object(runner.subprocess, 'run', return_value=result) as decrypt:
+            env = runner.runtime_env({'DOTENVX_BIN': 'fixture-dotenvx'})
+        self.assertEqual(env['TTS_API_TOKEN'], 'fixture-local-token')
+        args = decrypt.call_args.args[0]
+        self.assertEqual(args[args.index('-f') + 1], str(local / '.env'))
+        self.assertEqual(args[args.index('-fk') + 1], str(local / '.env.keys'))
+
+    def test_incomplete_local_pair_does_not_fall_back_to_shared_credentials(self):
+        home = Path(self.temp.name) / 'home'
+        local = home / '.config/tina/tts-local'
+        local.mkdir(parents=True)
+        (local / '.env').write_text('TTS_API_TOKEN=encrypted:local-fixture\n')
+        with patch.object(runner.Path, 'home', return_value=home), patch.object(runner.subprocess, 'run') as decrypt:
+            with self.assertRaisesRegex(runner.EnvError, 'key is missing'):
+                runner.runtime_env({'DOTENVX_BIN': 'fixture-dotenvx'})
+        decrypt.assert_not_called()
+
     def test_missing_key_never_starts_decryption(self):
         self.key_file.unlink()
         with patch.object(runner.subprocess, 'run') as run:

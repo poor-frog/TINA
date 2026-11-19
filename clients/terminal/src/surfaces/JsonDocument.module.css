@@ -1,0 +1,44 @@
+/* Hallmark · v2.0.0 · component: JSON document view · genre: modern-minimal · theme: TINA Graphite Emerald */
+/* Critique · JSON was falling through the Markdown renderer as plain prose; give it one readable code surface. */
+/* Hallmark · waive 26b · JSON source is read-only code · pressing or disabling a document has no effect */
+.document {
+  min-width: 0;
+  margin: var(--space-4) 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  background: var(--panel);
+}
+
+.kind {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding-inline: var(--space-4);
+  border-bottom: 1px solid var(--line);
+  color: var(--t2);
+  font-family: var(--sans);
+  font-size: var(--ui-type-meta);
+  font-weight: 600;
+}
+
+.source {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--t1);
+  font-family: var(--mono);
+  font-size: var(--ui-type-label);
+  line-height: 1.6;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.source code { font: inherit; }
+.source:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+@media (max-width: 400px) {
+  .source { padding: var(--space-3); }
+}

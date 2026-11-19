@@ -32,9 +32,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Cache model assets independently of application-source changes.
+COPY core/agent/control_plane/voice_retrieval.py /tmp/tina-prepare-voice-model.py
+ENV TINA_VOICE_EMBED_DIR=/opt/tina/voice-retrieval
+RUN python /tmp/tina-prepare-voice-model.py --download && rm /tmp/tina-prepare-voice-model.py
+COPY licenses/multilingual-e5-small.LICENSE.txt /opt/tina/voice-retrieval/LICENSE.txt
+
 # The control-plane packages (NO worker): control_plane + shared + contracts, copied to /app so
 # `PYTHONPATH=/app` resolves them as top-level imports.
 COPY core/agent/shared ./shared
+RUN python -c "from underthesea import word_tokenize; assert word_tokenize('hệ thống nhận dạng giọng nói')"
 COPY core/agent/control_plane ./control_plane
 COPY core/agent/contracts ./contracts
 # Credential probes and model/effort validation share provider code with the worker.

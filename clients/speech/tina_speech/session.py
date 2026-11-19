@@ -9,8 +9,8 @@ from uuid import UUID, uuid4
 import httpx
 import numpy as np
 
-from .capture import QuestionCapture, SileroVad
-from .wakeword import SherpaKws, WakeDetector
+from tina_meeting_voice.capture import QuestionCapture, SileroVad
+from tina_meeting_voice.wakeword import SherpaKws, WakeDetector
 
 
 class RoomClient:

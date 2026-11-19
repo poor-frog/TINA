@@ -1,5 +1,99 @@
 # core/flows — the reaction engine
 
+## Email after a meeting
+
+New `meeting.completed` events use `post_meeting` version 5. Once the existing summary job succeeds,
+`email_meeting_followup` saves its report as the bounded meeting annotation `data.summary`, then
+sends a Vietnamese thank-you email with separate summary and recording links. Each calendar/invite
+email is notified individually, including other domains. Duplicates, declined invitations, invalid
+addresses and the service mailbox are excluded. No participant emails are inferred from speaker
+names; an ad hoc meeting without stored invite emails can notify only its owner.
+
+The report has a separate 6000-character field so a Vietnamese summary cannot consume the existing
+16 KiB metadata budget. Meeting lookup uses the row-id detail endpoint rather than the first list
+page. Declined invite addresses stay excluded even if the completion event repeats them.
+Terminal can still read legacy `metadata.tina_summary`; the next summary write removes that old
+copy while preserving unrelated metadata, so clearing the summary cannot reveal stale text again.
+
+Recipients sign in using the email that received the message. Attendee links use recipient-restricted
+shares with explicit read-only recording access; existing transcript-only links gain no recording
+permission. No meeting content or recording attachment is put in the email. A meeting without audio
+still has a meeting page, which states that no recording is available.
+
+The existing `mail_minutes` owner preference, per-meeting `share: false` and flow-level
+`attendee_followup: off` remain effective. Version-5 legacy mail steps relay the new delivery receipt,
+so they do not send a second email. In-flight older flow versions keep their original behavior.
+Per-recipient checkpoints preserve confirmed sends and restricted links across retry. SMTP cannot
+guarantee exactly-once delivery if a worker crashes after server acceptance but before checkpointing.
+
+Compose needs `automation`, `TINA_FLOWS_API_URL=http://flows-api:8200`, a real
+`TINA_FLOWS_API_KEY`, `TINA_FLOWS_AGENT_API_URL=http://agent-api:8100`, configured meeting inference,
+and `TINA_UI_URL` set to the externally reachable Terminal URL. The existing company-layer setup
+gate must be complete for the worker to advance. Outbound mail reuses `TINA_MAIL_ADDR` plus
+`TINA_MAIL_APP_PASSWORD` for Gmail SSL, or the existing `TINA_MAIL_SMTP_HOST`/`TINA_MAIL_SMTP_PORT`
+relay. The `mailbox` profile is needed only for inbound mail. Keep credentials in private deployment
+configuration. Edit the copy in `_global/mail/meeting-followup.md`; the baked source is
+[`behavior/mail/meeting-followup.md`](../../behavior/mail/meeting-followup.md).
+
+The follow-up now sends `multipart/alternative`: the existing editable plain-text copy plus a
+branded HTML version. The minimal light design uses the Tina palette, generous spacing, table
+layout and two buttons. React Email source lives in [`email-design/`](email-design/README.md);
+`pnpm build` there exports the shell and fragments into `src/flows_steps/templates/`.
+`email_design.py` fills those assets with escaped copy, meeting titles and URL attributes; no externally hosted
+images, tracking pixels or new frontend runtime are required. The original Tina logo is rasterized
+from `clients/terminal/public/tina-logo.svg` into the bundled `templates/tina-logo.png` and attached
+inline via Content-ID inside the HTML's `multipart/related` part. Styling is inline, with solid
+colors and Outlook-aware buttons. There are no animations or decorative status badges.
+React Email is an authoring dependency only; the Python worker still needs no Node runtime.
+Legacy notices remain plain text.
+
+### Gmail SMTP
+
+The default `TINA_NOTIFY_CHANNEL=smtp` uses `smtp.gmail.com:465` with SSL and authenticates with
+`TINA_MAIL_ADDR` plus `TINA_MAIL_APP_PASSWORD`. Enable Google 2-Step Verification and create a
+[Gmail App Password](https://support.google.com/accounts/answer/185833); the regular account
+password is not the SMTP credential. The shared MVP mailbox values in `deploy/compose/.env` are
+encrypted with the deployment's existing dotenvx public key. Authorized team members need the
+matching `.env.keys`, distributed privately, to decrypt them; `git pull` does not supply that key.
+The SMTP update reuses the existing key pair. Never commit plaintext credentials or `.env.keys`,
+and keep `.env.example` free of real credentials.
+
+Leave `TINA_MAIL_SMTP_HOST` empty for Gmail. Setting that key selects the existing plain,
+unauthenticated relay transport; `TINA_MAIL_SMTP_PORT` only applies to that relay. Recreate the
+flows services after changing their environment. Sending a test message verifies the mailbox,
+but automatic meeting emails still require the automation and summary prerequisites above.
+
+### Resend delivery
+
+Set these in private deployment configuration (the names are listed in
+`deploy/compose/.env.example`; keep that example free of real API keys):
+
+```dotenv
+TINA_NOTIFY_CHANNEL=resend
+TINA_RESEND_API_KEY=YOUR_RESEND_SENDING_API_KEY
+TINA_RESEND_FROM=onboarding@resend.dev
+```
+
+Without a domain, `onboarding@resend.dev` is for tests to the email associated with your Resend
+account only. For actual attendee delivery, verify your domain in Resend and replace the sender
+with an address on that domain, such as `hello@your-domain.com`.
+See [Resend's testing restriction](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain).
+
+The `resend` notification adapter reuses the same MIME builder and sends via
+`smtp.resend.com:465` with certificate-verified TLS, username `resend` and the API key as password.
+HTML, plain text, the inline logo and RFC Message-ID threading are preserved. No SDK is required.
+Missing credentials fail before opening a connection. The selector applies to all `notify()`
+messages in this flows deployment, including meeting follow-ups. The default remains `smtp`.
+Recreate the flows services after changing their environment; changing a host env file alone does
+not update existing containers. The deployment's existing secret-loading workflow still applies.
+
+Inbound IMAP and calendar RSVP remain on the existing mailbox configuration. If `TINA_MAIL_ADDR`
+is set, Resend notifications include it as Reply-To so replies can reach that intake. To use the
+Helm deployment, set `flows.mail.notifyChannel`, `flows.mail.resendApiKey` and
+`flows.mail.resendFrom` through private values. To switch back, select `TINA_NOTIFY_CHANNEL=smtp`.
+
+## Engine
+
 Durable product workflows as TWO Postgres tables and ONE leased worker loop. A fact enters as a
 sealed envelope, becomes exactly one `reaction` row (dedup by constraint), is worked one step at a
 time, and every touch of the outside world leaves an `effect_receipt` a retry consults before acting.

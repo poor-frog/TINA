@@ -9,7 +9,9 @@ The named backend resolves its credential on the server. Existing sessions and d
 VieGem CTC runs with PyTorch FP32 on explicit `mps`, `cpu`, or `cuda`; FSMN and the
 upstream KenLM 4-gram prefix beam decoder run on CPU. No automatic device fallback.
 LM parameters follow the published example: alpha 0.35, beta 1.5, beam width 32;
-context bias is disabled. This endpoint does not accept decoder tuning from clients.
+the FSMN end-of-silence default is 1200 ms (Gipformer remains at 800 ms); explicit valid
+`min_silence_duration_ms` requests still override it. Name bias is disabled by default. This
+endpoint does not accept decoder tuning from clients.
 
 This is bounded HTTP-window inference (`streaming=False`), not an incremental cache/session
 implementation. It accepts up to 90 seconds, decodes VAD ranges of at most 30 seconds,
@@ -243,3 +245,30 @@ exposed to the browser. Private keys remain on the host and ASR tokens never rea
 Identity stores versioned account preferences; the controller serializes lifecycle changes and
 reconciles them every two seconds. `make down` stops the controller first. WSL2 restores its
 detached controller with `make all` after a reboot; Mac uses an owned per-deployment LaunchAgent.
+
+## Experimental TINA name bias
+
+`TINA_VIEGEM_NAME_BIAS` is an operator-only value from 0 to 2, default **0 (no extra name weight)**.
+It changes only the KenLM decoder: a positive value admits lowercase `tina` to its word/prefix vocabulary
+and adds that score when the word is completed. The vocabulary change also removes upstream
+OOV/partial-word penalties, so even a small weight can affect competing words. It is not a
+per-request prompt and does not change the model weights, alpha/beta, beam, FSMN or source clock.
+The baseline decoder is not mutated. Make-all forwards the value to native MPS or Docker CUDA/CPU;
+changing it requires restarting the corresponding worker after active requests have drained.
+
+custom_words.txt is a worker-wide word list outside the model asset directory. Blank
+lines and lines starting with # are ignored; whitespace-separated entries are independent words,
+not phrase constraints. TINA_VIEGEM_CUSTOM_WEIGHT is a finite value from 0 to 2 (default 1.0),
+and TINA_VIEGEM_CUSTOM_WORDS_FILE can select another worker-visible file. A positive name weight
+sets tina's weight independently. The reserved word tina is ignored in this list and controlled
+only by TINA_VIEGEM_NAME_BIAS.
+These terms bias every request handled by this VieGem worker, not a meeting-specific context.
+Changes are read at worker startup, so restart the worker to reload them. The default file is copied
+into Docker images and included in the native worker revision fingerprint; it is not part of
+model-assets.json.
+
+The bundled list is active globally at its default weight; set TINA_VIEGEM_CUSTOM_WEIGHT=0 to
+disable it. A word prior can add a term where it was never spoken, so evaluate changes on matched
+audio with labeled positives and negative near-homophones before expanding the list. The report from
+benchmark/name_bias.py keeps real hypotheses/audio private and distinguishes synthetic controls
+from unlabeled real candidates.

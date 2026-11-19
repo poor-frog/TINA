@@ -57,6 +57,7 @@ WORKDIR /app/terminal
 COPY clients/terminal/package.json clients/terminal/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY clients/terminal/ ./
+COPY packages/transcript-rendering/src/format.ts /packages/transcript-rendering/src/format.ts
 COPY branding/tokens.css /branding/tokens.css
 # next build needs the dev deps (typescript/tailwind); prune them after so the runtime tree is lean.
 RUN npm run build && npm prune --omit=dev

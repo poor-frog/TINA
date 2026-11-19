@@ -7,19 +7,22 @@ from llm.errors import (
     LLMAuthError,
     LLMConfigError,
     LLMError,
+    LLMStructuredOutputUnsupported,
     auth_error_event,
+    completion_failure_code,
     looks_like_auth_failure,
     model_error_event,
     preflight_provider_guard,
     provider_host,
 )
-from llm.citations import render_citations, web_sources
+from llm.citations import render_citations, web_sources, safe_web_source
 from llm.ports import (
     CompletionPort,
     CompletionResult,
     HarnessExec,
     HarnessPort,
     run_harness_turn,
+    harness_subprocess_env,
 )
 from llm.registry import (
     COMPLETION_PROVIDERS,
@@ -31,10 +34,13 @@ from llm.registry import (
 __all__ = [
     "render_citations",
     "web_sources",
+    "safe_web_source",
     "LLMAuthError",
     "LLMConfigError",
     "LLMError",
+    "LLMStructuredOutputUnsupported",
     "auth_error_event",
+    "completion_failure_code",
     "looks_like_auth_failure",
     "model_error_event",
     "preflight_provider_guard",
@@ -44,6 +50,7 @@ __all__ = [
     "HarnessExec",
     "HarnessPort",
     "run_harness_turn",
+    "harness_subprocess_env",
     "COMPLETION_PROVIDERS",
     "HARNESS_RUNNERS",
     "completion_from_env",

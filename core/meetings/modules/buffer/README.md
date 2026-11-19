@@ -23,7 +23,7 @@ The default RMS floor is `0.0001` (-80 dBFS), matching `SpeakerStreamManager`.
 It retains quiet speech while rejecting digital silence/near-zero residue. Explicit
 thresholds keep their previous meaning; this energy floor does not replace backend VAD.
 
-Its defaults are behaviorally parity-locked against the still-untouched Google Meet source by
+Its defaults are behaviorally parity-locked against the Google Meet source by
 [`src/gmeet-compatible-buffer.parity.test.ts`](src/gmeet-compatible-buffer.parity.test.ts). Teams
 imports the shared class now. Google Meet deliberately keeps its pipeline-local class for this
 release; after Teams wins on diverse fixtures, a later release can switch Google Meet to this
@@ -72,3 +72,10 @@ The mixed transcription algorithm retains its separate bounded 120-second workin
 not been replaced by the ingress ring. No ASR backend is converted to native streaming by this change.
 
 Run the package tests for wrap, missing intervals, duplicates, overlap reads, bounds and source isolation.
+
+At the ordinary cadence, coarse-segment streams reserve a cadence plus the latest frame duration
+before the smaller of retained/window limits, then finalize an owned quiet-frame cut using the
+existing capped-window path. Remaining PCM stays on its original timeline for the next request.
+This mirrors Google Meet and prevents the live 30-second retention reset from erasing a continually
+growing single ASR segment. A backend stalled beyond bounded retention still reports overflow;
+there is no model, VAD, cadence or retention-limit change.

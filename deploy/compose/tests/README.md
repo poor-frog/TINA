@@ -104,3 +104,7 @@ scope isolation, denied credentials, changed-endpoint token decisions, private t
 edits, ambiguous writes/readback mismatches, malformed settings and the selected project/port guard.
 The actual Identity route integration is also exercised separately with TestClient and an in-memory
 session double; it does not alter production settings or claim PostgreSQL persistence coverage.
+
+Production entrypoint checks in `test_make_entrypoint.py` cover dedicated TTS autoload, secret-free
+startup logs, read-only missing-credential plans, cached KWS reuse, readonly artifact import and
+reverification before application activation. They use fixtures and do not restart the live stack.

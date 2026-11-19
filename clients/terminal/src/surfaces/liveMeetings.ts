@@ -5,7 +5,7 @@
  *  Live meetings carry a `session_uid` so the tab subscribes to the copilot stream; past meetings open a
  *  recorded view whose transcript is fetched on demand from `GET /api/transcripts/{platform}/{native}`. */
 import { useSyncExternalStore } from "react";
-import type { MeetingAudioRecording, MeetingMock, TranscriptLine } from "./meetingModel";
+import type { MeetingAudioRecording, MeetingAutoRetry, MeetingMock, TranscriptLine } from "./meetingModel";
 import { onGatewayWSConnected, onMeetingStatus } from "./gatewayWS";
 
 /** A row from meeting-api GET /meetings (live AND past). */
@@ -23,6 +23,8 @@ interface MeetingRowDTO {
     docs?: { workspace: string; path: string; title?: string; kind?: string }[];
     participants?: string[];
     notes?: string;
+    metadata?: { tina_summary?: string };
+    summary?: string;
     languages?: string[];
     calendar_sources?: { name?: string }[];
     status_transition?: { from?: string; to?: string; timestamp?: string; reason?: string }[];
@@ -35,6 +37,7 @@ interface MeetingRowDTO {
     calendar_uid?: string;
     auto_join?: boolean;
     auto_join_error?: string;
+    auto_retry?: MeetingAutoRetry;
     join_failure_summary?: string;
     constructed_meeting_url?: string;
     attendees?: { email: string; name?: string; partstat?: string }[];
@@ -221,11 +224,14 @@ function toMock(d: MeetingRowDTO): MeetingMock {
     calendar_uid: d.data?.calendar_uid ?? undefined,
     attendees: d.data?.attendees ?? undefined,
     notes: d.data?.notes ?? undefined,
+    summary: typeof d.data?.summary === "string" ? d.data.summary
+      : typeof d.data?.metadata?.tina_summary === "string" ? d.data.metadata.tina_summary : undefined,
     languages: d.data?.languages ?? undefined,
     calendar_sources: (d.data?.calendar_sources ?? []).filter((source): source is { name: string } => !!source && typeof source.name === "string").map((source) => ({ name: source.name })),
     status_transition: statusTransitions,
     auto_join: d.data?.auto_join,
     auto_join_error: d.data?.auto_join_error ?? undefined,
+    auto_retry: d.data?.auto_retry ?? undefined,
     join_failure_summary: d.data?.join_failure_summary ?? undefined,
     meeting_url: d.constructed_meeting_url ?? d.data?.constructed_meeting_url ?? undefined,
     start_time: d.start_time ?? undefined,
@@ -269,9 +275,12 @@ async function snapshot() {
       workspaceId: item.workspace_id,
       autoJoin: item.auto_join,
       autoJoinError: item.auto_join_error,
+      autoRetry: item.auto_retry,
+      joinFailureSummary: item.join_failure_summary,
       attendees: item.attendees,
       participants: item.participants,
       notes: item.notes,
+      summary: item.summary,
       languages: item.languages,
       calendarSources: item.calendar_sources,
       statusTransitions: item.status_transition,
@@ -291,7 +300,7 @@ async function snapshot() {
 /** Apply a `meeting.status` WS frame to the store: patch the matching row's status in place (the snapshot
  *  already seeded the row metadata). Match by native, falling back to meeting_id. Unknown rows trigger a
  *  re-snapshot so a freshly-created (scheduled/idle) meeting surfaces. */
-function applyFrame(f: { meeting_id?: number | string; native?: string; status: string; when?: string }) {
+function applyFrame(f: { meeting_id?: number | string; native?: string; status: string; when?: string; auto_retry?: MeetingAutoRetry }) {
   storeRevision += 1;
   // P0: match the ROW id first (`meeting_id`) — a native-only match would patch EVERY row sharing that
   // native (several distinct meetings), flipping the wrong rows' status. Fall back to native only when
@@ -315,9 +324,12 @@ function applyFrame(f: { meeting_id?: number | string; native?: string; status: 
     status: live ? "live" : "past",
     session_uid: live ? cur.id : undefined,  // subscribe by the ROW id (P0)
     scheduled_at: f.status === "scheduled" ? (f.when ?? cur.scheduled_at) : cur.scheduled_at,
+    auto_retry: f.auto_retry ?? cur.auto_retry,
   };
   meetings = [...meetings.slice(0, i), nextRow, ...meetings.slice(i + 1)];
   subs.forEach((fn) => fn());
+  // Status frames omit the owner-only diagnosis; fetch it once when this run fails.
+  if (f.status === 'failed' && cur.live_status !== 'failed') void snapshot();
 }
 
 function ensureStarted() {

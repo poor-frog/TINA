@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ChatGPTPlanConnection } from '../settings';
 import { ModelChips } from '../meeting';
 beforeEach(() => { vi.stubGlobal('fetch', vi.fn()); });
@@ -11,10 +11,16 @@ describe('ChatGPT account switch', () => {
       ? Response.json({ authorization_url: 'https://auth.openai.com/api/accounts/authorize?state=test' })
       : Response.json({ connected: true, email: 'old@example.test' }));
     render(<ChatGPTPlanConnection />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Reconnect with ChatGPT' }));
+    const reconnect = await screen.findByRole('button', { name: 'Reconnect with ChatGPT' });
+    // Flush the async sign-in update and its focus effect before simulating a return
+    // from the popup. Finding the input alone can precede passive-effect setup in CI.
+    await act(async () => { fireEvent.click(reconnect); });
     await screen.findByLabelText('Callback URL from the other browser');
-    const before = vi.mocked(fetch).mock.calls.length; fireEvent.focus(window);
-    await waitFor(() => expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(before));
+    const statusCalls = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/status')).length;
+    const before = statusCalls();
+    await act(async () => { fireEvent.focus(window); });
+    expect(statusCalls()).toBe(before + 1);
+    expect(screen.getByText(/old@example.test/)).toBeTruthy();
     expect(screen.getByLabelText('Callback URL from the other browser')).toBeTruthy();
   });
   it('finishes a callback copied from another browser in the initiating TINA tab', async () => {

@@ -114,6 +114,9 @@ def test_stop_route_fails_narrowly_503_when_command_bus_down():
         async def update_meeting_status(self, **k):
             return None
 
+        async def save_voice_reply(self, meeting_id, session_uid, reply):
+            return None
+
     app = create_app(meeting_repo=_Repo(), command_publisher=_DeadRedis())
     with TestClient(app) as c:
         r = c.delete("/bots/google_meet/abc-defg-hij", headers={"x-user-id": "7"})

@@ -52,6 +52,11 @@ flowchart LR
   dashboard["dashboard (deprecated)"]
   native_capture["TINA Capture"]
   speech_coordinator["Optional single-room speech coordinator"]
+  livekit_agent["Optional local LiveKit Agents pilot"]
+  livekit_server["Self-hosted LiveKit server"]
+  agent_reach["Public Agent Reach retrieval worker"]
+  public_content_providers["Public content providers"]
+  mail_relay["configured SMTP relay"]
   meeting_api -->|"write"| segments_table
   bot -->|"HTTPS"| transcription
   meeting_api -->|"JDBC"| postgres
@@ -105,3 +110,15 @@ flowchart LR
   extension -->|"call"| agent_api
   asr_control -->|"HTTP"| admin_api
   asr_control -->|"HTTP"| transcription
+  bot -->|"HTTP"| meeting_api
+  meeting_api -->|"HTTP"| agent_api
+  terminal -->|"HTTP via gateway and meeting-api"| tts_sidecar
+  bot -->|"HTTP/WS"| livekit_agent
+  livekit_agent -->|"HTTP"| meeting_api
+  meeting_api -->|"HTTP"| livekit_agent
+  livekit_agent -->|"HTTP"| tts_sidecar
+  livekit_agent -->|"WebSocket"| livekit_server
+  agent_worker -->|"HTTP"| agent_reach
+  agent_reach -->|"HTTP"| public_content_providers
+  livekit_agent -->|"HTTP"| transcription
+  flows_worker -->|"SMTP"| mail_relay

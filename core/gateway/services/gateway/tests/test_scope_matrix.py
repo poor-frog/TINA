@@ -42,6 +42,10 @@ CASES = [
     ("GET", "/bots", "/bots"),
     ("POST", "/bots", "/bots"),
     ("GET", "/bots/status", "/bots/status"),
+    ('GET','/bots/voice/services','/bots/voice/services'),
+    ('POST','/bots/voice/preview','/bots/voice/preview'),
+    ('GET','/user/voice','/user/voice'),
+    ('PUT','/user/voice','/user/voice'),
     ("DELETE", "/bots/google_meet/abc-defg-hij", "/bots/{platform}/{native_meeting_id}"),
     ("PUT", "/bots/google_meet/abc-defg-hij/config", "/bots/{platform}/{native_meeting_id}/config"),
     ("POST", "/bots/google_meet/abc-defg-hij/speak", "/bots/{platform}/{native_meeting_id}/speak"),
@@ -50,6 +54,16 @@ CASES = [
      "/bots/{platform}/{native_meeting_id}/speak/{command_id}"),
     ("GET", "/bots/google_meet/abc-defg-hij/chat", "/bots/{platform}/{native_meeting_id}/chat"),
 
+    ("GET", "/meetings/42/voice-assistant", "/meetings/{meeting_id}/voice-assistant"),
+    ("GET", "/meetings/42/voice-assistant/sources/00000000-0000-4000-8000-000000000001",
+     "/meetings/{meeting_id}/voice-assistant/sources/{request_id}"),
+    ("PUT", "/meetings/42/voice-assistant", "/meetings/{meeting_id}/voice-assistant"),
+    ("POST", "/meetings/42/voice-assistant/navigation/00000000-0000-4000-8000-000000000123",
+     "/meetings/{meeting_id}/voice-assistant/navigation/{request_id}"),
+    ("GET", "/meetings/42/voice-assistant/handoff/00000000-0000-4000-8000-000000000123",
+     "/meetings/{meeting_id}/voice-assistant/handoff/{request_id}"),
+    ("POST", "/meetings/42/voice-assistant/handoff/00000000-0000-4000-8000-000000000123",
+     "/meetings/{meeting_id}/voice-assistant/handoff/{request_id}"),
     ("GET", "/meetings", "/meetings"),
     ("POST", "/meetings", "/meetings"),
     ("GET", "/meetings/42", "/meetings/{meeting_id}"),
@@ -324,7 +338,7 @@ def test_matrix_covers_every_declared_route():
 
     Both sides are read from the same build: `ROUTE_SCOPES` is what this build publishes, and
     `CARRIED_CASES` is the rows it can exercise. So this stays an EXACT equality in a build that
-    fronts four domains (62 rows) as much as in one that fronts five (69) — it never degrades to a
+    fronts four domains (63 rows) as much as in one that fronts five (70) — it never degrades to a
     subset check, which would be the one way for a declaration to go unexercised unnoticed."""
     covered = {(method, template) for method, _url, template in CARRIED_CASES}
     assert covered == set(ROUTE_SCOPES), (
@@ -362,3 +376,16 @@ def test_route_scope_declarations_only_use_real_scopes():
 def test_app_is_a_fastapi_instance_after_the_build_guard():
     """Sanity: the build-time assertion runs AFTER every route is registered and returns the app."""
     assert isinstance(create_app(FakeAuthorizer(), FakeDownstream(), FakeRedis()), FastAPI)
+
+
+def test_voice_source_route_forwards_owner_identity_and_core_status():
+    downstream = FakeDownstream(status_code=404, body={'detail': 'Voice reply not found'})
+    app = create_app(FakeAuthorizer(), downstream, FakeRedis())
+    path = '/meetings/42/voice-assistant/sources/00000000-0000-4000-8000-000000000001'
+    with TestClient(app) as client:
+        assert client.get(path).status_code == 401
+        assert downstream.last is None
+        response = client.get(path, headers=AUTH)
+        assert response.status_code == 404 and response.json() == {'detail': 'Voice reply not found'}
+        assert downstream.last['method'] == 'GET' and downstream.last['url'].endswith(path)
+        assert downstream.last['headers']['x-user-id'] == '7'

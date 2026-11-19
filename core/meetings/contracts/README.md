@@ -10,3 +10,5 @@ pilot; the frozen legacy `acts.v1` command shapes remain unchanged.
 
 `speech-room.v1` adds authenticated occupancy snapshots, atomic capture revisions and boot
 epoch fencing for multiple enrolled host clients. Speech playback shapes stay unchanged.
+
+- [`meeting-voice.v1`](meeting-voice.v1/README.md): owner-approved sources, bounded voice questions and ephemeral room status.

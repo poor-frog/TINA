@@ -46,7 +46,9 @@ function TasksList() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
-    void (async () => {
+    let serial = 0;
+    async function refresh() {
+      const ticket = ++serial;
       try {
         const tree = await listWorkspaceTree();
         const out: Task[] = [];
@@ -56,14 +58,16 @@ function TasksList() {
           const f = frontmatter(content);
           out.push({ path, title: f.title ?? path, state: (f.status ?? f.state ?? "open").toLowerCase(), priority: (f.priority ?? "").toLowerCase(), due: f.due });
         }
-        if (active) setTasks(out);
+        if (active && ticket === serial) { setTasks(out); setError(null); }
       } catch (e) {
-        if (active) setError(presentError(e).headline);
+        if (active && ticket === serial) setError(presentError(e).headline);
       } finally {
-        if (active) setLoading(false);
+        if (active && ticket === serial) setLoading(false);
       }
-    })();
-    return () => { active = false; };
+    }
+    void refresh();
+    window.addEventListener('tina:tasks-changed', refresh);
+    return () => { active = false; window.removeEventListener('tina:tasks-changed', refresh); };
   }, []);
 
   return (

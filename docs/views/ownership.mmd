@@ -41,6 +41,10 @@ flowchart LR
   speech_playback[("Ephemeral playback receipts")]
   speech_room_v1[("speech-room.v1 protocol")]
   meeting_translation_cache[("Private meeting translation SQLite cache")]
+  meeting_voice_v1[("meeting-voice.v1 policy and turn protocol")]
+  meeting_voice_state[("Ephemeral per-meeting voice turn and runtime state")]
+  meeting_voice_replies[("Owner-only durable TINA voice replies")]
+  voice_account_defaults[("Account voice preparation defaults")]
   bot -->|write| segments_stream
   bot -->|write| tc_mutable
   meeting_api -.->|read| segments_stream
@@ -91,3 +95,6 @@ flowchart LR
   agent_api -->|write| workspace_human_documents
   meeting_api -->|write| speech_playback
   agent_api -->|write| meeting_translation_cache
+  meeting_api -->|write| meeting_voice_state
+  meeting_api -->|write| meeting_voice_replies
+  admin_api -->|write| voice_account_defaults

@@ -1,0 +1,31 @@
+.indicator {
+  --voice-ink: var(--t2);
+  display: inline-flex; align-items: center; flex: 0 1 auto; gap: 7px; min-width: 0;
+  padding: 5px 9px; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--panel2); color: var(--voice-ink); font-size: 11px; line-height: 16px;
+  white-space: nowrap;
+}
+.name { font-size: 11px; font-weight: 700; letter-spacing: .025em; }
+.label { padding-left: 7px; border-left: 1px solid var(--line2); font-weight: 500; }
+.wave { flex: none; }
+.indicator[data-phase="LISTENING"], .indicator[data-phase="CAPTURING"], .indicator[data-phase="SPEAKING"] {
+  --voice-ink: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel2));
+}
+.indicator[data-phase="THINKING"] { --voice-ink: var(--t1); }
+.indicator[data-phase="ERROR"] { --voice-ink: var(--danger, var(--t1)); }
+.indicator[data-phase="CAPTURING"] .wave path, .indicator[data-phase="SPEAKING"] .wave path {
+  transform-origin: center; animation: voice-wave 1.2s ease-in-out infinite;
+}
+.wave path:nth-child(2) { animation-delay: -.4s; }
+.wave path:nth-child(3) { animation-delay: -.8s; }
+@keyframes voice-wave { 0%, 100% { transform: scaleY(.6); } 50% { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) { .indicator .wave path { animation: none; } }
+.group { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.handoff {
+  font: inherit; font-size: 11px; line-height: 16px; padding: 5px 9px; border-radius: 7px;
+  border: 1px solid var(--line2); background: var(--panel2); color: var(--t1); cursor: pointer;
+}
+.handoff:hover { color: var(--accent); border-color: var(--accent); }
+.handoff:disabled { opacity: .6; cursor: wait; }
+.error { color: var(--danger, var(--t2)); font-size: 11px; max-width: 320px; }

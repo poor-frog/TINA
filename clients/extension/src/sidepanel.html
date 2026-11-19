@@ -49,19 +49,36 @@
     .library[open] .disclosure-icon svg { transform: rotate(180deg); }
     .library summary:hover .review-label, .library summary:hover .disclosure-icon { color: var(--brand); }
     .library summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; border-radius: var(--radius-panel); }
-    .library-body { padding: 0 10px 10px; border-top: 1px solid var(--border); }
+    .library-body { padding: 10px; border-top: 1px solid var(--border); }
+    .source-card { padding: 12px; border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--brand) 5%, var(--surface)); }
+    .source-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+    .source-label { margin: 0; color: var(--muted-foreground); font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+    .source-badge { padding: 3px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--brand); font-size: 10px; font-weight: 650; white-space: nowrap; }
+    .source-name { display: block; color: var(--foreground); font-size: 13px; font-weight: 700; }
+    .source-destination { display: block; margin-top: 1px; color: var(--muted-foreground); font-size: 11px; }
+    .source-description { margin: 9px 0 11px; color: var(--muted-foreground); font-size: 11px; line-height: 1.5; }
+    .source-refresh { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 34px; border: 1px solid var(--control-line); border-radius: var(--radius); background: var(--surface); color: var(--brand); font-size: 11px; font-weight: 650; }
+    .source-refresh:hover:not(:disabled) { border-color: var(--brand); background: var(--subtle-bg); }
+    .source-refresh:disabled { cursor: default; opacity: .6; }
+    .source-refresh-mark { font-size: 15px; line-height: 1; }
+    .send-bot { display: flex; align-items: center; gap: 10px; width: calc(100% - 24px); margin: 8px 12px 2px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--brand) 32%, var(--border)); border-radius: var(--radius-panel); background: color-mix(in srgb, var(--brand) 5%, var(--surface)); }
+    .send-bot-copy { flex: 1; min-width: 0; }
+    .send-bot-overline { margin: 0 0 3px; color: var(--brand); font-size: 9px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+    .send-bot-title { display: block; overflow: hidden; color: var(--foreground); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .send-bot-status { margin: 3px 0 0; color: var(--muted-foreground); font-size: 10px; line-height: 1.4; }
+    .send-bot[data-state="error"] { border-color: var(--rejected); }
+    .send-bot[data-state="error"] .send-bot-status { color: var(--rejected); }
+    .send-bot-button { flex: none; min-height: 34px; padding: 0 11px; border: 1px solid var(--brand); border-radius: var(--radius); background: var(--brand); color: var(--on-brand, #fff); font-size: 11px; font-weight: 650; }
+    .send-bot-button:not(:disabled):hover { background: var(--brand-hover); }
+    .send-bot-button:disabled { cursor: default; opacity: .58; }
     .library-body label { display: block; margin: 9px 0 5px; color: var(--muted-foreground); font-size: 11px; font-weight: 650; }
     .library-body select { font-size: 12px; }
-    .source-row { display: flex; width: 100%; min-width: 0; gap: 8px; align-items: center; }
     select, input[type="text"], input[type="url"], input[type="password"] { width: 100%; max-width: 100%; min-width: 0; height: 38px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--foreground); }
-    .source-row select { flex: 1; }
     .library select { border-color: var(--control-line); background: var(--background); }
     .library select:hover:not(:disabled) { border-color: var(--brand); }
-    .select-btn:hover { border-color: var(--brand); background: var(--subtle-bg); }
-    .select-btn { width: 38px; height: 38px; flex: 0 0 38px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--brand); font-size: 17px; }
     .meeting-empty { padding: 7px 2px 0; color: var(--muted-foreground); font-size: 10px; line-height: 1.45; }
     .transcript-toolbar { flex: 0 0 auto; padding: 7px 14px 6px; }
-    .transcript-heading { display: flex; align-items: center; gap: 8px; }
+    .transcript-heading { flex-wrap: wrap; display: flex; align-items: center; gap: 8px; }
     .transcript-heading h1 { margin: 0; font-size: 13px; line-height: 1.4; font-weight: 650; }
     .language-badge { margin-left: auto; min-height: 28px; padding: 4px 8px; border: 1px solid transparent; cursor: pointer; border-radius: var(--radius-small); background: var(--subtle-bg); color: var(--brand); font-size: 10px; font-weight: 650; line-height: 1.3; }
     .language-badge::after { content: ' ⌄'; }
@@ -81,12 +98,16 @@
     .speaker-avatar { width: 22px; height: 22px; flex: 0 0 22px; display: grid; place-items: center; background: var(--subtle-bg); border-radius: 50%; color: var(--brand); font-size: 10px; }
     .speaker-name { font-size: 12px; font-weight: 650; }
     .turn-time { margin-left: auto; color: var(--muted-foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
-    .turn-copy { margin: 0; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+    .turn-copy { margin: 0; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .voice-reply { padding-left: 12px; border-left: 2px solid var(--brand); }
+    .voice-reply .turn-header { flex-wrap: wrap; }
+    .voice-reply [role="status"] { margin-left: 0; }
     .turn-draft { margin-top: 7px; padding-left: 9px; border-left: 2px solid var(--control-line); }
     .draft-label { display: block; margin-bottom: 3px; color: var(--muted-foreground); font-size: 9px; text-transform: uppercase; }
     #latestBtn { position: sticky; bottom: 4px; display: block; margin: 0 auto; width: auto; min-height: 34px; padding: 0 12px; border-radius: 20px; background: var(--surface); border-color: var(--control-line); box-shadow: 0 3px 12px #0002; color: var(--brand); font-size: 11px; }
     .footer { display: flex; gap: 8px; padding: 3px 12px calc(8px + env(safe-area-inset-bottom)); flex: 0 0 auto; }
-    .footer .btn { min-height: 32px; }
+    .footer .btn { min-height: 32px; padding-inline: 6px; }
+    .footer .voice-activity { min-height: 32px; flex-shrink: 0; margin-left: 0; }
     .btn { min-width: 0; min-height: 38px; flex: 1 1 0; overflow: hidden; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
     .btn:not(:disabled):hover { border-color: var(--brand); background: var(--subtle-bg); }
     .btn.primary { border-color: var(--brand); background: var(--brand); color: var(--on-brand, #fff); font-weight: 650; }
@@ -127,7 +148,35 @@
       .transcript-toolbar { padding-top: 5px; padding-bottom: 5px; }
       .footer { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
     }
-  </style>
+    .voice-activity {
+      --voice-ink: var(--muted-foreground); display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 8px; margin-left: auto; min-width: 0; border: 1px solid var(--border); border-radius: 7px;
+      background: var(--subtle-bg); color: var(--voice-ink); font-size: 11px; line-height: 16px; white-space: nowrap;
+    }
+    .voice-activity[hidden] { display: none; }
+    .voice-name { font-size: 11px; font-weight: 700; letter-spacing: .025em; }
+    .voice-label { padding-left: 6px; border-left: 1px solid var(--border); font-weight: 500; }
+    .voice-wave { flex: none; }
+    .voice-activity[data-phase="LISTENING"], .voice-activity[data-phase="CAPTURING"], .voice-activity[data-phase="SPEAKING"] {
+      --voice-ink: var(--brand); border-color: color-mix(in srgb, var(--brand) 30%, var(--border));
+      background: color-mix(in srgb, var(--brand) 6%, var(--background));
+    }
+    .voice-activity[data-phase="THINKING"] { --voice-ink: var(--foreground); }
+    .voice-activity[data-phase="ERROR"] { --voice-ink: var(--rejected); }
+    .voice-activity[data-phase="CAPTURING"] .voice-wave path, .voice-activity[data-phase="SPEAKING"] .voice-wave path {
+      transform-origin: center; animation: voice-wave 1.2s ease-in-out infinite;
+    }
+    .voice-wave path:nth-child(2) { animation-delay: -.4s; }
+    .voice-wave path:nth-child(3) { animation-delay: -.8s; }
+    @keyframes voice-wave { 0%, 100% { transform: scaleY(.6); } 50% { transform: scaleY(1); } }
+    @media (prefers-reduced-motion: reduce) { .voice-activity .voice-wave path { animation: none; } }
+  .voice-evidence { margin-top: 10px; font-size: 12px; }
+.voice-source-toggle { cursor: pointer; color: var(--brand); padding: 4px 0; }
+.voice-source-quotes { display: grid; gap: 10px; margin-top: 8px; }
+.voice-source-quote { border-left: 2px solid var(--brand); padding: 4px 10px; overflow-wrap: anywhere; }
+.voice-source-quote blockquote { margin: 5px 0; white-space: pre-wrap; font-size: 12px; }
+.voice-source-quote a { color: var(--brand); font-size: 12px; }
+</style>
 </head>
 <body>
   <header class="header">
@@ -148,14 +197,13 @@
         <span class="disclosure-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg></span>
       </summary>
       <div class="library-body">
-        <label for="sourceSelect">Transcript source</label>
-        <div class="source-row">
-          <select id="sourceSelect" aria-label="Transcript source">
-            <option value="bot">Meeting Bot · TINA Terminal</option>
-            <option value="desktop">Desktop archive · Dashboard</option>
-          </select>
-          <button id="refreshBtn" class="select-btn" type="button" aria-label="Refresh meetings" title="Refresh meetings">↻</button>
-        </div>
+        <section class="source-card" aria-labelledby="sourceTitle">
+          <div class="source-card-head"><p class="source-label">Transcript source</p><span class="source-badge">Meeting Bot</span></div>
+          <strong id="sourceTitle" class="source-name">TINA Terminal</strong>
+          <span class="source-destination">Bot meetings and saved transcripts</span>
+          <p class="source-description">Choose a Bot meeting below to review its transcript here.</p>
+          <button id="refreshBtn" class="source-refresh" type="button" aria-label="Refresh meetings"><span class="source-refresh-mark" aria-hidden="true">↻</span>Refresh meetings</button>
+        </section>
         <label for="meetingSelect">Meeting</label>
         <select id="meetingSelect" class="meeting-select" aria-label="Choose a meeting" disabled></select>
         <div id="meetingEmpty" class="meeting-empty">Loading meetings…</div>
@@ -168,6 +216,15 @@
       </div>
     </details>
 
+    <section id="sendBotPanel" class="send-bot" hidden aria-labelledby="sendBotHeading">
+      <div class="send-bot-copy">
+        <div id="sendBotHeading" class="send-bot-overline">Meeting link detected</div>
+        <strong id="sendBotTitle" class="send-bot-title"></strong>
+        <p id="sendBotStatus" class="send-bot-status" role="status" aria-live="polite"></p>
+      </div>
+      <button id="sendBotBtn" class="send-bot-button" type="button">Send Bot</button>
+    </section>
+
     <section class="transcript-toolbar" aria-label="Transcript display">
       <div class="transcript-heading"><h1>Transcript</h1><button type="button" id="displayLanguage" class="language-badge" aria-label="Change transcript language" aria-controls="meetingControls" title="Change transcript language">VI + EN</button></div>
       <div id="translationControls" class="translation-controls" aria-label="Translation status">
@@ -179,15 +236,15 @@
       <div id="emptyState" class="empty-state">
         <div class="empty-mark" aria-hidden="true">T</div>
         <strong id="emptyStateTitle">Your transcript, in one place</strong>
-        <span id="emptyStateText">Choose a source and an authorized meeting to read its transcript.</span>
+        <span id="emptyStateText">Choose a Bot meeting from TINA Terminal to read its transcript.</span>
       </div>
       <div id="transcriptTurns" role="list" aria-label="Transcript turns"></div>
       <button id="latestBtn" class="btn" type="button" hidden>Latest transcript ↓</button>
     </div>
-    <div class="transcript-meta"><span id="transcriptStatus">Choose a meeting to view its transcript.</span><span id="updatedAt"></span></div>
+    <div class="transcript-meta"><span id="transcriptStatus">Choose a Bot meeting to view its transcript.</span><span id="updatedAt"></span></div>
     <footer class="footer">
       <button id="openTerminal" class="btn primary" type="button" disabled>Open Terminal ↗</button>
-      <button id="openDashboard" class="btn" type="button" disabled>Open Dashboard ↗</button>
+      <span id="voiceActivity" hidden></span>
     </footer>
   </main>
 
@@ -201,11 +258,9 @@
       <div class="field"><label for="apiKey">API key</label><input id="apiKey" type="password" autocomplete="off" placeholder="Paste your TINA API key" /><p class="help">Authorizes transcript reads and translation requests. Sent only to your configured TINA gateway in the X-API-Key header.</p></div>
 
       <div class="group-title">Connections</div>
-      <div class="field"><label for="deployment">Deployment</label><select id="deployment"><option value="desktop">Desktop (127.0.0.1:9099)</option><option value="cloud">Cloud / Compose (127.0.0.1:8092)</option></select><p class="help">Keeps your saved deployment profile. The gateway addresses below are used by this viewer.</p></div>
-      <div class="field"><label for="gatewayUrl">API gateway override · Desktop archive</label><input id="gatewayUrl" class="mono" type="url" placeholder="http://127.0.0.1:8056" /><p class="help">Leave blank to use the selected deployment’s default gateway.</p></div>
-      <div class="field"><label for="botGatewayUrl">Meeting Bot API gateway</label><input id="botGatewayUrl" class="mono" type="url" placeholder="http://127.0.0.1:18056" /></div>
-      <div class="field"><label for="terminalUrl">TINA Terminal URL</label><input id="terminalUrl" class="mono" type="url" placeholder="http://127.0.0.1:13000" /></div>
-      <div class="field"><label for="dashboardUrl">Dashboard override</label><input id="dashboardUrl" class="mono" type="url" placeholder="http://127.0.0.1:13001" /><p class="help">Optional destination for Meeting Bot rows. Desktop archive rows open their saved transcript review page.</p></div>
+      <div class="field"><label for="deployment">Deployment</label><select id="deployment"><option value="desktop">Desktop (127.0.0.1:9099)</option><option value="cloud">Cloud / Compose (127.0.0.1:8092)</option></select><p class="help">Saved deployment profile for legacy capture settings.</p></div>
+      <div class="field"><label for="botGatewayUrl">Meeting Bot API gateway</label><input id="botGatewayUrl" class="mono" type="url" placeholder="https://tinabot.duckdns.org/extension-api" /></div>
+      <div class="field"><label for="terminalUrl">TINA Terminal URL</label><input id="terminalUrl" class="mono" type="url" placeholder="https://tinabot.duckdns.org" /></div>
 
       <div class="inactive-group">
         <div class="group-title">Capture settings · inactive in this extension</div>

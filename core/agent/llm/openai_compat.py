@@ -17,7 +17,8 @@ from typing import Optional
 
 import httpx
 
-from llm.errors import LLMAuthError, LLMConfigError, LLMError
+from llm.errors import (LLMAuthError, LLMConfigError, LLMError,
+                        LLMStructuredOutputUnsupported, structured_output_unsupported)
 from llm.ports import CompletionResult
 
 
@@ -36,7 +37,15 @@ class OpenAICompatCompletion:
         self._client = httpx.Client(timeout=timeout, transport=transport)
 
     def complete(self, prompt: str, *, system: Optional[str] = None,
-                  model: Optional[str] = None, response_schema: Optional[dict] = None) -> CompletionResult:
+                 model: Optional[str] = None, response_schema: Optional[dict] = None) -> CompletionResult:
+        return self._complete(prompt, system=system, model=model, schema=response_schema,
+                              schema_name="structured_completion")
+
+    def complete_structured(self, prompt: str, *, system: str, schema: dict) -> CompletionResult:
+        return self._complete(prompt, system=system, schema=schema)
+
+    def _complete(self, prompt: str, *, system: Optional[str] = None,
+                  model: Optional[str] = None, schema: dict | None = None, schema_name: str = "tina_voice") -> CompletionResult:
         target = (model or "").strip() or self._model
         if not self._base:
             raise LLMConfigError(
@@ -56,21 +65,23 @@ class OpenAICompatCompletion:
         except ValueError:
             max_tokens = 4096
         payload = {"model": target, "messages": messages, "max_tokens": max_tokens}
-        if response_schema is not None:
+        if schema is not None:
             payload['response_format'] = {'type': 'json_schema', 'json_schema': {
-                'name': 'structured_completion', 'strict': True, 'schema': response_schema}}
+                'name': schema_name, 'strict': True, 'schema': schema}}
         try:
             r = self._client.post(f"{self._base}/chat/completions",
                                   json=payload, headers=headers)
         except httpx.HTTPError as exc:
             detail = str(exc).replace(self._key, "[redacted]") if self._key else str(exc)
             raise LLMError(f"completion transport failure against {self._base}: {detail}") from exc
+        if schema is not None and structured_output_unsupported(r, 'response_format'):
+            raise LLMStructuredOutputUnsupported('Structured output is unsupported')
         if r.status_code in (401, 403):
             detail = r.text.replace(self._key, "[redacted]") if self._key else r.text
-            raise LLMAuthError(f"{r.status_code} from {self._base}: {detail[:300]}")
+            raise LLMAuthError(f"{r.status_code} from {self._base}: {detail[:300]}", status_code=r.status_code)
         if r.status_code >= 400:
             detail = r.text.replace(self._key, "[redacted]") if self._key else r.text
-            raise LLMError(f"{r.status_code} from {self._base}: {detail[:300]}")
+            raise LLMError(f"{r.status_code} from {self._base}: {detail[:300]}", status_code=r.status_code)
         try:
             choice = (r.json().get("choices") or [{}])[0]
             text = (choice.get("message") or {}).get("content") or ""

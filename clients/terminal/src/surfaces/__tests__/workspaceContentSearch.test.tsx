@@ -9,10 +9,10 @@ it('searches authorized mounted workspaces and opens the matching workspace', as
   vi.stubGlobal('fetch', fetch);
   const open = vi.fn();
   render(<WorkspaceContentSearch mounts={[{ slug: 'home' }, { slug: 'shared', name: 'Team' }]} onOpen={open} />);
-  fireEvent.click(screen.getByText('Tìm trong nội dung Knowledge'));
-  fireEvent.change(screen.getByLabelText('Nội dung cần tìm'), { target: { value: 'budget' } });
-  fireEvent.click(screen.getByRole('button', { name: /^Tìm nội dung$/ }));
-  fireEvent.click(await screen.findByRole('button', { name: /Team · wiki\/budget.md:3/ }));
+  fireEvent.click(screen.getByText('Search within content'));
+  fireEvent.change(screen.getByLabelText('Search file contents'), { target: { value: 'budget' } });
+  fireEvent.click(screen.getByRole('button', { name: /^Search$/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /Team, wiki\/budget\.md, line 3/i }));
   expect(open).toHaveBeenCalledWith('wiki/budget.md', 'shared');
   expect(fetch).toHaveBeenCalledTimes(2);
 });

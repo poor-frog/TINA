@@ -9,8 +9,7 @@
  * audio render thread, so it can't be starved by main-thread load.
  *
  * Contract-faithful: the ctx must already be at the target rate (16 kHz); this
- * emits fixed BLOCK-sized Float32 frames at that rate — same shape the old
- * ScriptProcessor(BLOCK, 1, 1) produced, so callers are a drop-in swap.
+ * emits fixed-size Float32 frames at that rate (4096 default, 1024 for the voice bot).
  */
 
 const BLOCK = 4096;
@@ -30,7 +29,11 @@ export const PCM_WORKLET_PROCESSOR = 'tina-pcm-capture';
 // Exported so the extension build can emit it verbatim as the shipped worklet.
 export const WORKLET_SRC = `
 class TinaPcmCapture extends AudioWorkletProcessor {
-  constructor() { super(); this._buf = new Float32Array(${BLOCK}); this._n = 0; }
+  constructor(options) {
+    super(); this._block = options?.processorOptions?.bufferSize ?? ${BLOCK};
+    if (![1024, ${BLOCK}].includes(this._block)) throw new Error('Unsupported PCM buffer size');
+    this._buf = new Float32Array(this._block); this._n = 0;
+  }
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
     if (!ch) {this._n=0;return true;}
@@ -39,7 +42,7 @@ class TinaPcmCapture extends AudioWorkletProcessor {
     for (let i = 0; i < ch.length; i++) {
       if(this._n===0)this._startFrame=currentFrame+i;
       this._buf[this._n++] = ch[i];
-      if (this._n === ${BLOCK}) { this.port.postMessage({pcm:this._buf,startFrame:this._startFrame}); this._buf = new Float32Array(${BLOCK}); this._n = 0; }
+      if (this._n === this._block) { this.port.postMessage({pcm:this._buf,startFrame:this._startFrame}); this._buf = new Float32Array(this._block); this._n = 0; }
     }
     return true;
   }
@@ -55,7 +58,7 @@ const moduled = new WeakSet<AudioContext>();
 /**
  * Create an AudioWorklet capture node on `ctx` (which must be at 16 kHz). The
  * caller connects its source to the returned node and the node to
- * `ctx.destination` (to keep it pulled). `onPcm` receives a BLOCK-sized
+ * `ctx.destination` (to keep it pulled). `onPcm` receives a bufferSize-sized
  * Float32Array per frame — already a fresh copy, safe to forward without cloning.
  *
  * `moduleUrl` (optional) is the URL the worklet module is fetched from. Pass a
@@ -68,7 +71,9 @@ export async function createPcmCaptureNode(
   ctx: AudioContext,
   onPcm: (pcm: Float32Array, timeline?:PcmTimeline) => void,
   moduleUrl?: string,
+  bufferSize = BLOCK,
 ): Promise<AudioWorkletNode> {
+  if (![1024, BLOCK].includes(bufferSize)) throw new Error('Unsupported PCM buffer size');
   if (!moduled.has(ctx)) {
     if (moduleUrl) {
       await ctx.audioWorklet.addModule(moduleUrl);
@@ -82,15 +87,27 @@ export async function createPcmCaptureNode(
   const node = new AudioWorkletNode(ctx, PCM_WORKLET_PROCESSOR, {
     numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
     channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'speakers',
+    processorOptions: { bufferSize },
   });
   const epochMs=Date.now()-ctx.currentTime*1000;
+  const performanceEpochMs = Date.now() - performance.now();
   let firstFrame:number|undefined;
   node.port.onmessage = (e:MessageEvent) => {
     if(e.data instanceof Float32Array) {onPcm(e.data);return;} // old worklet during extension reload
     const {pcm,startFrame}=e.data ?? {};
     if(!(pcm instanceof Float32Array)||!Number.isSafeInteger(startFrame)||startFrame<0)return;
     firstFrame ??= startFrame as number;
-    onPcm(pcm,{startSample:startFrame-firstFrame,captureMs:epochMs+startFrame/ctx.sampleRate*1000});
+    const frameTime = startFrame / ctx.sampleRate;
+    const output = ctx.getOutputTimestamp?.();
+    const contextTime = output?.contextTime ?? 0;
+    const performanceTime = output?.performanceTime ?? 0;
+    // AudioContext time can drift or pause relative to the wall clock. Correlate the
+    // source sample with the device clock while preserving delayed frame timestamps.
+    const captureMs = Number.isFinite(contextTime) && contextTime > 0
+      && Number.isFinite(performanceTime) && performanceTime > 0
+      ? performanceEpochMs + performanceTime + (frameTime - contextTime) * 1000
+      : epochMs + frameTime * 1000;
+    onPcm(pcm,{startSample:startFrame-firstFrame,captureMs});
   };
   return node;
 }

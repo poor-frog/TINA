@@ -18,3 +18,9 @@ command arguments; resolve them through the scoped identity token or named envir
 `env` values are per-server literals for non-secret settings. Put credential names in that server's
 `env_vars` allowlist; the worker passes only those named values to that MCP subprocess, and different
 integrations should use distinct variable names when their credentials differ.
+
+`reach.web.search`, `reach.web.read`, `reach.github.search` and `reach.github.read` attach the
+read-only `tina-reach` MCP bridge (`python -m llm.reach_mcp`). Its deployment-owned
+`TINA_AGENT_REACH_URL` reaches the private shared public-retrieval worker. It never receives
+the owner GitHub token or browser sessions. Only selected operations are granted; generated
+content is untrusted evidence and returned URLs must accompany claims. See deploy/agent-reach.

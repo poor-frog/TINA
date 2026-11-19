@@ -11,7 +11,7 @@
  * diarization. Contrast @tina/mixed-pipeline (one mixed stream, names from hints).
  */
 export { createGmeetPipeline } from './gmeet-pipeline.js';
-export type { GmeetPipeline, GmeetPipelineOptions } from './gmeet-pipeline.js';
+export type { GmeetPipeline, GmeetPipelineOptions, VoiceHypothesis, AsrDiagnostic } from './gmeet-pipeline.js';
 export { SpeakerStreamManager } from './speaker-streams.js';
 export type { SpeakerStreamManagerConfig, SpeakerStreamDiagnostic } from './speaker-streams.js';
 export { isHallucination } from './hallucination-filter.js';

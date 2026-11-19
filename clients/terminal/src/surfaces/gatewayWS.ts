@@ -18,6 +18,7 @@ export interface MeetingStatusFrame {
   native?: string;
   status: string;        // raw meeting-api status
   when?: string;
+  auto_retry?: { state: string; attempt: number; max_attempts: number; next_at?: string };
 }
 
 type Listener = (f: MeetingStatusFrame) => void;
@@ -51,7 +52,11 @@ export function parseFrame(data: unknown): MeetingStatusFrame | null {
   const meeting_id = (o.meeting_id ?? meeting.id) as number | string | undefined;
   const native = (o.native ?? meeting.native_id) as string | undefined;
   const when = (o.when ?? o.ts) as string | undefined;
-  return { meeting_id, native, status, when };
+  const retry = o.auto_retry as Record<string, unknown> | undefined;
+  const auto_retry = retry && typeof retry.state === "string"
+    && Number.isSafeInteger(retry.attempt) && Number.isSafeInteger(retry.max_attempts)
+    ? retry as MeetingStatusFrame["auto_retry"] : undefined;
+  return { meeting_id, native, status, when, ...(auto_retry ? { auto_retry } : {}) };
 }
 
 export function parseRevisionFrame(data: unknown): { meetingId: string; segmentId: string; revision: number } | null {

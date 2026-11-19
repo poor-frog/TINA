@@ -1,0 +1,25 @@
+{
+  "request_id": "00000000-0000-4000-8000-000000000001",
+  "text": "Lan ph\u1ee5 tr\u00e1ch demo.",
+  "state": "completed",
+  "created_at_ms": 1,
+  "updated_at_ms": 1,
+  "lookups": [
+    {
+      "tool": "search_meeting",
+      "source_count": 1
+    },
+    {
+      "tool": "search_shared_documents",
+      "source_count": 1
+    },
+    {
+      "tool": "read_source_context",
+      "source_count": 1
+    },
+    {
+      "tool": "search_meeting",
+      "source_count": 1
+    }
+  ]
+}

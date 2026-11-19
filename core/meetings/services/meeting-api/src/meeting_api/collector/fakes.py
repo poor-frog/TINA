@@ -525,24 +525,24 @@ class InMemoryTranscriptStore:
         self._meetings[mid]["data"]["workspace_id"] = workspace_id
         return workspace_id
 
-    def _mint_share_on(self, mid, mode, allowed_emails, expires_in_sec):
+    def _mint_share_on(self, mid, mode, allowed_emails, expires_in_sec, include_recordings=False):
         """The grant, once, for both address shapes — mirrors the SqlAlchemy store's ``_mint_share_on``."""
         from .adapters import _build_share_grant
 
         if mid is None or mid not in self._meetings:
             return None
-        grant, secret = _build_share_grant(mode, allowed_emails, expires_in_sec)
+        grant, secret = _build_share_grant(mode, allowed_emails, expires_in_sec, include_recordings)
         self._meetings[mid]["data"].setdefault("share_grants", []).append(grant)
         return {"id": grant["id"], "token": f"{mid}.{secret}",
                 "mode": mode, "expires_at": grant["expires_at"]}
 
     async def mint_transcript_share(self, user_id, platform, native_meeting_id, *,
-                                    mode="open", allowed_emails=None, expires_in_sec=86400):
+                                    mode="open", allowed_emails=None, expires_in_sec=86400, include_recordings=False):
         return self._mint_share_on(self._find(user_id, platform, native_meeting_id),
-                                   mode, allowed_emails, expires_in_sec)
+                                   mode, allowed_emails, expires_in_sec, include_recordings)
 
     async def mint_transcript_share_by_id(self, user_id, meeting_id, *,
-                                          mode="open", allowed_emails=None, expires_in_sec=86400):
+                                          mode="open", allowed_emails=None, expires_in_sec=86400, include_recordings=False):
         """Owner-scoped by primary key. A row that is not this caller's reads exactly like one that
         does not exist — the store never tells a non-owner that an id is taken."""
         try:
@@ -552,7 +552,7 @@ class InMemoryTranscriptStore:
         row = self._meetings.get(mid)
         if row is None or row.get("user_id") != user_id:
             return None
-        return self._mint_share_on(mid, mode, allowed_emails, expires_in_sec)
+        return self._mint_share_on(mid, mode, allowed_emails, expires_in_sec, include_recordings)
 
     async def redeem_transcript_share(self, user_id, user_email, token):
         from .adapters import _sha, validate_transcript_grant
@@ -575,6 +575,10 @@ class InMemoryTranscriptStore:
         viewers = m["data"].setdefault("transcript_viewers", [])
         if user_id not in viewers:
             viewers.append(user_id)
+        if grant.get("include_recordings") is True:
+            recording_viewers = grant.setdefault("recording_viewers", [])
+            if user_id not in recording_viewers:
+                recording_viewers.append(user_id)
         return {"meeting_id": mid, "ok": True}
 
     async def connect_doc(self, user_id, platform, native_meeting_id, doc):
@@ -795,13 +799,15 @@ class InMemoryTranscriptStore:
         which is exactly the property that makes skipping the real build safe."""
         return {"status": "skipped", "reason": "in-memory store"}
 
-    async def annotate_meeting(self, user_id, meeting_id, *, title=None, metadata=None):
+    async def annotate_meeting(self, user_id, meeting_id, *, title=None, metadata=None, summary=None):
         """Caller-owned annotations on a row in ANY status — mirrors the adapter. No status check:
         nothing written here is read by the dispatch pipeline, so there is no FSM to fight."""
         m = self._meetings.get(meeting_id)
         if m is None or m["user_id"] != user_id:
             return None
         data = m["data"]
+        if data.get("artifact_deletion") and (summary is not None or (metadata and "tina_summary" in metadata)):
+            return None
         # `title` lives in the data blob, NOT as a top-level field — mirrors the adapter and
         # update_planned_meeting. Writing it anywhere else persists nothing.
         if title is not None:
@@ -827,6 +833,14 @@ class InMemoryTranscriptStore:
             if reason:
                 return {"error": "metadata_too_large", "detail": reason}
             data["metadata"] = merged
+        if summary is not None:
+            if isinstance(data.get("metadata"), dict) and "tina_summary" in data["metadata"]:
+                data["metadata"] = dict(data["metadata"])
+                data["metadata"].pop("tina_summary")
+            if summary:
+                data["summary"] = summary
+            else:
+                data.pop("summary", None)
         return self._planned_row(meeting_id)
 
     async def update_planned_meeting(self, user_id, meeting_id, updates):
@@ -951,8 +965,13 @@ class InMemoryTranscriptStore:
             return False
         m["segments"] = {}
         data = dict(m.get("data") or {})
-        for key in ("canonical_transcript", "meeting_memory", "canonical_notes", "stt_replicas", "stt_foundation", "stt_instance_id", "recordings", "processed", "notes", "share_grants", "transcript_viewers", "transcript_refinement", "transcript_diarization", "transcript_alignment", "transcript_revision_sequences", "transcript_outbox", "speaker_registry"):
+        for key in ("canonical_transcript", "meeting_memory", "canonical_notes", "stt_replicas", "stt_foundation", "stt_instance_id", "recordings", "processed", "notes", "share_grants", "transcript_viewers", "transcript_refinement", "transcript_diarization", "transcript_alignment", "transcript_revision_sequences", "transcript_outbox", "speaker_registry", "voice_replies"):
             data.pop(key, None)
+        metadata = dict(data.get("metadata") or {})
+        data.pop("summary", None)
+        metadata.pop("tina_summary", None)
+        if "metadata" in data:
+            data["metadata"] = metadata
         data["artifact_deletion"] = {
             "state": "completed",
             "completed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),

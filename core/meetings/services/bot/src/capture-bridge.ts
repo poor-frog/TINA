@@ -42,7 +42,9 @@ import type { BotPipeline } from './pipeline.js';
 import type { BotRecordingSink } from './recording.js';
 import type { TelemetrySink } from './ports.js';
 import type { RemoteAudioActivityTap } from './aloneness.js';
-import { createTtsPlayback, type TtsPlayback, type PlaybackOutcome } from './tts-playback.js';
+import { createTtsPlayback, type TtsPlayback, type PlaybackOutcome, type PreparedSpeech, type SpeechTiming } from './tts-playback.js';
+import type {NoiseFrame} from './noise-suppression.js';
+import {setMeetingMicrophone} from './meeting-microphone.js';
 
 /** Float32 PCM → base64 of its little-endian bytes — the EXACT codec wire payload, so a stored
  *  captured-signal.v1 frame round-trips through @tina/capture-codec (encode→decode→same PCM). */
@@ -718,6 +720,8 @@ export async function startCaptureBridge(
   onChat?: (sender: string, text: string) => void,
   /** Active-phase silence signal. It remains unavailable until page capture reports ready. */
   activity?: RemoteAudioActivityTap,
+  voiceAudio?: (channel: number, pcm: Float32Array, stamp: number, participant?: string | null, startSample?: number) => void,
+  filterAudio?: (frame:NoiseFrame,deliver:(pcm:Float32Array)=>void)=>void,
 ): Promise<() => Promise<void>> {
   const mixed = isMixedLanePlatform(inv.platform);
   const perTrack = isPerTrackLanePlatform(inv.platform);   // Zoom: per-track through the per-channel lane
@@ -746,8 +750,13 @@ export async function startCaptureBridge(
     // an unbound track (name not yet resolved) arrives with no name → the per-channel lane opens the
     // turn UNKNOWN and upgrades it the moment the resolver binds (gmeet-pipeline onset-adopt); the
     // named path is __tinaNamedAudioData.
-    if (useMix) pipeline.feedMixedAudio(pcm, ts);
-    else pipeline.feedAudio(speakerIndex,undefined,pcm,ts,undefined,startSample);
+    const deliver=(audio:Float32Array)=>{
+      if (useMix) pipeline.feedMixedAudio(audio, ts);
+      else pipeline.feedAudio(speakerIndex,undefined,audio,ts,undefined,startSample);
+      if (inv.platform === 'google_meet') { try { voiceAudio?.(speakerIndex, audio, ts, undefined, startSample); } catch { /* voice cannot interrupt transcript */ } }
+    };
+    if(inv.platform==='google_meet'&&filterAudio)filterAudio({channel:speakerIndex,pcm,stamp:ts,startSample},deliver);
+    else deliver(pcm);
   };
   // gmeet: the v1 producer stamps the glow name page-side; this named variant carries it through.
   const onNamedAudio = (channel: number, glowName: string | undefined, samples: number[], tsMs?: number, participantId?:string|null,startSample?:number):void=>{
@@ -755,7 +764,12 @@ export async function startCaptureBridge(
     const ts = tsMs ?? Date.now();
     observeRemoteAudio(pcm);
     tee(channel,pcm,ts,glowName,undefined,startSample);                            // O-TEL-1: tap BEFORE the pipeline
-    pipeline.feedAudio(channel, glowName, pcm, ts, inv.platform === "google_meet" && (participantId === null || (typeof participantId === "string" && participantId.length <= 512)) ? participantId : undefined,startSample);
+    const deliver=(audio:Float32Array)=>{
+      pipeline.feedAudio(channel, glowName, audio, ts, inv.platform === "google_meet" && (participantId === null || (typeof participantId === "string" && participantId.length <= 512)) ? participantId : undefined,startSample);
+      if (inv.platform === 'google_meet') { try { voiceAudio?.(channel, audio, ts, participantId, startSample); } catch { /* voice cannot interrupt transcript */ } }
+    };
+    if(inv.platform==='google_meet'&&filterAudio)filterAudio({channel,pcm,stamp:ts,participant:participantId,startSample},deliver);
+    else deliver(pcm);
   };
   // mixed lane "who is lit" hint (Zoom/Teams active-speaker → the namer's time window).
   // Epoch-clock-guarded + counted; see makeSpeakerHintSink for the clock contract.
@@ -820,7 +834,7 @@ export async function startCaptureBridge(
   // ── Start the page-side capture (TinaBrowserUtils preferred; production inline fallback). ──
   // The body of this callback runs IN THE BROWSER (Playwright serializes it); DOM globals are
   // reached via globalThis (this file type-checks against the Node lib — no DOM types here).
-  await page.evaluate(async ({ isMixed, isPerTrack, isJitsi, isTeams, isZoom, botName, mainAudioGraceMs, mainAudioSilenceMs, mainAudioEnergyRms }) => {
+  await page.evaluate(async ({ isMixed, isPerTrack, isJitsi, isTeams, isZoom, botName, captureBufferSize, mainAudioGraceMs, mainAudioSilenceMs, mainAudioEnergyRms }) => {
     const w = (globalThis as any) as Record<string, any>;
     if (isMixed) {
       // Zoom/Teams/Jitsi ride the WebRTC hook (installRemoteAudioHook, installed pre-nav), which mirrors
@@ -1308,6 +1322,7 @@ export async function startCaptureBridge(
         ?? w.TinaBrowserUtils.createGmeetSpeakers?.({ selfName: botName, log: (m: string) => w.logBot?.('[PerSpeaker] ' + m) });
       w.__tinaGmeetCapture = w.TinaBrowserUtils.createGmeetCapture({
         includeSilence:true,
+        bufferSize: captureBufferSize,
         log: (m: string) => w.logBot?.('[PerSpeaker] ' + m),
         onAudio:(index:number,pcm:Float32Array,timeline?:{captureMs:number;startSample:number})=>{
           let energy=0;for(const value of pcm)energy+=value*value;
@@ -1327,6 +1342,7 @@ export async function startCaptureBridge(
       await w.__tinaRemoteAudioReady?.();
     }
   }, { isMixed: mixed, isPerTrack: perTrack, isJitsi: jitsi, isTeams: inv.platform === 'teams', isZoom: inv.platform === 'zoom', botName: inv.botName,
+      captureBufferSize: inv.platform === 'google_meet' && inv.voiceAgentEnabled ? 1024 : 4096,
       // How long the Teams lane waits for the server mix before capturing every track instead.
       mainAudioGraceMs: Number(process.env.TINA_TEAMS_MAIN_AUDIO_GRACE_MS || 15000),
       // How long a PICKED mix may stay wholly silent before the lane abandons it for every track.
@@ -1475,8 +1491,9 @@ export async function startRecording(page: Page, inv: Invocation, recording: Bot
  * the OS-level audio injection the VM image provides. Speaking is gated on inv.voiceAgentEnabled.
  */
 export interface SpeakController {
+  prepare?(text: string, voice?: string): PreparedSpeech;
   /** Begin speaking `text` (TTS synthesized + injected via the VM's PulseAudio chain). */
-  speak(text: string, voice?: string, onStarted?: () => void): Promise<PlaybackOutcome | void>;
+  speak(text: string, voice?: string, onStarted?: (timing?: Readonly<SpeechTiming>) => void, timeoutMs?: number): Promise<PlaybackOutcome | void>;
   /** Stop any in-flight speech (barge-in). */
   stop(): Promise<void>;
 }
@@ -1484,75 +1501,88 @@ export interface SpeakController {
 export function createSpeakController(
   page: Page,
   inv: Invocation,
-  createTts: (log: (message: string) => void) => TtsPlayback = (log) => createTtsPlayback(log),
+  createTts: (log: (message: string) => void) => TtsPlayback = (log) => createTtsPlayback(log, { meetingId: inv.meeting_id }),
 ): SpeakController {
   const enabled = !!inv.voiceAgentEnabled;
   const platform = inv.platform;
   const tts = createTts((m) => console.log(`[bot] ${m}`));   // OS-level TTS→tts_sink half
 
-  // Track the state the join adapter establishes: Zoom voice-agent joins keep the mic open;
-  // Meet/Teams/Jitsi join muted. Read platform labels when present to resynchronize after a UI change.
-  let micOn = platform === 'zoom' && enabled;
   let micQueue: Promise<void> = Promise.resolve();
   let speechGeneration = 0;
+  let micUncertain = false;
+  let micTouched = false;
   const setMic = async (on: boolean): Promise<boolean> => {
-    let verified = false;
+    const generation = speechGeneration;
     const operation = micQueue.then(async () => {
-      const nextState = await page.evaluate(({ desiredOn, platform, assumedOn }) => {
-        const doc = (globalThis as any).document;
-        let button: any;
-        if (platform === 'teams') button = doc?.querySelector('#microphone-button');
-        else if (platform === 'zoom') button = doc?.querySelector('.join-audio-container__btn');
-        else {
-          button = Array.from(doc?.querySelectorAll('[role="button"],button') ?? [])
-            .find((candidate: any) => /microphone|mute audio/i.test(candidate.getAttribute('aria-label') ?? ''));
-        }
-        if (!button) return undefined;
-
-        const label = `${button.getAttribute('aria-label') ?? ''} ${button.getAttribute('title') ?? ''}`.toLowerCase();
-        let currentOn: boolean | undefined;
-        if (/unmute|turn on.*microphone|enable microphone/.test(label)) currentOn = false;
-        else if (!/toggle/.test(label) && /mute|turn off.*microphone|disable microphone/.test(label)) currentOn = true;
-        else currentOn = assumedOn;
-
-        if (currentOn !== desiredOn) button.click();
-        return desiredOn;
-      }, { desiredOn: on, platform, assumedOn: micOn }).catch(() => undefined);
-
-      if (typeof nextState === 'boolean') { micOn = nextState; verified = true; }
-      else console.error(`[bot] speak: microphone state could not be changed (${platform})`);
+      if (on && (micUncertain || generation !== speechGeneration)) return false;
+      const nextState = await page.evaluate(setMeetingMicrophone, { desiredOn: on, platform }).catch(() => undefined);
+      const verified = typeof nextState === 'boolean' && nextState === on;
+      if (!verified) console.error(`[bot] speak: microphone state could not be changed (${platform})`);
+      if (!on && verified) micUncertain = false;
+      return verified;
     });
-    micQueue = operation.catch(() => { /* mic UI failures never reject the voice handler */ });
-    await micQueue;
-    return verified;
+    // Keep the actual UI queue serialized: a timed-out evaluate can still click later.
+    micQueue = operation.then(() => {}, () => {});
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([operation, new Promise<boolean>(resolve => {
+        timer = setTimeout(() => {
+          micUncertain = true;
+          try { tts.stop(); } catch { /* Keep the UI deadline bounded even if the local player failed. */ }
+          console.error('[bot] speak: microphone control timed out'); resolve(false);
+        }, 5000);
+      })]);
+    } finally { clearTimeout(timer); }
   };
 
-  return {
-    async speak(text: string, voice?: string, onStarted?: () => void): Promise<PlaybackOutcome> {
+  const play = async (run: () => Promise<PlaybackOutcome | void>, ready?: Promise<boolean>): Promise<PlaybackOutcome> => {
       if (!enabled) { console.error('[bot] speak ignored: voiceAgentEnabled is false'); return 'failed'; }
       const generation = ++speechGeneration;
-      console.log(`[bot] speak request: ${text.length} characters`);
+      if (ready) {
+        const buffered = await ready;
+        if (generation !== speechGeneration) return 'stopped';
+        if (!buffered) return await run() ?? 'failed';
+      }
+      micTouched = true; // Even a failed/timed-out unmute must retain the strict Stop mute check.
       const verified = await setMic(true);                   // (a) unmute the meeting-UI mic button
       if (generation !== speechGeneration) return 'stopped';
-      if (onStarted && !verified) return 'failed';
       // (b) synthesize via the TTS service + stream PCM to tts_sink → virtual_mic (the bot's mic).
       try {
-        return await tts.speak(text, voice, onStarted) ?? 'failed';
+        if (!verified) return 'failed';
+        return await run() ?? 'failed';
       } catch (e) {
         console.error(`[bot] speak: tts failed: ${String(e)}`);
         return 'failed';
       } finally {
         if (generation === speechGeneration) {
           const muted = await setMic(false);
-          if (onStarted && !muted) return 'failed';
+          if (!muted) return 'failed';
         }
       }
+  };
+  return {
+    ...(enabled && tts.prepare ? { prepare(text: string, voice?: string): PreparedSpeech {
+      const pending = tts.prepare!(text, voice);
+      return { ready: pending.ready, cancel: () => pending.cancel(),
+        get timing() { return pending.timing; },
+        get failedBeforePlayback() { return pending.failedBeforePlayback; },
+        play: onStarted => play(() => pending.play(onStarted), pending.ready).finally(() => pending.cancel()) };
+    } } : {}),
+    async speak(text: string, voice?: string, onStarted?: (timing?: Readonly<SpeechTiming>) => void, timeoutMs?: number): Promise<PlaybackOutcome> {
+      console.log(`[bot] speak request: ${text.length} characters`);
+      if (tts.prepare && enabled) {
+        tts.stop();
+        const pending = tts.prepare(text, voice, timeoutMs);
+        return play(() => pending.play(onStarted), pending.ready).finally(() => pending.cancel());
+      }
+      return play(() => tts.speak(text, voice, onStarted, timeoutMs));
     },
     async stop(): Promise<void> {
       if (!enabled) return;
       speechGeneration++;
       tts.stop();                                             // barge-in: kill playback + re-mute tts_sink
-      await setMic(false);
+      if (!micTouched) return; // A pre-admission failure has no meeting microphone to manipulate.
+      if (!await setMic(false)) throw new Error('Meeting microphone mute could not be verified');
       console.log('[bot] speak_stop');
     },
   };

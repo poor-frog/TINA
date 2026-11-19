@@ -58,6 +58,9 @@ system meetings  # capture → transcribe → record; owns the raw transcript
   data-asset speech-playback [writers: meeting-api]
   data-asset speech-room.v1
   service asr-control
+  module voice-engine
+  data-asset meeting-voice.v1
+  data-asset meeting-voice-state [writers: meeting-api]
 
 system agent  # the execution domain: a trigger becomes one governed agent turn over a workspace.v1 git repo; owns no transcript
   service agent-api
@@ -110,7 +113,7 @@ system service-authority-system  # optional operator-owned admission and active-
 system system-webhook-system  # optional operator-owned terminal-event consumer; absent in stock OSS and never selected from customer or meeting data
   service system-webhook
 
-system completion-provider  # the deployment or per-user model endpoint; may be tenant-hosted or an external provider. Groq uses Codex Responses at https://api.groq.com/openai/v1 for chat, DeepSeek uses the Claude Code Anthropic-compatible endpoint at https://api.deepseek.com/anthropic, and Gemini uses agy with its Gemini API-key provider. Their tool-less meeting jobs use OpenAI-compatible Chat Completions at the respective fixed Groq, DeepSeek and Gemini endpoints. The same masked per-user/platform provider credential selects both paths; TINA transcript API tokens remain separate.
+system completion-provider  # the deployment or per-user model endpoint; may be tenant-hosted or an external provider. Groq uses Codex Responses at https://api.groq.com/openai/v1 for chat, DeepSeek uses the Claude Code Anthropic-compatible endpoint at https://api.deepseek.com/anthropic, and Gemini uses agy with its Gemini API-key provider. Their tool-less meeting jobs use OpenAI-compatible Chat Completions at the respective fixed Groq, DeepSeek and Gemini endpoints. The same masked per-user/platform provider credential selects both paths; TINA transcript API tokens remain separate. Room voice public web lookup may use the configured OpenAI Responses built-in web_search only after owner opt-in and an explicit spoken public search query; no transcript, private documents or voice history is included. When TINA_AGENT_REACH_URL is configured, public web/GitHub retrieval goes through the private Agent Reach worker and the selected CompletionPort generates and verifies cited claims. Empty configuration retains provider search; unsupported providers return a visible unavailable reason.
 
 system platform  # shared infra backing the services
   service redis
@@ -130,7 +133,7 @@ system flows  # the reaction engine; owns the reaction row and its effect receip
 
 system foreground-application  # User-selected local application with the focused text field; receives only the transcript pasted after the explicit dictation hotkey is released.
 
-system speech-client  # Optional host speech CLI: per-microphone KWS, bounded pre-roll and Silero VAD question capture, explicit Start/Stop and participant-only credentials. Opt-in run/run-file sends bounded WAV to the single-room speech coordinator; ordinary listen/file remain local. Wake is activation, not authentication. Default TTS remains Truc Ly. Room-wide polling suppresses KWS/pre-roll while busy; stale status/boot changes disarm until explicit restart; idle requires 800 ms quiet.
+system speech-client  # Optional host speech CLI: per-microphone KWS, bounded pre-roll and Silero VAD question capture, explicit Start/Stop and participant-only credentials. A 1200 ms post-wake continuation window retains a question after the wake's VAD endpoint; anchored ASR validation also accepts the spelling hay tina, never mid-sentence or empty questions. Opt-in run/run-file sends bounded WAV to the single-room speech coordinator; ordinary listen/file remain local. Wake is activation, not authentication. Default TTS remains Truc Ly. Room-wide polling suppresses KWS/pre-roll while busy; stale status/boot changes disarm until explicit restart; idle requires 800 ms quiet.
 
 edges:
   bot -write-> segments-stream
@@ -157,13 +160,13 @@ edges:
   agent-worker -write-> meeting-wiki-entity  # deterministically serialize the validated summary/cards and commit only kg/entities/meeting/{id}.md
   bot -read-> bot-commands  # SUBSCRIBE acts.v1 commands
   meeting-api -write-> bm-status  # PUBLISH status
-  meeting-api -write-> u-meetings  # PUBLISH per-user status
+  meeting-api -write-> u-meetings  # PUBLISH per-user lifecycle and auto-retry attempt state for Terminal; Extension reads the same owner-only retry state from GET /meetings.
   meeting-api -write-> bot-commands  # PUBLISH leave/speak
   meeting-api -write-> recording-blob  # S3 PUT stitched master
-  meeting-api -write-> postgres
+  meeting-api -write-> postgres  # Persist transient pre-admission retry state atomically with lifecycle status; the single-flight auto-join loop polls due rows. Owner cancellation and retry reopen share the row lock; cancelled, deleted and superseded rows cannot trigger a fresh automatic spawn.
   meeting-api -write-> object-store
   meeting-api -req-> runtime  # POST /workloads spawn bot
-  meeting-api -req-> admin-api  # GET /internal/calendar-configs discovers secret-gated calendar connections for sync and disconnect cleanup
+  meeting-api -req-> admin-api  # GET /internal/calendar-configs discovers secret-gated ICS/Google calendar connections; decrypts Google refresh tokens only for Meeting API sync and sends tombstones for cleanup
   meeting-api -req-> service-authority  # optional signed service-authority.v1 admit/continue decision; unset is explicit OSS allow-all, configured failure is closed
   meeting-api -req-> system-webhook  # optional signed terminal webhook.v1 delivery to a boot-frozen operator destination; customer webhook SSRF policy remains separate
   agent-api -read-> segments-stream  # XREADGROUP agent_copilot (proactive watcher)
@@ -174,10 +177,10 @@ edges:
   agent-worker -write-> out-stream  # XADD turn events, MCP approval requests and resolutions, cards, and notes
   agent-worker -read-> unit-in  # chat path XREADs prompts and matching owner decisions while Codex waits for MCP approval
   mcp -req-> gateway  # every MCP tool forwards the caller's X-API-Key to the public REST surface
-  gateway -req-> meeting-api  # proxy /bots /transcripts /meetings /recordings and per-calendar sync
+  gateway -req-> meeting-api  # proxy /bots /transcripts /meetings /recordings and per-calendar ICS/Google sync
   gateway -req-> agent-api  # proxy /agent/*
   gateway -req-> mcp  # proxy /mcp — POST buffered, GET relayed unbuffered (SSE stream)
-  gateway -req-> admin-api  # POST /internal/validate (authz oracle) plus user calendar connection CRUD
+  gateway -req-> admin-api  # POST /internal/validate (authz oracle), user calendar connection CRUD, and authenticated OAuth-grant storage from the Terminal callback
   gateway -read-> bm-status  # WS fan-out
   gateway -read-> u-meetings  # WS auto-subscribe
   gateway -read-> va-chat  # WS fan-out
@@ -225,7 +228,7 @@ edges:
   meeting-api -read-> canonical-notes-results  # Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view.
   meeting-api -write-> canonical-notes-approved  # Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view.
   agent-api -read-> canonical-notes-approved  # Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view.
-  agent-api -req-> meeting-api  # Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A and manual post-meeting discussion reviews; each source is reauthorized, and there are no transcript writes.
+  agent-api -req-> meeting-api  # Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A across an anchor meeting and up to four explicitly selected meetings and for manual post-meeting discussion reviews. Each source is reauthorized, and there are no transcript writes. Owner-authenticated voice handoff GET rechecks policy revision, expiry and source fingerprints for each private chat turn; Terminal prepares the composer only.
   agent-api -write-> meeting-knowledge-pages  # Persist private answer/source snapshots and explicitly reviewed create-only Wiki pages; no overwrites.
   terminal -read-> meeting-knowledge-pages  # Through existing authenticated Gateway workspace proxy: related docs, bounded multi-meeting answers, source-meeting quotes/audio, freshness warnings and revision-guarded fact reviews.
   agent-api -write-> discussion-reviews  # Manual owner request -> private read-only unit.v1 worker -> validated classification -> canonical recheck -> locked compare-and-swap report publication.
@@ -239,12 +242,31 @@ edges:
   speech-coordinator -req-> transcription  # Bounded consented question WAV including up to two seconds wake pre-roll; existing authenticated OpenAI-compatible STT.
   bot -req-> meeting-api  # Internal-secret-authenticated speech.v1 receipts bound to the recorded bot session.
   meeting-api -write-> speech-playback  # Meeting API alone owns the ephemeral Redis playback state.
-  agent-api -write-> meeting-translation-cache  # Owner-scoped SQLite phrase cache, live-tail observations and job leases; every HTTP access first reauthorizes canonical transcript and meeting status.
+  agent-api -write-> meeting-translation-cache  # Owner-scoped SQLite phrase cache, revision-bound attempts, live-tail observations, atomic job leases and owner service cooldown generations. HTTP access reauthorizes canonical transcript and meeting status; completion reloads source/access before publishing a result.
   terminal-app -call-> agent-api  # Authenticated English/bilingual view reads and advances the shared translation overlay; original ASR remains independent.
   extension -call-> agent-api  # Meeting Bot viewer requests the same gateway-authorized translation cache; provider secrets remain server-side.
   terminal-app -call-> asr-control  # Authenticated account-only ASR start/stop and safe resource status through Terminal proxy; private derived host key.
   asr-control -call-> admin-api  # Internal account preference CAS and aggregate enabled demand; no user list or credential projection.
   asr-control -call-> transcription  # Authenticated real audio readiness and derived-key drain fencing before owned process/container stop.
+  bot -req-> voice-engine  # Bounded PCM IPC supplies per-channel Silero VAD activity/endpoint events and a separate local LiveKit ONNX activation child. The bot controller accepts acoustic evidence for a single caller and dispatches existing owner-scoped question/LLM/TTS flow; IPC carries transient participant identity, logs are content-free. Sessions load once per bot with bounded per-speaker state; busy/quiet/Stop and source discontinuities reset KWS. KWS failure disables voice with a visible reason while transcript continues; VAD overflow/error retains its existing disarm behavior without affecting transcript.
+  bot -req-> meeting-api  # Meeting/session capability-authenticated preflight, bounded ASR-derived text question and content-free state. Voice reuses the existing selected ASR request; no duplicate question transcription. Optional validated KWS engine/readiness snapshots are session-bound and expire after 15 seconds; Settings services exposes them only for active owned meetings. Owner-approved name variants are revision-bound. Optional diagnostics are capability-authenticated, truncated to three prefix words, age/session-fenced and owner-visible for 30 seconds only.
+  meeting-api -req-> agent-api  # Server-authenticated owner identity, current room policy and current approved sources; source fingerprints and policy rechecked after inference. One read-only lookup round (at most two calls) searches recent transcript, the full authorized transcript snapshot, or explicitly shared documents. Per-room opt-ins separately permit isolated general-knowledge and explicit public-web question modes; every result rechecks the policy revision.
+  meeting-api -write-> meeting-voice-state  # Single writer: bounded turn reservation, revision and cancellation state. Redis Stop fences and room lock release are independent of durable reply-history availability; storage failure cannot leave a stopped turn blocking a new question.
+  meeting-api -write-> meeting-voice-replies  # Persist verified text and playback receipts independently of ASR transcript rows.
+  meeting-voice-replies -read-> terminal  # Owner-scoped voice assistant history rendered as TINA reply cards with playback state. Collapsed source evidence loads fresh owner-authorized quotes on demand and removes them on revalidation failure; links retain meeting and reply identity.
+  meeting-voice-replies -read-> extension  # Owner-scoped history polled independently from transcript snapshots; account/meeting abort fences prevent stale replies. Collapsed source evidence loads fresh owner-authorized quotes on demand and removes them on revalidation failure; links retain meeting and reply identity.
+  admin-api -write-> voice-account-defaults  # Row-locked authenticated self-serve voice preference; no ASR or sharing changes.
+  voice-account-defaults -read-> meeting-api  # Reuse existing internal bot-context to resolve new manual Google Meet voice capability.
+  terminal -invoke-> tts-sidecar  # Authenticated readiness and fixed preview: server-held TTS credentials; bounded WAV returned only to the account browser, no meeting command.
+  bot -req-> livekit-agent  # Selected pilot only: meeting/session capability, revision, request UUID and hashed transport speaker key. Confirmed question in, bounded answer metadata and PCM out. Stop cancels the matching request. Bot owns actual microphone receipts. The fixed source-free acknowledgment stays on direct prewarmed local TTS so it does not wait behind pending LLM generation. With TINA_LIVEKIT_AUDIO=1, the same private worker accepts signed session-bound windowed STT and per-channel NS audio for both voice and transcript. Credentials stay in handshake/Authorization headers; no query strings or public tracks. Continuous STT transmits each accepted channel-turn frame once and references overlapping windows with sample checksums; results are provisional until the existing bot confirmation policy accepts them. Source/turn/session isolation and the same HTTP fallback apply. Optional VAD observation sends filtered PCM/state and numeric source-end/ASR-tail candidates to the same private service. Old-generation replies are ignored; diagnostics contain only bounded numeric/boolean comparisons. No observer reply controls the primary turn. The noise bridge returns DTLN or WebRTC NS output for the same accepted source frames before KWS/Silero/STT; exactly one engine is selected per connection and filters never alter canonical text directly. Idle noise connections revalidate session/noise policy every 15 seconds. Transient failures preserve exact-once raw fallback and retry on valid audio after five seconds; disabled filters stay off and retired-generation replies are ignored. Transient configuration/ASR probe failures may rearm bot workers on a healthy poll only after confirmed local stop, receipt and core release. Manual playback, native construction/control failures and pre-existing safety errors remain fenced; retired workers cannot rearm a new generation.
+  livekit-agent -req-> meeting-api  # Revalidate active meeting, engine and owner policy before every context/plan/lookup/final operation. Context reserves the original room turn, LangGraph API tools retrieve only approved transcript/linked Wiki sources (web requires the exact explicit public query and owner opt-in), and finalization matches heard context and executed tool queries before source verification. Stop and policy/session changes fence late tools/results. No full owner credential or direct workspace access. The internal endpoint is http://meeting-api:8080, matching the gateway; readiness checks that API as well as the LiveKit server. Audio-only capabilities authorize the latest active transcribing session before/after ASR and periodically during filtering; they grant no answer-source policy. Identified task requests reserve a text-only Pipecat flow turn; flow_plan/flow_apply use the same live lease and cached proposal. The worker cannot submit task state or approve a draft. Decision flow_plan/apply use the same caller/lease fences; unknown speakers cannot fall back to unchecked decision drafting. Paused/error decision fields can transfer through the existing owner-only chat handoff.
+  meeting-api -req-> livekit-agent  # Optional ready probe; unavailable pilot disarms voice without stopping ASR. Only bridge-capable bots can select this path.
+  livekit-agent -req-> tts-sidecar  # Bounded text to existing shared local VieNeu-TTS; PCM16 mono 24 kHz. Shared TTS token stays inside the worker; bot uses only its scoped capability for pilot I/O. Each synthesis uses the current TINA-authorized signed speech profile; caller profile fields cannot select another owner voice/glossary.
+  livekit-agent -req-> livekit-server  # Agent joins only its named per-meeting room, without publish/subscribe/data grants. SDK RoomIO inputs/outputs and session hosting are disabled in this custom-I/O pilot; no raw meeting audio or private transcripts are published.
+  agent-worker -call-> agent-reach  # Explicit voice public query or granted interactive read-only MCP tool; no room transcript/history/model keys are sent.
+  agent-reach -call-> public-content-providers  # Public requests to fixed hosted Exa/Jina or anonymous GitHub REST endpoints; no private credentials or workspace access.
+  livekit-agent -call-> transcription  # Signed session-bound audio capability pins the existing selected ASR endpoint/model/token. Standalone SDK STT forwards bounded WAV windows and original response offsets/timings for both transcript and voice. No LLM invocation or canonical writes on continuous audio.
+  flows-worker -call-> mail-relay  # Individual post-meeting thank-you emails via the notify port, selecting the mailbox SMTP adapter or Resend SMTPS adapter.
   bot, agent-worker deployed-in runtime
   gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription, asr-control deployed-in deploy
   flows-api, flows-worker deployed-in deploy
@@ -255,3 +277,4 @@ flows:
   native-live-translation-flow: native-capture-desktop -> native-capture-desktop-live -> native-capture-live-translation -> desktop-live-translation
   dispatch-flow: aa-runtime -> workers-deployed -> aw-unitout -> aa-unitout
   meeting-wiki-flow: agent-worker-meeting-summary-completion -> agent-worker-validates-workspace-entity -> agent-worker-writes-meeting-entity
+  post-meeting-email-flow: flows-worker-calls-agent-api -> flows-worker-calls-gateway -> flows-worker-sends-followup-mail -> flows-worker-writes-rows

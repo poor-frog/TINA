@@ -26,6 +26,12 @@
       "note": "Connection pooler. Wrapper image is MIT; PgBouncer itself is ISC — both Category A."
     },
     {
+      "name": "livekit/livekit-server",
+      "license": "Apache-2.0",
+      "disposition": "sidecar",
+      "note": "Self-hosted LiveKit SFU for the opt-in voice agent stack; upstream livekit/livekit is Apache-2.0."
+    },
+    {
       "name": "versity/versitygw",
       "license": "Apache-2.0",
       "disposition": "sidecar",
@@ -45,6 +51,13 @@
       "artifact": "tina/tina-lite",
       "how": "source-build from the pinned git tag 8.1.9 (deploy/lite/Dockerfile.lite valkey-builder stage); valkey-server + valkey-cli copied into the final image, COPYING preserved at /usr/local/share/valkey/LICENSE",
       "reason": "XAUTOCLAIM parity with compose/helm and off BOTH jammy apt's stale Redis 6.0.16 (no XAUTOCLAIM) and source-available Redis ≥7.4 (RSALv2/SSPLv1). BSD-3 is Category A — clean to redistribute (#653)."
+    },
+    {
+      "name": "Xenova/multilingual-e5-small",
+      "license": "MIT",
+      "artifact": "tina/v012-agent-api",
+      "how": "Pinned INT8 ONNX/tokenizer at revision 761b726dd34fb83930e26aab4e9ac3899aa1fa78, SHA-256 verified during Docker build and first runtime load; notice preserved at /opt/tina/voice-retrieval/LICENSE.txt",
+      "reason": "CPU-local multilingual voice retrieval; no downloaded executable model code."
     }
   ]
 }

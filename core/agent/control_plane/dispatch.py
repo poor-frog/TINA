@@ -413,6 +413,9 @@ def build_unit_env(settings: Settings, invocation: dict, *, unit_id: str, token:
         env["TINA_DICTATION_TRANSLATE"] = "1"
     if is_meeting_knowledge(invocation):
         env['TINA_MEETING_KNOWLEDGE'] = '1'
+        # Knowledge jobs receive authorized snapshots; a harness must never see chat workspace mounts.
+        env.update(TINA_MOUNTS='[]', TINA_WORKSPACES='[]', TINA_UNIT_TOOLS='[]',
+                   TINA_WORKSPACE_PATH='/tmp/tina-meeting-knowledge')
     if is_discussion_review(invocation):
         env['TINA_DISCUSSION_REVIEW'] = '1'
     # Attribution (D4 / WP-A1.2): the per-mount turn commit is authored by the dispatch PRINCIPAL (the
@@ -512,6 +515,8 @@ def build_unit_env(settings: Settings, invocation: dict, *, unit_id: str, token:
         value = (os.environ.get(key) or "").strip()
         if value and key not in env:
             env[key] = value
+    if value := os.environ.get('TINA_AGENT_REACH_URL', '').strip():
+        env['TINA_AGENT_REACH_URL'] = value
     return env
 
 
@@ -579,6 +584,10 @@ class Dispatcher:
     @property
     def settings(self) -> Settings:
         return self._settings
+
+    def stop_workload(self, workload_id: str) -> None:
+        """Stop one isolated dispatch workload after its live voice lease is revoked."""
+        self._runtime.stop(workload_id)
 
     def resolve_model_config(self, subject: str) -> Optional[dict]:
         """The subject's effective Settings → Models config (user pref > platform setting).

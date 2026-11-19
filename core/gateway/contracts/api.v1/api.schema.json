@@ -3546,6 +3546,459 @@
           }
         }
       }
+    },
+    "/meetings/{meeting_id}/voice-assistant": {
+      "get": {
+        "summary": "Read room voice policy and state",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current voice policy and runtime status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "policy",
+                    "runtime"
+                  ],
+                  "properties": {
+                    "policy": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": {
+                          "default": false,
+                          "title": "Enabled",
+                          "type": "boolean"
+                        },
+                        "include_transcript": {
+                          "default": false,
+                          "title": "Include Transcript",
+                          "type": "boolean"
+                        },
+                        "documents": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "maxItems": 8,
+                          "title": "Documents",
+                          "type": "array"
+                        },
+                        "revision": {
+                          "default": 0,
+                          "minimum": 0,
+                          "title": "Revision",
+                          "type": "integer"
+                        },
+                        "wake_variants": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "maxItems": 8,
+                          "title": "Wake Variants",
+                          "type": "array"
+                        },
+                        "noise_suppression": {
+                          "default": false,
+                          "title": "Noise Suppression",
+                          "type": "boolean"
+                        },
+                        "allow_general_knowledge": {
+                          "default": false,
+                          "title": "Allow General Knowledge",
+                          "type": "boolean"
+                        },
+                        "allow_web_search": {
+                          "default": false,
+                          "title": "Allow Web Search",
+                          "type": "boolean"
+                        },
+                        "engine": {
+                          "default": "tina",
+                          "enum": [
+                            "tina",
+                            "livekit"
+                          ],
+                          "title": "Engine",
+                          "type": "string"
+                        }
+                      },
+                      "title": "VoicePolicy",
+                      "type": "object"
+                    },
+                    "runtime": {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string"
+                        },
+                        "session_active": {
+                          "type": "boolean"
+                        },
+                        "heartbeat_fresh": {
+                          "type": "boolean"
+                        },
+                        "diagnostic": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "description": "Owner-only last diagnostic for the active bot session; three ASR prefix words maximum; expires after 30 seconds."
+                        }
+                      }
+                    },
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "livekit_available": {
+                      "type": "boolean",
+                      "description": "The local LiveKit pilot is configured; runtime readiness is checked separately."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Set owner-approved room voice sources with revision check",
+        "parameters": [
+          {
+            "name": "meeting_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current voice policy and runtime status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "policy",
+                    "runtime"
+                  ],
+                  "properties": {
+                    "policy": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "enabled": {
+                          "default": false,
+                          "title": "Enabled",
+                          "type": "boolean"
+                        },
+                        "include_transcript": {
+                          "default": false,
+                          "title": "Include Transcript",
+                          "type": "boolean"
+                        },
+                        "documents": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "maxItems": 8,
+                          "title": "Documents",
+                          "type": "array"
+                        },
+                        "revision": {
+                          "default": 0,
+                          "minimum": 0,
+                          "title": "Revision",
+                          "type": "integer"
+                        },
+                        "wake_variants": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "maxItems": 8,
+                          "title": "Wake Variants",
+                          "type": "array"
+                        },
+                        "noise_suppression": {
+                          "default": false,
+                          "title": "Noise Suppression",
+                          "type": "boolean"
+                        },
+                        "allow_general_knowledge": {
+                          "default": false,
+                          "title": "Allow General Knowledge",
+                          "type": "boolean"
+                        },
+                        "allow_web_search": {
+                          "default": false,
+                          "title": "Allow Web Search",
+                          "type": "boolean"
+                        },
+                        "engine": {
+                          "default": "tina",
+                          "enum": [
+                            "tina",
+                            "livekit"
+                          ],
+                          "title": "Engine",
+                          "type": "string"
+                        }
+                      },
+                      "title": "VoicePolicy",
+                      "type": "object"
+                    },
+                    "runtime": {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string"
+                        },
+                        "session_active": {
+                          "type": "boolean"
+                        },
+                        "heartbeat_fresh": {
+                          "type": "boolean"
+                        },
+                        "diagnostic": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "description": "Owner-only last diagnostic for the active bot session; three ASR prefix words maximum; expires after 30 seconds."
+                        }
+                      }
+                    },
+                    "available": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "default": false,
+                    "title": "Enabled",
+                    "type": "boolean"
+                  },
+                  "include_transcript": {
+                    "default": false,
+                    "title": "Include Transcript",
+                    "type": "boolean"
+                  },
+                  "documents": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 8,
+                    "title": "Documents",
+                    "type": "array"
+                  },
+                  "revision": {
+                    "default": 0,
+                    "minimum": 0,
+                    "title": "Revision",
+                    "type": "integer"
+                  },
+                  "wake_variants": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 8,
+                    "title": "Wake Variants",
+                    "type": "array"
+                  },
+                  "noise_suppression": {
+                    "default": false,
+                    "title": "Noise Suppression",
+                    "type": "boolean"
+                  },
+                  "allow_general_knowledge": {
+                    "default": false,
+                    "title": "Allow General Knowledge",
+                    "type": "boolean"
+                  },
+                  "allow_web_search": {
+                    "default": false,
+                    "title": "Allow Web Search",
+                    "type": "boolean"
+                  },
+                  "engine": {
+                    "default": "tina",
+                    "enum": [
+                      "tina",
+                      "livekit"
+                    ],
+                    "title": "Engine",
+                    "type": "string"
+                  }
+                },
+                "title": "VoicePolicy",
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/voice": {
+      "get": {
+        "summary": "Read account voice defaults",
+        "operationId": "get_user_voice",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "prepare_new_bots": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "default": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Set voice preparation for new Google Meet bots",
+        "operationId": "put_user_voice",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "prepare_new_bots": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "default": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "prepare_new_bots": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "default": null
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bots/voice/services": {
+      "get": {
+        "summary": "Read authenticated TTS readiness and safe metadata",
+        "operationId": "get_bots_voice_services",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bots/voice/preview": {
+      "post": {
+        "summary": "Synthesize fixed browser-only voice preview",
+        "operationId": "post_bots_voice_preview",
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

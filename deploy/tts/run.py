@@ -19,10 +19,13 @@ def runtime_env(source=None):
     dotenvx = env.get('DOTENVX_BIN') or shutil.which('dotenvx')
     if not dotenvx:
         raise EnvError('Install dotenvx in this OS, or set DOTENVX_BIN to its executable.')
-    env_file = Path(env.get('TINA_TTS_ENV_FILE') or HERE / '.env').expanduser()
+    local = Path.home() / '.config/tina/tts-local'
+    local_default = not env.get('TINA_TTS_ENV_FILE') and not env.get('TINA_TTS_KEYS_FILE') and (
+        (local / '.env').exists() or (local / '.env.keys').exists())
+    env_file = Path(env.get('TINA_TTS_ENV_FILE') or (local / '.env' if local_default else HERE / '.env')).expanduser()
     if not env_file.is_absolute():
         env_file = ROOT / env_file
-    key_file = Path(env.get('TINA_TTS_KEYS_FILE') or Path.home() / '.config/tina/tts.env.keys').expanduser()
+    key_file = Path(env.get('TINA_TTS_KEYS_FILE') or (local / '.env.keys' if local_default else ROOT / '.env.keys')).expanduser()
     if not key_file.is_absolute():
         key_file = ROOT / key_file
     if not env_file.is_file():

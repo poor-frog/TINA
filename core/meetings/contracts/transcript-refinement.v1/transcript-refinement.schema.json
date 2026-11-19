@@ -75,7 +75,8 @@
               "ready",
               "skipped",
               "failed",
-              "applied"
+              "applied",
+              "checked"
             ]
           },
           "text": {
@@ -89,6 +90,76 @@
           },
           "reason": {
             "type": "string"
+          },
+          "quality": {
+            "$ref": "#/$defs/quality"
+          },
+          "error_code": {
+            "enum": [
+              "asr_timeout",
+              "asr_busy",
+              "asr_auth",
+              "asr_unavailable",
+              "asr_invalid_response",
+              "asr_rejected",
+              "audio_unavailable",
+              "source_changed"
+            ]
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "asr_elapsed_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "HTTP duration of the last ASR attempt, excluding queue wait and audio preparation."
+          },
+          "preprocessing": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "method",
+              "applied",
+              "gain_db",
+              "reason",
+              "audio_sha256"
+            ],
+            "properties": {
+              "method": {
+                "const": "bounded-gain.v1"
+              },
+              "applied": {
+                "type": "boolean"
+              },
+              "gain_db": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 12
+              },
+              "reason": {
+                "enum": [
+                  "gain_applied",
+                  "not_low_volume",
+                  "low_signal",
+                  "mostly_quiet",
+                  "clipping",
+                  "peak_limited"
+                ]
+              },
+              "audio_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "description": "Prepared ASR input fingerprint. The item audio_sha256 still identifies the unchanged original clip."
+          },
+          "proposal_quality": {
+            "$ref": "#/$defs/quality",
+            "description": "Second-pass text checked against the same original audio metrics. Suggestions may also need review; no automatic Apply or removal."
           }
         },
         "allOf": [
@@ -133,6 +204,31 @@
         "maxLength": 80
       },
       "description": "Optional fixed vocabulary hints, not reference transcript. Combined terms limited to 700 characters by both services."
+    },
+    "mode": {
+      "enum": [
+        "all",
+        "check",
+        "flagged"
+      ],
+      "description": "Bot recording review only: all decodes every eligible clip; check measures audio without ASR; flagged decodes only clips with advisory quality flags. Desktop keeps its existing start options."
+    },
+    "backend_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Hash of endpoint/model/backend, excluding credentials. Used to reject retry against a different backend."
+    },
+    "retry_of": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "audio_preprocessing": {
+      "enum": [
+        "none",
+        "bounded-gain.v1"
+      ],
+      "description": "Bot-only pinned audio preparation policy. Omitted legacy jobs use none."
     }
   },
   "$defs": {
@@ -149,8 +245,65 @@
             "maxLength": 80
           },
           "description": "Optional fixed vocabulary hints, not reference transcript. Combined terms limited to 700 characters by both services."
+        },
+        "mode": {
+          "enum": [
+            "all",
+            "check",
+            "flagged"
+          ],
+          "description": "Bot recording review only: all decodes every eligible clip; check measures audio without ASR; flagged decodes only clips with advisory quality flags. Desktop keeps its existing start options."
+        },
+        "retry_job_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Bot-only manual retry of failed ASR items from the latest job. Cannot override mode/vocabulary. Preserves ready/applied/checked items; rechecks source and backend. Audio preparation is also preserved."
+        },
+        "normalize_audio": {
+          "type": "boolean",
+          "default": false,
+          "description": "Bot-only opt-in bounded gain for eligible quiet clips. Invalid with check or a retry override. Does not alter original audio, timestamps or text."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "mode"
+                ],
+                "properties": {
+                  "mode": {
+                    "const": "check"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "retry_job_id"
+                ],
+                "properties": {
+                  "retry_job_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "normalize_audio": {
+                "const": false
+              }
+            }
+          }
+        }
+      ]
     },
     "Apply": {
       "type": "object",
@@ -174,6 +327,58 @@
         "expected_revision": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "needs_review",
+        "reasons",
+        "rms",
+        "clipping_ratio",
+        "quiet_ratio"
+      ],
+      "properties": {
+        "needs_review": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "low_volume",
+              "clipping",
+              "mostly_quiet",
+              "repetition",
+              "non_lexical"
+            ]
+          }
+        },
+        "rms": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "clipping_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "quiet_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "text_check": {
+          "enum": [
+            "no_text_flags",
+            "text_flag",
+            "text_and_quiet_audio"
+          ],
+          "description": "Advisory text/energy comparison on the original clip. Mostly quiet frames are not evidence of absent speech. No confidence score or deletion decision."
         }
       }
     }

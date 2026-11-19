@@ -1,0 +1,42 @@
+{
+  "version": "transcript-refinement.v1",
+  "id": "text-audio-review",
+  "meeting": "1",
+  "status": "completed",
+  "model": "custom",
+  "backend": "viegem",
+  "created_at": "2026-11-05T00:00:00Z",
+  "mode": "all",
+  "items": [
+    {
+      "segment_id": "s1",
+      "expected_revision": 0,
+      "state": "ready",
+      "audio_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "quality": {
+        "needs_review": true,
+        "reasons": [
+          "low_volume",
+          "mostly_quiet"
+        ],
+        "rms": 0,
+        "clipping_ratio": 0,
+        "quiet_ratio": 1,
+        "text_check": "no_text_flags"
+      },
+      "text": "TINA, TINA. TINA! TINA?",
+      "proposal_quality": {
+        "needs_review": true,
+        "reasons": [
+          "low_volume",
+          "mostly_quiet",
+          "repetition"
+        ],
+        "rms": 0,
+        "clipping_ratio": 0,
+        "quiet_ratio": 1,
+        "text_check": "text_and_quiet_audio"
+      }
+    }
+  ]
+}

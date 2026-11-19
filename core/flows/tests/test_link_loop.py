@@ -33,9 +33,11 @@ class FakeChannel:
     def __init__(self):
         self.sent: list[dict] = []
 
-    def send(self, to, subject, body, *, link=None, in_reply_to=None):
+    def send(self, to, subject, body, *, link=None, in_reply_to=None, html_body=None):
         self.sent.append({"to": to, "subject": subject, "body": body,
                           "link": link, "in_reply_to": in_reply_to})
+        if html_body is not None:
+            self.sent[-1]["html_body"] = html_body
         return f"<fake-{len(self.sent)}@test>"
 
 

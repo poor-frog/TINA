@@ -24,7 +24,8 @@ COPY deploy/transcription/http_worker.py /app/http_worker.py
 COPY deploy/transcription/viegem/server.py \
      deploy/transcription/viegem/engine.py \
      deploy/transcription/viegem/install-models.py \
-     deploy/transcription/viegem/model-assets.json ./
+     deploy/transcription/viegem/model-assets.json \
+     deploy/transcription/viegem/custom_words.txt ./
 
 EXPOSE 8000
 CMD ["python", "server.py"]

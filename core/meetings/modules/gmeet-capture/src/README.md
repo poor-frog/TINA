@@ -14,3 +14,9 @@ junk-name filtering (in-memory DOM shim). Both run on `npm test` (`gate:node`); 
 live-validated.
 
 Default audio forwarding rejects only frames below RMS `0.0001`, preserving quiet speech for backend VAD. An explicit `silenceThreshold` retains its legacy peak-amplitude semantics. The PCM callback regression uses a WebAudio shim; it does not prove hardware capture.
+
+The worklet accepts `bufferSize` 1024 or 4096 via processor options; default remains 4096.
+Google Meet bots started with voice enabled request 1024 (64 ms at 16 kHz), forwarding silence
+to the voice VAD while the same PCM still reaches transcript processing. Other callers keep 256 ms.
+`pcm-timeline.test.ts` checks both sizes for exact sample order, no duplication and capture-clock gaps.
+Changing packet size does not change the ASR HTTP window, decoder, model or confirmation policy.

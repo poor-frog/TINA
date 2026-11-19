@@ -51,6 +51,7 @@ export const MeetingAudioPlayer = forwardRef<MeetingAudioPlayerHandle, {
   const offset = useMemo(() => durations.slice(0, fragmentIndex).reduce((sum, duration) => sum + duration, 0), [durations, fragmentIndex]);
   const totalDuration = useMemo(() => durations.reduce((sum, duration) => sum + duration, 0), [durations]);
   const virtualTime = offset + currentTime;
+  const progress = totalDuration > 0 ? Math.min(100, Math.max(0, virtualTime / totalDuration * 100)) : 0;
 
   const reportPosition = (index: number, seconds: number) => {
     const base = durations.slice(0, index).reduce((sum, duration) => sum + duration, 0);
@@ -171,34 +172,41 @@ export const MeetingAudioPlayer = forwardRef<MeetingAudioPlayerHandle, {
         }}
         onError={() => { setLoading(false); setPlaying(false); setError("This meeting recording could not be loaded."); }}
       />
-      <button type="button" className={styles.iconButton} aria-label={playing ? "Pause recording" : "Play recording"} disabled={loading && !playing} onClick={() => {
-        const audio = audioRef.current;
-        if (!audio) return;
-        if (playing) audio.pause(); else play(audio);
-      }}>
-        {loading && !playing ? <LoaderCircle className={styles.spinner} size={16} /> : playing ? <Pause size={16} /> : <Play size={16} />}
-      </button>
-      <span className={styles.time}>{formatTime(virtualTime)}</span>
-      <input
-        className={styles.seek}
-        type="range"
-        min={0}
-        max={totalDuration}
-        step={0.1}
-        value={Math.min(virtualTime, totalDuration || virtualTime)}
-        aria-label="Seek in meeting recording"
-        disabled={!totalDuration}
-        onChange={(event) => seekVirtual(Number(event.currentTarget.value))}
-      />
-      <span className={styles.time}>{formatTime(totalDuration)}</span>
-      <button type="button" className={styles.iconButton} aria-label={muted ? "Unmute recording" : "Mute recording"} onClick={() => {
-        const audio = audioRef.current;
-        if (!audio) return;
-        audio.muted = !muted;
-        setMuted(!muted);
-      }}>
-        {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
-      </button>
+      <div className={styles.scrubber}>
+        <div className={styles.track} aria-hidden="true"><span className={styles.progress} style={{ width: `${progress}%` }} /></div>
+        <input
+          className={styles.seek}
+          type="range"
+          min={0}
+          max={totalDuration}
+          step={0.1}
+          value={Math.min(virtualTime, totalDuration || virtualTime)}
+          aria-label="Seek in meeting recording"
+          disabled={!totalDuration}
+          onChange={(event) => seekVirtual(Number(event.currentTarget.value))}
+        />
+      </div>
+      <div className={styles.controls}>
+        <button type="button" className={`${styles.iconButton} ${styles.playButton}`} aria-label={playing ? "Pause recording" : "Play recording"} disabled={loading && !playing} onClick={() => {
+          const audio = audioRef.current;
+          if (!audio) return;
+          if (playing) audio.pause(); else play(audio);
+        }}>
+          {loading && !playing ? <LoaderCircle className={styles.spinner} size={16} /> : playing ? <Pause size={16} /> : <Play size={16} />}
+        </button>
+        <span className={styles.timeCurrent}>{formatTime(virtualTime)}</span>
+        <span className={styles.timeDivider} aria-hidden="true">/</span>
+        <span className={styles.time}>{formatTime(totalDuration)}</span>
+        <span className={styles.spacer} />
+        <button type="button" className={styles.iconButton} aria-label={muted ? "Unmute recording" : "Mute recording"} onClick={() => {
+          const audio = audioRef.current;
+          if (!audio) return;
+          audio.muted = !muted;
+          setMuted(!muted);
+        }}>
+          {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+        </button>
+      </div>
       {error && <span className={styles.error} role="status">{error}</span>}
     </div>
   );

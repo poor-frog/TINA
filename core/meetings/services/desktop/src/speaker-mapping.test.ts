@@ -157,6 +157,7 @@ try {
   assert.equal((await request('/speakers/' + voice, 'PATCH', { expected_revision: entry.revision, name: 'An' })).status, 200);
   assert.equal((await request('/speakers/' + voice, 'PATCH', { expected_revision: entry.revision, name: 'Stale' })).status, 409);
   registry = (await request('/speakers')).body;
+  const renamedRevision = registry.speakers.find((s: any) => s.speaker_id === voice).revision;
   assert.equal((await request('/speakers/assign', 'POST', { expected_revision: registry.revision, segment_id: 'overlap', speaker_id: voice })).status, 200);
   assert.equal((await request('/speakers/assign', 'POST', { expected_revision: registry.revision, segment_id: 'overlap', speaker_id: null })).status, 409);
   const canonical = (await request('/canonical')).body, memory = (await request('/memory')).body;
@@ -164,10 +165,14 @@ try {
   assert.equal(canonical.segments.find((s: any) => s.segment_id === 'remote-two').speaker_name, 'An');
   assert.equal(canonical.segments.find((s: any) => s.segment_id === 'remote-two').revision, 1);
   assert(memory.facts.some((f: any) => f.evidence.some((e: any) => e.segment_id === 'remote-two' && e.speaker_name === 'An')));
-  for (let i = 0; i < 100 && !received.some(e => e.type === 'speaker.revised' && e.speaker_id === voice); i++) await new Promise(r => setTimeout(r, 10));
-  const event = received.find(e => e.type === 'speaker.revised' && e.speaker_id === voice); assert(event); validate('speaker-revision', event);
+  const renamedEvent = () => received.some(e => e.type === 'speaker.revised' && e.speaker_id === voice && e.revision === renamedRevision);
+  const renamedTranscript = () => received.some(e => e.type === 'transcript' && !('pending' in e)
+    && e.confirmed.some((s: any) => s.speaker === 'An'));
+  for (let i = 0; i < 100 && (!renamedEvent() || !renamedTranscript()); i++) await new Promise(r => setTimeout(r, 10));
+  const event = received.find(e => e.type === 'speaker.revised' && e.speaker_id === voice && e.revision === renamedRevision);
+  assert(event); validate('speaker-revision', event);
   assert(!('name' in event) && !('text' in event));
-  assert(received.some(e => e.type === 'transcript' && !('pending' in e) && e.confirmed.some((s: any) => s.speaker === 'An')));
+  assert(renamedTranscript());
   assert(!leaked.some(e => e.type === 'speaker.revised' || e.type === 'transcript'), 'denied subscribers receive no identities or transcript');
   for (const id of ['remote-two', 'overlap']) {
     registry = (await request('/speakers')).body;

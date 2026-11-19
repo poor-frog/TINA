@@ -48,9 +48,9 @@ from typing import Any, Dict, Optional
 # Fixed owner-facing copy derived only from the bounded evidence enum. Raw producer details can
 # contain URLs, page content, or credentials and must stay on the private diagnostic surfaces.
 _JOIN_FAILURE_SUMMARIES = {
-    "awaiting_admission_rejected": "Google Meet rejected the join request.",
+    "awaiting_admission_rejected": "The meeting join request was rejected.",
     "awaiting_admission_timeout": "The bot waited for admission, but did not get into the meeting.",
-    "auth_session_missing": "Google requires an authenticated account for this meeting.",
+    "auth_session_missing": "The bot's signed-in session is missing or expired.",
     "never_reached_lobby": "The bot could not reach the Google Meet lobby.",
     "navigation_failure": "The bot could not load the Google Meet page.",
     "stopped_while_joining": "The bot was stopped before it entered the meeting.",
@@ -61,6 +61,14 @@ _JOIN_FAILURE_SUMMARIES = {
 def _owner_join_failure_summary(data: Dict[str, Any]) -> Optional[str]:
     evidence = data.get("join_evidence")
     reason = evidence.get("reason") if isinstance(evidence, dict) else None
+    if reason == "awaiting_admission_rejected":
+        detail = evidence.get("detail")
+        if isinstance(detail, str) and "google_meet_join_refused" in detail.lower():
+            return "Google Meet blocked the bot before an admission request could be sent."
+        if evidence.get("attribution") == "exogenous_platform":
+            return "The meeting platform blocked the bot from joining."
+        if evidence.get("attribution") == "host_action":
+            return "The meeting host declined the bot's request to join."
     return _JOIN_FAILURE_SUMMARIES.get(reason) if isinstance(reason, str) else None
 
 # Heavy per-meeting ``data`` keys the list NEVER renders — dropped from list rows. Everything else
@@ -99,6 +107,7 @@ CALENDAR_SOURCE_LIST_KEYS = frozenset({
 # (``webhooks.delivery._INTERNAL_DATA_KEYS``) and how ``GET /user/webhook`` reports the config
 # (``webhook_secret_set`` + a masked value, never the value).
 SENSITIVE_OMIT_KEYS = frozenset({
+    "voice_replies",  # Owner-only dedicated voice endpoint; never leak approved-document answers through transcript shares.
     "canonical_transcript", "meeting_memory", "canonical_notes", "stt_replicas", "stt_foundation", "stt_instance_id",
     "speaker_registry",
     "transcript_outbox",
@@ -109,6 +118,7 @@ SENSITIVE_OMIT_KEYS = frozenset({
     # ``GET /user/webhook``; nothing needs the value back out of a meeting row.
     "webhook_secret",
     "webhook_secrets",
+    "_auto_retry_request",
     # Per-link share grants: each carries its ``secret_hash`` plus the allow-list and expiry. This is
     # the credential half of the share machinery, and the redeem path is its only legitimate reader.
     "share_grants",
@@ -134,6 +144,8 @@ OWNER_ONLY_KEYS = frozenset({
     "webhook_delivery",
     "webhook_deliveries",
     "outbound_events",
+    "auto_retry",
+    "join_failure_summary",
     # The reader roster — every user id that can read this meeting. A share recipient enumerating it
     # learns who ELSE the owner shared with, which is other people's material, not theirs.
     "transcript_viewers",
@@ -291,6 +303,11 @@ def project_response_data(
         k: v for k, v in projected.items()
         if k not in omit and not is_sensitive_key(k)
     }
+    result.pop("join_failure_summary", None)
+    if viewer_is_owner:
+        summary = _owner_join_failure_summary(projected)
+        if summary:
+            result["join_failure_summary"] = summary
     if not viewer_is_owner and (data or {}).get('canonical_notes') is not None and isinstance(result.get('processed'), dict):
         import copy
         result['processed'] = copy.deepcopy(result['processed'])
@@ -325,6 +342,7 @@ def project_list_data(
     projected = {k: v for k, v in data.items()
                  if k not in LIST_OMIT_KEYS and k != "calendar_sources"
                  and k not in omit and not is_sensitive_key(k)}
+    projected.pop("join_failure_summary", None)
     if viewer_is_owner:
         summary = _owner_join_failure_summary(data)
         if summary:

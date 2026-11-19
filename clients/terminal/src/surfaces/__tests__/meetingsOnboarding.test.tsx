@@ -1,9 +1,12 @@
 /** Meetings user onboarding (frames 4–5): the three-path empty state, the STANDING slim
  *  calendar card (state-driven — exists exactly while no calendar is connected), and the
- *  connect modal's answer-on-connect behavior. */
+ *  Google Calendar OAuth entry point. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
+import { signIn } from "next-auth/react";
+
+vi.mock("next-auth/react", () => ({ signIn: vi.fn() }));
 
 vi.mock("../../platform", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -14,10 +17,11 @@ import { MeetingsOnboarding, connectOutcome } from "../meetingsOnboarding";
 
 afterEach(() => {
   cleanup();
+  vi.clearAllMocks();
   vi.unstubAllGlobals();
 });
 
-function stubCalendarApi(opts: { connected: boolean; syncCounts?: { created?: number; updated?: number }; syncError?: string }) {
+function stubCalendarApi(opts: { connected: boolean; linkError?: string }) {
   const calls: { url: string; method?: string; body?: string }[] = [];
   const CAL = { id: "cal-1", name: "My calendar", ics_url_set: true, ics_url_masked: "calendar.google.com/…d3f1", auto_join: true, bot_name: "TINA", enabled: true };
   vi.stubGlobal(
@@ -25,9 +29,10 @@ function stubCalendarApi(opts: { connected: boolean; syncCounts?: { created?: nu
     vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
       calls.push({ url: u, method: init?.method, body: init?.body as string });
-      if (/\/api\/user\/calendars\/[^/]+\/sync$/.test(u)) {
-        if (opts.syncError) return new Response(JSON.stringify({ last_error: opts.syncError }), { status: 200 });
-        return new Response(JSON.stringify({ last_sync: new Date().toISOString(), counts: opts.syncCounts ?? {} }), { status: 200 });
+      if (u === "/api/auth/google-calendar-link") {
+        return opts.linkError
+          ? Response.json({ error: opts.linkError }, { status: 503 })
+          : Response.json({});
       }
       if (u.includes("/api/user/calendars")) {
         if (init?.method === "POST") return new Response(JSON.stringify(CAL), { status: 201 });
@@ -50,7 +55,7 @@ describe("connectOutcome", () => {
     expect(connectOutcome({ counts: { created: 1 } }).text).toContain("1 upcoming meeting imported");
   });
   it("zero found → honest, not silent", () => {
-    expect(connectOutcome({ counts: {} }).text).toContain("no upcoming meetings with joinable links");
+    expect(connectOutcome({ counts: {} }).text).toMatch(/no upcoming meetings with joinable links/i);
   });
 });
 
@@ -107,41 +112,29 @@ describe("full — the three-path empty state", () => {
   });
 });
 
-describe("connect modal — teaches the secret address and answers on connect", () => {
-  it("walkthrough + paste → POST /user/calendars + sync-now → reports what it found", async () => {
-    const calls = stubCalendarApi({ connected: false, syncCounts: { created: 3 } });
+describe("Google Calendar onboarding", () => {
+  it("prepares the link and starts read-only OAuth with a settings return URL", async () => {
+    const calls = stubCalendarApi({ connected: false });
     render(<MeetingsOnboarding variant="slim" />);
-    await waitFor(() => screen.getByText("Connect calendar →"));
-    fireEvent.click(screen.getByText("Connect calendar →"));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Google Calendar" }));
 
-    // the explainer is THERE — secret-address step + the Workspace-admin trap
-    expect(screen.getByText(/Secret address in iCal format/)).toBeTruthy();
-    expect(screen.getByText(/Workspace admin has it locked/)).toBeTruthy();
-
-    fireEvent.change(screen.getByPlaceholderText(/basic\.ics/), {
-      target: { value: "https://calendar.google.com/calendar/ical/x/private-abc/basic.ics" },
+    await waitFor(() => expect(signIn).toHaveBeenCalledOnce());
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual(["/api/auth/google-calendar-link"]);
+    const [provider, options, params] = vi.mocked(signIn).mock.calls[0];
+    expect(provider).toBe("google-calendar");
+    expect(new URL(options!.callbackUrl!).searchParams.get("tina-calendar-settings")).toBe("google-linked");
+    expect(params).toMatchObject({
+      access_type: "offline",
+      scope: "openid email profile https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events.readonly",
     });
-    fireEvent.click(screen.getByText("Connect"));
-
-    await waitFor(() => expect(screen.getByText(/3 upcoming meetings imported/)).toBeTruthy());
-    // first connect CREATES connection #1 on the plural API, with a name…
-    const post = calls.find((c) => c.url.endsWith("/api/user/calendars") && c.method === "POST");
-    expect(post).toBeDefined();
-    expect(JSON.parse(post!.body as string)).toMatchObject({ name: "My calendar", auto_join: true });
-    // …then syncs THAT connection by id (the backend does not sync on create)
-    expect(calls.some((c) => /\/api\/user\/calendars\/cal-1\/sync$/.test(c.url) && c.method === "POST")).toBe(true);
   });
 
-  it("first-sync failure is loud, with the server's reason", async () => {
-    stubCalendarApi({ connected: false, syncError: "HTTP 401 fetching the feed — that looks like the public address, not the secret one" });
+  it("shows a failed link preparation without redirecting to Google", async () => {
+    stubCalendarApi({ connected: false, linkError: "Google Calendar connection is unavailable" });
     render(<MeetingsOnboarding variant="slim" />);
-    await waitFor(() => screen.getByText("Connect calendar →"));
-    fireEvent.click(screen.getByText("Connect calendar →"));
-    fireEvent.change(screen.getByPlaceholderText(/basic\.ics/), {
-      target: { value: "https://calendar.google.com/calendar/ical/x/private-abc/basic.ics" },
-    });
-    fireEvent.click(screen.getByText("Connect"));
-    await waitFor(() => expect(screen.getByText(/first sync failed/)).toBeTruthy());
-    expect(screen.getByText(/first sync failed/).textContent).toContain("public address, not the secret one");
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Google Calendar" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Google Calendar connection is unavailable");
+    expect(signIn).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: "Connect Google Calendar" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

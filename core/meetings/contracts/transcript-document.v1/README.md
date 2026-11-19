@@ -18,3 +18,5 @@ history remain the authority; PostgreSQL materializes accepted text/revision for
 Desktop maintains an atomic FTS5 projection. Metadata-only transcript-revision.v1 notifications
 refresh exact snapshots after manual edits, refinement Apply and Restore. Live raw frames cannot
 replace accepted revisions, including an accepted empty legacy Restore.
+
+Applied bot refinement may include optional `preprocessing` in its immutable history entry: method/applied/gain_db/reason plus the actual prepared ASR input hash. The existing `audio_sha256` remains the original clip hash. This provenance survives starting a later job and Restore; original audio/text stay immutable. Legacy/Desktop revisions omit it.

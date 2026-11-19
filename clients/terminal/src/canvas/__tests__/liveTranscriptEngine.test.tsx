@@ -13,6 +13,33 @@ function render(ui: React.ReactElement) {
 
 const segments = [{ id: "s0", speaker: "Jane", text: "I spoke with Acme today.", completed: true }];
 
+describe('final ASR display formatting',()=>{
+  it('formats final segments without an original disclosure while preserving raw inputs and drafts',()=>{
+    const input=[{id:'s-final',speaker:'Lan',completed:true,text:'Mức mười chín phần trăm; ngày mười lăm tháng mười một.'},
+      {id:'s-draft',speaker:'Lan',completed:false,text:'Mức hai mươi tư phần trăm.'}];
+    const before=JSON.stringify(input);
+    const {container,unmount}=render(<LiveTranscriptEngine segments={input}/>);
+    expect(container.textContent).toContain('Mức 19%; ngày 15/11.');
+    expect(container.textContent).toContain('Mức hai mươi tư phần trăm.');
+    expect(container.querySelector('details[data-asr-original]')).toBeNull();
+    expect(container.textContent).not.toContain('ASR original');
+    expect(container.textContent).not.toContain(input[0].text);
+    expect(JSON.stringify(input)).toBe(before);unmount();
+  });
+
+  it.each(['vi','bilingual'] as const)('preserves playback identity and original source in %s',language=>{
+    const onClick=vi.fn(),input=[{id:'s1',speaker:'Lan',completed:true,text:'mã A gạch ngang một hai ba.'}];
+    const {container,unmount}=render(<LiveTranscriptEngine segments={input} language={language}
+      playableSegmentIds={new Set(['s1'])} onSegmentClick={onClick}/>);
+    const button=container.querySelector('button')!;
+    expect(button.textContent).toBe('mã A-123.');button.click();expect(onClick).toHaveBeenCalledWith('s1');
+    expect(container.querySelector('details[data-asr-original]')).toBeNull();
+    expect(container.textContent).not.toContain('ASR original');
+    expect(input[0].text).toBe('mã A gạch ngang một hai ba.');
+    unmount();
+  });
+});
+
 describe("LiveTranscriptEngine — processed v2 inline rendering", () => {
   it("RAW mode (no entities) renders plain text with no entity spans/menu", () => {
     const { container, unmount } = render(<LiveTranscriptEngine segments={segments} />);
@@ -84,5 +111,17 @@ describe("LiveTranscriptEngine — processed v2 inline rendering", () => {
 it('distinct speaker IDs with equal names remain separate transcript blocks',()=>{
   const {container,unmount}=render(<LiveTranscriptEngine segments={[{id:'a',speakerId:'person-a',speaker:'Minh',text:'First speaker',completed:true},{id:'b',speakerId:'person-b',speaker:'Minh',text:'Second speaker',completed:true}]} />);
   expect(container.textContent?.match(/Minh/g)?.length).toBe(2);
+  unmount();
+});
+
+it('retains every segment identity in a merged speaker block for voice evidence navigation', () => {
+  const { container, unmount } = render(<LiveTranscriptEngine segments={[
+    { id: 'owner', speaker: 'Lan', text: 'Lan phụ trách demo.' },
+    { id: 'deadline', speaker: 'Lan', text: 'Hạn thứ Sáu.' },
+  ]} />);
+  const anchor = container.querySelector<HTMLElement>('[data-transcript-segments]')!;
+  expect(JSON.parse(anchor.dataset.transcriptSegments!)).toEqual(['owner', 'deadline']);
+  expect(anchor.tabIndex).toBe(-1);
+  expect(anchor.textContent).toContain('Hạn thứ Sáu.');
   unmount();
 });

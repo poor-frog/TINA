@@ -1145,6 +1145,47 @@ def create_app(
         except openai_auth.ChatGPTAuthError as exc:
             raise HTTPException(409, str(exc)) from exc
 
+    @app.get('/internal/system-workspace/file', include_in_schema=False)
+    def global_system_workspace_file(request: Request, path: str):
+        """Read the company profile or a mail template for trusted internal services only.
+
+        The platform-owned ``_global`` workspace is deliberately not a user workspace mount. Keep
+        this edge narrow: flows may read its README and ``mail/*.md`` templates, but the public
+        workspace tree/file/git routes must not expose the rest of the system instructions.
+        """
+        secret = settings.internal_api_secret.get_secret_value() if settings is not None else ''
+        provided = request.headers.get('x-internal-secret', '')
+        if not secret or not hmac.compare_digest(provided.encode(), secret.encode()):
+            raise HTTPException(403, 'internal secret required')
+
+        relative = path.strip()
+        if len(relative) > 160 or not (
+            relative == 'README.md'
+            or re.fullmatch(r'mail/[A-Za-z0-9][A-Za-z0-9._-]*\.md', relative)
+        ):
+            raise HTTPException(404, 'not found')
+        source = (getattr(settings, 'global_system_workspace_path', '') or '').strip() if settings else ''
+        if not source:
+            raise HTTPException(404, 'not found')
+        try:
+            root = Path(source).resolve(strict=True)
+            target = (root / relative).resolve(strict=True)
+        except FileNotFoundError:
+            raise HTTPException(404, 'not found')
+        except (OSError, RuntimeError):
+            raise HTTPException(404, 'not found')
+        if not root.is_dir() or root not in target.parents or not target.is_file():
+            raise HTTPException(404, 'not found')
+        try:
+            if target.stat().st_size > 500_000:
+                raise HTTPException(413, 'file too large')
+            content = target.read_text(encoding='utf-8')
+        except UnicodeDecodeError as exc:
+            raise HTTPException(422, 'file is not UTF-8') from exc
+        except OSError as exc:
+            raise HTTPException(404, 'not found') from exc
+        return JSONResponse({'path': relative, 'content': content}, headers={'Cache-Control': 'no-store'})
+
     def _transcript_completion(
         request: Request,
         *,
@@ -1166,6 +1207,34 @@ def create_app(
         else:
             prefix, session = units.DICTATION_TRANSLATE_PREFIX, "dictation-translate"
         payload = {"request_id": request_id, "text": text}
+        if task == 'knowledge':
+            from shared.voice_trace import voice_trace_id
+            trace_id = voice_trace_id.get()
+            if trace_id is None:
+                # Recap jobs run on a pool; their scoped Request preserves the internal UUID header.
+                try: trace_id = str(uuid.UUID(request.headers.get('x-tina-voice-request-id', '')))
+                except ValueError: pass
+            if trace_id: payload['voice_trace_id'] = trace_id
+            source = json.loads(text)
+            sandbox_voice = source.get('use_sandbox_agent') is True
+            live_voice_id = request.headers.get('x-tina-voice-request-id')
+            if str(source.get('mode','')).startswith('voice') and live_voice_id and request.path_params.get('meeting_id') is not None:
+                try: live_voice_id = str(uuid.UUID(live_voice_id))
+                except ValueError: raise HTTPException(409,'Invalid voice request id') from None
+                raw_mid = str(request.path_params.get('meeting_id', ''))
+                if not redis_url or not raw_mid.isdecimal():
+                    raise HTTPException(409,'Current voice turn required')
+                else:
+                    mid = int(raw_mid)
+                    import redis as _redis
+                    connection = _redis.from_url(redis_url, decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
+                    try: held = connection.get(f'meeting:voice:{mid}:lock')
+                    finally: connection.close()
+                    if not isinstance(held,str) or not held.endswith(':'+live_voice_id):
+                        raise HTTPException(409, 'Voice turn was cancelled')
+                    payload['voice_turn'] = {'meeting_id': mid, 'holder': held}
+            elif sandbox_voice:
+                raise HTTPException(409, 'Current voice turn required for sandbox')
         if target_language is not None:
             payload["target_language"] = target_language
         inline = prefix + json.dumps(payload, ensure_ascii=False)
@@ -1183,6 +1252,7 @@ def create_app(
             raise HTTPException(status_code=503, detail=f"{label} is unavailable") from exc
 
         output_parts: list[str] = []
+        translation_complete = False
         deadline_seconds = 60.0
         if task == 'discussion':
             try:
@@ -1191,8 +1261,35 @@ def create_app(
                 window_count = 1
             deadline_seconds = min(900.0, 90.0 + window_count * 40.0)
         deadline = time.monotonic() + deadline_seconds
+        voice_cancelled = False
+        voice_redis = None
+        should_continue = None
+        if payload.get('voice_turn'):
+            import redis as _redis
+            voice_redis = _redis.from_url(redis_url,decode_responses=True,socket_timeout=1,socket_connect_timeout=1)
+            def voice_still_current():
+                nonlocal voice_cancelled
+                if voice_cancelled: return False
+                turn=payload['voice_turn']
+                try:
+                    held=voice_redis.get(f"meeting:voice:{turn['meeting_id']}:lock")
+                    current=held==turn['holder']
+                except Exception as exc:
+                    current=False
+                    logger.warning('voice worker lease probe failed error=%s',type(exc).__name__)
+                if current:return True
+                voice_cancelled=True
+                try: dispatcher.stop_workload(unit_id)
+                except Exception as exc: logger.warning('cancelled voice worker stop failed error=%s',type(exc).__name__)
+                return False
+            should_continue=voice_still_current
         try:
-            for item in stream_reader.read(unit_id, resume="0-0"):
+            reader=(stream_reader.read_cancelable(unit_id,resume='0-0',should_continue=should_continue)
+                    if should_continue and callable(getattr(stream_reader,'read_cancelable',None))
+                    else stream_reader.read(unit_id,resume='0-0'))
+            for item in reader:
+                if should_continue and not should_continue():
+                    raise HTTPException(409,detail='Voice turn was cancelled')
                 if item is None:
                     if time.monotonic() >= deadline:
                         raise HTTPException(status_code=504, detail=f"{label} timed out")
@@ -1207,13 +1304,23 @@ def create_app(
                         if sum(map(len, output_parts)) > 50000:
                             raise HTTPException(status_code=502, detail=f"{label} returned too much text")
                 elif event.get("type") == "turn-complete":
+                    if task == 'translate':
+                        from shared.translation_text import TRANSLATION_FAILURE_STATUS
+                        translation_complete = True
+                        if 'translation_error' in event:
+                            code = event['translation_error']
+                            status = TRANSLATION_FAILURE_STATUS.get(code, 503) if isinstance(code, str) else 503
+                            raise HTTPException(status_code=status, detail='Live translation could not complete')
                     break
+            if should_continue and not should_continue():
+                raise HTTPException(409,detail='Voice turn was cancelled')
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001 — stream/provider details stay server-side
             logger.warning("transcript completion stream failed task=%s error=%s", task, type(exc).__name__)
             raise HTTPException(status_code=502, detail=f"{label} is unavailable") from exc
         finally:
+            if voice_redis is not None: voice_redis.close()
             if redis_url:
                 try:
                     import redis as _redis
@@ -1225,9 +1332,72 @@ def create_app(
                 except Exception:  # noqa: BLE001 — TTL is the fallback if cleanup fails
                     logger.warning("transcript completion output cleanup failed task=%s", task)
         output = "".join(output_parts).strip()
+        if task == 'translate' and not translation_complete:
+            raise HTTPException(status_code=503, detail='Live translation stream was interrupted')
         if not output:
             raise HTTPException(status_code=503, detail=f"{label} is unavailable")
         return output
+
+    @app.post("/internal/post-meeting/report/{meeting_id}", include_in_schema=False)
+    def post_meeting_report(meeting_id: int, request: Request):
+        """Generate a report only from the completed meeting's canonical transcript."""
+        from control_plane.meeting_knowledge import meeting_get
+        from shared.meeting_knowledge import digest, sources_for, validate_answer
+
+        secret = settings.internal_api_secret.get_secret_value() if settings is not None else ""
+        supplied = request.headers.get("x-internal-secret", "")
+        if not secret or not hmac.compare_digest(secret.encode(), supplied.encode()):
+            raise HTTPException(403, "internal secret required")
+        subject = subject_of(request)
+        base = settings.meeting_api_url
+
+        def read_sources():
+            row = meeting_get(base, subject, meeting_id, f"/meetings/{meeting_id}")
+            if (str(row.get("user_id")) != subject or row.get("shared") is True
+                    or (row.get("data") or {}).get("artifact_deletion")):
+                raise HTTPException(404, "Meeting unavailable")
+            if row.get("status") != "completed":
+                raise HTTPException(409, "Meeting is not completed")
+            canonical = meeting_get(base, subject, meeting_id, f"/transcripts/by-id/{meeting_id}/canonical")
+            return sources_for(canonical, {})
+
+        original = read_sources()
+        if not original:
+            raise HTTPException(422, "Meeting has no transcript")
+        # Join consecutive transcript segments into bounded excerpts without truncating the meeting.
+        excerpts: list[dict] = []
+        for source in original:
+            quote = source["quote"].strip()
+            for offset in range(0, len(quote), 2400):
+                part = quote[offset:offset + 2400]
+                if excerpts and len(excerpts[-1]["quote"]) + len(part) + 1 <= 2400:
+                    excerpts[-1]["quote"] += "\n" + part
+                else:
+                    excerpts.append({"id": f"s{len(excerpts)}", "quote": part, "kind": "transcript"})
+        if sum(len(x["quote"]) for x in excerpts) > 48000 or len(excerpts) > 40:
+            raise HTTPException(413, "Meeting transcript exceeds the report budget")
+        payload = {
+            "question": ("Write a shared meeting summary in the main language of the transcript. "
+                         "Cover the main topics, confirmed decisions and explicit next actions. "
+                         "Use concise claims and omit anything the transcript does not establish."),
+            "sources": excerpts,
+        }
+        raw = _transcript_completion(
+            request, text=json.dumps(payload, ensure_ascii=False), task="knowledge",
+        )
+        try:
+            claims = validate_answer(raw, excerpts)["claims"]
+        except (ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(502, "Meeting report could not be validated") from exc
+        if digest(read_sources()) != digest(original):
+            raise HTTPException(409, "Transcript changed while generating its report")
+        if not claims:
+            # A valid empty result conveys no meeting facts. Let the normal follow-up deliver
+            # the authorized artifact links with an explicit status in place of a summary.
+            return {"report": ("TINA ch\u01b0a t\u1ea1o \u0111\u01b0\u1ee3c t\xf3m t\u1eaft c\xf3 c\u0103n c\u1ee9 t\u1eeb b\u1ea3n ch\xe9p l\u1eddi. "
+                               "M\u1edf trang cu\u1ed9c h\u1ecdp \u0111\u1ec3 xem b\u1ea3n ch\xe9p l\u1eddi v\xe0 b\u1ea3n ghi n\u1ebfu c\xf3.")}
+        report = "\n".join(f"- {claim['text']}" for claim in claims)
+        return {"report": report[:6000]}
 
     @app.post("/api/dictation/polish")
     def polish_dictation(body: DictationPolishBody, request: Request):
@@ -1500,7 +1670,9 @@ def create_app(
         # from the meeting's redis Stream (tc:meeting:{native} — the SAME stream the copilot tails) into
         # the prompt, fresh on every turn. The transcript stays inside the trusted control plane and
         # rides the prompt to the worker — no file, no cross-domain HTTP, no user key in the worker (P15).
-        ctx, tools, prompt = _context_grounding(
+        from control_plane.voice_handoff import grounding as handoff_grounding
+        handoff = handoff_grounding(settings.meeting_api_url if settings else '',subject,session,body.prompt)
+        ctx, tools, prompt = handoff if handoff is not None else _context_grounding(
             body, session, redis_url,
             schedule_rows=lambda: _schedule_source(subject),
             workspace_mounts=lambda: (active_workspaces(wsr.root, subject)

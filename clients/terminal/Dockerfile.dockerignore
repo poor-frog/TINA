@@ -4,5 +4,9 @@
 !clients/terminal/**
 !branding/
 !branding/tokens.css
+!packages/
+!packages/transcript-rendering/
+!packages/transcript-rendering/src/
+!packages/transcript-rendering/src/format.ts
 clients/terminal/.next/
 clients/terminal/node_modules/

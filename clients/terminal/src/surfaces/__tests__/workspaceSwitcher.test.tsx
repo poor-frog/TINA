@@ -1,9 +1,9 @@
-/** Behavioral test for the WORKSPACES sidebar section (workspace.tsx WorkspaceSwitcher).
+/** Behavioral tests for the workspace picker (workspace.tsx WorkspaceSwitcher).
  *
- *  ADDITIVE model (WP-A1): the list-level "+ New workspace…" action CREATES a fresh blank workspace and
+ *  ADDITIVE model (WP-A1): the list-level "New workspace" action CREATES a fresh blank workspace and
  *  ADDS it to the mount set (a new CHECKED row) — it does NOT swap/rebuild/park the baseline, and pops NO
- *  scary confirm (creating a workspace is non-destructive). It lives alongside "+ Attach repo…" as the two
- *  ways to bring a workspace into the set. These tests pin: the list offers "+ New workspace…" (not the old
+ *  scary confirm (creating a workspace is non-destructive). It lives alongside "Attach repo" as the two
+ *  ways to bring a workspace into the set. These tests pin: the list offers "New workspace" (not the old
  *  "Start fresh…"), clicking it calls createWorkspace (never swapWorkspace/fresh) with no window.confirm,
  *  and no row carries the old ↻ icon.
  */
@@ -14,7 +14,7 @@ import { ServicesProvider, createContainer, reg } from "../../platform";
 import { LayoutServiceId, createLayoutService } from "../../workbench/layout";
 import * as api from "../workspaceApi";
 
-// WorkspaceSwitcher now opens the MANAGE tab via the LayoutService — provide a real one so it renders.
+// WorkspaceSwitcher opens the MANAGE tab via the LayoutService — provide a real one so it renders.
 const withServices = (node: React.ReactNode) => (
   <ServicesProvider container={createContainer([reg(LayoutServiceId, () => createLayoutService("files"))])}>{node}</ServicesProvider>
 );
@@ -44,7 +44,7 @@ const activeSet = {
 } as unknown as Awaited<ReturnType<typeof api.readActiveSet>>;
 
 async function renderOpenSwitcher(overrideActive?: Awaited<ReturnType<typeof api.readActiveSet>>) {
-  sessionStorage.setItem("ws.attach.open", "1"); // section open by default for the test
+  sessionStorage.setItem("ws.attach.open.v2", "1");
   vi.mocked(api.readAttachedWorkspaces).mockResolvedValue(view);
   vi.mocked(api.readActiveSet).mockResolvedValue(overrideActive ?? activeSet);
   vi.mocked(api.swapWorkspace).mockResolvedValue(undefined as never);
@@ -53,18 +53,18 @@ async function renderOpenSwitcher(overrideActive?: Awaited<ReturnType<typeof api
   vi.mocked(api.createWorkspace).mockResolvedValue({ subject: "u1", slug: "workspace-1", changed: true, added: true });
   const onSwapped = vi.fn();
   render(withServices(<WorkspaceSwitcher onSwapped={onSwapped} />));
-  await screen.findByText("leo"); // slots loaded
+  await screen.findByRole("button", { name: "leo" }); // workspace row loaded
   return { onSwapped };
 }
 
 beforeEach(() => sessionStorage.clear());
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
-describe("WorkspaceSwitcher — '+ New workspace…' CREATES + ADDS (additive), not swap-rebuild-baseline", () => {
-  it("offers '+ New workspace…' as a list item alongside '+ Attach repo…' (not the old 'Start fresh…')", async () => {
+describe("WorkspaceSwitcher — New workspace CREATES + ADDS (additive), not swap-rebuild-baseline", () => {
+  it("offers New workspace alongside Attach repo (not the old Start fresh action)", async () => {
     await renderOpenSwitcher();
-    expect(screen.getByText("Attach repo…")).toBeTruthy();
-    expect(screen.getByText("New workspace…")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Attach repo" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New workspace" })).toBeTruthy();
     expect(screen.queryByText("Start fresh…")).toBeNull();  // the old swap-rebuild action is gone
   });
 
@@ -76,7 +76,7 @@ describe("WorkspaceSwitcher — '+ New workspace…' CREATES + ADDS (additive), 
   it("clicking it calls createWorkspace — NOT swapWorkspace/fresh — and pops NO confirm", async () => {
     const { onSwapped } = await renderOpenSwitcher();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-    fireEvent.click(screen.getByText("New workspace…"));
+    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
     await waitFor(() => expect(api.createWorkspace).toHaveBeenCalled());
     expect(confirm).not.toHaveBeenCalled();                 // creating a workspace is non-destructive
     expect(api.swapWorkspace).not.toHaveBeenCalled();       // NOT the swap-rebuild-baseline path
@@ -87,7 +87,7 @@ describe("WorkspaceSwitcher — '+ New workspace…' CREATES + ADDS (additive), 
   it("re-reads the active set after creating, so the new (checked) row shows up", async () => {
     await renderOpenSwitcher();
     vi.mocked(api.readActiveSet).mockClear();
-    fireEvent.click(screen.getByText("New workspace…"));
+    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
     // the reload() after create re-fetches the active set → the new checked row is picked up
     await waitFor(() => expect(api.readActiveSet).toHaveBeenCalled());
   });
@@ -111,19 +111,20 @@ describe("WorkspaceSwitcher — '+ New workspace…' CREATES + ADDS (additive), 
         { slug: "workspace-1", repo: null, ref: null, role: "private", path: "/w/.attached/u1/workspace-1", write: true, primary: false },
       ],
     } as unknown as Awaited<ReturnType<typeof api.readActiveSet>>);
-    fireEvent.click(screen.getByText("New workspace…"));
-    const newRow = await screen.findByText("New workspace");
-    const cb = newRow.closest("div")!.querySelector<HTMLElement>('[role="checkbox"]')!;
+    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Workspace:/ }));
+    const cb = await screen.findByRole("checkbox", { name: /^New workspace,/ });
     await waitFor(() => expect(cb.getAttribute("aria-checked")).toBe("true"));  // new row is CHECKED
     // the baseline (leo) is still checked (mounted) — untouched by the create; it's toggleable now
-    const leoCb = screen.getByText("leo").closest("div")!.querySelector<HTMLElement>('[role="checkbox"]')!;
+    const leoCb = screen.getByRole("checkbox", { name: /^leo,/ });
     expect(leoCb.getAttribute("aria-checked")).toBe("true");
     expect(leoCb.getAttribute("aria-disabled")).not.toBe("true");
   });
 });
 
 // The toggle affordance is the row CHECKBOX (the row LABEL now opens the manage tab — see the last block).
-const rowCb = (name: string) => screen.getByText(name).closest("div")!.querySelector<HTMLElement>('[role="checkbox"]')!;
+const rowCb = (name: string) => screen.getAllByRole("checkbox")
+  .find((checkbox) => checkbox.getAttribute("aria-label")?.startsWith(`${name},`))!;
 
 describe("WorkspaceSwitcher — additive active set (WP-A2.1)", () => {
   it("a parked workspace's toggle ACTIVATES it (adds to the mount set, no swap/park)", async () => {
@@ -155,9 +156,9 @@ describe("WorkspaceSwitcher — additive active set (WP-A2.1)", () => {
     expect(api.activateWorkspace).not.toHaveBeenCalled();
   });
 
-  it("'Attach repo…' ADDS the repo to the set (activate), not a swap", async () => {
+  it("Attach repo ADDS the repo to the set (activate), not a swap", async () => {
     await renderOpenSwitcher();
-    fireEvent.click(screen.getByText("Attach repo…"));
+    fireEvent.click(screen.getByRole("button", { name: "Attach repo" }));
     fireEvent.change(screen.getByPlaceholderText("git repo URL"), { target: { value: "https://example.com/r.git" } });
     fireEvent.click(screen.getByText("Attach"));
     await waitFor(() => expect(api.activateWorkspace).toHaveBeenCalledWith({ repo: "https://example.com/r.git", ref: undefined, token: undefined }));
@@ -168,8 +169,7 @@ describe("WorkspaceSwitcher — additive active set (WP-A2.1)", () => {
 describe("WorkspaceSwitcher — active set uses CHECKBOXES, not radio-style dots (multi-active is the model)", () => {
   // The multi-select mental model must be visually obvious: each row renders a real role="checkbox"
   // (checked = mounted, unchecked = parked). A filled/hollow dot read as a single-select radio.
-  const rowCheckbox = (name: string) =>
-    screen.getByText(name).closest("div")!.querySelector<HTMLElement>('[role="checkbox"]')!;
+  const rowCheckbox = rowCb;
 
   it("each workspace row renders a real accessible checkbox (no ●/○ dot)", async () => {
     await renderOpenSwitcher();
@@ -218,12 +218,12 @@ describe("WorkspaceSwitcher — active set uses CHECKBOXES, not radio-style dots
   it("a baseline switched OFF (baseline_hidden) renders UNCHECKED and re-activates on click", async () => {
     // Own mock setup (renderOpenSwitcher would overwrite the attached-view mock): baseline switched OFF,
     // and the active set no longer carries the baseline (nothing primary in the list).
-    sessionStorage.setItem("ws.attach.open", "1");
+    sessionStorage.setItem("ws.attach.open.v2", "1");
     vi.mocked(api.readAttachedWorkspaces).mockResolvedValue({ ...view, baseline_hidden: true } as unknown as Awaited<ReturnType<typeof api.readAttachedWorkspaces>>);
     vi.mocked(api.readActiveSet).mockResolvedValue({ subject: "u1", active: [] } as unknown as Awaited<ReturnType<typeof api.readActiveSet>>);
     vi.mocked(api.activateWorkspace).mockResolvedValue({ subject: "u1", slug: "leo", changed: true, cloned: false, nested: false });
     render(withServices(<WorkspaceSwitcher onSwapped={vi.fn()} />));
-    await screen.findByText("leo");
+    await screen.findByRole("button", { name: "leo" });
     const cb = rowCheckbox("leo");
     expect(cb.getAttribute("aria-checked")).toBe("false");       // switched off → unchecked
     fireEvent.click(cb);
@@ -251,17 +251,58 @@ describe("WorkspaceSwitcher — active set uses CHECKBOXES, not radio-style dots
   });
 });
 
-describe("WorkspaceSwitcher — selecting a row opens the MANAGE tab (not a toggle)", () => {
-  it("clicking a row's NAME opens the 'workspace' manage tab; it does NOT toggle active", async () => {
+describe("WorkspaceSwitcher — selecting a workspace focuses its files", () => {
+  it("switches the file focus without changing mount state and keeps Manage available", async () => {
     const openTab = vi.fn();
-    sessionStorage.setItem("ws.attach.open", "1");
+    const onFocusWorkspace = vi.fn();
+    sessionStorage.setItem("ws.attach.open.v2", "1");
     vi.mocked(api.readAttachedWorkspaces).mockResolvedValue(view);
     vi.mocked(api.readActiveSet).mockResolvedValue(activeSet);
     const container = createContainer([reg(LayoutServiceId, () => ({ ...createLayoutService("files"), openTab }))]);
-    render(<ServicesProvider container={container}><WorkspaceSwitcher onSwapped={vi.fn()} /></ServicesProvider>);
-    await screen.findByText("leo");
-    fireEvent.click(screen.getByText("leo"));  // the row NAME (not its checkbox)
+    render(<ServicesProvider container={container}><WorkspaceSwitcher onSwapped={vi.fn()} onFocusWorkspace={onFocusWorkspace} /></ServicesProvider>);
+    await screen.findByRole("button", { name: "leo" });
+    fireEvent.click(screen.getByRole("button", { name: "leo" }));
+    expect(onFocusWorkspace).toHaveBeenCalledWith("leo");
+    expect(api.deactivateWorkspace).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Workspace: leo/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Manage leo" }));
     await waitFor(() => expect(openTab).toHaveBeenCalledWith(expect.objectContaining({ kind: "workspace", params: expect.objectContaining({ slug: "leo" }) })));
-    expect(api.deactivateWorkspace).not.toHaveBeenCalled();  // the name no longer toggles
+  });
+});
+
+describe("WorkspaceSwitcher — unknown mount state", () => {
+  it("does not show a fallback workspace as parked when workspace loading fails", async () => {
+    sessionStorage.setItem("ws.attach.open.v2", "1");
+    vi.mocked(api.readAttachedWorkspaces).mockRejectedValue(new Error("Your API key was rejected"));
+    vi.mocked(api.readActiveSet).mockRejectedValue(new Error("Your API key was rejected"));
+    render(withServices(<WorkspaceSwitcher onSwapped={vi.fn()} />));
+
+    expect(await screen.findByText("Your API key was rejected")).toBeTruthy();
+    expect(screen.queryByText("Personal")).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("keeps mount checkboxes disabled when the active set cannot be verified", async () => {
+    sessionStorage.setItem("ws.attach.open.v2", "1");
+    vi.mocked(api.readAttachedWorkspaces).mockResolvedValue(view);
+    vi.mocked(api.readActiveSet).mockRejectedValue(new Error("Your API key was rejected"));
+    render(withServices(<WorkspaceSwitcher onSwapped={vi.fn()} />));
+
+    const checkbox = await screen.findByRole("checkbox", { name: /leo, mount status unavailable/i });
+    expect(checkbox.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(checkbox);
+    expect(api.activateWorkspace).not.toHaveBeenCalled();
+    expect(api.deactivateWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("retries the workspace list after an API error", async () => {
+    sessionStorage.setItem("ws.attach.open.v2", "1");
+    vi.mocked(api.readAttachedWorkspaces).mockRejectedValueOnce(new Error("Your API key was rejected"))
+      .mockResolvedValue(view);
+    vi.mocked(api.readActiveSet).mockResolvedValue(activeSet);
+    render(withServices(<WorkspaceSwitcher onSwapped={vi.fn()} />));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("button", { name: "leo" })).toBeTruthy();
   });
 });

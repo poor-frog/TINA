@@ -27,13 +27,18 @@ echo "[entrypoint] Starting PulseAudio (no idle exit)..."
 pulseaudio --start --exit-idle-time=-1 --log-target=syslog 2>/dev/null || true
 sleep 1
 # Voice/capture audio graph (best-effort; only the speak path strictly needs it).
+pactl load-module module-null-sink sink_name=meeting_rx \
+  sink_properties=device.description="MeetingAudioReceive" 2>/dev/null || true
+pactl set-default-sink meeting_rx 2>/dev/null || true
 pactl load-module module-null-sink sink_name=tts_sink \
   sink_properties=device.description="TTSAudioSink" 2>/dev/null || true
+pactl set-sink-volume tts_sink 70% 2>/dev/null || true
 pactl load-module module-remap-source master=tts_sink.monitor source_name=virtual_mic \
   source_properties=device.description="VirtualMicrophone" 2>/dev/null || true
 pactl set-default-source virtual_mic 2>/dev/null || true
 pactl set-sink-mute tts_sink 1 2>/dev/null || true
-pactl set-source-mute virtual_mic 1 2>/dev/null || true
+# Muting the capture source makes Meet report a system-microphone problem; gate TTS at its sink.
+pactl set-source-mute virtual_mic 0 2>/dev/null || true
 
 # Run the worker from its package dir so the schema path (src→../../../contracts)
 # and the pnpm-linked workspace deps resolve. Always emit start + exit breadcrumbs

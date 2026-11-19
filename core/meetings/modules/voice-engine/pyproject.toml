@@ -1,0 +1,15 @@
+[project]
+name = "tina-meeting-voice"
+version = "0.1.0"
+requires-python = ">=3.11,<3.14"
+dependencies = ["numpy==2.4.6", "sherpa-onnx==2.0.1", "sentencepiece==0.2.2", "livekit-wakeword==2.1.1", "onnxruntime==1.31.1", "transformers==5.21.0", "tokenizers==0.23.1"]
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tina_meeting_voice"]
+
+[dependency-groups]
+dev = ["pytest==9.0.3"]

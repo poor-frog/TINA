@@ -9,6 +9,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -27,7 +28,9 @@ def fixture():
         "services": {
             "runtime": {"build": {}, "environment": {
                 "DOCKER_NETWORK": "existing_tina", "AGENT_WORKER_IMAGE": "worker:resolved",
-                "BROWSER_IMAGE": "bot:resolved"}, "healthcheck": {"test": ["CMD", "true"]}},
+                "BROWSER_IMAGE": "bot:resolved", "RUNTIME_BACKEND": "docker"},
+                "volumes": [{"type": "bind", "source": "/var/run/docker.sock", "target": "/var/run/docker.sock"}],
+                "healthcheck": {"test": ["CMD", "true"]}},
             "agent-api": {"build": {}, "environment": {
                 "TINA_WORKSPACE_MOUNT_SOURCE": "existing_agent-workspaces"},
                 "volumes": [{"type": "volume", "source": "agent-workspaces", "target": "/workspaces"}]},
@@ -38,6 +41,7 @@ def fixture():
             "gateway": {"build": {"context": "."}, "ports": [{"target": 8000, "published": "28056"}]},
             "storage-init": {"entrypoint": ["true"]},
             "meeting-api": {"depends_on": {"storage-init": {"condition": "service_completed_successfully"}}},
+            "redis": {"image": "registry.example/valkey:fixture"},
         },
     }
 
@@ -67,10 +71,15 @@ class Docker:
                 if "--environment" in args:
                     values = {k: v for k, v in self.config["services"]["admin-api"]["environment"].items()
                               if k == "TINA_VIEGEM_TOKEN"}
-                    values.update({k: (env or {})[k] for k in ("TINA_VIEGEM_DEVICE", "COMPOSE_PROFILES") if k in (env or {})})
+                    values.update({k: (env or {})[k] for k in ("TINA_VIEGEM_DEVICE", "COMPOSE_PROFILES", "TINA_MEETING_VOICE", "TTS_API_TOKEN", "LIVEKIT_AGENT_URL") if k in (env or {})})
                     out = "\n".join(f"{k}={v}" for k, v in values.items())
                 else:
-                    out = json.dumps(self.config)
+                    config = copy.deepcopy(self.config)
+                    runtime = config["services"].get("runtime", {})
+                    for mount in runtime.get("volumes", []):
+                        if mount.get("target") == "/var/run/docker.sock":
+                            mount["source"] = (env or {}).get("TINA_DOCKER_SOCKET_PATH", mount["source"])
+                    out = json.dumps(config)
             elif "build" in args:
                 code = int(self.fail_build)
             elif "up" in args:
@@ -108,6 +117,7 @@ class EntryPointTest(unittest.TestCase):
         self.docker = Docker()
         for item in [patch.object(stack, "run", self.docker),
                      patch.dict(os.environ, {"ENV_FILE": str(ROOT / "deploy/compose/.env.example")}, clear=True),
+                     patch.object(stack, 'tts_environment', side_effect=stack.StackError('TTS_API_TOKEN fixture is missing')),
                      patch.object(stack.time, "sleep")]:
             item.start()
             self.addCleanup(item.stop)
@@ -134,6 +144,141 @@ class EntryPointTest(unittest.TestCase):
         self.assertLess(max(checks), up)
         self.assertLess(up, access)
         self.assertTrue({"--wait", "--wait-timeout", "--no-build", "--pull", "never"} <= set(calls[up]))
+
+    def test_normal_deployment_never_prints_the_provisioned_api_key(self):
+        output = io.StringIO()
+        selected = stack.Stack('all')
+        with contextlib.redirect_stdout(output): selected.access()
+        self.assertNotIn('fixture-user-key', output.getvalue())
+        self.assertIn('API access provisioned', output.getvalue())
+
+    def test_kiri_docker_runtime_refuses_unsafe_named_workspace_volume_subpath(self):
+        self.docker.context = "kiri"
+        selected = stack.Stack("plan")
+        runtime_socket = next(m for m in selected.services["runtime"]["volumes"]
+                              if m.get("target") == "/var/run/docker.sock")
+        self.assertEqual(runtime_socket["source"], str(Path.home() / ".kiri/run/docker.sock"))
+        selected.runtime["TINA_WORKSPACE_MOUNT_SOURCE"] = "existing_agent-workspaces"
+        with self.assertRaisesRegex(stack.StackError, "does not enforce the workspace VolumeOptions.Subpath"):
+            selected.validate_bindings()
+
+    def test_doctor_accepts_a_paused_unused_asr_worker_but_rejects_a_required_failed_one(self):
+        from types import SimpleNamespace
+        self.docker.config['services']['admin-api']['environment']['INTERNAL_API_SECRET'] = 'fixture-internal'
+        self.docker.config['services']['gipformer'] = {'image':'asr:fixture'}
+        self.docker.rows.append({'Service':'gipformer','State':'exited','ExitCode':143})
+        selected = stack.Stack('doctor')
+        counts = {'gipformer':0,'viegem':0}
+        class ControlError(Exception): pass
+        module = SimpleNamespace(Identity=lambda _:SimpleNamespace(read=lambda:{'counts':counts}),
+            Workers=lambda _:SimpleNamespace(status=lambda _: {'ready':False}),ControlError=ControlError)
+        with patch.dict(sys.modules, {'asr_control':module}):
+            self.assertEqual(selected.doctor_readiness(), {'gipformer'})
+            counts['gipformer'] = 1
+            with self.assertRaisesRegex(stack.StackError, 'not ready: gipformer'):
+                selected.doctor_readiness()
+            counts['gipformer'] = False
+            with self.assertRaisesRegex(stack.StackError, 'Invalid managed ASR demand'):
+                selected.doctor_readiness()
+
+    def test_voice_profile_prepares_models_before_activation(self):
+        services = self.docker.config['services']
+        services['redis']['image'] = 'registry.example/valkey:fixture'
+        services.update({'meeting-voice-models': {'image': 'bot:resolved'},
+                         'tts-models': {'image': 'tts:fixture'},
+                         'tts': {'image': 'tts:fixture', 'build': {'context': '.'}, 'depends_on': {
+                             'meeting-voice-models': {'condition': 'service_completed_successfully'},
+                             'tts-models': {'condition': 'service_completed_successfully'}}}})
+        self.docker.rows.extend([{'Service': name, 'State': 'exited', 'ExitCode': 0}
+                                 for name in ('meeting-voice-models', 'tts-models')])
+        self.docker.rows.append({'Service': 'tts', 'State': 'running', 'Health': 'healthy'})
+        with patch.dict(os.environ, {'TINA_MEETING_VOICE': '1', 'TTS_API_TOKEN': 'test-only-' + 'x' * 40}):
+            self.invoke('all')
+        calls = [args for args, _ in self.docker.calls]
+        self.assertFalse(any('pull' in args and any(name in args for name in ('meeting-voice-models', 'tts-models')) for args in calls))
+        up = next(i for i, args in enumerate(calls) if 'up' in args)
+        for name in ('meeting-voice-models', 'tts-models'):
+            prepared = next(i for i, args in enumerate(calls) if 'run' in args and args[-1] == name)
+            self.assertLess(prepared, up)
+        self.assertTrue(any('--profile' in args and 'speech' in args for args in calls))
+        self.assertTrue(any('pull' in args and args[-1] == 'redis' for args in calls))
+
+    def test_asr_controller_can_preserve_voice_profile_without_receiving_tts_credentials(self):
+        with patch.dict(os.environ, {'TINA_MEETING_VOICE': '1', 'COMPOSE_PROFILES': 'asr,speech'}):
+            selected = stack.Stack('runtime-control')
+        self.assertIn('speech', selected.env['COMPOSE_PROFILES'].split(','))
+        self.assertNotIn('TTS_API_TOKEN', selected.env)
+
+    def test_voice_profile_refuses_missing_tts_token_before_build(self):
+        with patch.dict(os.environ, {'TINA_MEETING_VOICE': '1'}):
+            with self.assertRaisesRegex(stack.StackError, 'TTS_API_TOKEN'):
+                stack.Stack('all')
+        self.assertFalse(any('build' in args for args, _ in self.docker.calls))
+
+    def test_voice_loads_dedicated_tts_env_without_wrapper_and_does_not_forward_keys(self):
+        token = 'test-only-' + 'x' * 40
+        with patch.dict(os.environ, {'TINA_MEETING_VOICE': '1'}), patch.object(
+            stack, 'tts_environment', return_value={'TTS_API_TOKEN': token, 'TTS_SERVICE_URL': 'http://tts:8000'}) as load:
+            selected = stack.Stack('all')
+        self.assertTrue(selected.voice_credentials_ready)
+        self.assertEqual(selected.env['TTS_API_TOKEN'], token)
+        self.assertIn('speech', selected.env['COMPOSE_PROFILES'].split(','))
+        self.assertEqual(load.call_count, 1)
+        self.assertFalse(any(key.startswith('DOTENV_PRIVATE_KEY') for key in selected.env))
+
+    def test_plan_can_report_missing_voice_credentials_without_bootstrapping(self):
+        with patch.dict(os.environ, {'TINA_MEETING_VOICE': '1'}):
+            selected = stack.Stack('plan')
+        self.assertFalse(selected.plan_data()['tts_credentials_ready'])
+        self.assertTrue(selected.plan_data()['meeting_voice'])
+        self.assertFalse(any('build' in args or 'up' in args for args, _ in self.docker.calls))
+
+    def test_default_livekit_plan_allows_missing_secret_but_start_requires_it(self):
+        with patch.dict(os.environ, {'TINA_MEETING_VOICE': '1', 'LIVEKIT_AGENT_URL': 'http://livekit-agent:8080'}), patch.object(
+            stack, 'livekit_credentials', side_effect=stack.StackError('INTERNAL_API_SECRET required')):
+            selected = stack.Stack('plan')
+            self.assertIn('livekit', selected.env['COMPOSE_PROFILES'].split(','))
+            with self.assertRaisesRegex(stack.StackError, 'INTERNAL_API_SECRET'):
+                stack.Stack('all')
+        self.assertFalse(any('build' in args or 'up' in args for args, _ in self.docker.calls))
+
+    def test_kws_install_reuses_valid_cache_without_operator_source(self):
+        with patch.dict(os.environ, {'TINA_MEETING_VOICE': '1', 'TTS_API_TOKEN': 'test-only-' + 'x' * 40}):
+            selected = stack.Stack('build')
+        selected.services['meeting-voice-models'] = {'image': 'bot:resolved'}
+        selected.prepare_wakeword()
+        commands = [args for args, _ in self.docker.calls if 'run' in args]
+        self.assertEqual(len(commands), 1)
+        self.assertIn('kws_shadow', commands[0][-1])
+        self.assertNotIn('--volume', commands[0])
+
+    def test_missing_kws_source_fails_before_application_activation(self):
+        with patch.dict(os.environ, {'TINA_MEETING_VOICE': '1', 'TTS_API_TOKEN': 'test-only-' + 'x' * 40}):
+            selected = stack.Stack('build')
+        selected.services['meeting-voice-models'] = {'image': 'bot:resolved'}
+        selected.kws_models_dir = Path('/missing-synthetic-kws-source')
+        selected.compose = lambda *a, **k: subprocess.CompletedProcess([], 1, '', '')
+        with self.assertRaisesRegex(stack.StackError, 'TINA_KWS_MODELS_DIR'):
+            selected.prepare_wakeword()
+        self.assertFalse(any('up' in args for args, _ in self.docker.calls))
+
+    def test_kws_install_uses_readonly_source_and_rechecks_installed_cache(self):
+        with patch.dict(os.environ, {'TINA_MEETING_VOICE': '1', 'TTS_API_TOKEN': 'test-only-' + 'x' * 40}):
+            selected = stack.Stack('build')
+        selected.services['meeting-voice-models'] = {'image': 'bot:resolved'}
+        with tempfile.TemporaryDirectory() as directory:
+            selected.kws_models_dir = Path(directory)
+            for name in ('hey_tina', 'tina_oi'): (Path(directory) / (name + '.onnx')).write_bytes(b'fixture')
+            calls = []
+            def compose(*args, **kwargs):
+                calls.append(args)
+                return subprocess.CompletedProcess([], 1 if len(calls) == 1 else 0, '', '')
+            selected.compose = compose
+            selected.prepare_wakeword()
+        self.assertEqual(len(calls), 3)
+        self.assertIn('--volume', calls[1])
+        self.assertTrue(any(str(arg).endswith(':/source:ro') for arg in calls[1]))
+        self.assertIn('kws_shadow', calls[-1][-1])
 
     def test_failed_wait_does_not_mint_key(self):
         self.docker.fail_up = True
@@ -579,6 +724,17 @@ class ComposeConfigTest(unittest.TestCase):
                     self.assertEqual(explicit.project, "explicit-project")
                     self.assertEqual(explicit.images()["bot"], "tina/tina-bot:chosen")
             self.assertIn("IMAGE_TAG=fixture", env_file.read_text())
+
+
+class LiveKitCredentialTests(unittest.TestCase):
+    def test_keys_are_separate_deterministic_and_never_plain_control_secret(self):
+        secret='private-fixture-control-secret-32-characters'
+        result=stack.livekit_credentials({'INTERNAL_API_SECRET':secret})
+        self.assertEqual(result,stack.livekit_credentials({'INTERNAL_API_SECRET':secret}))
+        self.assertEqual(len(result['LIVEKIT_API_SECRET']),64)
+        self.assertNotIn(secret,result['LIVEKIT_KEYS'])
+        self.assertNotEqual(result,stack.livekit_credentials({'INTERNAL_API_SECRET':secret+'2'}))
+        with self.assertRaises(stack.StackError):stack.livekit_credentials({'INTERNAL_API_SECRET':''})
 
 
 if __name__ == "__main__":

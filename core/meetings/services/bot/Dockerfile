@@ -25,6 +25,12 @@
 # ------------------------------------------------------------------------------
 # Stage 1: builder — install + build the workspace slice @tina/bot depends on.
 # ------------------------------------------------------------------------------
+FROM tina/meet-join-env:dev AS noise-builder
+RUN apt-get update && apt-get install -y --no-install-recommends g++ pkg-config libwebrtc-audio-processing-dev=0.3.1-0ubuntu6 \
+    && rm -rf /var/lib/apt/lists/*
+COPY core/meetings/modules/voice-engine/native/webrtc_ns.cc /src/webrtc_ns.cc
+RUN c++ -O2 -fPIC -shared /src/webrtc_ns.cc -o /opt/libtina_ns.so $(pkg-config --cflags --libs webrtc-audio-processing)
+
 FROM tina/meet-join-env:dev AS builder
 
 # Bound individual TypeScript builds and avoid concurrent workspace compilers on local WSL.
@@ -116,6 +122,8 @@ FROM tina/meet-join-env:dev AS runtime
 RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
+       python3-venv \
+       libwebrtc-audio-processing1=0.3.1-0ubuntu6 \
        pulseaudio \
        fluxbox \
        socat \
@@ -143,6 +151,13 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
 # 'unknown', which is the honest answer rather than a guess.
 ARG TINA_IMAGE_VERSION=unknown
 ENV TINA_IMAGE_VERSION=${TINA_IMAGE_VERSION}
+
+# One lightweight native KWS runtime per bot; assets are mounted read-only at spawn.
+COPY core/meetings/modules/voice-engine /opt/voice-engine-src
+RUN python3 -m venv /opt/tina-voice \
+    && /opt/tina-voice/bin/pip install --no-cache-dir /opt/voice-engine-src \
+    && rm -rf /opt/voice-engine-src
+COPY --from=noise-builder /opt/libtina_ns.so /opt/tina-voice/lib/libtina_ns.so
 
 WORKDIR /app
 

@@ -673,6 +673,27 @@ def create_app(
             "GET", _meeting(f"/recordings/{recording_id}/media/{media_file_id}/raw"), request
         )
 
+    @app.get('/meetings/{meeting_id}/voice-assistant')
+    async def voice_assistant_state(meeting_id: int, request: Request):
+        return await _forward('GET', _meeting(f'/meetings/{meeting_id}/voice-assistant'), request)
+
+    @app.get('/meetings/{meeting_id}/voice-assistant/sources/{request_id}')
+    async def voice_assistant_sources(meeting_id: int, request_id: str, request: Request):
+        return await _forward('GET', _meeting(f"/meetings/{meeting_id}/voice-assistant/sources/{quote(request_id, safe='')}"), request)
+
+    @app.post('/meetings/{meeting_id}/voice-assistant/navigation/{request_id}')
+    async def claim_voice_navigation(meeting_id:int,request_id:str,request:Request):
+        return await _forward('POST',_meeting(f"/meetings/{meeting_id}/voice-assistant/navigation/{quote(request_id,safe='')}"),request)
+
+    @app.get('/meetings/{meeting_id}/voice-assistant/handoff/{request_id}')
+    @app.post('/meetings/{meeting_id}/voice-assistant/handoff/{request_id}')
+    async def voice_handoff(meeting_id:int,request_id:str,request:Request):
+        return await _forward(request.method,_meeting(f"/meetings/{meeting_id}/voice-assistant/handoff/{quote(request_id,safe='')}"),request)
+
+    @app.put('/meetings/{meeting_id}/voice-assistant')
+    async def voice_assistant_policy(meeting_id: int, request: Request):
+        return await _forward('PUT', _meeting(f'/meetings/{meeting_id}/voice-assistant'), request)
+
     @app.get("/meetings")
     async def meetings(request: Request):
         return await _forward("GET", _meeting("/meetings"), request)
@@ -865,6 +886,18 @@ def create_app(
     @app.get("/user/models")
     async def get_user_models(request: Request):
         return await _forward("GET", _admin("/user/models"), request)
+
+    @app.api_route('/user/voice', methods=['GET','PUT'])
+    async def user_voice(request: Request):
+        return await _forward(request.method, _admin('/user/voice'), request)
+
+    @app.get('/bots/voice/services')
+    async def voice_services(request: Request):
+        return await _forward('GET', _meeting('/bots/voice/services'), request)
+
+    @app.post('/bots/voice/preview')
+    async def voice_preview(request: Request):
+        return await _forward('POST', _meeting('/bots/voice/preview'), request)
 
     @app.put("/user/transcription")
     async def set_user_transcription(request: Request):

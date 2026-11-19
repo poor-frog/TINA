@@ -1,5 +1,11 @@
 # agent · control_plane
 
+Voice retrieval uses the V2 shared lexical/evidence modules and pinned offline Underthesea word
+segmentation; original E5 assets/authorization remain unchanged. Workspace `retrieval-domain.json`
+is bounded search data, never a source grant. `voice_reranker.py` and its pinned asset manifest provide
+an explicit offline BGE candidate evaluation, not a default production model replacement. See
+[Retrieval V2](../../../docs/tina-retrieval-v2.md).
+
 The agent control plane: the FastAPI app (`api.py`) and orchestration that dispatches work to workers and reconciles routine/meeting lifecycle. Owns request handling, routine bookkeeping, transcription watching, and event relay — distinct from the `worker/` that runs a single agent workload.
 
 A leading chat `/research <topic>` (or explicit `research: true` from document actions) uses `knowledge_research.py` to select an active private writable
@@ -27,11 +33,22 @@ and meeting status through Meeting API. GET observes live-tail stability without
 POST advances one ready phrase, joining consecutive ASR fragments of the same speaker
 through the existing tool-less translation worker and the user's saved Meeting model.
 SQLite results and atomic 120-second leases live outside workspace Git trees on the existing
-workspace volume. Web/extension share cache entries by owner, meeting, phrase and exact source members.
+workspace volume. Web/extension share cache entries by owner, meeting, phrase and exact source members,
+including canonical revision. POST reauthorizes and reloads canonical state after inference; results
+from an edited, deleted or regrouped source are discarded. Cache and lease are rechecked atomically
+before claiming a phrase, so simultaneous viewers do not translate the same phrase twice.
 Sentence endings, speaker changes and pauses close a phrase; size/time limits bound latency.
 An unfinished live tail waits five seconds without new finalized text. Stopping the meeting
 flushes it immediately. Old fragment cache entries remain on disk but are not reused.
-Failures back off 15/60/300 seconds; an explicit retry bypasses the backoff. Drafts, raw ASR,
+Phrase timeouts, rejected requests and unusable output retry separately after 15 then 60 seconds,
+with at most three automatic attempts per source revision. Other ready phrases continue. Exhausted
+phrases require explicit **Thử lại**; successful translations are not called again. Authentication,
+model configuration, quota and service failures instead apply an owner-wide 15/60/300-second
+cooldown across meetings. Only fixed error codes leave the worker. A newer service failure cannot
+be cleared by an older in-flight success. Optional `can_advance`, `service_error` and per-group
+status/attempt/retry fields are documented in the v2 contract. Existing private SQLite state migrates
+automatically, preserving cached results, active leases and pending cooldowns.
+An explicit retry bypasses cooldowns, never a live lease or grouping wait. Drafts, raw ASR,
 canonical revisions and capture continue independently. With all translated views closed,
 new translation calls pause until a client reopens one.
 
@@ -40,6 +57,14 @@ Settings → Models lists come from the provider itself (`model_catalog.py` behi
 saved key used for that single request, non-chat entries filtered out, and a rejected key reported as
 401 instead of an empty list. Callers supply `mode` only — never a base URL — so this route cannot be
 turned into an egress proxy.
+
+## Company profile and mail-template reads
+
+`GET /internal/system-workspace/file?path=...` is an internal-tier read used by flows to render
+post-meeting email. It requires `X-Internal-Secret` and serves only `_global/README.md` and
+`_global/mail/*.md` from the configured read-only global workspace. The user-facing workspace
+tree/file/git routes do not resolve `_global`, so platform instructions and unrelated files stay
+outside normal workspace access.
 
 ## Workspace membership + invites + roles (Lane M — the access layer for shared workspaces)
 
@@ -100,3 +125,19 @@ runs right before `git add -A` — it reverts any tracked `policy/` change back 
 untracked `policy/` add, emitting `{"type":"policy-reverted","paths":[…]}`. So a turn's legitimate
 (non-policy) writes still commit while a policy tamper is reverted before it can land. (Chosen default
 per plan Q3: post-turn validation + revert.)
+
+The internal meeting-voice agent endpoint validates shared sources and heard history for LiveKit context/plan/lookup; final answers retain source verification and revocation checks.
+
+Fixed assistant identity/capability/social replies do not generate room facts. Verified partial answers may ask one missing-detail question; source revocation still fences release.
+
+Voice source creation and the final revocation check use the same deterministic chunk projection. Full parent fingerprints invalidate every affected chunk; private documents and canonical transcript remain outside generated writes.
+
+Voice retrieval uses local INT8 multilingual-E5-small embeddings plus BM25 reciprocal rank fusion. Only already-approved source chunks enter encoding/scoring. The in-memory vector cache is bounded to 8192 entries, scoped by owner/meeting/policy revision/key/fingerprint and expires after 15 minutes. Runtime loads pinned local model/tokenizer files; no model downloads or outbound text embedding calls occur.
+
+Whole-meeting voice recaps map every approved transcript chunk through verified per-part facts, reduce bounded groups, then review final claims against original evidence plus related passages. The existing background pool completes map/select/verify under one 120-second waiting deadline, without returning early after the map stage. The bot announces once and plays the verified result automatically in the same reserved voice turn. An expired run emits summary_pending with no factual summary or promise of later playback. RAM work is scoped by owner/meeting/policy/request UUID; an abandoned request cannot poison a new turn with its cancelled futures. Each job rechecks current sources/policy and the internal Meeting API turn permit before and after inference; Stop, a replacement session/request or deletion refuses further dispatch. Final release still rechecks the original full input snapshot.
+
+A LiveKit second plan sees prior successful queries and bounded original excerpts, can stop or target a missing detail, and can read context only with supplied per-turn handles. Private meeting queries are never converted into web queries.
+
+The internal voice sources endpoint resolves saved key/fingerprint references against current owner-linked, room-approved transcript and document chunks, including ended meetings. It returns no old quote after edits, deletion or revocation and rechecks sources/policy before release.
+
+voice_actions.py stores private meeting voice proposals and publishes task/decision entities only after owner-authenticated review, matching revision and completed readback. Existing files are preserved and paths are server-generated.

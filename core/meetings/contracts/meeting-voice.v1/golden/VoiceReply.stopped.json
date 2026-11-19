@@ -1,0 +1,9 @@
+{
+  "request_id": "00000000-0000-4000-8000-000000000001",
+  "text": "Lan phụ trách demo. Hạn là thứ Sáu.",
+  "state": "stopped",
+  "created_at_ms": 1800000000000,
+  "updated_at_ms": 1800000002000,
+  "started_at_ms": 1800000001000,
+  "ended_at_ms": 1800000002000
+}

@@ -10,10 +10,17 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
+
+import httpx
 
 
 class LLMError(Exception):
     """A completion/harness call failed for a non-auth reason (HTTP 5xx, bad payload, transport)."""
+
+    def __init__(self, *args, status_code: int | None = None):
+        super().__init__(*args)
+        self.status_code = status_code
 
 
 class LLMConfigError(LLMError):
@@ -24,6 +31,56 @@ class LLMConfigError(LLMError):
 class LLMAuthError(LLMError):
     """The provider rejected the credential (401/403) — surfaced distinctly so the operator sees the
     token/endpoint mismatch instead of a generic model error."""
+
+
+class LLMStructuredOutputUnsupported(LLMError):
+    """The endpoint explicitly rejected the structured-output request parameter."""
+
+
+def structured_output_unsupported(response: httpx.Response, parameter: str) -> bool:
+    if response.status_code not in (400, 422):
+        return False
+    try:
+        error = response.json().get('error', {})
+        return (isinstance(error, dict)
+                and error.get('code') in ('unsupported_parameter', 'unsupported_value')
+                and isinstance(error.get('param'), str)
+                and (error['param'] == parameter or error['param'].startswith(parameter + '.')))
+    except (ValueError, AttributeError):
+        return False
+
+
+def completion_failure_code(exc: Exception) -> str:
+    """Classify typed failures only. Never infer status from model/provider text."""
+    if isinstance(exc, LLMAuthError):
+        return 'auth'
+    if isinstance(exc, LLMConfigError):
+        return 'configuration'
+    status = getattr(exc, 'status_code', None)
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+    if status in (401, 403):
+        return 'auth'
+    if status == 429:
+        return 'rate_limit'
+    if status == 404:
+        return 'configuration'
+    if status in (400, 422):
+        return 'request_rejected'
+    if status in (408, 504):
+        return 'timeout'
+    if status is not None:
+        return 'unavailable'
+    if isinstance(exc, (TimeoutError, httpx.TimeoutException, subprocess.TimeoutExpired)):
+        return 'timeout'
+    if isinstance(exc, ValueError):
+        return 'invalid_translation'
+    if exc.__cause__ is not None and isinstance(exc.__cause__, Exception):
+        # Adapters wrap typed transport/parse errors while retaining their cause.
+        cause = exc.__cause__
+        if isinstance(cause, (TimeoutError, httpx.TimeoutException, subprocess.TimeoutExpired, ValueError)):
+            return completion_failure_code(cause)
+    return 'unavailable'
 
 
 # Substrings that mark a provider authentication failure in provider/CLI output.

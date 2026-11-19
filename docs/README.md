@@ -14,3 +14,5 @@ What remains here, deliberately repo-side:
   checklist, reuse boundaries and acceptance gates; not a deployed runtime description.
 - `ARCHITECTURE.md`, `DELIVERY*.md`, … — **pointer stubs** for historical source links; current
   content lives in `docs/docs/governance/`.
+
+- [Bot-hosted Google Meet voice assistant](tina-meeting-voice.md): owner-approved sources, model cache and lifecycle.

@@ -5,24 +5,158 @@
  "description": "Opt-in correlated speech commands, bot receipts and the explicitly enrolled single-room speech coordinator. Legacy acts.v1 Speak/Stop remain unchanged.",
  "$defs": {
   "Speak": {
-   "type": "object", "additionalProperties": false, "required": ["action", "command_id", "text"],
-   "properties": {"action": {"const": "speech_speak"}, "command_id": {"type": "string", "format": "uuid"}, "text": {"type": "string", "minLength": 1, "maxLength": 4000}, "voice": {"type": "string", "maxLength": 64}}
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "action",
+    "command_id",
+    "text"
+   ],
+   "properties": {
+    "action": {
+     "const": "speech_speak"
+    },
+    "command_id": {
+     "type": "string",
+     "format": "uuid"
+    },
+    "text": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 4000
+    },
+    "voice": {
+     "type": "string",
+     "maxLength": 64
+    }
+   }
   },
   "Stop": {
-   "type": "object", "additionalProperties": false, "required": ["action", "command_id"],
-   "properties": {"action": {"const": "speech_stop"}, "command_id": {"type": "string", "format": "uuid"}}
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "action",
+    "command_id"
+   ],
+   "properties": {
+    "action": {
+     "const": "speech_stop"
+    },
+    "command_id": {
+     "type": "string",
+     "format": "uuid"
+    }
+   }
   },
   "PlaybackReport": {
-   "type": "object", "additionalProperties": false, "required": ["meeting_id", "command_id", "session_uid", "state"],
-   "properties": {"meeting_id": {"type": "integer", "minimum": 1}, "command_id": {"type": "string", "format": "uuid"}, "session_uid": {"type": "string", "minLength": 1, "maxLength": 128}, "state": {"enum": ["started", "completed", "failed", "stopped"]}}
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "meeting_id",
+    "command_id",
+    "session_uid",
+    "state"
+   ],
+   "properties": {
+    "meeting_id": {
+     "type": "integer",
+     "minimum": 1
+    },
+    "command_id": {
+     "type": "string",
+     "format": "uuid"
+    },
+    "session_uid": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 128
+    },
+    "state": {
+     "enum": [
+      "started",
+      "completed",
+      "failed",
+      "stopped"
+     ]
+    },
+    "played_text": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "maxLength": 4000
+    }
+   }
   },
   "PlaybackStatus": {
-   "type": "object", "additionalProperties": false, "required": ["meeting_id", "command_id", "state"],
-   "properties": {"meeting_id": {"type": "integer", "minimum": 1}, "command_id": {"type": "string", "format": "uuid"}, "state": {"enum": ["queued", "started", "completed", "failed", "stopped"]}}
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "meeting_id",
+    "command_id",
+    "state"
+   ],
+   "properties": {
+    "meeting_id": {
+     "type": "integer",
+     "minimum": 1
+    },
+    "command_id": {
+     "type": "string",
+     "format": "uuid"
+    },
+    "state": {
+     "enum": [
+      "queued",
+      "started",
+      "completed",
+      "failed",
+      "stopped"
+     ]
+    }
+   }
   },
   "TurnStatus": {
-   "type": "object", "additionalProperties": false, "required": ["request_id", "state", "reason", "source_ids"],
-   "properties": {"request_id": {"type": "string", "format": "uuid"}, "state": {"enum": ["CAPTURING", "WAITING", "SPEAKING", "COMPLETED", "FAILED", "STOPPED", "ERROR"]}, "reason": {"type": ["string", "null"], "maxLength": 64}, "source_ids": {"type": "array", "maxItems": 40, "items": {"type": "string", "maxLength": 128}}}
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "request_id",
+    "state",
+    "reason",
+    "source_ids"
+   ],
+   "properties": {
+    "request_id": {
+     "type": "string",
+     "format": "uuid"
+    },
+    "state": {
+     "enum": [
+      "CAPTURING",
+      "WAITING",
+      "SPEAKING",
+      "COMPLETED",
+      "FAILED",
+      "STOPPED",
+      "ERROR"
+     ]
+    },
+    "reason": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "maxLength": 64
+    },
+    "source_ids": {
+     "type": "array",
+     "maxItems": 40,
+     "items": {
+      "type": "string",
+      "maxLength": 128
+     }
+    }
+   }
   }
  }
 }

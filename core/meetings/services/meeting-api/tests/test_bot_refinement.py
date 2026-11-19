@@ -8,10 +8,360 @@ import pytest
 from fastapi import FastAPI
 
 from meeting_api.collector.app import build_router
+from meeting_api.collector.audio_quality import assess_audio
 from meeting_api.collector.fakes import InMemoryTranscriptStore
 from meeting_api.collector.refinement import BotRefiner, RefinementOptions
 from meeting_api.collector.transcript_document import document
 from meeting_api.recordings.fakes import InMemoryRecordingRepo, InMemoryStorage
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure,code", [
+    (401, "asr_auth"), (403, "asr_auth"), (429, "asr_busy"), (503, "asr_busy"),
+    (500, "asr_unavailable"), (400, "asr_rejected"), ("timeout", "asr_timeout"),
+    ("connection", "asr_unavailable"), ("invalid", "asr_invalid_response"),
+])
+async def test_safe_failure_reason_and_manual_retry(monkeypatch, failure, code):
+    client, store, _, worker, _ = await fixture(monkeypatch)
+    async def clip(*args):
+        return audio()
+    monkeypatch.setattr(worker, "clip", clip)
+    attempts = []
+    def infer(request):
+        attempts.append(request)
+        if len(attempts) > 1:
+            return httpx.Response(200, json={"text": "API thứ Sáu."})
+        if failure == "timeout":
+            raise httpx.ReadTimeout("private-token in upstream URL", request=request)
+        if failure == "connection":
+            raise httpx.ConnectError("private-token in upstream URL", request=request)
+        if failure == "invalid":
+            return httpx.Response(200, json={"text": {"credential": "private-token"}})
+        return httpx.Response(failure, text="private-token in provider response")
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(transport=httpx.MockTransport(infer), **kw))
+    async with client:
+        path = "/transcripts/by-id/1/refinement/start"
+        await client.post(path, json={})
+        await worker.task
+        job = await worker.current(7, 1)
+        assert job["items"][0]["error_code"] == code
+        assert job["items"][0]["retryable"] is True
+        assert "private-token" not in str(job)
+        assert len(attempts) == 1  # No automatic retry.
+        if failure == 401:
+            async def refreshed_backend(user):
+                return {"url":"http://asr.test","model":"custom","label":"funasr","token":"refreshed-private-token"}
+            monkeypatch.setattr(worker, "backend", refreshed_backend)
+        assert (await client.post(path, json={"retry_job_id": job["id"]}, headers={"x-user-id":"8"})).status_code == 404
+        result = await client.post(path, json={"retry_job_id": job["id"]})
+        assert result.status_code == 202, result.text
+        await worker.task
+        retried = await worker.current(7, 1)
+        assert retried["id"] != job["id"] and retried["retry_of"] == job["id"]
+        item = retried["items"][0]
+        assert item["state"] == "ready" and item["attempts"] == 2
+        assert "error_code" not in item and len(attempts) == 2
+        if failure == 401:
+            assert attempts[-1].headers["authorization"] == "Bearer refreshed-private-token"
+            assert "refreshed-private-token" not in str(retried)
+        assert (await store.get_transcript_document(7, 1))["segments"][0]["revision"] == 0
+
+
+@pytest.mark.asyncio
+async def test_retry_keeps_ready_applied_and_checked_items(monkeypatch):
+    import copy
+    client, store, _, worker, _ = await fixture(monkeypatch)
+    segments = store._meetings[1]["segments"]
+    segments["s/1"]["text"] = "má má má má"
+    for sid in ("ready", "applied", "checked"):
+        segments[sid] = {**segments["s/1"], "segment_id": sid, "text": "normal speech" if sid == "checked" else "má má má má"}
+    async def clip(*args):
+        return audio()
+    monkeypatch.setattr(worker, "clip", clip)
+    attempts = []
+    def infer(request):
+        attempts.append(request)
+        return httpx.Response(503) if len(attempts) == 1 else httpx.Response(200, json={"text":"proposal"})
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(transport=httpx.MockTransport(infer), **kw))
+    async with client:
+        base = "/transcripts/by-id/1/refinement"
+        await client.post(base + "/start", json={"mode":"flagged"})
+        await worker.task
+        job = await worker.current(7, 1)
+        assert (await client.post(base + "/apply", json={"job_id":job["id"],"segment_id":"applied","expected_revision":0})).status_code == 200
+        job = await worker.current(7, 1)
+        kept = copy.deepcopy(job["items"][1:])
+        assert [i["state"] for i in kept] == ["ready","applied","checked"]
+        assert (await client.post(base + "/start", json={"retry_job_id":job["id"]})).status_code == 202
+        await worker.task
+        retried = await worker.current(7, 1)
+        assert retried["items"][1:] == kept
+        assert retried["items"][0]["state"] == "ready" and len(attempts) == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["revision", "audio", "backend", "job", "live", "options"])
+async def test_retry_refuses_stale_source_or_changed_configuration(monkeypatch, change):
+    client, store, _, worker, _ = await fixture(monkeypatch)
+    sample = audio()
+    async def clip(*args):
+        return sample
+    monkeypatch.setattr(worker, "clip", clip)
+    calls = []
+    def infer(request):
+        calls.append(request)
+        return httpx.Response(503)
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(transport=httpx.MockTransport(infer), **kw))
+    async with client:
+        path = "/transcripts/by-id/1/refinement/start"
+        await client.post(path, json={})
+        await worker.task
+        job = await worker.current(7, 1)
+        payload = {"retry_job_id": job["id"]}
+        if change == "revision":
+            await client.patch("/transcripts/by-id/1/segments/s%2F1", json={"expected_revision":0,"text":"manual edit"})
+        elif change == "audio":
+            sample = audio(20)
+        elif change == "backend":
+            async def backend(user):
+                return {"url":"http://different.test","model":"custom","label":"funasr","token":"private"}
+            monkeypatch.setattr(worker, "backend", backend)
+        elif change == "job":
+            payload["retry_job_id"] = "outdated-job"
+        elif change == "live":
+            store.seed_meeting(user_id=8,platform="google_meet",native_meeting_id="live",meeting_id=2,status="active")
+        elif change == "options":
+            payload["glossary"] = ["override"]
+        result = await client.post(path, json=payload)
+        if change in ("revision", "audio"):
+            assert result.status_code == 202
+            await worker.task
+            item = (await worker.current(7, 1))["items"][0]
+            assert item["state"] == "skipped" and item["error_code"] == "source_changed" and not item["retryable"]
+        else:
+            assert result.status_code == (422 if change == "options" else 409), result.text
+        assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_does_not_resume_unattempted_items_and_rejects_duplicate_click(monkeypatch):
+    client, store, _, worker, _ = await fixture(monkeypatch)
+    async def clip(*args):
+        return audio()
+    monkeypatch.setattr(worker, "clip", clip)
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls = []
+    async def infer(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(503)
+        entered.set()
+        await release.wait()
+        return httpx.Response(200, json={"text":"recovered"})
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(transport=httpx.MockTransport(infer), **kw))
+    async with client:
+        path = "/transcripts/by-id/1/refinement/start"
+        await client.post(path, json={})
+        await worker.task
+        job = await worker.current(7, 1)
+        # A cancelled/crashed job can have items that were never submitted.
+        job["status"] = "interrupted"
+        job["items"].append({"segment_id":"unattempted","expected_revision":0,"state":"pending"})
+        store._meetings[1]["data"]["transcript_refinement"] = job
+        payload = {"retry_job_id":job["id"]}
+        assert (await client.post(path, json=payload)).status_code == 202
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            assert (await client.post(path, json=payload)).status_code == 409
+        finally:
+            release.set()
+            await worker.task
+        retried = await worker.current(7, 1)
+        assert len(calls) == 2 and retried["items"][1]["state"] == "skipped"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode,amplitude,expected_calls,state", [
+    ("check", 1000, 0, "checked"), ("flagged", 1000, 0, "checked"),
+    ("flagged", 10, 1, "ready"), ("all", 1000, 1, "ready"),
+])
+async def test_quality_modes_preserve_original(monkeypatch, mode, amplitude, expected_calls, state):
+    client, store, _, worker, calls = await fixture(monkeypatch)
+    async def clip(*args):
+        return audio(amplitude)
+    monkeypatch.setattr(worker, "clip", clip)
+    if mode == "check":
+        async def unavailable_backend(user):
+            raise AssertionError("Audio checks must not resolve ASR credentials")
+        monkeypatch.setattr(worker, "backend", unavailable_backend)
+    async with client:
+        assert (await client.post("/transcripts/by-id/1/refinement/start", json={"mode": mode})).status_code == 202
+        await worker.task
+        job = await worker.current(7, 1)
+        assert job["status"] == "completed", job
+        item = job["items"][0]
+        assert item["state"] == state
+        assert item["quality"]["needs_review"] == (amplitude == 10)
+        assert len(calls) == expected_calls
+        assert (await store.get_transcript_document(7, 1))["segments"][0]["revision"] == 0
+        if state == "checked":
+            result = await client.post("/transcripts/by-id/1/refinement/apply", json={"job_id": job["id"], "segment_id": "s/1", "expected_revision": 0})
+            assert result.status_code == 409
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["TINA, TINA. TINA! TINA?", "… !!!"])
+async def test_text_only_flags_trigger_selective_asr_with_normal_energy(monkeypatch, text):
+    client, store, _, worker, calls = await fixture(monkeypatch)
+    store._meetings[1]["segments"]["s/1"]["text"] = text
+    async def clip(*args):
+        return audio(1000)
+    monkeypatch.setattr(worker, "clip", clip)
+    async with client:
+        await client.post("/transcripts/by-id/1/refinement/start", json={"mode": "flagged"})
+        await worker.task
+        item = (await worker.current(7, 1))["items"][0]
+        assert len(calls) == 1 and item["state"] == "ready"
+        assert item["quality"]["text_check"] == "text_flag"
+        assert item["proposal_quality"]["text_check"] == "no_text_flags"
+        assert not item["proposal_quality"]["needs_review"]
+        assert (await store.get_transcript_document(7, 1))["segments"][0]["text"] == text
+
+
+def request_audio(request):
+    from email.parser import BytesParser
+    message = BytesParser().parsebytes(b"Content-Type: " + request.headers["content-type"].encode() + b"\r\n\r\n" + request.content)
+    return next(part.get_payload(decode=True) for part in message.get_payload()
+                if part.get_param("name", header="content-disposition") == "file")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("opt_in", [False, True])
+async def test_prepared_asr_keeps_original_playback_apply_hash_and_restore(monkeypatch, opt_in):
+    import hashlib
+    from jsonschema import validate
+    import json
+    from pathlib import Path
+    client, store, _, worker, calls = await fixture(monkeypatch)
+    original = audio(70)
+    async def clip(*args):
+        return original
+    monkeypatch.setattr(worker, "clip", clip)
+    base = "/transcripts/by-id/1"
+    async with client:
+        result = await client.post(base + "/refinement/start", json={"normalize_audio": opt_in})
+        assert result.status_code == 202
+        await worker.task
+        job = await worker.current(7, 1)
+        item = job["items"][0]
+        sent = request_audio(calls[0])
+        assert job["audio_preprocessing"] == ("bounded-gain.v1" if opt_in else "none")
+        assert item["audio_sha256"] == hashlib.sha256(original).hexdigest()
+        assert item["asr_elapsed_ms"] >= 0
+        assert item["proposal_quality"]["rms"] == item["quality"]["rms"]
+        assert item["quality"]["rms"] == assess_audio(original, "")["rms"]
+        assert (sent != original) == opt_in
+        if opt_in:
+            assert item["preprocessing"]["audio_sha256"] == hashlib.sha256(sent).hexdigest()
+            assert item["preprocessing"]["gain_db"] == 12
+        else:
+            assert "preprocessing" not in item
+        schema = Path(__file__).parents[3] / "contracts/transcript-refinement.v1/transcript-refinement.schema.json"
+        validate(job, json.loads(schema.read_text(encoding="utf8")))
+        assert (await client.get(base + "/segments/s%2F1/audio")).content == original
+        assert (await store.get_transcript_document(7, 1))["segments"][0]["revision"] == 0
+        applied = await client.post(base + "/refinement/apply", json={"job_id":job["id"],"segment_id":"s/1","expected_revision":0})
+        assert applied.status_code == 200, applied.text
+        history = applied.json()["segments"][0]["history"][0]
+        assert history["audio_sha256"] == hashlib.sha256(original).hexdigest()
+        if opt_in:
+            assert history["preprocessing"] == item["preprocessing"]
+        document_schema = Path(__file__).parents[3] / "contracts/transcript-document.v1/transcript-document.schema.json"
+        validate(applied.json(), json.loads(document_schema.read_text(encoding="utf8")))
+        restored = await client.patch(base + "/segments/s%2F1", json={"expected_revision":1,"text":None})
+        assert restored.json()["segments"][0]["text"] == restored.json()["segments"][0]["raw_text"]
+        if opt_in:
+            await client.post(base + "/refinement/start", json={"mode":"check"})
+            await worker.task
+            current = (await client.get(base + "/document")).json()
+            assert current["segments"][0]["history"][0]["preprocessing"] == history["preprocessing"]
+        assert await worker.clip(7, 1, "s/1") == original
+
+
+@pytest.mark.asyncio
+async def test_retry_preserves_the_exact_prepared_asr_input(monkeypatch):
+    client, _, _, worker, _ = await fixture(monkeypatch)
+    async def clip(*args):
+        return audio(70)
+    monkeypatch.setattr(worker, "clip", clip)
+    sent = []
+    def infer(request):
+        sent.append(request_audio(request))
+        return httpx.Response(503) if len(sent) == 1 else httpx.Response(200, json={"text":"Xin chào."})
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(transport=httpx.MockTransport(infer), **kw))
+    async with client:
+        path = "/transcripts/by-id/1/refinement/start"
+        await client.post(path, json={"normalize_audio":True})
+        await worker.task
+        job = await worker.current(7, 1)
+        assert job["items"][0]["state"] == "failed"
+        assert (await client.post(path, json={"retry_job_id":job["id"],"normalize_audio":True})).status_code == 422
+        assert (await client.post(path, json={"retry_job_id":job["id"]})).status_code == 202
+        await worker.task
+        retried = await worker.current(7, 1)
+        assert retried["items"][0]["state"] == "ready"
+        assert retried["items"][0]["preprocessing"] == job["items"][0]["preprocessing"]
+        assert len(sent) == 2 and sent[0] == sent[1] and sent[0] != audio(70)
+
+
+@pytest.mark.asyncio
+async def test_retry_refuses_changed_prepared_input_before_inference(monkeypatch):
+    client, _, _, worker, _ = await fixture(monkeypatch)
+    async def clip(*args):
+        return audio(70)
+    monkeypatch.setattr(worker, "clip", clip)
+    calls = []
+    def infer(request):
+        calls.append(request)
+        return httpx.Response(503)
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(transport=httpx.MockTransport(infer), **kw))
+    async with client:
+        path = "/transcripts/by-id/1/refinement/start"
+        await client.post(path, json={"normalize_audio":True})
+        await worker.task
+        job = await worker.current(7, 1)
+        metadata = {**job["items"][0]["preprocessing"], "audio_sha256":"f"*64}
+        monkeypatch.setattr("meeting_api.collector.refinement.prepare_audio", lambda content: (content,metadata))
+        await client.post(path, json={"retry_job_id":job["id"]})
+        await worker.task
+        item = (await worker.current(7, 1))["items"][0]
+        assert item["state"] == "skipped" and not item["retryable"] and item["error_code"] == "source_changed"
+        assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("options", [{"mode":"check","normalize_audio":True}, {"normalize_audio":"true"}])
+async def test_audio_preparation_validation_does_not_submit_asr(monkeypatch, options):
+    client, _, _, _, calls = await fixture(monkeypatch)
+    async with client:
+        assert (await client.post("/transcripts/by-id/1/refinement/start", json=options)).status_code == 422
+    assert not calls
+
+
+def test_quality_is_advisory_and_preserves_vietnamese_accents():
+    from meeting_api.collector.audio_quality import assess_audio
+    assert assess_audio(audio(0), "hello")["reasons"] == ["low_volume", "mostly_quiet"]
+    assert not assess_audio(audio(), "ma má mà mạ")["needs_review"]
+    assert "repetition" in assess_audio(audio(), "má má má má")["reasons"]
+    assert "clipping" in assess_audio(audio(32767), "speech")["reasons"]
+    with pytest.raises((ValueError, EOFError, wave.Error)):
+        assess_audio(b"not audio", "")
 
 ORIGIN = 1792522376000
 HEADERS = {"x-user-id": "7"}
@@ -52,6 +402,82 @@ async def fixture(monkeypatch):
     refiner = BotRefiner(store, repo, storage, backend)
     app = FastAPI(); app.include_router(build_router(store, None, refiner=refiner))
     return original(transport=httpx.ASGITransport(app=app), base_url="http://api.test", headers=HEADERS), store, storage, refiner, calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("amplitude,suggestion,expected", [
+    (0, "TINA, TINA. TINA! TINA?", "text_and_quiet_audio"),
+    (1000, "TINA, TINA. TINA! TINA?", "text_flag"),
+    (1000, "7", "no_text_flags"),
+])
+async def test_second_pass_flags_are_durable_advisory_and_never_auto_applied(monkeypatch, amplitude, suggestion, expected):
+    import json
+    from pathlib import Path
+    from jsonschema import validate
+
+    client, store, _, worker, _ = await fixture(monkeypatch)
+    source = audio(amplitude)
+    async def clip(*args):
+        return source
+    monkeypatch.setattr(worker, "clip", clip)
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"text": suggestion})), **kw))
+    async with client:
+        base = "/transcripts/by-id/1"
+        before = (await client.get(base + "/document")).json()
+        assert (await client.post(base + "/refinement/start", json={})).status_code == 202
+        await worker.task
+        job = (await client.get(base + "/refinement")).json()
+        item = job["items"][0]
+        assert item["state"] == "ready" and item["text"] == suggestion
+        assert item["quality"]["text_check"] == "no_text_flags"
+        assert item["proposal_quality"]["text_check"] == expected
+        assert all(item["proposal_quality"][k] == item["quality"][k] for k in ("rms", "quiet_ratio", "clipping_ratio"))
+        assert (await client.get(base + "/document")).json() == before
+        assert (await client.get(base + "/segments/s%2F1/audio")).content == source
+        restarted = BotRefiner(store, worker.repo, worker.storage, worker.backend)
+        assert await restarted.current(7, 1) == job
+        assert (await client.get(base + "/refinement", headers={"x-user-id": "8"})).status_code == 404
+        schema = Path(__file__).parents[3] / "contracts/transcript-refinement.v1/transcript-refinement.schema.json"
+        validate(job, json.loads(schema.read_text(encoding="utf8")))
+        # Even a flagged suggestion only changes the document after explicit owner Apply.
+        applied = await client.post(base + "/refinement/apply", json={"job_id": job["id"], "segment_id": "s/1", "expected_revision": 0})
+        assert applied.status_code == 200
+        assert applied.json()["segments"][0]["text"] == suggestion
+        restored = await client.patch(base + "/segments/s%2F1", json={"expected_revision": 1, "text": None})
+        assert restored.status_code == 200
+        assert restored.json()["segments"][0]["text"] == before["segments"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_proposal_check_does_not_publish_a_ready_suggestion(monkeypatch):
+    import threading
+    from meeting_api.collector.audio_quality import assess_text
+
+    client, store, _, worker, _ = await fixture(monkeypatch)
+    async def clip(*args):
+        return audio(1000)
+    monkeypatch.setattr(worker, "clip", clip)
+    entered, release = asyncio.Event(), threading.Event()
+    loop = asyncio.get_running_loop()
+    def delayed_check(*args):
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(5)
+        return assess_text(*args)
+    monkeypatch.setattr("meeting_api.collector.refinement.assess_text", delayed_check)
+    async with client:
+        await client.post("/transcripts/by-id/1/refinement/start", json={})
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            await worker.cancel(7, 1)
+        finally:
+            release.set()
+            await worker.task
+        job = await worker.current(7, 1)
+        assert job["status"] == "cancelled"
+        assert not any(i["state"] == "ready" for i in job["items"])
+        assert (await store.get_transcript_document(7, 1))["segments"][0]["revision"] == 0
 
 
 @pytest.mark.asyncio

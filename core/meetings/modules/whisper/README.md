@@ -11,6 +11,9 @@ nothing of topology, naming, or confirmation.
 - `isLowConfidenceSegment` drops acoustically-junk segments (bad logprob, high
   no-speech, runaway compression) before they reach the confirm loop.
 - WAV-encodes Float32 PCM, retries transient failures with backoff, 30s timeout.
+- Optional `windowRequest` transports an already-streamed window by reference; an undefined response
+  falls back to the original HTTP WAV. Both paths share retry, confidence and language-review policy.
+  `encodePcm16` is shared by WAV and continuous-frame encoding to keep checksum/sample parity.
 
 ## Surface
 `TranscriptionClient` · `continuityPrompt` · `isLowConfidenceSegment` · `setLogger` · types
@@ -28,6 +31,8 @@ That retry stays a review-only suggestion, with original audio/text retained.
 Optional `TranscriptionTiming` carries capture-to-submit milliseconds. Clients identify only their
 bounded source (`meeting-bot` / `extension` / `unknown`), create a UUID per HTTP attempt and send
 `X-ASR-*` diagnostic headers. No names, meeting identifiers, text or audio enter diagnostic metadata.
+Its optional `stream` reference carries the internal turn key/source start only to the private STT
+transport; it never enters public transcript/diagnostic headers.
 
 ## Verify
 ```bash

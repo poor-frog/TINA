@@ -135,6 +135,30 @@ const htmlComponents = {
 
 export const MDX_COMPONENTS = { ...htmlComponents, Note, Warning, Card, CardGroup, Steps, Step, Tabs, Tab, Wikilink };
 
+const readmeHeading = (level: 1 | 2 | 3 | 4) => {
+  const Tag = `h${level}` as "h1" | "h2" | "h3" | "h4";
+  const headingStyle: CSSProperties = level === 1
+    ? { margin: "0 0 14px", fontSize: 30, lineHeight: 1.12, fontWeight: 650, letterSpacing: "-.035em" }
+    : level === 2
+      ? { margin: "30px 0 10px", paddingTop: 18, borderTop: "1px solid var(--line)", fontSize: 20, lineHeight: 1.3, fontWeight: 620, letterSpacing: "-.015em" }
+      : { margin: "20px 0 8px", fontSize: level === 3 ? 16 : 14, lineHeight: 1.35, fontWeight: 600 };
+  return ({ children }: { children?: ReactNode }) => <Tag style={{ color: "var(--t1)", ...headingStyle }}>{children}</Tag>;
+};
+const README_COMPONENTS = {
+  ...MDX_COMPONENTS,
+  h1: readmeHeading(1), h2: readmeHeading(2), h3: readmeHeading(3), h4: readmeHeading(4),
+  p: ({ children }: { children?: ReactNode }) => <p style={{ maxWidth: "70ch", margin: "0 0 12px", fontSize: 15.5, lineHeight: 1.72 }}>{children}</p>,
+  ul: ({ children }: { children?: ReactNode }) => <ul style={{ maxWidth: "70ch", margin: "6px 0 16px", paddingLeft: 22, display: "flex", flexDirection: "column", gap: 5 }}>{children}</ul>,
+  ol: ({ children }: { children?: ReactNode }) => <ol style={{ maxWidth: "70ch", margin: "6px 0 16px", paddingLeft: 22, display: "flex", flexDirection: "column", gap: 5 }}>{children}</ol>,
+  li: ({ children }: { children?: ReactNode }) => <li style={{ lineHeight: 1.65, paddingInlineStart: 3 }}>{children}</li>,
+  blockquote: ({ children }: { children?: ReactNode }) => (
+    <blockquote style={{ maxWidth: "70ch", borderLeft: "3px solid var(--accent)", borderRadius: "0 8px 8px 0", padding: "14px 18px", margin: "18px 0 24px", color: "var(--t2)", background: "var(--panel)", lineHeight: 1.7 }}>{children}</blockquote>
+  ),
+  pre: ({ children }: { children?: ReactNode }) => (
+    <pre style={{ maxWidth: "70ch", fontFamily: "var(--mono)", fontSize: 12.5, background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 10, padding: "13px 15px", margin: "8px 0 16px", overflowX: "auto", lineHeight: 1.6, color: "var(--t1)" }}>{children}</pre>
+  ),
+};
+
 // ── security: forbid executable MDX ──────────────────────────────────────────
 // kg/ markdown is agent-written from meeting transcripts and external content, so it
 // is untrusted input. The component registry closes which TAGS resolve, but MDX
@@ -182,9 +206,11 @@ type CompileState =
 
 /** Renders workspace markdown as MDX with the registry above; falls back to the
  *  legacy <Markdown> renderer (with a subtle notice) when the source doesn't compile. */
-export function MdxDoc({ children, style }: { children: string; style?: CSSProperties }): ReactNode {
+export function MdxDoc({ children, style, variant = "default" }: { children: string; style?: CSSProperties; variant?: "default" | "readme" }): ReactNode {
   const src = children ?? "";
   const [state, setState] = useState<CompileState>({ status: "loading" });
+  const readme = variant === "readme";
+  const eyebrow = readme && <div style={{ margin: "24px 0 8px", color: "var(--t3)", fontSize: 11, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" }}>README</div>;
 
   useEffect(() => {
     let cancelled = false;
@@ -198,7 +224,8 @@ export function MdxDoc({ children, style }: { children: string; style?: CSSPrope
   if (state.status === "loading") return <div style={{ color: "var(--t3)", fontSize: 12, ...style }}>rendering…</div>;
   if (state.status === "fallback") {
     return (
-      <div style={style}>
+      <div style={{ maxWidth: readme ? "72ch" : undefined, ...style }}>
+        {eyebrow}
         {/* fail-loud: name the downgrade AND the reason inline — a tooltip-only error is
             invisible in screenshots and to anyone who doesn't hover */}
         <div style={{ fontFamily: "var(--mono)", fontSize: 10.5, color: "var(--t3)", marginBottom: 8 }}>
@@ -210,8 +237,9 @@ export function MdxDoc({ children, style }: { children: string; style?: CSSPrope
   }
   const Content = state.Content;
   return (
-    <div style={{ color: "var(--t1)", ...style }}>
-      <Content components={MDX_COMPONENTS} />
+    <div style={{ color: "var(--t1)", maxWidth: readme ? "72ch" : undefined, ...style }}>
+      {eyebrow}
+      <Content components={readme ? README_COMPONENTS : MDX_COMPONENTS} />
     </div>
   );
 }

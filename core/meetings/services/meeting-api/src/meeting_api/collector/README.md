@@ -132,3 +132,76 @@ the isolated agent worker uses CompletionPort and returns candidates. Only appro
 enter `data.processed.views` and the public proc stream. Edit/restore/speaker rename revokes the
 affected leases in the same mutation transaction. The revision outbox publishes current approved
 or stale state, and readers compare publication revisions when merging REST and SSE.
+
+## Audio quality review
+
+`audio_quality.py` measures bounded saved PCM16 clips on an owner-triggered refinement job.
+Low RMS, clipping, mostly quiet 20 ms frames and exact repeated phrases are advisory flags,
+not calibrated confidence or a speech/noise classifier. Vietnamese diacritics are retained.
+`RefinementOptions.mode` accepts `all` (existing default), `check` (no ASR/backend lookup)
+and `flagged` (measure every eligible clip and decode only flagged ones). All modes use
+the existing source clock, ownership, pause/cancel, revision and audio-hash protections.
+No raw text/audio is changed; only ready ASR proposals can be explicitly applied.
+
+Text/audio comparison also flags non-lexical text and repetition after Unicode NFC,
+case folding and trimming token-edge punctuation. Vietnamese accents are preserved;
+short replies, names and numbers are not rejected based on length. `text_check`
+distinguishes no text cues, text-only cues and text cues coinciding with >=80% quiet
+frames. Low volume or clipping alone never produces that last assessment. Quiet-frame
+energy is not VAD or independent proof of absent speech; all results are advisory.
+Every ready second-pass suggestion has its own `proposal_quality`, recomputed from
+its text and the same ORIGINAL-clip acoustic metrics, even when gain was used for
+inference. Neither suspected text nor audio is removed. Check/flagged modes, saved
+proposals, retry and revision-safe explicit Apply/Restore keep their existing flow.
+
+Refinement start also accepts `retry_job_id` for explicit failed-only retry. A new
+CAS-admitted job preserves settled proposals, mode and vocabulary, refreshes credentials
+for the same endpoint/model/backend hash, and checks failed clips against their original
+text revision and audio hash before inference. Safe error codes/reasons distinguish ASR
+auth, busy, timeout, network/server and response failures; provider payloads stay private.
+
+## Opt-in quiet-audio preparation and evaluation
+
+Bot refinement start accepts `normalize_audio: true` (default false) for ASR modes,
+not `check` or a retry override. `audio_preprocessing` pins `bounded-gain.v1` on the
+job. Eligible clips below RMS 0.003 may receive up to +12 dB toward RMS 0.01, capped
+at 90% PCM peak. Clips below RMS 0.0001, >=80% quiet frames, clipping, or unsuitable
+peaks allowing less than 5% gain stay unchanged. These energy gates do not establish speech presence or SNR.
+Preparation does not denoise, crop, pad, resample or move samples. The source
+`audio_sha256`, playback, Apply/Restore and source timestamps remain unchanged.
+Optional per-item `preprocessing` records actual gain/reason and prepared input hash;
+retry must reproduce that same input. `asr_elapsed_ms` measures the last HTTP attempt,
+excluding queue wait/preparation. Better accuracy is not guaranteed.
+
+`refinement_eval.py` provides a manual A/B probe using the same preparation function.
+Supply 1-20 local mono PCM16/16 kHz WAV clips, each <=30 seconds/2 MiB, with human-checked
+references. It calls the selected ASR directly and does not write application data.
+Use an idle worker. No bots, database fixtures or new model are launched.
+
+```bash
+# In core/meetings/services/meeting-api; credentials are supplied through environment.
+# TRANSCRIPTION_SERVICE_URL = the chosen ASR base URL or /v1/audio/transcriptions endpoint
+# TRANSCRIPTION_SERVICE_TOKEN = existing credential, if required
+# TRANSCRIPTION_MODEL = existing ASR model alias (default whisper-1)
+PYTHONPATH=src uv run python -m meeting_api.collector.refinement_eval \
+  --manifest /private/cases.json --output /private/refinement-report.json
+```
+
+Manifest example: `[{"audio":"clip.wav","reference":"Xin chào mọi người."}]`.
+Paths are relative to the manifest. Keep recordings/references outside Git. The report
+omits text, audio, endpoints and credentials; it records CER, token substitutions/
+deletions/insertions, first/last-two-token agreement, adjacent repeats and HTTP timing.
+CER uses NFC/casefold, excludes punctuation/whitespace and retains Vietnamese accents.
+Token alignment counts whitespace tokens, not Vietnamese linguistic words. A text
+edge mismatch is a review cue, not proof that capture or cutting lost audio.
+Identical prepared/source input reuses one inference, explicitly marked in the report.
+Timings are single-pass observations and can include warm-up; this is not a latency SLO.
+
+Saved bot clips now keep packet timestamps through an optional coarse whole-second
+seek with 1-2 seconds of pre-roll, then trim on the resampled 16 kHz clock. The zero
+seek is omitted to avoid reapplying Opus encoder pre-skip. Missing audio beyond 1 ms
+is rejected; no silence is synthesized. This fixes the direct-seek boundary loss
+reproduced on WebM/Opus. Reconstructed clip hashes may differ from older jobs;
+existing source-hash checks reject stale Apply/retry and require a fresh refinement.
+
+Apply copies the prepared-input metadata into immutable correction history; later jobs and Restore preserve that provenance. The evaluation CLI reuses the existing transcription environment keys and introduces no deployment configuration.

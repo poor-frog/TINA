@@ -13,8 +13,10 @@ import { type AuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import { cookies } from "next/headers";
-import { AUTH_COOKIE, USER_INFO_COOKIE, findOrCreateUserToken } from "../adminApi";
+import { AUTH_COOKIE, USER_INFO_COOKIE, findOrCreateUserToken, linkGoogleCalendarAccount, validateAuthToken } from "../adminApi";
 import { googleAvatarUrl } from "../googleAvatar";
+import { GOOGLE_CALENDAR_LINK_COOKIE, listGoogleCalendars, verifyGoogleCalendarLinkIntent } from "../googleCalendarLink";
+import { GOOGLE_CALENDAR_PROVIDER, GOOGLE_CALENDAR_AUTHORIZATION_PARAMS, GOOGLE_CALENDAR_SCOPES } from "../../../../lib/googleCalendar";
 
 const isGoogleEnabled = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 const isMicrosoftEnabled = () =>
@@ -41,6 +43,13 @@ export const authOptions: AuthOptions = {
             clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
             authorization: { params: { prompt: "select_account" } },
           }),
+          GoogleProvider({
+            id: GOOGLE_CALENDAR_PROVIDER,
+            name: "Google Calendar",
+            clientId: process.env.GOOGLE_CLIENT_ID!,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+            authorization: { params: GOOGLE_CALENDAR_AUTHORIZATION_PARAMS },
+          }),
         ]
       : []),
     ...(isMicrosoftEnabled()
@@ -66,6 +75,45 @@ export const authOptions: AuthOptions = {
      *  `tina-user-info` cookies, reusing the admin-api find-or-create+mint flow. Deny on any failure. */
     async signIn({ user, account }) {
       const provider = account?.provider;
+      if (provider === GOOGLE_CALENDAR_PROVIDER && account) {
+        const cookieStore = await cookies();
+        const intent = cookieStore.get(GOOGLE_CALENDAR_LINK_COOKIE)?.value;
+        // Linking has its own provider/callback so an expired intent can never become a login.
+        if (!intent) return false;
+        const clearIntent = () => cookieStore.set(GOOGLE_CALENDAR_LINK_COOKIE, "", {
+          httpOnly: true, secure: isSecureRequest(), sameSite: "lax", maxAge: 0, path: "/api/auth",
+        });
+        try {
+          const tinaToken = cookieStore.get(AUTH_COOKIE)?.value;
+          const identity = tinaToken ? await validateAuthToken(tinaToken) : { ok: false as const };
+          if (!tinaToken || !identity.ok || !verifyGoogleCalendarLinkIntent(intent, identity.userId)) {
+            clearIntent();
+            return false;
+          }
+          const granted = new Set((account.scope || "").split(/\s+/).filter(Boolean));
+          if (!GOOGLE_CALENDAR_SCOPES.every((scope) => granted.has(scope))
+              || !account.access_token || !account.providerAccountId || !user.email) {
+            clearIntent();
+            return false;
+          }
+          const calendars = await listGoogleCalendars(account.access_token);
+          if (!calendars.length) {
+            clearIntent();
+            return false;
+          }
+          const saved = await linkGoogleCalendarAccount(tinaToken, {
+            provider_account_id: account.providerAccountId,
+            email: user.email,
+            refresh_token: account.refresh_token,
+            calendars,
+          });
+          clearIntent();
+          return saved.ok;
+        } catch {
+          clearIntent();
+          return false;
+        }
+      }
       if ((provider !== "google" && provider !== "microsoft") || !user.email) return false;
 
       const result = await findOrCreateUserToken(user.email.toLowerCase());

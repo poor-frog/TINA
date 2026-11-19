@@ -9,6 +9,9 @@ Drives the SHIPPED ``auto_join_tick`` over the in-memory fakes, OFFLINE.
 """
 from __future__ import annotations
 
+import pytest
+import json
+
 from datetime import datetime, timedelta, timezone
 
 from meeting_api.bot_spawn.auto_join import DEFAULT_LEAD_S, auto_join_tick, due_rows
@@ -58,6 +61,29 @@ async def test_due_row_spawns_and_claims_in_place():
     assert row["status"] == "requested"          # the SAME row was claimed
     assert row["data"]["title"] == "t"           # planned keys survive
     assert len(runtime.specs) == 1
+
+
+@pytest.mark.parametrize('prepare',[True,False])
+async def test_calendar_join_uses_livekit_defaults_without_overriding_account_opt_out(monkeypatch,prepare):
+    from meeting_api.bot_spawn import service
+    async def context(_):
+        return {'transcription':{'url':'http://asr.test','token':'synthetic'},
+                'voice':{'prepare_new_bots':prepare}}
+    monkeypatch.setattr(service,'_fetch_bot_context',context)
+    monkeypatch.setenv('TTS_SERVICE_URL','http://tts.test')
+    monkeypatch.setenv('TINA_MEETING_VOICE','1')
+    monkeypatch.setenv('TRANSCRIBE_ENABLED','true')
+    repo,runtime=InMemoryMeetingRepo(),FakeRuntimeClient();mid=_seed(repo)
+    result=await _tick(repo,runtime)
+    assert result['spawned']==1
+    config=json.loads(runtime.specs[0]['env']['TINA_BOT_CONFIG'])
+    assert config.get('voiceAgentEnabled',False) is prepare
+    policy=repo._meetings[mid]['data'].get('voice_assistant',{})
+    if prepare:
+        assert policy['engine']=='livekit'
+        assert all(policy[key] for key in ('enabled','include_transcript','allow_general_knowledge','allow_web_search'))
+        assert policy['documents']==[]
+    else:assert not policy
 
 
 async def test_due_row_uses_user_calendar_bot_name():

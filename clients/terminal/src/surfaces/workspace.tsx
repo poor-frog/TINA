@@ -3,11 +3,12 @@
  *  entity: frontmatter + wikilinked body). Clicking a file opens a Doc tab; the chat rail references the
  *  active file from the center tab. Reuses /api/workspace/*. */
 import { useContext, useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
-import { useService } from "../platform";
+import { useService, useStore } from "../platform";
 import { LayoutServiceId } from "../workbench/layout";
 import { registerList, registerTab, type TabProps } from "../contributions";
 import { meetingsOnly } from "../app/mode";
 import { Icon, Checkbox } from "../ui-kit";
+import { Bot, Building2, CalendarDays, ContactRound, FolderClosed, FolderKanban, Network, PanelsTopLeft, Repeat2, Sparkles, Tags } from "lucide-react";
 import { Modal } from "../ui-kit/Modal";
 import { OPEN_ENTITY_EVENT, requestChat } from "../canvas/actions";
 import { ENTITY_CHIP, DEFAULT_ENTITY_CHIP, DocMetaContext, DocNavContext, resolveDocRef, type DocNavigate } from "../ui-kit/docLinks";
@@ -15,6 +16,9 @@ import { ContextMenu, copyText } from "../ui-kit/ContextMenu";
 import { MdxDoc } from "../ui-kit/MdxDoc";
 import { MeetingWikiSourceStatus } from './MeetingKnowledge';
 import { WorkspaceContentSearch } from './WorkspaceContentSearch';
+import { WorkspaceGraphTab } from "./workspaceGraph";
+import panelStyles from "./workspacePanel.module.css";
+import jsonStyles from "./JsonDocument.module.css";
 // Data-access lives in its own SoC module (scoped to the authed user — no client subject, P20),
 // proven in isolation by workspaceApi.test.ts.
 import { readWorkspaceFile, listWorkspaceTree, readWorkspaceGit, readWorkspaceGitDiff, readAttachedWorkspaces, renameWorkspace, publishWorkspace, readActiveSet, activateWorkspace, deactivateWorkspace, createWorkspace, mintInvite, listSharedMemberships, setSharedActive, shareEnableWorkspace, unshareWorkspace, archiveWorkspace, deleteWorkspace, type GitState, type GitCommit, type AttachedWorkspaces, type PublishResult, type ActiveMount, type Membership } from "./workspaceApi";
@@ -53,13 +57,22 @@ function wikilinks(text: string, navigate?: DocNavigate | null): ReactNode[] {
 const REVEAL_PATH_EVENT = "tina:terminal:reveal-path";
 /** All ancestor dir paths of `dir` (inclusive), e.g. "kg/entities/org" → [kg, kg/entities, kg/entities/org]. */
 const ancestorDirs = (dir: string): string[] => dir.split("/").filter(Boolean).map((_, i, parts) => parts.slice(0, i + 1).join("/"));
+function revealTreeRow(path: string): void {
+  const row = [...document.querySelectorAll<HTMLElement>("[data-tree-path]")].find((item) => item.dataset.treePath === path);
+  const scroller = row?.closest<HTMLElement>("[data-workspace-scroll]");
+  if (!row || !scroller) return;
+  const rowRect = row.getBoundingClientRect();
+  const scrollRect = scroller.getBoundingClientRect();
+  if (rowRect.top < scrollRect.top + 8) scroller.scrollTop += rowRect.top - scrollRect.top - 8;
+  else if (rowRect.bottom > scrollRect.bottom - 8) scroller.scrollTop += rowRect.bottom - scrollRect.bottom + 8;
+}
 function revealInTree(dir: string): void {
   // Persist first so a not-yet-mounted FilesList picks it up on mount; the event covers the mounted case.
   try {
     const cur = JSON.parse(readSS(SS_EXPANDED) ?? "[]") as string[];
     writeSS(SS_EXPANDED, JSON.stringify([...new Set([...(Array.isArray(cur) ? cur : []), ...ancestorDirs(dir)])]));
   } catch { writeSS(SS_EXPANDED, JSON.stringify(ancestorDirs(dir))); }
-  if (!dir.startsWith("kg")) writeSS(SS_HIDDEN, "0");  // target hidden by the kg-only filter → reveal all
+  if (dir !== "README.md" && dir !== "kg" && !dir.startsWith("kg/")) writeSS(SS_KG_ONLY, "0");
   writeSS(SS_FILES_OPEN, "1");  // the Files section is collapsed by default — a reveal must expand it
   window.dispatchEvent(new CustomEvent(REVEAL_PATH_EVENT, { detail: { dir } }));
 }
@@ -100,7 +113,7 @@ function CommitRow({ c, wsLabel, onOpen }: { c: GitCommit; wsLabel?: string; onO
         </span>
         <span style={{ fontFamily: "var(--mono)", color: "var(--green)", flex: "none" }}>{c.sha}</span>
         <span style={{ flex: "none" }}>{c.when}</span>
-        {wsLabel && <span title={`in ${wsLabel}`} style={{ marginLeft: "auto", color: "var(--accent)", fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "40%", textTransform: "uppercase", letterSpacing: ".03em" }}>{wsLabel}</span>}
+        {wsLabel && <span title={`in ${wsLabel}`} style={{ marginLeft: "auto", color: "var(--accent)", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "40%" }}>{wsLabel}</span>}
       </div>
       {/* the files this commit touched — clickable links that OPEN the file (its exact diff is one click
           away in the doc header's "Changes"). */}
@@ -123,6 +136,21 @@ function CommitRow({ c, wsLabel, onOpen }: { c: GitCommit; wsLabel?: string; onO
 
 // ── tree model: fold the flat path list into nested folder/file nodes ─────────────
 interface TreeNode { name: string; path: string; isDir: boolean; children: TreeNode[] }
+const TREE_FOLDER_ICONS = { agents: Bot, kg: Network, routines: Repeat2, skills: Sparkles, views: PanelsTopLeft };
+const KG_FOLDER_ICONS: Record<string, typeof Network> = {
+  "kg/entities": Network,
+  "kg/entities/company": Building2,
+  "kg/entities/meeting": CalendarDays,
+  "kg/entities/organization": Network,
+  "kg/entities/person": ContactRound,
+  "kg/entities/project": FolderKanban,
+  "kg/entities/topic": Tags,
+};
+function TreeFolderIcon({ path }: { path: string }) {
+  const name = path.split("/").at(-1)?.toLowerCase() ?? "";
+  const FolderIcon = KG_FOLDER_ICONS[path] ?? TREE_FOLDER_ICONS[name as keyof typeof TREE_FOLDER_ICONS] ?? FolderClosed;
+  return <FolderIcon className={panelStyles.folderIcon} size={16} strokeWidth={1.8} aria-hidden="true" />;
+}
 function buildTree(paths: string[]): TreeNode[] {
   const root: TreeNode = { name: "", path: "", isDir: true, children: [] };
   for (const p of [...paths].sort()) {
@@ -142,37 +170,45 @@ function buildTree(paths: string[]): TreeNode[] {
 }
 
 // ── recursive tree row (folders collapse, files open a doc tab) ──────────────────
-function TreeRow({ node, depth, expanded, toggle, openFile, pinFile, openMenu }: {
-  node: TreeNode; depth: number; expanded: Set<string>; toggle: (p: string) => void; openFile: (p: string) => void; pinFile: (p: string) => void; openMenu: (e: MouseEvent<HTMLDivElement>, p: string) => void;
+function TreeRow({ node, expanded, toggle, openFile, pinFile, openMenu, activePath }: {
+  node: TreeNode; expanded: Set<string>; toggle: (p: string) => void; openFile: (p: string) => void; pinFile: (p: string) => void; openMenu: (e: MouseEvent<HTMLElement>, p: string) => void; activePath?: string | null;
 }) {
-  const pad = 9 + depth * 13;
-  const hover = { onMouseEnter: (e: MouseEvent<HTMLDivElement>) => (e.currentTarget.style.background = "var(--panel2)"), onMouseLeave: (e: MouseEvent<HTMLDivElement>) => (e.currentTarget.style.background = "transparent") };
   // single-click → preview (immediate — openPreview/openTab reconcile by id, so a
   // double-click harmlessly previews then pins); double-click → pinned tab.
   if (!node.isDir) {
     return (
-      <div
+      <button
+        type="button"
         data-tree-path={node.path}
+        className={panelStyles.treeFile}
+        aria-label={`Open ${node.path}`}
+        aria-current={activePath === node.path ? "page" : undefined}
+        title={activePath === node.path ? `Currently open: ${node.path}` : undefined}
         onClick={() => openFile(node.path)}
         onDoubleClick={() => pinFile(node.path)}
-        onContextMenu={(e) => openMenu(e, node.path)}
-        {...hover}
-        style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 9px", paddingLeft: pad + 14, borderRadius: 6, cursor: "pointer", fontSize: 12.5, color: "var(--t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-        <Icon name="file" size={13} style={{ color: "var(--t3)" }} />
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{node.name}</span>
-      </div>
+        onContextMenu={(e) => openMenu(e, node.path)}>
+        <Icon name="file" size={14} aria-hidden="true" />
+        <span className={panelStyles.treeLabel}>{node.name}</span>
+        {activePath === node.path && <span className={panelStyles.activeFileTag}>Open</span>}
+      </button>
     );
   }
   const open = expanded.has(node.path);
+  const containsActive = Boolean(activePath?.startsWith(`${node.path}/`));
   return (
     <>
-      <div data-tree-path={node.path} onClick={() => toggle(node.path)} {...hover}
-        style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 9px", paddingLeft: pad, borderRadius: 6, cursor: "pointer", fontSize: 12.5, color: "var(--t1)" }}>
-        <Icon name="chevR" size={13} style={{ color: "var(--t3)", transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }} />
-        <Icon name="folder" size={13} style={{ color: "var(--accent)" }} />
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{node.name}</span>
-      </div>
-      {open && node.children.map((c) => <TreeRow key={c.path} node={c} depth={depth + 1} expanded={expanded} toggle={toggle} openFile={openFile} pinFile={pinFile} openMenu={openMenu} />)}
+      <button type="button" data-tree-path={node.path} className={panelStyles.treeFolder}
+        aria-expanded={open} aria-label={`${open ? "Collapse" : "Expand"} ${node.name}${node.path === "kg" ? ", Knowledge" : ""}`}
+        data-contains-active={containsActive || undefined}
+        onClick={() => toggle(node.path)}>
+        <span className={panelStyles.chevron} aria-hidden="true"><Icon name="chevR" size={13} /></span>
+        <TreeFolderIcon path={node.path} />
+        <span className={panelStyles.treeLabel}>{node.name}</span>
+        {node.path === "kg" && <span className={panelStyles.treeFolderKind}>Knowledge</span>}
+      </button>
+      {open && <div className={panelStyles.treeChildren} role="group">
+        {node.children.map((c) => <TreeRow key={c.path} node={c} expanded={expanded} toggle={toggle} openFile={openFile} pinFile={pinFile} openMenu={openMenu} activePath={activePath} />)}
+      </div>}
     </>
   );
 }
@@ -185,6 +221,9 @@ function TreeRow({ node, depth, expanded, toggle, openFile, pinFile, openMenu }:
 // tree is untouched, so the single-workspace view can never regress.
 function MountSection({ mount }: { mount: ActiveMount }) {
   const layout = useService(LayoutServiceId);
+  const { activeTab } = useStore(layout.store);
+  const activePath = activeTab?.kind === "doc" && activeTab.params.slug === mount.slug
+    ? String(activeTab.params.path ?? "") : null;
   const [tree, setTree] = useState<string[]>([]);
   const [open, setOpen] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -215,52 +254,63 @@ function MountSection({ mount }: { mount: ActiveMount }) {
   const toggleDir = (p: string) => setExpanded((prev) => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n; });
   const openDoc = (p: string) => layout.openPreview(docTab(p, mount.slug));
   const pinDoc = (p: string) => layout.openTab(docTab(p, mount.slug));
+  useEffect(() => {
+    if (!activePath) return;
+    setOpen(true);
+    const directory = activePath.split("/").slice(0, -1).join("/");
+    if (directory) setExpanded((prev) => new Set([...prev, ...ancestorDirs(directory)]));
+    const timer = window.setTimeout(() => revealTreeRow(activePath), 80);
+    return () => window.clearTimeout(timer);
+  }, [activePath, tree]);
   return (
-    <div style={{ marginTop: 2 }}>
-      <div onClick={() => setOpen((v) => !v)} title="Shared workspace — read-only"
-        style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 8px", cursor: "pointer",
-          fontSize: 11, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em" }}>
-        <Icon name="chevR" size={12} style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }} />
-        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{mount.name || mount.slug}</span>
+    <section className={panelStyles.mountSection}>
+      <button type="button" className={panelStyles.sectionToggle} aria-expanded={open}
+        title={mount.role === "shared" ? "Shared workspace. Access depends on your role." : undefined}
+        onClick={() => setOpen((v) => !v)}>
+        <span className={panelStyles.chevron} aria-hidden="true"><Icon name="chevR" size={13} /></span>
+        <span className={panelStyles.sectionIcon} aria-hidden="true"><Icon name="folder" size={14} /></span>
+        <span className={panelStyles.treeLabel}>{mount.name || mount.slug}</span>
         {mount.role === "shared" && (
-          <span title={mount.write ? "Shared · read-write" : "Shared · read-only"}
-            style={{ marginLeft: "auto", display: "flex", alignItems: "center", color: mount.write ? "var(--accent)" : "var(--t3)" }}>
+          <span className={panelStyles.mountRole} title={mount.write ? "Shared, read-write" : "Shared, read-only"}>
             <Icon name={mount.write ? "user" : "eye"} size={12} />
           </span>
         )}
-      </div>
+      </button>
       {open && (<>
-        {error && <div role="alert" style={{ margin: "0 8px 6px", fontSize: 11.5, color: "var(--danger)" }}>⚠ {error}</div>}
-        {nodes.map((n) => <TreeRow key={n.path} node={n} depth={0} expanded={expanded} toggle={toggleDir}
-          openFile={openDoc} pinFile={pinDoc} openMenu={() => {}} />)}
-        {!error && tree.length === 0 && <div style={{ padding: "3px 12px", color: "var(--t3)", fontSize: 12 }}>Empty.</div>}
+        {error && <p role="alert" className={panelStyles.workspaceError}>{error}</p>}
+        {nodes.map((n) => <TreeRow key={n.path} node={n} expanded={expanded} toggle={toggleDir}
+          openFile={openDoc} pinFile={pinDoc} openMenu={() => {}} activePath={activePath} />)}
+        {!error && tree.length === 0 && <p className={panelStyles.emptyState}>No files in this workspace.</p>}
         {/* No per-workspace activity strip — all members' pushes surface in the ONE aggregated RECENT
             ACTIVITY feed (GitSection) + the "new updates" badge on the Knowledge nav. */}
       </>)}
-    </div>
+    </section>
   );
 }
 
 // ── Files LIST (left) ───────────────────────────────────────────────────────────
-const SS_EXPANDED = "ws.tree.expanded", SS_HIDDEN = "ws.tree.hidden", SS_SYSTEM = "ws.system.show", SS_FILES_OPEN = "ws.files.open";
-export function FilesList() {  // exported for the surface test
+const SS_EXPANDED = "ws.tree.expanded", SS_KG_ONLY = "ws.tree.knowledgeOnly.v1", SS_SYSTEM = "ws.system.show", SS_FILES_OPEN = "ws.files.open.v2", SS_WS_FOCUS = "ws.focused";
+export function FilesList({ showSourceControl = true }: { showSourceControl?: boolean } = {}) {
   const layout = useService(LayoutServiceId);
+  const { activeTab } = useStore(layout.store);
+  const activeDocument = activeTab?.kind === "doc" ? activeTab : null;
+  const activeDocumentPath = activeDocument ? String(activeDocument.params.path ?? "") : null;
+  const activeDocumentSlug = activeDocument?.params.slug == null ? undefined : String(activeDocument.params.slug);
+  const [knowledgeMode, setKnowledgeMode] = useState<"files" | "graph">(() =>
+    layout.store.getState().activeTab?.kind === "kgGraph" ? "graph" : "files",
+  );
   const [tree, setTree] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);  // fail-loud (P18): a tree-load failure is shown, not hidden as "empty"
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);  // bumped after a workspace swap → re-fetch the tree
-  // Knowledge view defaults to ONLY the knowledge graph (kg/); the eye toggle reveals the rest of the
-  // workspace scaffold (CLAUDE.md, agents/, skills/, views/, …). Default ON = kg-only.
-  // Default: show the ENTIRE workspace (a normal workspace IS the knowledge — full context to share &
-  // collaborate on, not kg-only). The eye toggle can still collapse to just the knowledge graph.
-  const [kgOnly, setKgOnly] = useState<boolean>(() => readSS(SS_HIDDEN) === "1");
+  // Keep Knowledge files focused while retaining the workspace README as its landing page.
+  const [kgOnly, setKgOnly] = useState<boolean>(() => readSS(SS_KG_ONLY) !== "0");
   // _system (the user's private system workspace — chats/settings/routines, RW) is HIDDEN BY DEFAULT;
   // a toggle surfaces it as a section in the files panel.
   const [showSystem, setShowSystem] = useState<boolean>(() => readSS(SS_SYSTEM) === "1");
   // Workspaces are the PRIMARY object of the Knowledge rail; the file tree recedes behind a
   // collapsed FILES section (Find-file stays visible — search is the fast path, browsing the fallback).
-  const [filesOpen, setFilesOpen] = useState<boolean>(() => readSS(SS_FILES_OPEN) === "1");
-  const toggleFiles = () => setFilesOpen((v) => { const n = !v; writeSS(SS_FILES_OPEN, n ? "1" : "0"); return n; });
+  const [filesOpen, setFilesOpen] = useState<boolean>(() => readSS(SS_FILES_OPEN) !== "0");
   // Lane A: every NON-PRIMARY active mount (other private workspaces + shared) — rendered as sections
   // beneath the primary tree, so KNOWLEDGE mirrors the agent's full mount set, not just the primary.
   const [extraMounts, setExtraMounts] = useState<ActiveMount[]>([]);
@@ -270,6 +320,10 @@ export function FilesList() {  // exported for the surface test
   // the HOME mount (first active) — the finder's main section; null = loaded + empty active
   // set, undefined = not yet loaded (render nothing rather than a flash of "No active workspace")
   const [homeMount, setHomeMount] = useState<ActiveMount | null | undefined>(undefined);
+  const [focusedSlug, setFocusedSlug] = useState<string | null>(() => readSS(SS_WS_FOCUS));
+  const homeActivePath = activeDocumentPath && homeMount &&
+    (activeDocumentSlug === homeMount.slug || (!activeDocumentSlug && homeMount.slug === "seed"))
+    ? activeDocumentPath : null;
   // per-mount trees (keyed by slug) so the Find-file search can reach shared/other workspaces, not just
   // the primary — otherwise a file a member's agent wrote in a SHARED ws is invisible to search.
   const [mountTrees, setMountTrees] = useState<Record<string, string[]>>({});
@@ -286,7 +340,18 @@ export function FilesList() {  // exported for the surface test
     // visible + re-fetch on window focus. setTree only on change so React skips no-op renders.
     const load = () => void readActiveSet()
       .then(async (s) => {
-        const home = s.active.find((m) => m.primary) ?? s.active[0] ?? null;
+        const requestedHome = focusedSlug ? s.active.find((m) => m.slug === focusedSlug) : null;
+        const home = requestedHome
+          ?? s.active.find((m) => m.primary)
+          ?? s.active[0]
+          ?? null;
+        if (home && focusedSlug && home.slug !== focusedSlug) {
+          writeSS(SS_WS_FOCUS, home.slug);
+          setFocusedSlug(home.slug);
+        } else if (!home && focusedSlug) {
+          writeSS(SS_WS_FOCUS, "");
+          setFocusedSlug(null);
+        }
         setHomeMount(home);
         const mounts = s.active.filter((m) => m !== home);
         setExtraMounts(mounts);
@@ -309,25 +374,44 @@ export function FilesList() {  // exported for the surface test
     const id = setInterval(() => { if (!document.hidden) load(); }, 5000);
     window.addEventListener("focus", load);
     return () => { clearInterval(id); window.removeEventListener("focus", load); };
-  }, [reloadKey]);
+  }, [reloadKey, focusedSlug]);
   // No active workspace ⇒ nothing to show (a deactivated workspace's files leave with it, like any mount).
   const hasHome = homeMount != null;
-  const nodes = hasHome ? buildTree(kgOnly ? tree.filter((p) => p.startsWith("kg/")) : tree) : [];
+  const isKnowledgeFile = (path: string) => path === "README.md" || path.startsWith("kg/");
+  const nodes = hasHome ? buildTree(kgOnly ? tree.filter(isKnowledgeFile) : tree) : [];
   // default expansion: top-level folders open, deeper folders collapsed (only when no saved state yet)
   useEffect(() => {
     if (readSS(SS_EXPANDED) != null || nodes.length === 0) return;
     const top = new Set(nodes.filter((n) => n.isDir).map((n) => n.path));
     setExpanded(top); writeSS(SS_EXPANDED, JSON.stringify([...top]));
   }, [tree]);  // eslint-disable-line react-hooks/exhaustive-deps
+  // Keep the user's kg-only choice; the explicit Reveal action exits it for paths outside kg/.
+  useEffect(() => {
+    if (!homeActivePath || !homeMount) return;
+    setKnowledgeMode("files");
+    setSearchMode("filename");
+    setQuery("");
+    setFilesOpen(true);
+    writeSS(SS_FILES_OPEN, "1");
+    const directory = homeActivePath.split("/").slice(0, -1).join("/");
+    if (directory) setExpanded((prev) => {
+      const next = new Set([...prev, ...ancestorDirs(directory)]);
+      writeSS(SS_EXPANDED, JSON.stringify([...next]));
+      return next;
+    });
+    const timer = window.setTimeout(() => revealTreeRow(homeActivePath), 80);
+    return () => window.clearTimeout(timer);
+  }, [homeActivePath, homeMount?.slug, tree]);
   // Breadcrumb "reveal in tree": expand every ancestor of the requested folder (and leave the
   // kg-only filter if the target lives outside kg/). sessionStorage was already updated by the sender.
   useEffect(() => {
     const onReveal = (e: Event) => {
       const dir = (e as CustomEvent<{ dir?: string }>).detail?.dir;
       if (!dir) return;
-      if (!dir.startsWith("kg")) setKgOnly(false);
+      if (!isKnowledgeFile(dir) && dir !== "kg") { setKgOnly(false); writeSS(SS_KG_ONLY, "0"); }
       setFilesOpen(true);  // sessionStorage was already set by the sender (revealInTree)
       setQuery("");  // a live search hides the tree — clear it so the reveal is visible
+      setSearchMode("filename");
       setExpanded((prev) => new Set([...prev, ...ancestorDirs(dir)]));
       // after the expansion renders, bring the revealed row into view and flash it
       window.setTimeout(() => {
@@ -358,16 +442,18 @@ export function FilesList() {  // exported for the surface test
     const next = new Set(prev); next.has(p) ? next.delete(p) : next.add(p);
     writeSS(SS_EXPANDED, JSON.stringify([...next])); return next;
   });
-  const toggleKgOnly = () => setKgOnly((v) => { const n = !v; writeSS(SS_HIDDEN, n ? "1" : "0"); return n; });
-  const openMenu = (e: MouseEvent<HTMLDivElement>, path: string) => {
+  const toggleKgOnly = () => setKgOnly((v) => { const n = !v; writeSS(SS_KG_ONLY, n ? "1" : "0"); return n; });
+  const openMenu = (e: MouseEvent<HTMLElement>, path: string) => {
     e.preventDefault();
     e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY, path });
   };
   // ── instant file-name search: pure client-side filter over the already-loaded tree ──
   const [query, setQuery] = useState("");
+  const [searchMode, setSearchMode] = useState<"filename" | "content">("filename");
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const q = query.trim().toLowerCase();
-  const scoped = !hasHome ? [] : (kgOnly ? tree.filter((p) => p.startsWith("kg/")) : tree);
+  const scoped = !hasHome ? [] : (kgOnly ? tree.filter(isKnowledgeFile) : tree);
   // search spans the primary tree AND every active mount (shared / other private), each hit tagged with
   // its slug + workspace label — so a file a member's agent wrote in a SHARED workspace is findable and
   // opens against the right mount, not just the caller's own primary.
@@ -388,63 +474,139 @@ export function FilesList() {  // exported for the surface test
         .slice(0, 60)
     : [];
   const homeLabel = homeMount ? (homeMount.name || (homeMount.slug === "seed" ? "Personal" : homeMount.slug)) : null;
+  const graphOpen = knowledgeMode === "graph";
+  const focusWorkspace = (slug: string) => {
+    writeSS(SS_WS_FOCUS, slug);
+    setFocusedSlug(slug);
+    setQuery("");
+    setSearchMode("filename");
+    setOptionsOpen(false);
+    setKnowledgeMode("files");
+    setFilesOpen(true);
+    writeSS(SS_FILES_OPEN, "1");
+  };
+  const openGraph = () => {
+    if (!homeMount) return;
+    setKnowledgeMode("graph");
+    setOptionsOpen(false);
+    setFilesOpen(false);
+    writeSS(SS_FILES_OPEN, "0");
+    layout.openTab({
+      id: `kgGraph:${homeMount.slug}`,
+      title: "Knowledge graph",
+      kind: "kgGraph",
+      params: { slug: homeMount.slug, name: homeLabel },
+    });
+  };
+  const openFiles = () => {
+    setKnowledgeMode("files");
+    setFilesOpen(true);
+    writeSS(SS_FILES_OPEN, "1");
+    setSearchMode("filename");
+    setOptionsOpen(false);
+    setQuery("");
+    const previewPath = tree.includes("README.md") ? "README.md" : tree[0];
+    if (layout.store.getState().activeTab?.kind === "kgGraph" && homeMount && previewPath) {
+      layout.openPreview(docTab(previewPath, homeMount.slug));
+    }
+  };
   return (
-    <div style={{ padding: "6px 8px" }}>
-      {/* WORKSPACES FIRST — the top-level object of Knowledge; the file tree recedes below. */}
-      <WorkspaceSwitcher onSwapped={() => setReloadKey((k) => k + 1)} />
-      <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 8 }} />
-      <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", padding: "2px 8px 6px", display: "flex", alignItems: "center", gap: 6 }}>
-        <span onClick={toggleFiles} title={filesOpen ? "Collapse the file tree" : "Browse the workspace files"}
-          style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", minWidth: 0 }}>
-          <Icon name="chevR" size={12} style={{ transform: filesOpen ? "rotate(90deg)" : "none", transition: "transform .12s", flex: "none" }} />
-          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>files{homeLabel ? ` · ${homeLabel}` : ""}</span>
-        </span>
-        <span onClick={() => setReloadKey((k) => k + 1)} title="Refresh the file list"
-          style={{ marginLeft: "auto", display: "flex", cursor: "pointer", color: "var(--t3)" }}>
-          <Icon name="refresh" size={13} />
-        </span>
-        <span onClick={toggleKgOnly} title={kgOnly ? "Show all workspace files" : "Show only the knowledge graph"}
-          style={{ display: "flex", cursor: "pointer", color: kgOnly ? "var(--accent)" : "var(--t3)" }}>
-          <Icon name={kgOnly ? "eye" : "eyeOff"} size={13} />
-        </span>
-        <span onClick={() => setShowSystem((v) => { const n = !v; writeSS(SS_SYSTEM, n ? "1" : "0"); return n; })}
-          title={showSystem ? "Hide the private system workspace" : "Show the private system workspace (_system)"}
-          style={{ display: "flex", cursor: "pointer", color: showSystem ? "var(--accent)" : "var(--t3)" }}>
-          <Icon name="key" size={13} />
-        </span>
-      </div>
-      <div style={{ padding: "0 4px 8px", position: "relative" }}>
-        <Icon name="search" size={12} style={{ position: "absolute", left: 13, top: 8, color: "var(--t3)", pointerEvents: "none" }} />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") { e.stopPropagation(); setQuery(""); e.currentTarget.blur(); }
-            if (e.key === "Enter" && matches[0]) layout.openPreview(docTab(matches[0].p, matches[0].slug));
-          }}
-          placeholder="Find file…"
-          spellCheck={false}
-          style={{ width: "100%", boxSizing: "border-box", fontSize: 12.5, padding: "5px 8px 5px 26px", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 7, color: "var(--t1)", outline: "none" }}
-        />
-      </div>
-      <WorkspaceContentSearch mounts={[...(homeMount ? [homeMount] : []), ...extraMounts]} onOpen={(path, slug) => layout.openPreview(docTab(path, slug))} />
-      {error && <div role="alert" style={{ margin: "0 8px 8px", fontSize: 12, color: "var(--danger)", background: "var(--panel)", border: "1px solid var(--danger)", borderRadius: 8, padding: "8px 10px" }}>⚠ Couldn’t load the workspace — {error}</div>}
-      {q ? (<>
-        {matches.map((h) => (
-          <div key={(h.slug || "") + ":" + h.p} onClick={() => layout.openPreview(docTab(h.p, h.slug))} onDoubleClick={() => layout.openTab(docTab(h.p, h.slug))} onContextMenu={(e) => openMenu(e, h.p)}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel2)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            style={{ padding: "4px 9px", borderRadius: 6, cursor: "pointer", fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-            <Icon name="file" size={13} style={{ color: "var(--t3)", flex: "none" }} />
-            <span style={{ color: "var(--t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: "none", maxWidth: h.ws ? "45%" : "60%" }}>{base(h.p)}</span>
-            <span style={{ color: "var(--t3)", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", direction: "rtl", flex: 1, minWidth: 0 }}>{h.p.slice(0, -base(h.p).length).replace(/\/$/, "")}</span>
-            {h.ws && <span title={`in shared workspace ${h.ws}`} style={{ flex: "none", color: "var(--accent)", fontSize: 10, whiteSpace: "nowrap", textTransform: "uppercase", letterSpacing: ".03em" }}>{h.ws}</span>}
+      <div className={panelStyles.rail} data-workspace-scroll>
+      <WorkspaceSwitcher
+        focusedSlug={homeMount?.slug ?? focusedSlug ?? undefined}
+        focusedName={homeLabel ?? undefined}
+        onFocusWorkspace={focusWorkspace}
+        onSwapped={() => setReloadKey((k) => k + 1)}
+      />
+      <section className={panelStyles.knowledge} aria-labelledby="workspace-knowledge-title">
+        <header className={panelStyles.knowledgeHeader}>
+          <div className={panelStyles.knowledgeHeading}>
+            <h2 id="workspace-knowledge-title" className={panelStyles.knowledgeTitle}>Knowledge</h2>
+            <p className={panelStyles.workspaceLabel}>Files and graph in this workspace</p>
           </div>
+        </header>
+        {homeMount === null && <p className={panelStyles.graphHint}>Activate a workspace to open its graph.</p>}
+        <div className={panelStyles.modeSwitch} role="group" aria-label="Knowledge view">
+          <button type="button" className={panelStyles.modeButton} aria-pressed={!graphOpen} onClick={openFiles}>
+            <Icon name="file" size={15} aria-hidden="true" /><span>Files</span>
+          </button>
+          <button type="button" className={panelStyles.modeButton} aria-pressed={graphOpen} disabled={!homeMount}
+            title={!homeMount ? "Activate a workspace to view its graph" : "Open the knowledge graph"} onClick={openGraph}>
+            <Network size={15} strokeWidth={1.8} aria-hidden="true" /><span>Graph</span>
+          </button>
+        </div>
+        {!graphOpen && <>
+          <div className={panelStyles.searchModes} role="group" aria-label="Search mode">
+            <button type="button" className={panelStyles.searchMode} aria-pressed={searchMode === "filename"} onClick={() => { setSearchMode("filename"); setOptionsOpen(false); }}>File name</button>
+            <button type="button" className={panelStyles.searchMode} aria-pressed={searchMode === "content"} onClick={() => { setSearchMode("content"); setOptionsOpen(false); }}>Content</button>
+          </div>
+          {searchMode === "filename" ? <div className={panelStyles.searchRow}>
+            <label className={panelStyles.fileSearch}>
+              <Icon name="search" size={14} aria-hidden="true" />
+              <input
+                aria-label="Find files"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { e.stopPropagation(); setQuery(""); e.currentTarget.blur(); }
+                  if (e.key === "Enter" && matches[0]) layout.openPreview(docTab(matches[0].p, matches[0].slug));
+                }}
+                placeholder="Find file names…"
+                spellCheck={false}
+              />
+            </label>
+            <div className={panelStyles.optionsWrap}>
+              <button type="button" className={panelStyles.actionButton} aria-label="View options" title="View options"
+                aria-expanded={optionsOpen} onClick={() => setOptionsOpen((v) => !v)}>
+                <Icon name="gear" size={15} aria-hidden="true" />
+              </button>
+              {optionsOpen && <div className={panelStyles.optionsMenu} role="group" aria-label="View options">
+                <p className={panelStyles.optionsTitle}>View options</p>
+                <button type="button" className={panelStyles.optionAction} onClick={() => { setReloadKey((k) => k + 1); setOptionsOpen(false); }}>
+                  <Icon name="refresh" size={14} aria-hidden="true" /><span>Refresh files</span>
+                </button>
+                <label className={panelStyles.optionRow}>
+                  <input type="checkbox" checked={kgOnly} onChange={toggleKgOnly} /><span>Show only Knowledge files</span>
+                </label>
+                <label className={panelStyles.optionRow}>
+                  <input type="checkbox" checked={showSystem} onChange={() => setShowSystem((v) => { const n = !v; writeSS(SS_SYSTEM, n ? "1" : "0"); return n; })} />
+                  <span>Show private system workspace</span>
+                </label>
+              </div>}
+            </div>
+          </div> : <WorkspaceContentSearch
+            mounts={[...(homeMount ? [homeMount] : []), ...extraMounts]}
+            onOpen={(path, slug) => layout.openPreview(docTab(path, slug))}
+            forceOpen
+            showSummary={false}
+          />}
+        </>}
+        {graphOpen && <p className={panelStyles.graphHint}>The knowledge graph is open in the main work area.</p>}
+        {error && <div role="alert" className={panelStyles.railError}>Couldn’t load the workspace. {error}</div>}
+      {!graphOpen && searchMode === "filename" && q ? (<>
+        {matches.map((h) => (
+          <button key={(h.slug || "") + ":" + h.p} type="button" className={panelStyles.searchResult}
+            onClick={() => layout.openPreview(docTab(h.p, h.slug))} onDoubleClick={() => layout.openTab(docTab(h.p, h.slug))}
+            onContextMenu={(e) => openMenu(e, h.p)}>
+            <span className={panelStyles.searchFileHeading}>
+              <Icon name="file" size={14} aria-hidden="true" />
+              <span className={panelStyles.searchFileName}>{base(h.p)}</span>
+            </span>
+            <span className={panelStyles.searchFileMeta}>
+              <span className={panelStyles.searchPath}>{h.p.slice(0, -base(h.p).length).replace(/\/$/, "")}</span>
+              {h.ws && <span className={panelStyles.searchWorkspace}>{h.ws}</span>}
+            </span>
+          </button>
         ))}
-        {matches.length === 0 && <div style={{ padding: 8, color: "var(--t3)", fontSize: 12 }}>No files match “{query.trim()}”.</div>}
-      </>) : filesOpen ? (<>
-        {nodes.map((n) => <TreeRow key={n.path} node={n} depth={0} expanded={expanded} toggle={toggle} openFile={(p) => layout.openPreview(docTab(p, homeMount?.slug))} pinFile={(p) => layout.openTab(docTab(p, homeMount?.slug))} openMenu={openMenu} />)}
-        {!error && homeMount === null && <div style={{ padding: 8, color: "var(--t3)", fontSize: 12 }}>No active workspace — turn one on in Workspaces above.</div>}
-        {!error && hasHome && tree.length === 0 && <div style={{ padding: 8, color: "var(--t3)", fontSize: 12 }}>Empty — ask the agent in Chat to record something.</div>}
+        {matches.length === 0 && <p className={panelStyles.emptyState}>No files match “{query.trim()}”.</p>}
+      </>) : !graphOpen && searchMode === "filename" && filesOpen ? (<>
+        {homeLabel && <div className={panelStyles.treeHead}><span>{homeLabel}</span><span className={panelStyles.mountLabel}>Mounted</span></div>}
+        <div id="workspace-file-tree" className={panelStyles.fileTree}>
+          {nodes.map((n) => <TreeRow key={n.path} node={n} expanded={expanded} toggle={toggle} openFile={(p) => layout.openPreview(docTab(p, homeMount?.slug))} pinFile={(p) => layout.openTab(docTab(p, homeMount?.slug))} openMenu={openMenu} activePath={homeActivePath} />)}
+          {!error && homeMount === null && <p className={panelStyles.emptyState}>No workspace is active. Turn one on above.</p>}
+          {!error && hasHome && tree.length === 0 && <p className={panelStyles.emptyState}>No files yet. Ask the agent in Chat to add one.</p>}
+          {!error && hasHome && kgOnly && tree.length > 0 && nodes.length === 0 && <p className={panelStyles.emptyState}>No Knowledge files or workspace README found.</p>}
+        </div>
       </>) : null}
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
@@ -454,27 +616,34 @@ export function FilesList() {  // exported for the surface test
       )}
       {/* Lane A: every non-primary mount (other private + shared) as a KNOWLEDGE section — mirrors the
           mount set. Part of the files area, so it follows the FILES collapse. */}
-      {!q && filesOpen && extraMounts.map((mount) => <MountSection key={mount.slug} mount={mount} />)}
+      {!graphOpen && searchMode === "filename" && !q && filesOpen && extraMounts.map((mount) => <MountSection key={mount.slug} mount={mount} />)}
       {/* The private SYSTEM workspace (_system, RW) — hidden by default, surfaced via the key toggle. */}
-      {!q && filesOpen && showSystem && <MountSection key="_system" mount={{ slug: "_system", repo: null, ref: null, role: "system", path: "", write: true, primary: false, name: "System · private" }} />}
-      <GitSection />
+      {!graphOpen && searchMode === "filename" && !q && filesOpen && showSystem && <MountSection key="_system" mount={{ slug: "_system", repo: null, ref: null, role: "system", path: "", write: true, primary: false, name: "System (private)" }} />}
+      </section>
+      {showSourceControl && <GitSection />}
     </div>
   );
 }
 
 // ── Workspaces (attach/swap a custom git repo) — over /api/workspace/swap + /attached ──────────────
-const SS_WS_OPEN = "ws.attach.open";
-export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  // exported for the surface test
+const SS_WS_OPEN = "ws.attach.open.v2";
+export function WorkspaceSwitcher({ onSwapped, focusedSlug, focusedName, onFocusWorkspace }: {
+  onSwapped: () => void;
+  focusedSlug?: string;
+  focusedName?: string;
+  onFocusWorkspace?: (slug: string) => void;
+}) {
   const layout = useService(LayoutServiceId);
-  // Selecting a workspace row opens the MANAGE hub as a center tab (rename · on/off · GitHub · purpose ·
-  // participants). The row's checkbox stays the quick on/off; the name opens the panel.
+  // Workspace names switch the file view; the explicit Manage action opens the workspace hub.
   const openManage = (slug: string, opts?: { shared?: boolean; name?: string }) => layout.openTab(manageTabDescriptor(slug, opts));
-  const [open, setOpen] = useState<boolean>(() => readSS(SS_WS_OPEN) !== "0");  // default OPEN — workspaces lead the Knowledge rail
+  const [open, setOpen] = useState<boolean>(() => readSS(SS_WS_OPEN) === "1");
   const [view, setView] = useState<AttachedWorkspaces>({ active: null, slots: {} });
+  const [viewLoaded, setViewLoaded] = useState(false);
   // The ADDITIVE active set (WP-A2.1): the slugs currently MOUNTED into the agent turn. Distinct from
   // `view.active` (the single private-baseline primary) — a workspace can be MOUNTED (in the set) or just
   // AVAILABLE (parked). Drives the per-row toggle; the baseline is in the set by default but can be switched off.
   const [activeSet, setActiveSet] = useState<ActiveMount[]>([]);
+  const [mountStatus, setMountStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [sharedMemberships, setSharedMemberships] = useState<Membership[]>([]);  // ALL shared (incl switched-off)
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -489,23 +658,35 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
   const [rowMenu, setRowMenu] = useState<{ slug: string; display: string; x: number; y: number } | null>(null);  // per-row … menu (archive/delete)
   const [showArchived, setShowArchived] = useState(false);  // the collapsed 'Archived' group
   const load = () => {
-    void readAttachedWorkspaces().then((v) => { setView(v); setErr(null); }).catch((e: unknown) => setErr(presentError(e).headline));
-    void readActiveSet().then((s) => setActiveSet(s.active)).catch(() => { /* active-set is additive UI; a failure just leaves the toggles at the baseline */ });
+    setViewLoaded(false);
+    setMountStatus("loading");
+    void readAttachedWorkspaces().then((v) => { setView(v); setViewLoaded(true); setErr(null); }).catch((e: unknown) => { setViewLoaded(false); setErr(presentError(e).headline); });
+    void readActiveSet().then((s) => { setActiveSet(s.active); setMountStatus("ready"); }).catch(() => setMountStatus("unavailable"));
     void listSharedMemberships().then(setSharedMemberships).catch(() => { /* shared list is additive; ignore */ });
   };
   useEffect(() => { if (open) load(); }, [open]);
   const toggle = () => setOpen((v) => { const n = !v; writeSS(SS_WS_OPEN, n ? "1" : "0"); return n; });
   const mountedSlugs = new Set(activeSet.map((m) => m.slug));
+  const chooseWorkspace = (slug: string) => {
+    onFocusWorkspace?.(slug);
+    setOpen(false);
+    writeSS(SS_WS_OPEN, "0");
+  };
   // The seed-slot workspace ("Personal") whose tree lives at <root>/<subject>. Its share/archive/delete are
   // still refused server-side (it's the seed home slot), so we hide those affordances — but it is a NORMAL,
   // EQUAL-RANK workspace for activation: switching it off just removes it from the set, like any workspace.
-  const seedSlug = view.active ?? "seed";
-
   // Per-row active toggle: ADD a workspace to the mount set (activate) or REMOVE it (deactivate — parked,
   // never destroyed). UNIFORM for every workspace, seed included — membership in the active set is the truth.
-  const toggleActive = async (slug: string, mounted: boolean) => {
+  const toggleActive = async (slug: string, mounted: boolean, focusAfterMount = false) => {
     setBusy(true); setErr(null);
-    try { if (mounted) { await deactivateWorkspace(slug); } else { await activateWorkspace({ slug }); } load(); onSwapped(); }
+    try {
+      if (mounted) await deactivateWorkspace(slug);
+      else {
+        const activated = await activateWorkspace({ slug });
+        if (focusAfterMount) chooseWorkspace(activated.slug);
+      }
+      load(); onSwapped();
+    }
     catch (e) { setErr(presentError(e).headline); }
     finally { setBusy(false); }
   };
@@ -513,7 +694,7 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
   // ADD a repo to the mount set (additive — does NOT park the others), then re-load so its row shows mounted.
   const doAttach = async (repo: string, ref?: string, token?: string) => {
     setBusy(true); setErr(null);
-    try { await activateWorkspace({ repo, ref, token }); load(); onSwapped(); setForm(null); }
+    try { const attached = await activateWorkspace({ repo, ref, token }); chooseWorkspace(attached.slug); load(); onSwapped(); setForm(null); }
     catch (e) { setErr(presentError(e).headline); }
     finally { setBusy(false); }
   };
@@ -523,7 +704,7 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
   // parked/rebuilt/backed up). The new row loads back CHECKED (it joined the active set).
   const doNewWorkspace = async () => {
     setBusy(true); setErr(null);
-    try { await createWorkspace(); load(); onSwapped(); }
+    try { const created = await createWorkspace(); chooseWorkspace(created.slug); load(); onSwapped(); }
     catch (e) { setErr(presentError(e).headline); }
     finally { setBusy(false); }
   };
@@ -572,9 +753,9 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
   };
 
   // Switch a SHARED workspace ON/OFF in the active set (mount vs hide) — membership is unchanged.
-  const toggleShared = async (workspaceId: string, active: boolean) => {
+  const toggleShared = async (workspaceId: string, active: boolean, focusAfterMount = false) => {
     setBusy(true); setErr(null);
-    try { await setSharedActive(workspaceId, active); load(); onSwapped(); }
+    try { await setSharedActive(workspaceId, active); if (focusAfterMount && active) chooseWorkspace(workspaceId); load(); onSwapped(); }
     catch (e) { setErr(presentError(e).headline); }
     finally { setBusy(false); }
   };
@@ -617,77 +798,109 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
   // Publish applies to a TINA-born active workspace only — one attached from an external repo already
   // has a home (the backend refuses it too). Default repo name: the workspace's display name, slugified.
   const activeSlug = view.active ?? "seed";
-  const activeBorn = !view.slots[activeSlug]?.repo;
+  const selectedSlug = focusedSlug ?? activeSlug;
+  const selectedLabel = focusedName ?? (mountStatus === "ready"
+    ? label(selectedSlug, view.slots[selectedSlug]?.repo ?? null)
+    : mountStatus === "unavailable" ? "Workspace unavailable" : "Loading workspace…");
+  const selectedMounted = Boolean(focusedName) || (mountStatus === "ready" && mountedSlugs.has(selectedSlug));
+  const mountStatusLabel = selectedMounted ? "Mounted" : mountStatus === "loading" ? "Checking mount" : mountStatus === "unavailable" ? "Status unavailable" : "Not mounted";
   const defaultRepoName = (view.slots[activeSlug]?.name ?? (activeSlug === "seed" ? "tina-workspace" : activeSlug))
     .toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "tina-workspace";
 
   return (
-    <div style={{ paddingTop: 2 }}>
-      <div onClick={toggle} style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", padding: "2px 8px 6px", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-        <Icon name="chevR" size={12} style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }} />
-        <Icon name="folder" size={12} />workspaces
-      </div>
+    <section className={panelStyles.workspaces}>
+      <p className={panelStyles.workspaceEyebrow}>Workspace</p>
+      <button type="button" className={panelStyles.workspacePicker} aria-expanded={open} onClick={toggle} aria-label={`Workspace: ${selectedLabel}, ${mountStatusLabel}`}>
+        <span className={panelStyles.workspacePickerValue}>
+          <Icon name="folder" size={17} style={{ color: "var(--muted)" }} />
+          <span className={panelStyles.workspaceCurrent}>{selectedLabel}</span>
+          {selectedMounted
+            ? <span className={panelStyles.workspaceMountDot} title="Mounted in TINA" aria-hidden="true" />
+            : <span className={panelStyles.workspaceMountStatus}>{mountStatusLabel}</span>}
+          <span className={panelStyles.chevron} aria-hidden="true"><Icon name="chevD" size={13} /></span>
+        </span>
+      </button>
       {open && (<>
-        {err && <div role="alert" style={{ padding: "2px 9px", fontSize: 12, color: "var(--danger)" }}>⚠ {err}</div>}
-        {slots.map(([slug, meta]) => {
+        {(err || mountStatus === "unavailable") && <div role="alert" className={panelStyles.workspaceProblem}>
+          <p>{err ?? "Couldn’t verify which workspaces are mounted. Sign in again, then retry."}</p>
+          <button type="button" className={panelStyles.retryButton} onClick={load}>Retry</button>
+        </div>}
+        {!viewLoaded && !err && <p role="status" className={panelStyles.emptyState}>Loading workspaces…</p>}
+        {viewLoaded && mountStatus === "loading" && <p role="status" className={panelStyles.emptyState}>Checking which workspaces are mounted…</p>}
+        <div className={panelStyles.workspaceMenu}>
+        <div className={panelStyles.workspaceRows}>
+        {viewLoaded && slots.map(([slug, meta]) => {
           // The per-row toggle is a CHECKBOX reflecting ACTIVE-SET membership (WP-A2.1): CHECKED = MOUNTED
           // into the agent turn, UNCHECKED = AVAILABLE (parked, check to mount). Multiple rows can be checked
           // at once — the mount set is a flat, equal-rank list, so a checkbox (multi-select) is the right
           // affordance. EVERY workspace (seed included) follows active-set membership uniformly.
-          const isSeed = slug === seedSlug;   // the seed-slot occupant — share/archive/delete are still refused for it
-          const mounted = mountedSlugs.has(slug);
+          const mounted = mountStatus === "ready" && mountedSlugs.has(slug);
           const isRenaming = renaming === slug;
           const display = meta.name || label(slug, meta.repo);
-          const toggleTitle = mounted ? "Mounted into the agent — uncheck to unmount (park)" : "Available — check to mount into the agent";
+          const mountLabel = mountStatus === "ready" ? mounted ? "mounted into the agent" : "available and parked" : mountStatus === "loading" ? "checking mount status" : "mount status unavailable";
+          const toggleTitle = mountStatus !== "ready" ? "Mount status is unavailable. Retry loading workspaces." : mounted ? "Mounted into the agent. Uncheck to unmount and park." : "Available and parked. Check to mount into the agent.";
           return (
-            <div key={slug}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 9px", borderRadius: 6, fontSize: 12, opacity: busy ? 0.6 : 1 }}
-              onMouseEnter={(e) => { if (!isRenaming) e.currentTarget.style.background = "var(--panel2)"; }} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-              <Checkbox checked={mounted} disabled={busy}
+            <div key={slug} className={panelStyles.workspaceRow} data-mounted={mounted} data-focused={focusedSlug === slug} data-busy={busy}
+              onMouseEnter={(e) => { if (!isRenaming) e.currentTarget.style.background = "var(--panel2)"; }}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+              <Checkbox checked={mounted} disabled={busy || mountStatus !== "ready"}
                 onChange={() => void toggleActive(slug, mounted)}
-                title={toggleTitle} label={`${display} — ${mounted ? "mounted into the agent" : "available (parked)"}`} />
+                title={toggleTitle} label={`${display}, ${mountLabel}`} />
               {isRenaming ? (
                 <input autoFocus defaultValue={meta.name ?? ""} placeholder="display name" disabled={busy}
                   onKeyDown={(e) => { if (e.key === "Enter") { cancelled.current = false; e.currentTarget.blur(); } else if (e.key === "Escape") { cancelled.current = true; e.currentTarget.blur(); } }}
                   onBlur={(e) => { if (cancelled.current) { cancelled.current = false; setRenaming(null); } else { void doRename(slug, e.currentTarget.value); } }}
-                  style={{ flex: 1, fontSize: 12, padding: "3px 6px", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 5, color: "var(--t1)" }} />
+                  className={panelStyles.renameInput} />
               ) : (
-                <span onClick={() => !busy && openManage(slug, { name: display })}
-                  title="Open the manage panel (rename · on/off · GitHub · purpose · participants)"
-                  style={{ flex: 1, color: mounted ? "var(--t1)" : "var(--t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: busy ? "default" : "pointer" }}>{display}</span>
+                <button type="button" disabled={busy || mountStatus !== "ready"} className={panelStyles.workspaceName} data-mounted={mounted}
+                  aria-current={focusedSlug === slug ? "page" : undefined}
+                  onClick={() => mounted ? chooseWorkspace(slug) : void toggleActive(slug, false, true)}
+                  title={mounted ? `Show files from ${display}` : `Mount and switch to ${display}`}>{display}</button>
               )}
-              {/* Row is intentionally minimal: the CHECKBOX mounts/parks, the NAME opens the manage
-                  panel. Every management action (rename · publish/push/pull · share · archive · delete)
-                  now lives in that panel, so the old per-row action icons were removed. */}
+              {!isRenaming && <span className={panelStyles.workspaceRowStatus}>{focusedSlug === slug ? "Current" : mounted ? "Mounted" : "Available"}</span>}
+              {!isRenaming && <button type="button" className={panelStyles.workspaceManage} disabled={busy}
+                aria-label={`Manage ${display}`} title={`Manage ${display}`} onClick={() => openManage(slug, { name: display })}>Manage</button>}
             </div>
           );
         })}
         {/* SHARED workspaces (member-of) — listed here too, not only in KNOWLEDGE. A CHECKBOX switches each
             ON (mounted into the agent) or OFF (hidden — membership kept). The role gates write: contributor/
             owner are read-write, viewer read-only. Owner/contributor gets a Share action to mint a link. */}
-        {sharedMemberships.map((mem) => {
+        {viewLoaded && sharedMemberships.map((mem) => {
           const wsId = mem.workspace_id;
-          const mounted = activeSet.some((m) => m.role === "shared" && m.slug === wsId);
+          const mounted = mountStatus === "ready" && activeSet.some((m) => m.role === "shared" && m.slug === wsId);
+          const mountLabel = mountStatus === "ready" ? mounted ? "mounted" : "switched off" : mountStatus === "loading" ? "checking mount status" : "mount status unavailable";
           return (
-            <div key={`shared:${wsId}`}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 9px", borderRadius: 6, fontSize: 12, opacity: busy ? 0.6 : 1 }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel2)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-              <Checkbox checked={mounted} disabled={busy}
+            <div key={`shared:${wsId}`} className={panelStyles.workspaceRow} data-mounted={mounted} data-focused={focusedSlug === wsId} data-busy={busy}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel2)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+              <Checkbox checked={mounted} disabled={busy || mountStatus !== "ready"}
                 onChange={() => void toggleShared(wsId, !mounted)}
-                title={mounted ? "Mounted — uncheck to switch off (you stay a member)" : "Switched off — check to mount"}
-                label={`${wsId} — shared (${mem.role})`} />
-              <span onClick={() => openManage(wsId, { shared: true, name: wsId })}
-                title="Open the manage panel (GitHub · purpose · participants)"
-                style={{ flex: 1, color: mounted ? "var(--t1)" : "var(--t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer" }}>{wsId}</span>
-              {/* Management (role · share · unshare · participants) lives in the manage panel opened by
-                  the name — no per-row action icons. */}
+                title={mountStatus !== "ready" ? "Mount status is unavailable. Retry loading workspaces." : mounted ? "Mounted. Uncheck to switch off; membership stays." : "Switched off. Check to mount."}
+                label={`${wsId}, shared, ${mem.role}, ${mountLabel}`} />
+              <button type="button" className={panelStyles.workspaceName} data-mounted={mounted}
+                aria-current={focusedSlug === wsId ? "page" : undefined}
+                disabled={busy || mountStatus !== "ready"}
+                onClick={() => mounted ? chooseWorkspace(wsId) : void toggleShared(wsId, true, true)}
+                title={mounted ? `Show files from ${wsId}` : `Mount and switch to ${wsId}`}>{wsId}</button>
+              <span className={panelStyles.workspaceRowStatus}>{focusedSlug === wsId ? "Current" : mounted ? "Mounted" : "Available"}</span>
+              <button type="button" className={panelStyles.workspaceManage} disabled={busy}
+                aria-label={`Manage ${wsId}`} title={`Manage ${wsId}`} onClick={() => openManage(wsId, { shared: true, name: wsId })}>Manage</button>
             </div>
           );
         })}
+        </div>
         {/* Attach repo is a LIST-LEVEL action; the FORM opens in a modal (portaled overlay) rather than
             expanding inline in the sidebar — see the Modal block below. */}
-        <div onClick={() => setForm({ repo: "", ref: "", token: "" })} style={{ padding: "5px 9px", fontSize: 12, color: "var(--accent)", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-          <Icon name="plus" size={12} /> Attach repo…
+        <div className={panelStyles.listActions}>
+          <button type="button" className={panelStyles.listAction} disabled={busy} title="Create a blank workspace without replacing the current one"
+            onClick={() => { if (!busy) void doNewWorkspace(); }}>
+            <Icon name="plus" size={14} aria-hidden="true" /> <span>New workspace</span>
+          </button>
+          <button type="button" className={panelStyles.listAction} disabled={busy} onClick={() => setForm({ repo: "", ref: "", token: "" })}>
+            <Icon name="plus" size={14} aria-hidden="true" /> <span>Attach repo</span>
+          </button>
+        </div>
         </div>
         {form !== null && (
           <Modal title="Attach a git repo" onClose={() => setForm(null)}>
@@ -715,20 +928,10 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
             })()}
           </Modal>
         )}
-        {/* New workspace is a LIST-LEVEL action (not a row icon): it CREATES a fresh blank workspace
-            (seeded from the template) and ADDS it to the mount set — additive, so it destroys nothing and
-            leaves the baseline + every other workspace untouched. It lives alongside "+ Attach repo…" as
-            the two ways to bring a new workspace into the set. No confirmation: creating a workspace is
-            non-destructive. The new row appears CHECKED (it joined the active set). */}
-        <div onClick={() => { if (!busy) void doNewWorkspace(); }}
-          title="New workspace — create a blank workspace and add it to your set (nothing is replaced)"
-          style={{ padding: "5px 9px", fontSize: 12, color: "var(--accent)", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, opacity: busy ? 0.6 : 1 }}>
-          <Icon name="plus" size={12} /> New workspace…
-        </div>
         {/* SHARE dialog — mint an invite link (open/restricted · role · TTL) and copy it. */}
         {share !== null && (
           <div style={{ padding: "8px 9px", display: "flex", flexDirection: "column", gap: 7, borderTop: "1px solid var(--line)", marginTop: 4 }}>
-            <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em" }}>Share “{share.wsId}”</div>
+            <div style={{ fontSize: 12, color: "var(--t3)" }}>Share “{share.wsId}”</div>
             <div style={{ display: "flex", gap: 6 }}>
               <select value={share.role} disabled={busy} onChange={(e) => setShare({ ...share, role: e.target.value, link: null })}
                 style={{ flex: 1, fontSize: 12, padding: "4px 6px", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 6, color: "var(--t1)" }}>
@@ -778,7 +981,7 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
             <div style={{ padding: "6px 9px", display: "flex", flexDirection: "column", gap: 6 }}>
               {pushMode ? (
                 <div title={pubForm.remoteUrl} style={{ fontSize: 12, color: "var(--t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  push updates → {pubForm.remoteUrl}
+                  Push updates to {pubForm.remoteUrl}
                 </div>
               ) : (<>
                 <input autoFocus value={pubForm.name} placeholder="repo name" disabled={busy}
@@ -804,24 +1007,22 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
         })()}
         {published && (
           <div style={{ padding: "4px 9px", fontSize: 12, color: "var(--t2)", display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ color: "var(--green)" }}>✓</span> published →&nbsp;
+            <span style={{ color: "var(--green)" }}>✓</span> Published:
             <a href={published.repo_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{published.repo_url}</a>
           </div>
         )}
         {/* Archived workspaces — collapsed group; the data is kept, restore to bring them back. */}
         {archivedSlots.length > 0 && (
-          <div style={{ marginTop: 4 }}>
-            <div onClick={() => setShowArchived((v) => !v)}
-              style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 9px", cursor: "pointer", fontSize: 11, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em" }}>
-              <Icon name="chevR" size={12} style={{ transform: showArchived ? "rotate(90deg)" : "none", transition: "transform .12s" }} />
+          <div className={panelStyles.archivedGroup}>
+            <button type="button" className={panelStyles.sectionToggle} aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
+              <span className={panelStyles.chevron} aria-hidden="true"><Icon name="chevR" size={13} /></span>
               Archived ({archivedSlots.length})
-            </div>
+            </button>
             {showArchived && archivedSlots.map(([slug, meta]) => (
-              <div key={`arch:${slug}`} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 9px 4px 24px", fontSize: 12, color: "var(--t3)", opacity: busy ? 0.6 : 1 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel2)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{meta.name || label(slug, meta.repo)}</span>
-                <span onClick={() => void doArchive(slug, false)} title="Un-archive" style={{ flex: "none", color: "var(--accent)", cursor: "pointer", fontSize: 11 }}>restore</span>
-                <span onClick={() => void doDelete(slug, meta.name || label(slug, meta.repo))} title="Delete permanently" style={{ flex: "none", color: "var(--t3)", cursor: "pointer", fontSize: 13, padding: "0 3px" }}>×</span>
+              <div key={`arch:${slug}`} className={panelStyles.workspaceRow} data-busy={busy}>
+                <span className={panelStyles.archivedName}>{meta.name || label(slug, meta.repo)}</span>
+                <button type="button" className={panelStyles.archivedAction} disabled={busy} onClick={() => void doArchive(slug, false)}>Restore</button>
+                <button type="button" className={panelStyles.archivedAction} disabled={busy} aria-label={`Delete ${meta.name || label(slug, meta.repo)}`} title="Delete permanently" onClick={() => void doDelete(slug, meta.name || label(slug, meta.repo))}>Delete</button>
               </div>
             ))}
           </div>
@@ -829,12 +1030,12 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
         {/* Per-row … menu: archive / delete. */}
         {rowMenu && (
           <ContextMenu x={rowMenu.x} y={rowMenu.y} onClose={() => setRowMenu(null)} items={[
-            { id: "archive", label: "Archive", detail: "collapse · keep data", onSelect: () => void doArchive(rowMenu.slug, true) },
+            { id: "archive", label: "Archive", detail: "Keeps the workspace data", onSelect: () => void doArchive(rowMenu.slug, true) },
             { id: "delete", label: "Delete", detail: "removes all data", onSelect: () => void doDelete(rowMenu.slug, rowMenu.display) },
           ]} />
         )}
       </>)}
-    </div>
+    </section>
   );
 }
 
@@ -842,9 +1043,7 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
 const SS_GIT_OPEN = "ws.git.open";
 function GitSection() {
   const layout = useService(LayoutServiceId);
-  // Direction A, law #4 (browsing is on-demand): the recent-commit feed is the Fast path in Knowledge
-  // (the freshest thing a member pushed), so it now starts OPEN; the file tree below stays the fallback.
-  const [open, setOpen] = useState<boolean>(() => readSS(SS_GIT_OPEN) !== "0");  // default open
+  const [open, setOpen] = useState<boolean>(() => readSS(SS_GIT_OPEN) === "1");
   const [git, setGit] = useState<GitState>({ branch: "", changes: [], commits: [] });  // primary (branch + working changes)
   // RECENT ACTIVITY spans EVERY active workspace (primary + shared/other mounts), merged by recency — so
   // the freshest thing (a member's push to a shared ws) shows here, not a stale primary-only commit.
@@ -875,17 +1074,18 @@ function GitSection() {
   }, [open]);
   const toggle = () => setOpen((v) => { const n = !v; writeSS(SS_GIT_OPEN, n ? "1" : "0"); return n; });
   return (
-    <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
-      <div onClick={toggle} style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", padding: "2px 8px 6px", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-        <Icon name="chevR" size={12} style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }} />
-        <Icon name="zap" size={12} />source control
-        {git.branch && <span style={{ marginLeft: "auto", fontFamily: "var(--mono)", color: "var(--t2)", textTransform: "none" }}>{git.branch}</span>}
-      </div>
-      {open && gitError && <div role="alert" style={{ padding: "2px 9px", fontSize: 12, color: "var(--danger)" }}>⚠ git unavailable — {gitError}</div>}
+    <section className={panelStyles.gitSection}>
+      <button type="button" className={panelStyles.sectionToggle} aria-expanded={open} onClick={toggle}>
+        <span className={panelStyles.chevron} aria-hidden="true"><Icon name="chevR" size={13} /></span>
+        <Icon name="zap" size={14} aria-hidden="true" />
+        <span>Source control</span>
+        {git.branch && <span className={panelStyles.branch}>{git.branch}</span>}
+      </button>
+      {open && gitError && <p role="alert" className={panelStyles.railError}>Git unavailable. {gitError}</p>}
       {!open || gitError ? null : (!git.branch && feed.length === 0) ? (
         <div style={{ padding: "2px 9px", fontSize: 12, color: "var(--t3)" }}>Not a repo yet.</div>
       ) : (<>
-      {git.changes.length > 0 && <div style={{ fontSize: 10.5, color: "var(--t3)", padding: "2px 9px" }}>CHANGES</div>}
+      {git.changes.length > 0 && <div className={panelStyles.subheading}>Changes</div>}
       {git.changes.map((c) => (
         <div key={c.path} onClick={() => layout.openPreview(docTab(c.path))} onDoubleClick={() => layout.openTab(docTab(c.path))} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 9px", borderRadius: 6, cursor: "pointer", fontSize: 12 }}
           onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel2)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
@@ -893,10 +1093,10 @@ function GitSection() {
           <span style={{ color: "var(--t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{base(c.path)}</span>
         </div>
       ))}
-      {feed.length > 0 && <div style={{ fontSize: 10.5, color: "var(--t3)", padding: "8px 9px 2px" }}>LATEST COMMIT</div>}
+      {feed.length > 0 && <div className={panelStyles.subheading}>Latest commit</div>}
       {feed.map((c) => <CommitRow key={(c.slug || "") + ":" + c.sha} c={c} wsLabel={c.ws} onOpen={(f) => layout.openPreview(docTab(f, c.slug))} />)}
       </>)}
-    </div>
+    </section>
   );
 }
 
@@ -910,8 +1110,8 @@ function PathBreadcrumb({ path }: { path: string }) {
   const [menu, setMenu] = useState<{ x: number; y: number; target: string } | null>(null);
   const seg = { cursor: "pointer" } as const;
   const hover = {
-    onMouseEnter: (e: MouseEvent<HTMLSpanElement>) => { e.currentTarget.style.color = "var(--t1)"; e.currentTarget.style.textDecoration = "underline"; },
-    onMouseLeave: (e: MouseEvent<HTMLSpanElement>) => { e.currentTarget.style.color = ""; e.currentTarget.style.textDecoration = "none"; },
+    onMouseEnter: (e: MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.color = "var(--t1)"; e.currentTarget.style.textDecoration = "underline"; },
+    onMouseLeave: (e: MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.color = ""; e.currentTarget.style.textDecoration = "none"; },
   };
   // any segment surfaces the tree in the LEFT SIDEBAR: un-collapse it, switch to the
   // Knowledge list, expand down to the clicked folder (or the file itself) and flash it.
@@ -921,19 +1121,22 @@ function PathBreadcrumb({ path }: { path: string }) {
     revealInTree(target);
   };
   return (
-    <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--t3)", display: "flex", flexWrap: "wrap", alignItems: "center" }}>
+    <nav className={panelStyles.breadcrumb} aria-label="Document path">
       {parts.map((name, i) => {
         const isFile = i === parts.length - 1;
         const prefix = parts.slice(0, i + 1).join("/");
         return (
-          <span key={prefix} style={{ display: "inline-flex", alignItems: "center" }}>
-            {i > 0 && <span style={{ padding: "0 2px", userSelect: "none" }}>/</span>}
-            <span {...hover} style={seg}
-              title={`Reveal ${prefix}${isFile ? "" : "/"} in the sidebar · right-click to copy a reference`}
+          <span key={prefix} className={panelStyles.breadcrumbPart}>
+            {i > 0 && <span className={panelStyles.breadcrumbSlash} aria-hidden="true">/</span>}
+            <button type="button" {...hover} className={panelStyles.breadcrumbSegment}
+              aria-label={`Reveal ${prefix}${isFile ? "" : " folder"} in Knowledge`}
+              data-file={isFile}
+              style={seg}
+              title={`Reveal ${prefix}${isFile ? "" : "/"} in the sidebar. Right-click to copy a reference.`}
               onClick={() => reveal(prefix)}
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY, target: prefix }); }}>
               {name}
-            </span>
+            </button>
           </span>
         );
       })}
@@ -943,7 +1146,7 @@ function PathBreadcrumb({ path }: { path: string }) {
           { id: "copy-path", label: "Copy path", detail: menu.target, onSelect: () => copyText(menu.target) },
         ]} />
       )}
-    </div>
+    </nav>
   );
 }
 
@@ -987,26 +1190,28 @@ function FmValue({ k, v }: { k: string; v: string }) {
 }
 
 function FrontmatterCard({ fm }: { fm: [string, string][] }) {
+  if (fm.length === 0) return null;
   return (
-    <div style={{ border: "1px solid var(--line)", borderRadius: 10, background: "var(--panel)", padding: "11px 13px", marginBottom: 14, fontSize: 13, display: "flex", flexDirection: "column", gap: 6 }}>
-      {fm.map(([k, v]) => (
-        <div key={k} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-          <span style={{ color: "var(--t3)", width: 96, flex: "none", fontSize: 12 }}>{k}</span>
-          <span style={{ minWidth: 0, lineHeight: 1.55 }}><FmValue k={k} v={v} /></span>
-        </div>
-      ))}
-    </div>
+    <section className={panelStyles.metadataSection} aria-label="YAML metadata">
+      <div className={panelStyles.metadataLabel}>YAML metadata</div>
+      <dl className={panelStyles.metadata}>
+        {fm.map(([k, v]) => (
+          <div key={k} className={panelStyles.metadataRow}>
+            <dt>{k}</dt>
+            <dd><FmValue k={k} v={v} /></dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 
 /** ‹ › nav arrow, Obsidian-style: enabled only when the pane history has somewhere to go. */
 function NavArrow({ dir, enabled, onGo }: { dir: -1 | 1; enabled: boolean; onGo: () => void }) {
   return (
-    <button aria-label={dir === -1 ? "Back" : "Forward"} title={dir === -1 ? "Back" : "Forward"}
+    <button type="button" className={panelStyles.historyButton} aria-label={dir === -1 ? "Back" : "Forward"} title={dir === -1 ? "Back" : "Forward"}
       onClick={onGo} disabled={!enabled}
-      style={{ background: "none", border: "none", padding: 3, display: "flex", borderRadius: 6,
-        color: enabled ? "var(--t1)" : "var(--t3)", opacity: enabled ? 1 : 0.35,
-        cursor: enabled ? "pointer" : "default" }}
+      style={{ color: enabled ? "var(--t1)" : "var(--t3)", opacity: enabled ? 1 : 0.35 }}
       onMouseEnter={(e) => { if (enabled) e.currentTarget.style.background = "var(--panel2)"; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}>
       <Icon name="arrowR" size={15} style={dir === -1 ? { transform: "scaleX(-1)" } : undefined} />
@@ -1029,18 +1234,18 @@ function AskAboutDoc({ path, slug }: { path: string; slug?: string }) {
       if (!mount) throw new Error('Enable this workspace before asking about its documents.');
       const file = JSON.stringify(`${mount.path}/${path}`);
       requestChat({ research, prompt: research
-        ? `Nghiên cứu tài liệu ${file} trong workspace ${JSON.stringify(mount.slug)}. Đối chiếu tài liệu liên quan và nguồn web, rồi lưu ghi chú có nguồn và ngày xác minh.`
+        ? `Research document ${file} in workspace ${JSON.stringify(mount.slug)}. Compare related documents and web sources, then save a sourced note with its verification date.`
         : `What does this document say? Read ${file} in workspace ${JSON.stringify(mount.slug)}.` });
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
   return (
-    <span style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+    <span className={panelStyles.docActions}>
       <button type="button" disabled={busy} onClick={() => void ask()} title="Ask the agent about this document"
-        style={{ background: 'none', border: 0, cursor: 'pointer', fontSize: 11.5, color: 'var(--accent)' }}>Ask about</button>
+        className={panelStyles.action}>Ask about</button>
       <button type="button" disabled={busy} onClick={() => void ask(true)} title="Research this document and save a sourced private note"
-        style={{ background: 'none', border: 0, cursor: 'pointer', fontSize: 11.5, color: 'var(--accent)' }}>Nghiên cứu &amp; lưu</button>
-      {error && <span role="alert" style={{ fontSize: 11.5, color: 'var(--danger)' }}>{error}</span>}
+        className={panelStyles.action}>Research &amp; save</button>
+      {error && <span role="alert" className={panelStyles.docActionError}>{error}</span>}
     </span>
   );
 }
@@ -1057,6 +1262,8 @@ function DocTab({ id, params }: TabProps) {
   // retargeted from OUTSIDE (preview swap, layout restore) → a different doc: reset history
   useEffect(() => { setNav((n) => (n.stack[n.idx] === docked ? n : { stack: [docked], idx: 0 })); }, [docked]);
   const [content, setContent] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const [updated, setUpdated] = useState(false);           // the file changed under us (a member's push)
   const [showDiff, setShowDiff] = useState(false);
   const [diff, setDiff] = useState<string | null>(null);
@@ -1066,14 +1273,17 @@ function DocTab({ id, params }: TabProps) {
   // initial load on doc switch — reset the change/diff affordances
   useEffect(() => {
     const ticket = ++readSerial.current;
-    setContent(null); setUpdated(false); setShowDiff(false); setDiff(null); prevRef.current = null;
+    setContent(null); setLoadError(null); setUpdated(false); setShowDiff(false); setDiff(null); prevRef.current = null;
     scroller.current?.scrollTo(0, 0);
     void readFile(path, slug).then((c) => {
       if (ticket !== readSerial.current) return;
-      prevRef.current = c; setContent(c);
+      prevRef.current = c; setContent(c); setLoadError(null);
+    }).catch((e: unknown) => {
+      if (ticket !== readSerial.current) return;
+      setContent(null); setLoadError(presentError(e).headline);
     });
     return () => { readSerial.current++; };
-  }, [path, slug]);
+  }, [path, slug, retryKey]);
   // LIVE: poll the file while open so an OPEN doc auto-reloads when a member's agent updates it — folks
   // see updates without reopening. A real content change flags the "updated" banner (→ view exact lines).
   useEffect(() => {
@@ -1083,8 +1293,9 @@ function DocTab({ id, params }: TabProps) {
       void readFile(path, slug).then((c) => {
         if (ticket !== readSerial.current) return;
         if (prevRef.current !== null && prevRef.current !== c) setUpdated(true);
-        prevRef.current = c;
-        setContent(c);
+        prevRef.current = c; setContent(c); setLoadError(null);
+      }).catch((e: unknown) => {
+        if (ticket === readSerial.current) setLoadError(presentError(e).headline);
       });
     };
     const iv = setInterval(reload, 5000);
@@ -1131,41 +1342,71 @@ function DocTab({ id, params }: TabProps) {
     setNav({ ...nav, idx: i });
     show(nav.stack[i]);
   };
-  const { fm, body } = parseEntity(content ?? "");
+  const isJsonFile = base(path).toLowerCase().endsWith(".json");
+  const { fm, body: parsedBody } = parseEntity(content ?? "");
+  const body = isJsonFile ? content ?? "" : parsedBody;
+  const isReadme = base(path).toLowerCase() === "readme.md";
+  const fmTitle = fm.find(([key]) => key === "title")?.[1];
+  const bodyTitle = body.match(/^\s*#\s+(.+?)\s*#*\s*(?:\r?\n|$)/)?.[1]?.trim();
+  const displayFm = isJsonFile ? [] : fmTitle && fmTitle === bodyTitle ? fm.filter(([key]) => key !== "title") : fm;
   return (
     <DocNavContext.Provider value={navigate}>
     <DocMetaContext.Provider value={{ path, slug }}>
-      <div ref={scroller} style={{ height: "100%", overflowY: "auto", background: "var(--bg)" }}>
-        <div style={{ maxWidth: 760, margin: "0 auto", padding: "22px 24px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
-            <span style={{ display: "inline-flex", gap: 0, flex: "none" }}>
-              <NavArrow dir={-1} enabled={nav.idx > 0} onGo={() => go(-1)} />
-              <NavArrow dir={1} enabled={nav.idx < nav.stack.length - 1} onGo={() => go(1)} />
-            </span>
-            <div style={{ minWidth: 0, flex: 1 }}><PathBreadcrumb path={path} /></div>
+      <div ref={scroller} className={panelStyles.reader}>
+        <div className={panelStyles.article}>
+          <header className={panelStyles.toolbar}>
+            <div className={panelStyles.pathGroup}>
+              <span className={panelStyles.history}>
+                <NavArrow dir={-1} enabled={nav.idx > 0} onGo={() => go(-1)} />
+                <NavArrow dir={1} enabled={nav.idx < nav.stack.length - 1} onGo={() => go(1)} />
+              </span>
+              <PathBreadcrumb path={path} />
+            </div>
+            <div className={panelStyles.actions}>
             {/* Direction A, law #5: every surface answers "how do I open a conversation from here?" */}
-            <span onClick={() => { void copyText(`@file:${path}`); }} title={`Copy the @file reference for ${path}`}
-              style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11.5, color: "var(--t3)" }}>
-              <Icon name="link" size={12} />Reference
-            </span>
-            <span onClick={loadDiff} title="Show the exact lines changed in the latest commit"
-              style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11.5, color: showDiff ? "var(--accent)" : "var(--t3)" }}>
-              <Icon name="git" size={12} />Changes
-            </span>
+              <button type="button" className={panelStyles.action} onClick={() => { void copyText(`@file:${path}`); }} title={`Copy the @file reference for ${path}`}>
+                <Icon name="link" size={13} />Reference
+              </button>
+              <button type="button" className={panelStyles.action} aria-pressed={showDiff} onClick={loadDiff} title="Show the exact lines changed in the latest commit">
+                <Icon name="git" size={13} />Changes
+              </button>
             <AskAboutDoc path={path} slug={slug} />
-          </div>
+            </div>
+          </header>
+          {loadError && content !== null && <div className={panelStyles.readWarning} role="status">
+            <Icon name="alert" size={15} /><span>Couldn’t refresh this document. {loadError}</span>
+            <button type="button" className={panelStyles.retryButton} onClick={() => setRetryKey((key) => key + 1)}>Retry</button>
+          </div>}
           {updated && (
-            <div onClick={loadDiff} role="status"
-              style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, padding: "5px 10px", cursor: "pointer", background: "var(--panel)", border: "1px solid var(--accent)", borderRadius: 7, fontSize: 12, color: "var(--accent)" }}>
-              <Icon name="zap" size={12} />Updated just now — view the exact lines changed
+            <div className={panelStyles.updatedNotice} role="status">
+              <Icon name="zap" size={14} /><span>Document updated.</span>
+              <button type="button" className={panelStyles.updatedAction} onClick={loadDiff}>View diff</button>
             </div>
           )}
           {showDiff && (diff === null || diff === ""
-            ? <div style={{ fontSize: 12, color: "var(--t3)", marginBottom: 10 }}>loading changes…</div>
+            ? <div role="status" style={{ fontSize: 12, color: "var(--t3)", marginBottom: 10 }}>Loading changes…</div>
             : <div style={{ marginBottom: 12 }}><DiffView text={diff} /></div>)}
-          {fm.length > 0 && <FrontmatterCard fm={fm} />}
-          <MeetingWikiSourceStatus key={`${slug}/${path}`} path={path} slug={slug} content={content || undefined} />
-          <div style={{ fontSize: 14, color: "var(--t1)", lineHeight: 1.6 }}>{content === null ? "loading…" : <MdxDoc>{body}</MdxDoc>}</div>
+          {content === null ? loadError ? <div role="alert" className={panelStyles.loadError}>
+            <Icon name="alert" size={17} />
+            <div className={panelStyles.loadErrorCopy}>
+              <h2>Document couldn’t be opened</h2>
+              <p>{loadError}</p>
+            </div>
+            <button type="button" className={panelStyles.retryButton} onClick={() => setRetryKey((key) => key + 1)}>Retry</button>
+          </div> : <div className={panelStyles.loadingState} role="status" aria-label="Loading document">
+            <div className={panelStyles.skeletonLines} aria-hidden="true"><span /><span /><span /></div>
+          </div> : <>
+            {displayFm.length > 0 && <FrontmatterCard fm={displayFm} />}
+            {!isJsonFile && <MeetingWikiSourceStatus key={`${slug}/${path}`} path={path} slug={slug} content={content || undefined} />}
+            <div className={panelStyles.body}>
+              {isJsonFile ? (
+                <div className={jsonStyles.document}>
+                  <div className={jsonStyles.kind}>JSON</div>
+                  <pre className={jsonStyles.source} aria-label="JSON file contents" tabIndex={0}><code>{body}</code></pre>
+                </div>
+              ) : <MdxDoc variant={isReadme ? "readme" : "default"}>{body}</MdxDoc>}
+            </div>
+          </>}
         </div>
       </div>
     </DocMetaContext.Provider>
@@ -1177,4 +1418,5 @@ function DocTab({ id, params }: TabProps) {
 if (!meetingsOnly()) {
   registerList({ id: "files", label: "Knowledge", icon: "book", order: 30, component: FilesList });
   registerTab("doc", DocTab);
+  registerTab("kgGraph", WorkspaceGraphTab);
 }

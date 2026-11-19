@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, Mock, patch
 import numpy as np
 import pytest
 
-from tina_speech.assets import install, verify
+from tina_meeting_voice.assets import install, verify
 from tina_speech.cli import main, wav_blocks
-from tina_speech.wakeword import BLOCK_SIZE, CaptureQueue, WakeDetector
+from tina_meeting_voice.wakeword import BLOCK_SIZE, CaptureQueue, WakeDetector
 
 QUIET = np.zeros(BLOCK_SIZE, dtype=np.float32)
 SPEECH = np.ones(BLOCK_SIZE, dtype=np.float32) * .1
@@ -180,7 +180,7 @@ def test_inactive_microphone_does_not_wait_forever(capsys):
 
 def test_setup_rejects_archive_digest_before_extraction(tmp_path):
     data = {"url": "https://example.test/model", "archive_bytes": 3, "archive_sha256": "bad"}
-    with patch("tina_speech.assets.manifest", return_value=data), patch(
+    with patch("tina_meeting_voice.assets.manifest", return_value=data), patch(
         "urllib.request.urlopen", return_value=io.BytesIO(b"abc")
     ), pytest.raises(ValueError, match="checksum"):
         install(tmp_path)
@@ -188,7 +188,7 @@ def test_setup_rejects_archive_digest_before_extraction(tmp_path):
 
 
 def test_missing_or_modified_asset_is_not_loaded(tmp_path):
-    with patch("tina_speech.assets.manifest", return_value={"files": {"model.onnx": "pinned"}}):
+    with patch("tina_meeting_voice.assets.manifest", return_value={"files": {"model.onnx": "pinned"}}):
         with pytest.raises(ValueError, match="Missing or modified"):
             verify(tmp_path)
         (tmp_path / "model.onnx").write_bytes(b"tampered")

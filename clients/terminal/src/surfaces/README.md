@@ -83,3 +83,57 @@ Ended meetings show a compact end status in the metadata row. `meetingWhenLabel`
 cached live-only labels with the saved start time when available, and otherwise omits that
 placeholder; it does not invent a timestamp. The existing recap badge and lifecycle actions
 remain available, with recording playback presented in the canvas toolbar.
+
+TranscriptReview adds owner-triggered Check audio and Refine flagged segments for
+bot recordings, with a current-revision quality filter and readable advisory reasons.
+Checks have no ASR cost; selective refinement retains explicit audio comparison/Apply.
+
+Failed bot refinement items show safe service-specific reasons. Retry failed segments
+submits the latest job ID, keeps saved vocabulary and successful proposals, and is
+disabled during active work. No automatic retry or model selection is added.
+
+Review transcript -> Refinement options includes **Optimize quiet audio**, off by
+default and disabled during work/live meetings. Only ASR start requests include the
+opt-in; Check audio still measures the original and retry sends only the saved job ID.
+Proposals explain whether limited gain was used or why original audio was retained.
+The audio player always uses the original recording for owner comparison.
+
+`transcript-quality.tsx` presents the meetings-owned source/proposal checks separately.
+It explains text-only cues versus cues coinciding with mostly quiet audio, with
+optional original RMS/quiet-frame/clipping details. These never assert absent speech.
+The review filter includes a flagged second-pass suggestion at its exact source
+revision, even when source text was unflagged. Stale evidence is hidden after edits;
+after Apply only evidence matching the applied proposal/revision remains visible.
+Legacy jobs without text/proposal checks remain readable. Apply stays explicit.
+
+Meeting voice labels distinguish assistant replies from meeting evidence, general knowledge and public web.
+
+Voice assistant settings separate Voice, Behavior and Meeting tasks. The persistent Save changes/Discard footer handles account voice, pronunciations and new-bot defaults together; Apply to meeting saves only that room’s revision-checked source policy. Tabs retain edits and support arrow, Home and End keys.
+
+The Settings navigation uses shared brand tokens, sentence-case groups, icon-and-label rows and a checked current selection. Search and admin-only ASR visibility stay in SettingsBody; visual hover and keyboard focus live in settingsNavigation.module.css.
+
+Agent model settings group the provider and ChatGPT connection above paired chat/meeting model controls. The account-switch explanation is collapsible; reconnect, logout, callback handoff and masked credential partial updates retain their existing API behavior. Styling is scoped in agentModelSettings.module.css.
+
+VoiceReplySources displays fresh owner-authorized evidence under voice replies. Source reads revalidate every five seconds while expanded, abort on meeting changes/unmount, and clear quotes on permission/outage failures; transcript anchors and existing document navigation open originals.
+
+MeetingVoiceDrafts presents editable, owner-only voice task/decision proposals inside MeetingKnowledge. Review needs a fresh owner read and explicit confirmation; task publication refreshes the Tasks list through tina:tasks-changed.
+
+Voice handoffs use the existing chat action with `composeOnly` and a dedicated session: reveal the rail, preserve any existing draft, and prefill for review. Handoff chat skips ambient UI grounding; Agent API resolves current owner context on each turn.
+
+Voice drafts have twenty-item pages with older/newer navigation. Counts explicitly describe the visible page; edits or in-flight saves block navigation, and switching meetings starts on page1. Review by draft ID is independent of the list page.
+
+
+Voice assistant → Meeting offers named Project sources. Choose sources once, save a name, then
+select that profile and Apply to meeting in another room. Room source options can override project defaults without editing the saved
+profile; Save as project sources creates a new immutable selection. Remove profile revokes its
+room references. Public web permission and automatic public web selection are separate switches.
+
+
+Voice assistant → Meeting → Answer agent selects Sandbox agent or Direct LLM. Newly created
+voice-capable meetings use Sandbox agent; saved legacy policies remain selectable. Sandbox source
+tools are executed and checked by TINA, and its CLI cannot directly access account workspaces.
+
+New Google Meet rooms default to all-Wiki voice retrieval from the owner's primary private
+workspace. Meeting → "Read all Wiki documents in my private workspace" explicitly shows the
+room-level grant and can disable it; source profiles do not override it. Individual document
+selection applies when all-Wiki sharing is off. It does not share other accounts or hidden files.

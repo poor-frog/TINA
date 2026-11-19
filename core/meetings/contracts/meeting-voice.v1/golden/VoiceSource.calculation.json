@@ -1,0 +1,6 @@
+{
+  "id": "ctx-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "kind": "calculation",
+  "quote": "100 + 200 = 300",
+  "calculation_query": "{\"expression\":\"100+200\"}"
+}

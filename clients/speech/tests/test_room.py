@@ -14,7 +14,7 @@ import pytest
 
 from tina_speech.coordinator import Coordinator, create_app
 from tina_speech.session import RoomClient, RoomMonitor, SpeechSession
-from tina_speech.wakeword import WakeDetector
+from tina_meeting_voice.wakeword import WakeDetector
 from test_capture import Client, QUIET, VOICE, Vad
 from test_coordinator import FakeServices, room, wav, wait
 
@@ -136,59 +136,68 @@ def test_two_host_sessions_racing_one_wake_upload_only_winning_audio():
     # Keep the real coordinator occupied until both clients have processed the grant.
     services.state = 'started'
     original = services.handle
+    event_loops = set()
     def handle(request):
+        event_loops.add(asyncio.get_running_loop())
         if request.url.path == '/auth/me' and request.headers.get('x-api-key') == 'second':
             return httpx.Response(200, json={'user_id': 9})
         return original(request)
     http = httpx.AsyncClient(transport=httpx.MockTransport(handle))
     app = create_app(replace(room(), participants=[8, 9]), 'operator', '', http=http)
     with TestClient(app) as server:
-        # Independent transports, participant keys and session state, sharing one room.
-        with TestClient(app) as second_server:
-            monitors = [Monitor(), Monitor()]
-            instances = []
-            for key, transport, monitor in zip(['participant', 'second'], [server, second_server], monitors):
-                client = RoomClient('http://127.0.0.1', key, http=transport)
+        # Two independent HTTP clients share one ASGI lifespan/event loop, as in
+        # the single-process coordinator. A second TestClient context would drive
+        # its asyncio lock/tasks from another loop and race during shutdown.
+        monitors = [Monitor(), Monitor()]
+        instances = []
+        try:
+            for key, monitor in zip(['participant', 'second'], monitors):
+                transport = httpx.MockTransport(server.send)
+                client = RoomClient('http://127.0.0.1', key, http=httpx.Client(transport=transport))
                 client.epoch = monitor.value['epoch'] = app.state.coordinator.epoch
                 instances.append(session(client, monitor))
-            try:
+            for instance in instances: instance.feed(VOICE)
+            for instance in instances:
+                # Wait for each network reservation without consuming the result.
+                until(lambda: instance.future.done())
+            for instance in instances: instance.tick()
+            assert sorted(i.state for i in instances) == ['BUSY', 'CAPTURING']
+            winner = next(i for i in instances if i.state == 'CAPTURING')
+            loser = next(i for i in instances if i.state == 'BUSY')
+            for monitor in monitors: monitor.value = monitor.value | {'busy': True}
+            assert loser.capture is None and loser.audio is None
+            for _ in range(60):
                 for instance in instances: instance.feed(VOICE)
-                for instance in instances:
-                    # Wait for each network reservation without consuming the result.
-                    until(lambda: instance.future.done())
-                for instance in instances: instance.tick()
-                assert sorted(i.state for i in instances) == ['BUSY', 'CAPTURING']
-                winner = next(i for i in instances if i.state == 'CAPTURING')
-                loser = next(i for i in instances if i.state == 'BUSY')
-                for monitor in monitors: monitor.value = monitor.value | {'busy': True}
-                assert loser.capture is None and loser.audio is None
-                for _ in range(60):
-                    for instance in instances: instance.feed(VOICE)
-                for _ in range(40):
-                    for instance in instances: instance.feed(QUIET)
-                until(lambda: winner.state == 'SPEAKING', *instances)
-                assert len([r for r in services.calls if r.url.path == '/v1/audio/transcriptions']) == 1
-                assert len([r for r in services.calls if r.method == 'POST' and r.url.path.endswith('/speak')]) == 1
-                for instance in instances:
-                    for _ in range(30): instance.feed(VOICE)
-                    assert instance.detector.kws.accept.call_count == 1
-                services.state = 'completed'
-                until(lambda: winner.state in ('BUSY', 'QUIET'), *instances)
-                for monitor in monitors:
-                    monitor.value = monitor.value | {'busy': False, 'revision': app.state.coordinator.revision}
-                for instance in instances:
-                    for _ in range(40): instance.feed(QUIET)
-                    assert instance.state == 'ARMED'
-                    assert instance.detector.armed
-                # The losing host can ask the next question after fresh idle/quiet.
-                loser.feed(VOICE)
-                until(lambda: loser.future.done())
-                loser.tick()
-                assert loser.state == 'CAPTURING'
-                assert app.state.coordinator.active == loser.identifier
-            finally:
-                services.state = 'stopped'
-                for instance in instances: instance.close()
+            for _ in range(40):
+                for instance in instances: instance.feed(QUIET)
+            until(lambda: winner.state == 'SPEAKING', *instances)
+            assert len([r for r in services.calls if r.url.path == '/v1/audio/transcriptions']) == 1
+            assert len([r for r in services.calls if r.method == 'POST' and r.url.path.endswith('/speak')]) == 1
+            for instance in instances:
+                for _ in range(30): instance.feed(VOICE)
+                assert instance.detector.kws.accept.call_count == 1
+            services.state = 'completed'
+            until(lambda: winner.state in ('BUSY', 'QUIET'), *instances)
+            for monitor in monitors:
+                monitor.value = monitor.value | {'busy': False, 'revision': app.state.coordinator.revision}
+            for instance in instances:
+                for _ in range(40): instance.feed(QUIET)
+                assert instance.state == 'ARMED'
+                assert instance.detector.armed
+            # The losing host can ask the next question after fresh idle/quiet.
+            loser.feed(VOICE)
+            until(lambda: loser.future.done())
+            loser.tick()
+            assert loser.state == 'CAPTURING'
+            assert app.state.coordinator.active == loser.identifier
+            assert {turn.user_id for turn in app.state.coordinator.turns.values()} == {8, 9}
+        finally:
+            services.state = 'stopped'
+            for instance in instances: instance.close()
+            # Session.close is intentionally non-blocking for the host UI. Drain
+            # its queued HTTP cleanup here while the test server is still alive.
+            for instance in instances: instance.pool.shutdown(wait=True)
+        assert len(event_loops) == 1
 
 
 @pytest.mark.parametrize('failure', ['stt', 'llm', 'tts', 'bot_disconnected'])

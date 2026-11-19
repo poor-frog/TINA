@@ -424,9 +424,12 @@ async def request_bot(
     transcription_tier: str = "realtime",
     recording_enabled: bool = False,
     transcribe_enabled: bool = True,
-    voice_agent_enabled: bool = False,
+    voice_agent_enabled: Optional[bool] = False,
     automatic_leave: Optional[dict] = None,
     continue_meeting: bool = False,
+    auto_retry_enabled: bool = True,
+    expected_meeting_id: Optional[int] = None,
+    auto_retry_attempt: Optional[int] = None,
     max_concurrent: Optional[int] = None,
     redis_url: Optional[str] = None,
     meeting_api_url: Optional[str] = None,
@@ -457,6 +460,13 @@ async def request_bot(
     if is_discord:
         # This connector is receive/transcribe-only; the browser bot owns TTS injection.
         voice_agent_enabled = False
+    if auto_retry_attempt is not None and (not continue_meeting or expected_meeting_id is None):
+        raise ValueError("automatic retry requires the expected terminal meeting row")
+    if auto_retry_attempt is not None:
+        from ..lifecycle.retry import DEFAULT_MAX_ATTEMPTS
+
+        if type(auto_retry_attempt) is not int or not 2 <= auto_retry_attempt <= DEFAULT_MAX_ATTEMPTS:
+            raise ValueError("automatic retry attempt is outside its bounded policy")
     # 1. URL.
     constructed_url = meeting_url or construct_meeting_url(
         platform, native_meeting_id, teams_base_host=teams_base_host
@@ -481,6 +491,10 @@ async def request_bot(
     transcription_service_token = os.getenv("TRANSCRIPTION_SERVICE_TOKEN") or None
     transcription_model = os.getenv("TRANSCRIPTION_MODEL") or None
     bot_context = await _fetch_bot_context(user_id)
+    if voice_agent_enabled is None:
+        pref = (bot_context.get('voice') or {}).get('prepare_new_bots')
+        context_available = bool(bot_context) or not os.getenv('ADMIN_API_URL', '').strip()
+        voice_agent_enabled = context_available and bool(os.getenv('TTS_SERVICE_URL', '').strip()) and pref is not False
     configured = _transcription_from_context(bot_context)
     # O-TEL-1 fixture collection, resolved from the SAME best-effort lookup (one hop, two readers).
     # Default ON: only an explicit false from identity stops the tape.
@@ -495,10 +509,10 @@ async def request_bot(
         recording_enabled = False
     # THE NAME THIS PERSON'S BOT SHOWS UP AS — third reader of the same one hop. Precedence is
     # auto-join's, unchanged: an explicit name on THIS request, then this person's default from
-    # identity, then the deployment's (applied at `build_invocation` below). An explicit name wins
-    # without identity being consulted about it at all — the answer could not change anything.
+    # identity, then the deployment's. An explicit name wins without identity being consulted
+    # about it at all — the answer could not change anything.
     if not bot_name:
-        bot_name = _bot_name_from_context(bot_context)
+        bot_name = _bot_name_from_context(bot_context) or os.getenv("DEFAULT_BOT_NAME") or f"TINA-{uuid.uuid4().hex[:6]}"
     transcription_provider: Optional[str] = "none" if not transcribe_enabled else None
     configured_backend = configured.get("backend")
     if configured.get("disabled") and transcribe_enabled:
@@ -538,6 +552,14 @@ async def request_bot(
             "no transcription backend configured — set it in Settings or environment variables "
             "TRANSCRIPTION_SERVICE_URL + TRANSCRIPTION_SERVICE_TOKEN"
         )
+    audio_bridge = platform=='google_meet' and transcribe_enabled and env_flag('TINA_LIVEKIT_AUDIO',False)
+    if audio_bridge:
+        from ..lifecycle.audio import issue_audio_capability
+        agent_url=os.environ.get('LIVEKIT_AGENT_URL','').rstrip('/')
+        if not agent_url: raise TranscriptionNotConfigured('LiveKit audio bridge is not configured')
+        # Validate before inserting a requested meeting, so a config error cannot strand its retry.
+        try:issue_audio_capability(0,'preflight',transcription_service_url,transcription_service_token,transcription_model)
+        except ValueError:raise TranscriptionNotConfigured('LiveKit audio capability is not configured') from None
     # 1b-ii. SET-but-MISCONFIGURED is the other half of the same gate (#511 C3): a URL/token that is
     #     present but rejected (or points at a 404) used to spawn a bot that joined, captured, and
     #     transcribed NOTHING. Refuse it here, with the probe's own named reason, before the DB
@@ -597,6 +619,8 @@ async def request_bot(
     reused_row: Optional[dict] = None
     if continue_meeting:
         latest = await repo.find_latest(user_id, platform, native_meeting_id)
+        if expected_meeting_id is not None and (latest or {}).get("id") != expected_meeting_id:
+            raise DuplicateMeeting("Automatic retry was superseded by a newer meeting request")
         latest_data = (latest or {}).get("data") or {}
         deletion = latest_data.get("artifact_deletion") or {}
         recording_delete = any(
@@ -623,6 +647,8 @@ async def request_bot(
                 )
                 raise MeetingStopped(_stopped_reopen_detail(latest["id"]))
             reused_row = latest
+        if expected_meeting_id is not None and reused_row is None:
+            raise DuplicateMeeting("Automatic retry is no longer eligible")
 
     # 2+2b+3. Dedup + max-bots cap + INSERT, made ATOMIC (ROB1/ROB2). Replaces the old read-check-
     #     then-act sequence (find_active → count_active_bots → create_meeting), whose three separate
@@ -714,12 +740,27 @@ async def request_bot(
                     fields={"active": active, "cap": max_concurrent},
                 )
                 raise MaxBotsExceeded(user_id, max_concurrent)
+        policy_patch = {}
+        if auto_retry_attempt is not None:
+            from ..lifecycle.retry import DEFAULT_MAX_ATTEMPTS
+
+            policy_patch["auto_retry"] = {
+                "state": "in_progress",
+                "attempt": auto_retry_attempt,
+                "max_attempts": DEFAULT_MAX_ATTEMPTS,
+            }
+        if (voice_agent_enabled and transcribe_enabled and platform=='google_meet' and env_flag('TINA_MEETING_VOICE',False)
+                and not (reused_row.get('data') or {}).get('voice_assistant')):
+            from ..lifecycle.voice import new_meeting_voice_policy
+            policy_patch['voice_assistant']=new_meeting_voice_policy()
         row = await repo.reopen_meeting(
             meeting_id=reused_row["id"],
             data_patch={
+                **policy_patch,
                 "transcribe_enabled": transcribe_enabled,
                 "recording_enabled": recording_enabled,
                 "voice_agent_enabled": voice_agent_enabled,
+                "voice_assistant_capable": bool(voice_agent_enabled and platform == "google_meet" and env_flag("TINA_MEETING_VOICE", False)),
                 "transcription_provider": transcription_provider,
                 "service_authority": authority_record,
             },
@@ -728,9 +769,33 @@ async def request_bot(
         meeting_data: dict[str, Any] = {}
         if constructed_url:
             meeting_data["constructed_meeting_url"] = constructed_url
+        if auto_retry_enabled and constructed_url and passcode:
+            meeting_data["auto_retry"] = {"state": "manual_only", "attempt": 1,
+                                           "max_attempts": 3}
+        elif auto_retry_enabled and constructed_url:
+            from ..lifecycle.retry import DEFAULT_MAX_ATTEMPTS
+
+            meeting_data["auto_retry"] = {"state": "ready", "attempt": 1,
+                                           "max_attempts": DEFAULT_MAX_ATTEMPTS}
+            meeting_data["_auto_retry_request"] = {
+                "bot_name": bot_name,
+                "teams_base_host": teams_base_host,
+                "language": language,
+                "task": task,
+                "transcription_tier": transcription_tier,
+                "recording_enabled": recording_enabled,
+                "transcribe_enabled": transcribe_enabled,
+                "voice_agent_enabled": voice_agent_enabled,
+                "automatic_leave": automatic_leave,
+                "max_concurrent": max_concurrent,
+            }
         meeting_data["transcribe_enabled"] = transcribe_enabled
         meeting_data["recording_enabled"] = recording_enabled
         meeting_data["voice_agent_enabled"] = voice_agent_enabled
+        meeting_data["voice_assistant_capable"] = bool(voice_agent_enabled and platform == "google_meet" and env_flag("TINA_MEETING_VOICE", False))
+        if meeting_data['voice_assistant_capable'] and transcribe_enabled:
+            from ..lifecycle.voice import new_meeting_voice_policy
+            meeting_data['voice_assistant']=new_meeting_voice_policy()
         if transcription_provider is not None:
             meeting_data["transcription_provider"] = transcription_provider
         meeting_data["service_authority"] = authority_record
@@ -782,11 +847,19 @@ async def request_bot(
     token = mint_meeting_token(
         meeting_id, user_id, platform, native_meeting_id, secret=token_secret, ttl_seconds=token_ttl_seconds
     )
+    audio_env={}
+    if audio_bridge:
+        audio_token=issue_audio_capability(meeting_id,connection_id,transcription_service_url,
+                                           transcription_service_token,transcription_model)
+        transcription_service_url=f'{agent_url}/audio/{meeting_id}/{connection_id}'
+        transcription_service_token=audio_token
+        audio_env={'TINA_AUDIO_BRIDGE_URL':transcription_service_url,'TINA_AUDIO_BRIDGE_TOKEN':audio_token,
+                   'TINA_LIVEKIT_VAD_SHADOW':'1' if env_flag('TINA_LIVEKIT_VAD_SHADOW',False) else '0'}
     invocation = build_invocation(
         meeting_id=meeting_id,
         platform=platform,
         meeting_url=join_url,
-        bot_name=bot_name or (os.getenv("DEFAULT_BOT_NAME") or f"TINA-{uuid.uuid4().hex[:6]}"),
+        bot_name=bot_name,
         passcode=passcode,
         token=token,
         native_meeting_id=native_meeting_id,
@@ -841,7 +914,7 @@ async def request_bot(
     # 5. Spawn over runtime.v1. The workload id PREFIX is the routing key the composite runtime
     #    client uses for delete/get (create routes on `profile`): `dc-` is the long-lived Discord
     #    connector, `mtg-` the per-meeting container kernel.
-    tts_env = {}
+    tts_env = dict(audio_env)
     if voice_agent_enabled:
         tts_url = os.getenv("TTS_SERVICE_URL", "").strip()
         tts_token = os.getenv("TTS_API_TOKEN", "").strip()
@@ -849,6 +922,13 @@ async def request_bot(
             tts_env["TTS_SERVICE_URL"] = tts_url
         if tts_token:
             tts_env["TTS_API_TOKEN"] = tts_token
+    if voice_agent_enabled and platform == 'google_meet' and env_flag('TINA_MEETING_VOICE', False):
+        from ..lifecycle.voice import voice_token
+        tts_env.update(TINA_VOICE_URL=f'{meeting_api_url}/bots/voice/{meeting_id}/{connection_id}',
+                       TINA_VOICE_TOKEN=voice_token(token_secret, meeting_id, connection_id),
+                       TINA_VOICE_MODEL_DIR='/models/meeting-voice',
+                       TINA_VOICE_TURN_SHADOW='1' if env_flag('TINA_VOICE_TURN_SHADOW',True) else '0',
+                       TINA_TTS_PREBUFFER_MS=os.environ.get('TINA_TTS_PREBUFFER_MS','150'))
     spec = build_workload_spec(
         workload_id=f"{'dc' if is_discord else 'mtg'}-{meeting_id}-{connection_id[:8]}",
         profile="discord-bot" if is_discord else "meeting-bot",

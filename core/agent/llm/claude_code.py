@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
+import threading
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Optional
 
@@ -33,7 +35,7 @@ def _short(content: object, n: int = 80) -> str:
     return s[:n]
 
 
-def parse_stream_json(lines: Iterable[str]) -> Iterator[dict]:
+def parse_stream_json(lines: Iterable[str], *, structured_output: bool = False) -> Iterator[dict]:
     """Normalize Claude Code `--output-format stream-json` JSONL into UnitEvent dicts.
 
     assistant text → message-delta · assistant tool_use → tool-call · user tool_result →
@@ -87,13 +89,18 @@ def parse_stream_json(lines: Iterable[str]) -> Iterator[dict]:
                     }
         elif t == "result":
             reply = obj.get("result", "")
+            failed = obj.get('is_error') is True or obj.get('subtype') == 'error'
+            if structured_output and str(obj.get('subtype', '')).startswith('error'):
+                failed = True
+            if structured_output and isinstance(obj.get('structured_output'), dict) and not failed:
+                reply = json.dumps(obj['structured_output'], ensure_ascii=False)
             if obj.get("is_error") or obj.get("subtype") == "error":
                 reply = _short(reply, max(400, len(str(reply))))
             done = {
                 "type": "done",
                 "reply": reply,
                 "sessionId": obj.get("session_id"),
-                "ok": obj.get("is_error") is not True and obj.get("subtype") != "error",
+                "ok": not failed,
             }
             if not done["ok"] and looks_like_auth_failure(reply):
                 # The CLI's own auth text ("Not logged in · Please run /login") is an internal of
@@ -119,6 +126,7 @@ def build_argv(
     model: Optional[str] = None,
     mcp_config: Optional[str] = None,
     effort: Optional[str] = None,
+    output_schema: Optional[dict] = None,
 ) -> list[str]:
     """The headless Claude Code argv — `claude -p <prompt> --output-format stream-json [...]`.
 
@@ -136,12 +144,16 @@ def build_argv(
     tools = list(allowed_tools)
     if tools:
         argv += ["--allowedTools", ",".join(tools)]
+    else:
+        argv += ["--tools", ""]
     if mcp_config:
         argv += ["--mcp-config", mcp_config, "--strict-mcp-config"]
     if session:
         argv += ["--resume", session]
     if model:
         argv += ["--model", model]
+    if output_schema is not None:
+        argv += ["--json-schema", json.dumps(output_schema, ensure_ascii=False)]
     # The compatibility argument is deliberately ignored: thinking is always automatic.
     return argv
 
@@ -152,13 +164,39 @@ def _exec_subprocess(argv: list[str], cwd: str) -> Iterator[str]:
     # read/write another tenant's tc:meeting:* / unit:*:in streams, crossing the tenancy boundary the
     # mounts enforce on the filesystem) nor the minted per-dispatch bearer token. It also drops the
     # git repo-discovery redirects (a hook-exported GIT_DIR would re-point the workspace's git ops).
-    proc = subprocess.Popen(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+    # Feed the prompt on stdin so large authorized evidence packs do not exceed argv limits.
+    command = [*argv[:2], *argv[3:]]
+    proc = subprocess.Popen(command, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
                             env=harness_subprocess_env())
     assert proc.stdout is not None
+    assert proc.stdin is not None
+    input_errors = []
+    def send_prompt():
+        try:
+            proc.stdin.write(argv[2])
+        except BrokenPipeError:
+            pass  # Preserve the CLI's structured startup/auth error on stdout.
+        except Exception:
+            input_errors.append(True)
+        finally:
+            try: proc.stdin.close()
+            except BrokenPipeError: pass
+            except Exception: input_errors.append(True)
+    writer = threading.Thread(target=send_prompt, daemon=True)
+    writer.start()
+    finished = False
     try:
         yield from proc.stdout
+        finished = True
     finally:
-        proc.wait()
+        if not finished and proc.poll() is None: proc.terminate()
+        try: proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill(); proc.wait(timeout=3)
+        writer.join(timeout=3)
+        proc.stdout.close()
+        if writer.is_alive() or input_errors:
+            raise RuntimeError('Claude prompt input could not complete')
 
 
 def _link_chat_into_workspace(work: Path) -> None:
@@ -232,15 +270,28 @@ class ClaudeCodeHarness:
                  mcp_config: Optional[str] = None, gated_mcp_servers: Iterable[str] = (),
                  mcp_servers: Optional[dict] = None, mcp_env: Optional[dict[str, str]] = None,
                  mcp_tools: Optional[dict[str, list[str]]] = None,
+                 output_schema: Optional[dict] = None,
                  approval_handler: Optional[Callable[[dict], Optional[bool]]] = None) -> Iterator[dict]:
         mode = "bedrock" if os.environ.get("CLAUDE_CODE_USE_BEDROCK") == "1" else (
             "deepseek" if os.environ.get("ANTHROPIC_BASE_URL", "").rstrip("/") == "https://api.deepseek.com/anthropic"
             else "custom" if os.environ.get("ANTHROPIC_BASE_URL") else "subscription")
         effort = normalized_effort(mode, model or os.environ.get("TINA_AGENT_MODEL", ""), os.environ.get("TINA_AGENT_EFFORT"))
+        reach = (mcp_servers or {}).get('tina-reach')
+        if (mcp_config is None and isinstance(reach, dict) and 'mcp__tina-reach' in allowed_tools
+                and 'tina-reach' not in gated_mcp_servers and (mcp_tools or {}).get('tina-reach')):
+            # Public retrieval has no secret environment and its bridge advertises only granted tools.
+            with tempfile.TemporaryDirectory(prefix='tina-reach-mcp-') as directory:
+                config = Path(directory) / 'mcp.json'
+                config.write_text(json.dumps({'mcpServers': {'tina-reach': {
+                    'command': reach['command'], 'args': reach['args']}}}))
+                argv = build_argv(prompt, allowed_tools=allowed_tools, session=session, model=model,
+                                  effort=effort or None, mcp_config=str(config), output_schema=output_schema)
+                yield from parse_stream_json(self._exec(argv, str(work)), structured_output=output_schema is not None)
+            return
         argv = build_argv(prompt, allowed_tools=allowed_tools, session=session, model=model,
                           effort=effort or None,
-                          mcp_config=mcp_config)
-        yield from parse_stream_json(self._exec(argv, str(work)))
+                          mcp_config=mcp_config, output_schema=output_schema)
+        yield from parse_stream_json(self._exec(argv, str(work)), structured_output=output_schema is not None)
 
     def prepare(self, work: Path, chat_root: Optional[Path] = None) -> None:
         # chats are saved to / resumed from the PRIVATE continuity root (the _system mount when the

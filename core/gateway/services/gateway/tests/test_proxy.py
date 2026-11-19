@@ -35,6 +35,18 @@ def _client(authorizer=None, downstream=None):
     return TestClient(app), downstream
 
 
+@pytest.mark.parametrize('method,kind',[('POST','navigation'),('POST','handoff'),('GET','handoff')])
+def test_owner_voice_transfer_forwards_with_required_scopes(method,kind):
+    path=f'/meetings/1/voice-assistant/{kind}/00000000-0000-4000-8000-000000000123'
+    client,downstream=_client()
+    assert client.request(method,path).status_code==401 and downstream.last is None
+    denied,_=_client(authorizer=FakeAuthorizer(user={'user_id':7,'scopes':['browser'],'max_concurrent':1}))
+    assert denied.request(method,path,headers=AUTH).status_code==403
+    assert client.request(method,path,headers=AUTH).status_code==200
+    assert downstream.last['method']==method and downstream.last['url'].endswith(path)
+    assert downstream.last['headers']['x-user-id']=='7'
+
+
 def test_missing_api_key_is_401():
     client, _ = _client()
     r = client.get("/bots/status")

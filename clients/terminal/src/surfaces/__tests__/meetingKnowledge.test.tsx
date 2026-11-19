@@ -113,7 +113,9 @@ it('reviews facts on Terminal without changing transcript evidence', async () =>
   render(<MeetingKnowledge meetingId="42" />);
   await screen.findByText('Quyết định và công việc cần duyệt (1)');
   fireEvent.click(screen.getByText('Quyết định và công việc cần duyệt (1)'));
-  fireEvent.change(screen.getByLabelText('Nội dung đề xuất'), { target: { value: 'Send demo tomorrow' } });
+  const proposal = screen.getByLabelText('Nội dung đề xuất') as HTMLTextAreaElement;
+  fireEvent.change(proposal, { target: { value: 'Send demo tomorrow' } });
+  await waitFor(() => expect(proposal.value).toBe('Send demo tomorrow'));
   fireEvent.click(screen.getByRole('button', { name: /^Duyệt$/ }));
   await screen.findByText('Công việc · Đã duyệt');
   expect(fact.evidence[0].quote).toBe('Please send demo');

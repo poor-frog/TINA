@@ -48,16 +48,18 @@ check("below the confidence floor → UNKNOWN (leak-free, never a guess)", b2.na
   }
   class Worklet {
     port = { onmessage: null as any };
-    constructor() { node = this; }
+    constructor(_ctx: unknown, _name: string, options: any) { node = this; this.options = options; }
+    options: any;
     connect() {}
   }
   g.AudioContext = Context; g.AudioWorkletNode = Worklet; g.MediaStream = Stream;
   g.document = { querySelectorAll: () => [{ paused: false, srcObject: new Stream() }] };
   const pcms: Float32Array[] = [];
-  const capture = createGmeetCapture({ onAudio: (_index, pcm) => pcms.push(pcm) });
+  const capture = createGmeetCapture({ bufferSize: 1024, onAudio: (_index, pcm) => pcms.push(pcm) });
   try {
     await capture.start();
     await new Promise(resolve => setTimeout(resolve, 0));
+    check('capture forwards the requested frame size to the worklet processor', node.options.processorOptions.bufferSize === 1024);
     node.port.onmessage({ data: new Float32Array(4096) });
     node.port.onmessage({ data: new Float32Array(4096).fill(1 / 32768) });
     check('default capture rejects silence and PCM16 residue', pcms.length === 0);

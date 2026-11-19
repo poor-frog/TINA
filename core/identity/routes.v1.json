@@ -95,6 +95,22 @@
         "bot",
         "tx"
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/user/voice",
+      "scopes": [
+        "bot",
+        "tx"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/user/voice",
+      "scopes": [
+        "bot",
+        "tx"
+      ]
     }
   ]
 }

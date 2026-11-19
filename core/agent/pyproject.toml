@@ -21,8 +21,12 @@ dependencies = [
 # control-plane image (uvicorn HTTP front door) — `uv sync --group control-plane`.
 control-plane = [
     "fastapi>=0.110,<1",
+    "onnxruntime==1.31.1",
+    "tokenizers==0.21.4",
+    "numpy==2.4.6",
     "python-multipart>=0.0.31,<1",
     "uvicorn[standard]>=0.29,<1",
+    "underthesea==9.5.0",
 ]
 # worker image (claude-in-container) — base only; claude-code is an npm global, not a pip dep.
 worker = []

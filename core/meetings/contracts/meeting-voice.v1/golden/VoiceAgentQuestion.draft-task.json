@@ -1,0 +1,11 @@
+{
+  "request_id": "00000000-0000-4000-8000-000000000001",
+  "question": "Tạo task demo cho An",
+  "revision": 1,
+  "operation": "lookup",
+  "agent_context": [],
+  "lookup": {
+    "name": "draft_task",
+    "query": "Demo cho An"
+  }
+}

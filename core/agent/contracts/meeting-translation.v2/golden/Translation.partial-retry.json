@@ -1,0 +1,58 @@
+{
+  "version": "meeting-translation.v2",
+  "meeting_id": 6,
+  "target_language": "en",
+  "status": "pending",
+  "retry_after": 0,
+  "total": 2,
+  "completed": 0,
+  "groups": [
+    {
+      "group_id": "phrase:example",
+      "members": [
+        {
+          "segment_id": "s1",
+          "source_text": "Mục tiêu cuộc họp",
+          "revision": 0
+        },
+        {
+          "segment_id": "s2",
+          "source_text": "là tối ưu các mô hình học máy.",
+          "revision": 0
+        }
+      ],
+      "source_text": "Mục tiêu cuộc họp là tối ưu các mô hình học máy.",
+      "translated_text": null,
+      "ready": true,
+      "speaker_id": "nam",
+      "speaker_name": "Nam",
+      "start_ms": 0,
+      "end_ms": 6000,
+      "status": "retrying",
+      "attempts": 1,
+      "retry_after": 15,
+      "error_code": "timeout"
+    },
+    {
+      "group_id": "phrase:second",
+      "members": [
+        {
+          "segment_id": "next",
+          "source_text": "Câu tiếp theo.",
+          "revision": 0
+        }
+      ],
+      "source_text": "Câu tiếp theo.",
+      "translated_text": null,
+      "ready": true,
+      "speaker_id": "nam",
+      "speaker_name": "Nam",
+      "start_ms": 0,
+      "end_ms": 6000,
+      "status": "pending",
+      "attempts": 0,
+      "retry_after": 0
+    }
+  ],
+  "can_advance": true
+}

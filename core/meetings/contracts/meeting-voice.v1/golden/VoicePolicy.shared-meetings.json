@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "include_transcript": true,
+  "shared_meeting_ids": [
+    2,
+    3
+  ],
+  "revision": 2,
+  "engine": "livekit"
+}

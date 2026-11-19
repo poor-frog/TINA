@@ -1,0 +1,17 @@
+{
+  "version": "tina-v1",
+  "runtime": "livekit-wakeword==2.1.1",
+  "mode": "activation",
+  "models": {
+    "hey_tina": {
+      "phrase": "hey TINA",
+      "bytes": 7406227,
+      "sha256": "800153fec27509eadb9e87bb7635da677ed5786d164f10eabe8db949ec361921"
+    },
+    "tina_oi": {
+      "phrase": "TINA ơi",
+      "bytes": 7406227,
+      "sha256": "1ce31abcf79ef4497f370dfbc8ee9b7e82f05d0979b897cb3d73064349e88e66"
+    }
+  }
+}

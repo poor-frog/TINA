@@ -1,0 +1,96 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: brand · redesign: full · nav: kept · signature: meeting agenda · states: existing · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V3 · weakest: V, use readable agenda rows instead of another dashboard card grid */
+/* Hallmark · dropped onMouseEnter, onMouseLeave · agenda hover colors now use CSS pseudo-classes; meeting navigation and API handlers remain wired */
+.screen { height: 100%; min-width: 0; overflow-y: auto; container-name: today; container-type: inline-size; color: var(--t1); font-family: var(--today-font); }
+.content { width: 100%; max-width: var(--today-measure); margin-inline: auto; padding: 28px 24px 40px; font-size: var(--today-text); }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.title { margin: 0; min-width: 0; overflow-wrap: break-word; font-size: var(--today-title); font-weight: 650; line-height: 1.2; }
+.weekNavigation { display: flex; align-items: center; gap: 8px; }
+.weekLabel { color: var(--t2); font-size: var(--today-small); }
+.pager, .planButton, .connectButton, .sendButton, .askAgent { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--today-control); padding: 0 16px; border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); color: var(--t1); font-size: var(--today-small); font-weight: 600; cursor: pointer; }
+.pager { width: var(--today-control); padding: 0; }
+.pager:hover:not(:disabled), .planButton:hover, .askAgent:hover { border-color: var(--accent); background: var(--panel2); }
+.screen :is(button, input, [role="button"]):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.screen button:active:not(:disabled) { transform: translateY(1px); }
+.screen button:disabled { background: var(--panel2); color: var(--t3); border-color: var(--line); cursor: not-allowed; }
+.onboarding { margin-bottom: 28px; }
+.calendarNotice { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 0; border-block: 1px solid var(--line); }
+.calendarCopy { min-width: 0; }
+.calendarCopy strong { display: flex; align-items: center; gap: 8px; font-size: var(--today-text); font-weight: 600; }
+.calendarCopy p { margin: 4px 0 0; max-width: 68ch; color: var(--t2); font-size: var(--today-small); line-height: 1.6; }
+.connectButton { flex: none; border-color: var(--accent); color: var(--accent); background: transparent; }
+.connectButton:hover { background: var(--accentbg); }
+.meetingActions { display: flex; align-items: flex-start; gap: 12px; margin-top: 20px; }
+.planButton { flex: none; }
+.dropBot { flex: 1; min-width: 0; }
+.botForm { display: grid; gap: 8px; }
+.botInputRow { display: flex; gap: 8px; }
+.meetingInput { flex: 1; min-width: 0; width: 100%; min-height: var(--today-control); padding: 8px 12px; border: 1px solid var(--line2); border-radius: var(--r); background: var(--panel); color: var(--t1); font-size: var(--today-small); }
+.meetingInput::placeholder { color: var(--t3); }
+.meetingInput:hover { border-color: var(--accent); }
+.sendButton { flex: none; background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.sendButton:hover:not(:disabled) { background: var(--brand-hover, var(--accent)); }
+.sendButton[aria-busy="true"] { cursor: progress; }
+.timelineLayout { display: grid; gap: 32px; }
+.agenda { min-width: 0; border-block: 1px solid var(--line); }
+.dayRow { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 20px; padding: 24px 4px; border-bottom: 1px solid var(--line); }
+.dayRow:last-child { border-bottom: 0; }
+.dayDate { display: flex; align-items: center; gap: 12px; }
+.dayNumber { font-size: var(--today-date); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+.dayCopy { display: grid; gap: 2px; color: var(--t2); font-size: var(--today-small); }
+.dayRow[data-today="true"] .dayCopy { color: var(--accent); }
+.dayEvents { display: grid; gap: 8px; min-width: 0; align-content: center; }
+.emptyDay { color: var(--t3); margin: 0; font-size: var(--today-text); line-height: 1.6; }
+.eventRow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; min-height: 40px; padding: 8px; border-radius: var(--r); cursor: pointer; }
+.eventRow:hover, .pastRow:hover { background: var(--panel); }
+.eventTitle { flex: 1 1 180px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--today-text); font-weight: 550; }
+.eventTime, .deviation { flex: none; font-size: var(--today-small); }
+.eventTime { color: var(--t2); font-variant-numeric: tabular-nums; }
+.deviation { text-decoration: underline; text-underline-offset: 4px; }
+.pastFeed { min-width: 0; }
+.sectionTitle { margin: 0 0 20px; font-size: var(--today-text); font-weight: 600; }
+.pastGroup + .pastGroup { margin-top: 24px; }
+.pastDate { margin: 0 0 8px; color: var(--t3); font-size: var(--today-small); font-weight: 500; }
+.pastRow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 60px; padding: 12px 8px; border-bottom: 1px solid var(--line); cursor: pointer; border-radius: var(--r); }
+.pastIdentity { display: flex; align-items: center; gap: 8px; }
+.pastTitle { min-width: 0; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.pastTitle > span:first-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--today-text); font-weight: 500; }
+.recap, .pastNote { color: var(--t3); font-size: var(--today-small); }
+.recap[data-unreviewed="true"] { color: var(--accent); }
+.pastActions { display: flex; align-items: center; gap: 12px; }
+.pastTime { color: var(--t3); font-size: var(--today-small); font-variant-numeric: tabular-nums; }
+.askAgent { min-height: 32px; padding: 0 8px; opacity: 0; }
+.pastRow:hover .askAgent, .pastRow:focus-within .askAgent { opacity: 1; }
+.historyHint, .intro, .calendarConnected { margin: 24px 0 0; color: var(--t3); font-size: var(--today-small); line-height: 1.6; }
+.emptyActions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 32px; padding-block: 24px; }
+.planSection p, .sendSection p { margin: 0 0 16px; color: var(--t2); font-size: var(--today-text); line-height: 1.6; }
+@container today (min-width: 1050px) {
+  .content { --today-text: 18px; --today-small: 14px; --today-title: 32px; --today-date: 36px; --today-control: 44px; padding: 36px 40px 48px; }
+}
+@container today (min-width: 1320px) {
+  .content { --today-title: 36px; padding-inline: 48px; }
+  .timelineLayout[data-has-past="true"] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: start; }
+}
+@container today (max-width: 640px) {
+  .content { padding: 24px 16px 32px; }
+  .calendarNotice { align-items: flex-start; flex-direction: column; gap: 16px; }
+  .meetingActions { flex-direction: column; }
+  .dropBot { width: 100%; }
+  .dayRow { grid-template-columns: 80px minmax(0, 1fr); gap: 8px; }
+  .pastRow { grid-template-columns: auto minmax(0, 1fr); }
+  .pastActions { grid-column: 2; justify-content: space-between; }
+  .askAgent { opacity: 1; }
+  .emptyActions { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+}
+@media (prefers-reduced-motion: reduce) { .screen button:active:not(:disabled) { transform: none; } }
+
+.calendarNotice { background: var(--calendar-tint); padding-inline: 16px; border-radius: var(--r); border-block-color: color-mix(in srgb, var(--calendar-color) 30%, var(--line)); }
+.calendarCopy strong { color: var(--calendar-color); }
+.connectButton { border-color: var(--calendar-color); color: var(--calendar-color); }
+.connectButton:hover { background: var(--calendar-tint); }
+.askAgent { color: var(--agent-color); }
+.greeting { margin: 0 0 12px; color: var(--t2); font-size: var(--today-title); font-weight: 500; line-height: 1.2; }
+.greeting strong { color: var(--t1); font-weight: 650; }
+.title { font-size: var(--ui-type-title); }
+.headingGroup { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 8px; min-width: 0; }
+.headingGroup .weekLabel { white-space: nowrap; font-variant-numeric: tabular-nums; }

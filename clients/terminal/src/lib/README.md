@@ -10,3 +10,5 @@ cannot reconnect a removed account. Access and refresh tokens never appear in br
 `completeChatGPTSignIn` serves both the automatic callback and an authenticated manual handoff.
 Only the initiating TINA subject can consume pending OAuth state; an anonymous callback can show
 a copyable callback URL without consuming it. Handoff codes stay in page/component memory only.
+
+voiceActivity maps meeting-voice.v1 runtime and fresh KWS readiness to bounded presentation states; missing/expired data never implies listening.

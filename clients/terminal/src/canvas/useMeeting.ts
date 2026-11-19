@@ -416,9 +416,10 @@ function useLiveMeetingState(meetingId?: string): MeetingState {
       const source = canonical && (canonical.speakerRevision ?? 0) >= (s.speakerRevision ?? 0) ? canonical : s;
       return { id: s.id, speakerId: canonical?.speakerId ?? s.speakerId, speakerKey: canonical?.speakerKey ?? s.speakerKey, speakerStatus: source.speakerStatus, speaker: transcriptSpeaker(source.speaker, source.speakerStatus),
         sourceText: canonical && (canonical.revision ?? 0) > 0 ? canonical.text : s.text,
+        revision: canonical?.revision,
         text: canonical && (canonical.revision ?? 0) > 0 ? canonical.text : s.text, ts: s.t, tsMs: s.tsMs, completed: canonical && (canonical.revision ?? 0) > 0 ? true : s.completed };
     });
-    const recordedSegments = safeArray(durable.lines).map((s) => ({ id: s.id, speaker: transcriptSpeaker(s.speaker, s.speakerStatus), speakerId: s.speakerId, speakerKey: s.speakerKey, speakerStatus: s.speakerStatus, sourceText: s.text, text: s.text, ts: lineTs(s), tsMs: s.tsMs, endTsMs: s.endTsMs, sessionUid: s.sessionUid }));
+    const recordedSegments = safeArray(durable.lines).map((s) => ({ id: s.id, speaker: transcriptSpeaker(s.speaker, s.speakerStatus), speakerId: s.speakerId, speakerKey: s.speakerKey, speakerStatus: s.speakerStatus, sourceText: s.text, text: s.text, revision: s.revision, ts: lineTs(s), tsMs: s.tsMs, endTsMs: s.endTsMs, sessionUid: s.sessionUid }));
     const fallbackSegments = normalizedSelected.transcript.map((s) => ({ speaker: transcriptSpeaker(s.speaker, s.speakerStatus), speakerId: s.speakerId, speakerKey: s.speakerKey, speakerStatus: s.speakerStatus, sourceText: s.text, text: s.text, ts: lineTs(s) }));
     const segments = selected.session_uid ? liveSegments : (recordedSegments.length ? recordedSegments : fallbackSegments);
     const copilotCards = safeArray(live.cards).filter(c => !c.stale).map((c, i) => ({ id: `live-${i}-${c.kind}-${c.title}`, kind: c.kind, title: cleanTranscriptText(c.title), body: c.body ? cleanTranscriptText(c.body) : c.body }));

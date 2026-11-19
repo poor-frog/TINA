@@ -18,7 +18,21 @@ function outsideVietnameseEnglish(result: TranscriptionResult): boolean {
     || !supportedLanguage;
 }
 
-export interface TranscriptionTiming { capture_ms?: number }
+export interface TranscriptionTiming { capture_ms?: number; stream?: {id:string;start_ms:number} }
+
+export type TranscriptionWindowRequest = (request: {
+  wav:Buffer; fields:Record<string,string>; timing?:TranscriptionTiming;
+  headers:Record<string,string>; signal:AbortSignal;
+}) => Promise<Response|undefined>;
+
+export function encodePcm16(samples:Float32Array):Buffer {
+  const buffer=Buffer.alloc(samples.length*2);
+  for(let i=0;i<samples.length;i++){
+    const value=Math.max(-1,Math.min(1,samples[i]));
+    buffer.writeInt16LE(Math.round(value<0?value*0x8000:value*0x7FFF),i*2);
+  }
+  return buffer;
+}
 
 export interface TranscriptionWord {
   word: string;
@@ -38,6 +52,7 @@ export interface TranscriptionSegment {
 }
 
 export interface TranscriptionResult {
+  queue_ms?: number;
   text: string;
   language: string;
   language_probability?: number;
@@ -47,6 +62,8 @@ export interface TranscriptionResult {
 }
 
 export interface TranscriptionClientConfig {
+  /** Optional continuous-audio transport; undefined response uses the ordinary HTTP window. */
+  windowRequest?:TranscriptionWindowRequest;
   /** Content-free diagnostics source; no participant or meeting identifiers. */
   source?: 'meeting-bot' | 'extension';
   /** Base URL of transcription-service, e.g. "http://localhost:8083" */
@@ -115,6 +132,7 @@ function classifyHttp(status: number, detail?: string): TranscriptionError {
  * and returns transcription results.
  */
 export class TranscriptionClient {
+  private windowRequest?:TranscriptionWindowRequest;
   private serviceUrl: string;
   private apiToken: string | undefined;
   private maxRetries: number;
@@ -127,6 +145,7 @@ export class TranscriptionClient {
   private responseFormat: 'verbose_json' | 'json' = 'verbose_json';
   private source: string;
   constructor(config: TranscriptionClientConfig) {
+    this.windowRequest=config.windowRequest;
     this.source = config.source ?? 'unknown';
     // Ensure serviceUrl ends with the transcriptions endpoint
     this.serviceUrl = config.serviceUrl.replace(/\/+$/, '');
@@ -294,7 +313,12 @@ export class TranscriptionClient {
     const timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMs);
 
     try {
-      const response = await fetch(this.serviceUrl, {
+      const fields:Record<string,string>={model:this.model,response_format:this.responseFormat,timestamp_granularities:'word'};
+      if(language)fields.language=language;
+      if(prompt)fields.prompt=prompt;
+      if(this.maxSpeechDurationSec!==undefined)fields.max_speech_duration_s=String(this.maxSpeechDurationSec);
+      if(this.minSilenceDurationMs!==undefined)fields.min_silence_duration_ms=String(this.minSilenceDurationMs);
+      const response = await this.windowRequest?.({wav:wavBuffer,fields,timing,headers,signal:controller.signal}) ?? await fetch(this.serviceUrl, {
         method: 'POST',
         headers,
         body,
@@ -307,6 +331,8 @@ export class TranscriptionClient {
       }
 
       const data = await response.json() as any;
+      const queue = /(?:^|,)\s*asr_queue\s*;\s*dur=([\d.]+)(?=\s*(?:,|$))/.exec(response.headers.get('server-timing') || '');
+      const queueMs = queue ? Number(queue[1]) : NaN;
 
       const allSegments = (data.segments || []).map((s: any) => ({
         start: s.start || 0,
@@ -328,6 +354,7 @@ export class TranscriptionClient {
         log(`[STT] dropped ${allSegments.length - segments.length}/${allSegments.length} low-confidence segment(s)`);
       }
       return {
+        ...(Number.isFinite(queueMs) && queueMs >= 0 && queueMs <= 3_600_000 ? {queue_ms: queueMs} : {}),
         text,
         language: data.language || language || 'unknown',
         language_probability: data.language_probability ?? 0,
@@ -370,17 +397,7 @@ export class TranscriptionClient {
     buffer.write('data', 36);
     buffer.writeUInt32LE(dataSize, 40);
 
-    // Convert Float32 [-1, 1] to Int16
-    let offset = headerSize;
-    for (let i = 0; i < samples.length; i++) {
-      let sample = samples[i];
-      // Clamp to [-1, 1]
-      sample = Math.max(-1, Math.min(1, sample));
-      // Convert to 16-bit integer
-      const int16 = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-      buffer.writeInt16LE(Math.round(int16), offset);
-      offset += 2;
-    }
+    encodePcm16(samples).copy(buffer,headerSize);
 
     return buffer;
   }

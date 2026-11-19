@@ -22,8 +22,13 @@ from .common import http, meetings_door, setting, user_api_key
 
 
 def meeting_row(uid: str, meeting_id, native: str | None = None):
-    """This user's meeting row from the gateway, or None. One read, several callers."""
+    """Read a row directly by id; legacy native references fall back to the list."""
     try:
+        if str(meeting_id or "").isdigit():
+            status, row = http("GET", f"{meetings_door()}/meetings/{int(meeting_id)}",
+                               {"X-API-Key": user_api_key(str(uid))})
+            if status == 200 and isinstance(row, dict) and str(row.get("id")) == str(meeting_id):
+                return row
         _st, body = http("GET", f"{meetings_door()}/meetings", {"X-API-Key": user_api_key(str(uid))})
     except StepError:
         return None
@@ -71,7 +76,7 @@ def _http_detail(body) -> str:
 
 
 def mint_transcript_share(uid: str, meeting_id, email: str,
-                          expires_in_sec: int = 30 * 86400) -> str:
+                          expires_in_sec: int = 30 * 86400, *, include_recordings: bool = False) -> str:
     """A RESTRICTED transcript share grant for ONE attendee — the capability that makes the
     meeting visible to them. Returns the token, or RAISES ``ShareMintError``. Never ``None``.
 
@@ -101,7 +106,8 @@ def mint_transcript_share(uid: str, meeting_id, email: str,
     st, body = http("POST", f"{meetings_door()}/meetings/{meeting_id}/share",
                     {"X-API-Key": user_api_key(str(uid))},
                     {"mode": "restricted", "allowed_emails": [email],
-                     "expires_in_sec": int(expires_in_sec)})
+                     "expires_in_sec": int(expires_in_sec),
+                     **({"include_recordings": True} if include_recordings else {})})
     token = body.get("token") if isinstance(body, dict) else None
     try:
         code = int(st)

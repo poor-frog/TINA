@@ -16,7 +16,9 @@
   ],
   "scripts": {
     "build": "tsc && rm -rf dist/hallucinations && cp -R src/hallucinations dist/hallucinations",
-    "test": "node scripts/check-isolation.test.mjs && tsx src/context-short.test.ts && tsx src/latency-diagnostic.test.ts && tsx src/hallucination-filter.test.ts && tsx src/silence-gate.test.ts && tsx src/harvest-hallucinations.test.ts && tsx src/pipeline-conformance.test.ts && tsx src/fault-surfacing.test.ts && tsx src/confirm-loop.golden.test.ts && tsx src/prefix-echo-timeline.test.ts && tsx src/segment-bounds.test.ts && tsx src/input-gap-clock.test.ts && tsx src/turn-close-flush.test.ts && tsx src/capture-timeline.test.ts && tsx src/hard-cap-cut.test.ts && tsx src/count-channelswitch.test.ts && tsx src/pipeline-realstt.live.test.ts && tsx src/gmeet-compatible-buffer.parity.test.ts && tsx src/audio-ring.test.ts",
+    "test": "node scripts/check-isolation.test.mjs && tsx src/context-short.test.ts && tsx src/voice-observer.test.ts && tsx src/voice-endpoint.test.ts && tsx src/latency-diagnostic.test.ts && tsx src/hallucination-filter.test.ts && tsx src/silence-gate.test.ts && tsx src/harvest-hallucinations.test.ts && tsx src/pipeline-conformance.test.ts && tsx src/fault-surfacing.test.ts && tsx src/confirm-loop.golden.test.ts && tsx src/prefix-echo-timeline.test.ts && tsx src/segment-bounds.test.ts && tsx src/input-gap-clock.test.ts && tsx src/turn-close-flush.test.ts && tsx src/capture-timeline.test.ts && tsx src/hard-cap-cut.test.ts && tsx src/count-channelswitch.test.ts && tsx src/pipeline-realstt.live.test.ts && tsx src/gmeet-compatible-buffer.parity.test.ts && tsx src/audio-ring.test.ts && node --expose-gc --import tsx --test src/stream-integrity.test.ts",
+    "test:stream-integrity": "node --expose-gc --import tsx --test src/stream-integrity.test.ts",
+    "test:soak": "node --expose-gc --import tsx --test --test-name-pattern='long continuous' src/stream-integrity.test.ts",
     "check:isolation": "node scripts/check-isolation.js",
     "harvest:hallucinations": "tsx src/harvest-hallucinations.ts"
   },

@@ -76,7 +76,8 @@ async def infer(request, content, silence_ms):
         state.requests -= 1
 
 
-def create_app(*, model_id, name, prefix, default_directory, load_engine, device, decoder, languages):
+def create_app(*, model_id, name, prefix, default_directory, load_engine, device, decoder, languages,
+               default_silence_ms=800):
     @asynccontextmanager
     async def lifespan(app):
         token = os.getenv(prefix + '_TOKEN', '')
@@ -210,7 +211,7 @@ def create_app(*, model_id, name, prefix, default_directory, load_engine, device
     @app.post('/v1/audio/transcriptions')
     async def transcribe(request: Request, file: UploadFile = File(...), model: str = Form('custom'),
                          language: str | None = Form(None), prompt: str | None = Form(None),
-                         response_format: str = Form('json'), min_silence_duration_ms: int = Form(800, ge=100, le=2000)):
+                         response_format: str = Form('json'), min_silence_duration_ms: int = Form(default_silence_ms, ge=100, le=2000)):
         # Legacy Custom endpoint callers send whisper-1; this is only a compatibility alias.
         if model not in ('custom', 'whisper-1', model_id):
             raise HTTPException(400, f'This endpoint serves {name}')

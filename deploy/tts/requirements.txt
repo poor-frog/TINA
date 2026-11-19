@@ -1712,7 +1712,9 @@ sea-g2p==0.10.0 \
     --hash=sha256:4e023840f864d8fe9c6175b109c869f1a596d2d67458e3b406313ec6ce8dacbc \
     --hash=sha256:6efb37cc23643247b1d1aa68076fd4e4b33a62dcecefb737196d922ddcb0c0fe \
     --hash=sha256:c73a8201ef69b797178a06a4a1db1e19dc91de3555eb3ddfd05cc82f8679eb67
-    # via vieneu
+    # via
+    #   -r deploy/tts/requirements.in
+    #   vieneu
 semantic-version==2.10.0 \
     --hash=sha256:bdabb6d336998cbb378d4b9db3a4b56a1e3235701dc05ea2690d9a997ed5041c \
     --hash=sha256:de78a3b8e0feda74cabc54aab2da702113e33ac9d9eb9d2389bcf1f58b7d9177
@@ -1762,6 +1764,7 @@ soxr==1.1.0 \
     --hash=sha256:f4977323ef9c3aa3c2a26ff5fe0191c84b8fd759daf7afb1f25a91a55ad8b730 \
     --hash=sha256:feebcba99ac99adb8009d46c8f4c1956b8c167576b0ae8a6fb47502e9a6f78e7
     # via
+    #   -r deploy/tts/requirements.in
     #   librosa
     #   vieneu
 starlette==1.10.0 \

@@ -39,3 +39,4 @@ docs/changelog.d/*.md merge=union
 #   package.json, security-insights.yml, license-exceptions.json, docker-compose*.yml, …) — JSON /
 #   YAML / KEY=VALUE. A changed value is an EDITED line, not an append, and union would produce
 #   duplicate keys or structurally invalid files. Never union-ize structured formats.
+graphify-out/graph.json merge=graphify

@@ -1,0 +1,20 @@
+{
+  "default": {
+    "TINA": "ti na",
+    "API": "ây pi ai",
+    "LLM": "eo eo em",
+    "ASR": "ây ét a",
+    "STT": "ét ti ti",
+    "TTS": "ti ti ét",
+    "VAD": "vát",
+    "KWS": "cây đắp bờ liu ét",
+    "CPU": "xi pi iu",
+    "GPU": "gi pi iu",
+    "MPS": "em pi ét",
+    "CUDA": "cu đa",
+    "SDK": "ét đi cây",
+    "SQL": "ét kiu eo"
+  },
+  "projects": {},
+  "meeting_projects": {}
+}

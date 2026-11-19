@@ -22,7 +22,7 @@ export interface GmeetCaptureOptions {
   onAudio: (index:number,pcm:Float32Array,timeline?:PcmTimeline) => void;
   log?: (msg: string) => void;
   targetSampleRate?: number;   // default 16000
-  bufferSize?: number;         // default 4096
+  bufferSize?: number;         // 1024 (64 ms) or default 4096 (256 ms), at 16 kHz
   silenceThreshold?: number;   // optional legacy peak gate; default uses RMS 0.0001
   rescanMs?: number;           // default 15000 — discover late joiners
   findRetries?: number;        // default 10
@@ -83,7 +83,7 @@ export function createGmeetCapture(opts: GmeetCaptureOptions): GmeetCapture {
         const audible = SILENCE === undefined ? Math.sqrt(energy / data.length) >= 0.0001 : maxVal > SILENCE;
         if (audible || opts.includeSilence) { emitted++; if (emitted === 1 || emitted % 100 === 0) log(`stream ${index} AUDIO seen=${seen} emitted=${emitted} max=${maxVal.toFixed(3)}`); opts.onAudio(index,data,timeline); } // worklet already yields a fresh copy
         else if (seen % 250 === 0) log(`stream ${index} silent seen=${seen} emitted=${emitted} max=${maxVal.toFixed(4)} ctx=${ctx.state}`);
-      }).then((node) => { source.connect(node); node.connect(ctx.destination); })
+      }, undefined, opts.bufferSize).then((node) => { source.connect(node); node.connect(ctx.destination); })
         .catch((err: any) => console.log(`[gmeet-capture] worklet init failed: ${err?.message}`));
       connectedStreamIds.add(streamId);
       contexts.push(ctx);

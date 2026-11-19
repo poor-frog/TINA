@@ -108,7 +108,7 @@ def start():
     logs.mkdir(parents=True, exist_ok=True)
     fingerprint = hashlib.sha256()
     for path in sorted(p for p in WORKER.glob("*.py") if not p.name.startswith("test_")) + [WORKER / "start.sh", WORKER / "requirements.txt",
-            WORKER / "model-assets.json", ROOT / "deploy/transcription/http_worker.py",
+            WORKER / "model-assets.json", WORKER / "custom_words.txt", ROOT / "deploy/transcription/http_worker.py",
             ROOT / "deploy/transcription/gipformer/requirements.txt",
             ROOT / "deploy/transcription/gipformer/engine.py", ROOT / "deploy/transcription/gipformer/telemetry.py"]:
         fingerprint.update(path.read_bytes())
@@ -117,6 +117,9 @@ def start():
         "RunAtLoad": True, "KeepAlive": True, "ThrottleInterval": 10,
         "StandardOutPath": str(logs / "viegem.stdout.log"), "StandardErrorPath": str(logs / "viegem.stderr.log"),
         "EnvironmentVariables": {"PATH": os.environ["PATH"], "TINA_VIEGEM_DEVICE": "mps",
+            "TINA_VIEGEM_NAME_BIAS": os.environ.get("TINA_VIEGEM_NAME_BIAS", "0"),
+            "TINA_VIEGEM_CUSTOM_WEIGHT": os.environ.get("TINA_VIEGEM_CUSTOM_WEIGHT", "1.0"),
+            "TINA_VIEGEM_CUSTOM_WORDS_FILE": os.environ.get("TINA_VIEGEM_CUSTOM_WORDS_FILE", ""),
             "TINA_VIEGEM_HOST": os.environ.get("TINA_VIEGEM_HOST", "127.0.0.1"),
             "TOKENIZERS_PARALLELISM": "false", "TINA_VIEGEM_REVISION": fingerprint.hexdigest(),
             "TINA_VIEGEM_ENV_FILE": os.environ["TINA_VIEGEM_ENV_FILE"],

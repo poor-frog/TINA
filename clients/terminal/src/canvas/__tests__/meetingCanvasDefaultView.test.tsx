@@ -100,6 +100,16 @@ describe("defaultProcessingView (pure)", () => {
 });
 
 describe("MeetingCanvasView — default view + toggle semantics", () => {
+  it("shows the saved summary as text at the follow-up email destination", async () => {
+    const row = { ...meetingRow(false), summary: "Quyết định: phát hành thứ Sáu. <script>unsafe()</script>" };
+    meetingsState = [row]; durableState.lines = [LINE]; durableState.notes = [];
+    await renderCanvas();
+    const summary = container.querySelector("#meeting-summary-6")!;
+    expect(summary.textContent).toContain(row.summary);
+    expect(summary.querySelector("script")).toBeNull();
+    expect(container.querySelector("#meeting-recording-6")?.textContent).toContain("No recording is available");
+    expect(processCalls()).toBe(0);
+  });
   it("does not tell readers to wait for new speech in an empty ended meeting", async () => {
     meetingsState = [meetingRow(false)]; durableState.lines = []; durableState.notes = [];
     await renderCanvas();

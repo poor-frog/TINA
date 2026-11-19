@@ -9,8 +9,8 @@ import wave
 
 import numpy as np
 
-from .assets import default_directory, install
-from .wakeword import BLOCK_SIZE, SAMPLE_RATE, CaptureQueue, SherpaKws, WakeDetector
+from tina_meeting_voice.assets import default_directory, install
+from tina_meeting_voice.wakeword import BLOCK_SIZE, SAMPLE_RATE, CaptureQueue, SherpaKws, WakeDetector
 
 
 def emit(value):

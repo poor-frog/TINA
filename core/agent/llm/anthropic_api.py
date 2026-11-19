@@ -83,9 +83,9 @@ class AnthropicCompletion:
         except httpx.HTTPError as exc:
             raise LLMError(f"completion transport failure against {self._base}: {exc}") from exc
         if r.status_code in (401, 403):
-            raise LLMAuthError(f"{r.status_code} from {self._base}: {r.text[:300]}")
+            raise LLMAuthError(f"{r.status_code} from {self._base}: {r.text[:300]}", status_code=r.status_code)
         if r.status_code >= 400:
-            raise LLMError(f"{r.status_code} from {self._base}: {r.text[:300]}")
+            raise LLMError(f"{r.status_code} from {self._base}: {r.text[:300]}", status_code=r.status_code)
         try:
             blocks = r.json().get("content") or []
             text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")

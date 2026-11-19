@@ -36,6 +36,21 @@ interface so TINA can keep its existing workspace and event boundary.
 adapters send native JSON Schema output settings to supporting endpoints; Messages/CLI adapters
 append the schema to the system prompt. Callers still validate structure and source evidence.
 
+OpenAI Responses and Chat Completions adapters also expose the optional
+`complete_structured(prompt, system=..., schema=...)` capability for meeting voice. They request
+strict JSON Schema using `text.format` or `response_format`; ordinary `complete` calls keep their
+existing request shape. Only an explicit 400/422 `unsupported_parameter`/`unsupported_value`
+for that format parameter raises `LLMStructuredOutputUnsupported`. The voice worker can then
+use ordinary completion within its remaining budget, retaining source validation and review.
+Auth, quota, invalid schemas, transport failures and incomplete streams never trigger this fallback.
+Other completion adapters keep the existing prompt/validation path; no new dependency is required.
+
+Completion exceptions retain typed HTTP status in `LLMError.status_code`. The public
+`completion_failure_code()` helper maps only typed auth/config/status/timeout/parse errors to
+fixed recovery codes, never interpreting provider or model text. Live translation uses this
+metadata for isolated phrase retries and shared auth/quota/service cooldowns; other completion
+and harness behavior is unchanged. Existing wrapped exceptions retain their causes.
+
 ## Configuration
 
 | Env var | Meaning | Default |
@@ -52,6 +67,7 @@ append the schema to the system prompt. Callers still validate structure and sou
 | `ANTHROPIC_*`, `HOST_CLAUDE_CREDENTIALS` | claude-code adapter | — |
 | `OPENAI_API_KEY`, `ACCESS_TOKEN` | Codex/OpenAI provider credentials | — |
 | `GEMINI_API_KEY` | Antigravity CLI Gemini API-key authentication | — |
+| `TINA_AGENT_REACH_URL` | Shared public web/GitHub retrieval worker, used by granted MCP tools and explicit room web queries | disabled outside configured deployments |
 
 ## Provider model settings
 
@@ -104,6 +120,12 @@ The pinned Codex CLI also receives a temporary Groq model profile with TINA inst
 no freeform patch tool and no namespace delegation. File edits use the existing sandboxed
 exec function. This keeps the prompt and tool definitions consistent instead of telling
 the model to call a patch tool that the HTTP compatibility layer cannot forward.
+
+For the granted `tina-reach` MCP server, Groq receives only the selected public Reach functions
+with flattened names. The proxy restores their namespace on streamed function-call items and
+flattens it again in follow-up input history. Other namespaces stay omitted; provider keys and
+tool allowlists are unchanged. The bridge advertises read-only MCP annotations so Codex can run
+these reads with its existing automatic tool grant and `approvalPolicy=never`.
 
 Gemini defaults to `gemini-3.5-flash`. Gemini and DeepSeek credential tests also verify native
 function calls and matching results, preserving thought signatures and thinking blocks.
@@ -202,3 +224,26 @@ keeps shell networking offline; a globally forced proxy is rejected before start
 The real CLI smoke probes in `tests/codex_network_smoke.py` and `tests/codex_web_smoke.py` verify
 network/filesystem isolation and web-tool request construction without a provider account. Their
 fixture responses do not establish live search availability, provider quota, or account access.
+
+`OpenAIResponsesCompletion.search(question)` is a separate opt-in public-query capability. Ordinary
+`complete()` calls remain tool-less. Search requires a completed native web call and provider URL
+citations; it returns at most six validated source links in `CompletionResult.sources`. Room voice
+never passes its sources/history to this method. Other completion adapters have no implicit search
+fallback. API/model/account support must be verified on the target deployment.
+
+OpenAI Responses completions require a response.completed terminal event for ordinary generation and verification as well as web search. Early EOF, a bare [DONE], response.incomplete, and explicit non-completed envelope status fail closed without returning accumulated deltas. Successful terminal envelopes may omit status for existing compatible gateways; explicit status must be completed.
+
+
+A voice sandbox supplies an explicitly empty TINA tool grant. Codex disables execution, apps,
+browser/image/agent tools; Claude uses `--tools ""` and an empty strict MCP config; Antigravity denies
+file reads, writes, commands and URLs. The voice worker mounts no account workspace. Claude prompts
+travel on stdin to support evidence packs larger than OS argument limits.
+The pinned Codex CLI still advertises some built-ins; `apply_patch` remains constrained by the
+read-only filesystem profile. An empty TINA grant does not mean an empty provider tool catalog.
+
+Voice sandbox calls also pass the optional `output_schema` harness argument. Codex sends it as
+`turn/start.outputSchema` and uses the completed final assistant message without concatenating
+commentary or adding citation prose. Claude sends `--json-schema` and extracts the result's
+`structured_output`; failed structured runs remain failures. Antigravity has no established native
+schema flag, so it retains prompt guidance and server validation. Ordinary chat calls omit this
+argument and keep their existing streaming, citations and session behavior.

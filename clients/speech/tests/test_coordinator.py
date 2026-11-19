@@ -138,7 +138,8 @@ def test_older_single_meeting_sources_are_bound_to_the_fixed_endpoint():
 
 def test_wake_removal_is_anchored_and_empty_transcript_never_dispatches():
     assert question_text('Hey Tina, is Tina ready?') == 'is Tina ready?'
-    for invalid in ('', 'ordinary speech Hey Tina', 'Hey Tina.'):
+    assert question_text('hay tina when is the review') == 'when is the review'
+    for invalid in ('', 'ordinary speech Hey Tina', 'ordinary speech hay tina', 'Hey Tina.', 'hay tina'):
         with pytest.raises(ValueError): question_text(invalid)
 
 

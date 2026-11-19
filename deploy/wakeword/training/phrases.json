@@ -1,0 +1,16 @@
+{
+  "upstream_version": "2.1.1",
+  "upstream_commit": "71761845ca5465f8e3d32f7cb8af90f38d51ca33",
+  "language": "vi",
+  "steps": 5000,
+  "target_fpph": 0.5,
+  "counts": {
+    "train": {"positive": 1000, "adversarial": 500, "speech": 150},
+    "validation": {"positive": 100, "adversarial": 100, "speech": 50},
+    "test": {"positive": 100, "adversarial": 100, "speech": 50}
+  },
+  "phrases": [
+    {"name": "hey_tina", "wakeword": "hey TINA", "spoken": ["hey ti na", "hây ti na", "hey, ti na!"]},
+    {"name": "tina_oi", "wakeword": "TINA ơi", "spoken": ["ti na ơi", "ti na ơi!", "ti na ơi?"]}
+  ]
+}

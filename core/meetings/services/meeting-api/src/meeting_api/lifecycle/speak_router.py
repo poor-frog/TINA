@@ -36,6 +36,7 @@ class PlaybackReport(BaseModel):
     meeting_id: int = Field(gt=0)
     session_uid: str = Field(min_length=1, max_length=128)
     state: str = Field(pattern=r"^(started|completed|failed|stopped)$")
+    played_text: str | None = Field(default=None, max_length=4000)
     model_config = ConfigDict(extra="forbid")
 
 
@@ -148,6 +149,6 @@ def build_speak_router(repo: MeetingRepo, publisher: CommandPublisher, playback:
         if not expected or not hmac.compare_digest((x_internal_secret or "").encode(), expected.encode()):
             raise HTTPException(401, "Unauthorized")
         return playback.public(await operation(playback.report(body.meeting_id, str(body.command_id),
-                                                               body.session_uid, body.state)))
+                                                               body.session_uid, body.state, played_text=body.played_text)))
 
     return router

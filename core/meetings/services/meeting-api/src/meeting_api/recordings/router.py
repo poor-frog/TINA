@@ -292,7 +292,7 @@ def build_router(
         of scope; what changes is that the RESPONSE is bounded, which is what reaches a caller.
         """
         user_id = _resolve_user_id(x_user_id)
-        recs = await repo.list_meeting_recordings(user_id)
+        recs = await repo.list_meeting_recordings(user_id, include_shared=True)
         if meeting_id is not None:
             recs = [r for r in recs if r.get("meeting_id") == meeting_id]
         recs = sorted(recs, key=_list_sort_key, reverse=True)
@@ -318,7 +318,7 @@ def build_router(
         """Recording detail (api/meetings.mdx: GET /recordings/{recording_id}) — the single recording
         record, scoped to the caller. 404 if the id isn't one of the caller's recordings."""
         user_id = _resolve_user_id(x_user_id)
-        recs = await repo.list_meeting_recordings(user_id)
+        recs = await repo.list_meeting_recordings(user_id, include_shared=True)
         rec = next((r for r in recs if r.get("id") == recording_id), None)
         if rec is None:
             raise HTTPException(status_code=404, detail="Recording not found")
@@ -358,7 +358,7 @@ def build_router(
     ):
         user_id = _resolve_user_id(x_user_id)
         # Find which meeting owns this recording (scoped to the caller).
-        recs = await repo.list_meeting_recordings(user_id)
+        recs = await repo.list_meeting_recordings(user_id, include_shared=True)
         rec = next((r for r in recs if r.get("id") == recording_id), None)
         if rec is None:
             raise HTTPException(status_code=404, detail="Recording not found")
@@ -397,7 +397,7 @@ def build_router(
         # Stream the finalized master bytes from object storage (recordings P3). The player fetches
         # /master first (which finalizes), then this; finalize-on-read here too as a safety net.
         user_id = _resolve_user_id(x_user_id)
-        recs = await repo.list_meeting_recordings(user_id)
+        recs = await repo.list_meeting_recordings(user_id, include_shared=True)
         rec = next((r for r in recs if r.get("id") == recording_id), None)
         if rec is None:
             raise HTTPException(status_code=404, detail="Recording not found")
@@ -418,7 +418,7 @@ def build_router(
             repo, storage, meeting_id=rec["meeting_id"], recording_id=recording_id,
             media_type=mf.get("type", type),
         )
-        recs = await repo.list_meeting_recordings(user_id)
+        recs = await repo.list_meeting_recordings(user_id, include_shared=True)
         rec = next((r for r in recs if r.get("id") == recording_id), rec)
         mf = next(
             (m for m in (rec or {}).get("media_files", []) if str(m.get("id")) == str(media_file_id)),

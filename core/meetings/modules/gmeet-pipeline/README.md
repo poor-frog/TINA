@@ -77,3 +77,44 @@ solely due to word length. The module does not import the mixed pipeline or chan
 
 The speech filter preserves short replies and numbers; text length alone never rejects speech.
 Punctuation-only output, known phrase-list artifacts and repetition loops remain filtered.
+
+## Audio tail and long-session regression
+
+Live ASR windows and voice endpoints use each frame's `sourceCaptureMs` so device-clock
+corrections remain aligned with VAD. The audio archive retains its fixed indexed sample
+clock. `src/voice-endpoint.test.ts` exercises drift between these clocks and verifies that
+the final ASR result reaches the speech endpoint while all captured samples are retained.
+
+`npm test` includes `src/stream-integrity.test.ts`. It exercises the shipped pipeline at 16 kHz
+with 64 ms frames and unchanged window defaults: short/partial final frames, a delayed request
+missing its tail, repeated endpoints, the exact 30-second boundary, speaker rotations, and explicit
+overflow/stale-result rejection. A 120-second, three-channel deterministic soak checks every PCM
+marker reaches confirmed text once and ring allocations release on disposal.
+
+For a longer accelerated run with forced GC and sampled heap/ArrayBuffer/RSS measurements:
+
+```sh
+cd core/meetings/modules/gmeet-pipeline
+TINA_ASR_SOAK_SECONDS=7200 npm run test:soak
+```
+
+The report is one content-free `synthetic_asr_soak` JSON line. Retained heap and ArrayBuffer growth
+after warm-up must stay under 16 MiB; ring allocations must stay within three 30-second rings and
+return to zero after disposal. RSS includes allocator/JIT reservations and is reported separately.
+This is accelerated PCM replay with a marker recognizer, not two hours of wall-clock operation or
+real-model WER/latency qualification. Actual backend stalls past retention remain explicit overflow,
+not lossless recovery. No ASR/VAD model, silence, cadence or window setting is changed.
+
+A backend returning one growing segment can prevent LocalAgreement from confirming any complete
+segment before the live retention fills. At the regular cadence, the buffer now reserves one cadence
+plus the latest capture-frame duration before the smaller of retention/max-window limits. It submits
+an owned cut at the quietest frame in the last four seconds and uses the existing capped-final path
+to confirm that exact response and retain all audio after the cut. Both manager implementations use
+the same policy; no model, window maximum, frame size or submission interval changes.
+
+`TINA_ASR_SOAK_COARSE=1 TINA_ASR_SOAK_SECONDS=7200 npm run test:soak` runs the coarse-segment
+regression for three channels. Coverage tests also exercise timer/frame phase drift, delayed cut
+responses, repeated markers and stale result rejection. A backend stall exceeding bounded retention
+can still cause explicit overflow; this is not an unbounded lossless queue. The existing repetition
+filter remains authoritative and can reject highly repetitive synthetic speech independently of
+buffer rollover. Successful HTTP responses alone do not establish complete transcript coverage.

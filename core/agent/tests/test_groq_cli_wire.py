@@ -1,12 +1,15 @@
 """Pinned Codex → Groq adapter → tool → follow-up, without a network or real key.
 
-Run in the worker image with its Codex seccomp settings. The upstream stub checks
-the real CLI request, not a hand-written approximation of the developer messages.
+Run in the worker image with its Codex seccomp settings by setting
+``TINA_CODEX_WORKER_WIRE_TEST=1``. A host Codex binary does not prove that the
+worker's pinned CLI and sandbox are available. The upstream stub checks the
+real CLI request, not a hand-written approximation of the developer messages.
 """
 import json
 import os
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -47,7 +50,9 @@ def _stream_response(item):
     return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, content=wire)
 
 
-@unittest.skipUnless(shutil.which("codex"), "requires the pinned worker CLI and Codex sandbox")
+@unittest.skipUnless(shutil.which("codex") and sys.platform == "linux"
+                     and os.environ.get("TINA_CODEX_WORKER_WIRE_TEST") == "1",
+                     "requires the pinned worker CLI with the worker's Codex sandbox settings")
 class GroqCliWireTest(unittest.TestCase):
     def test_qwen_agent_keeps_instructions_and_consumes_real_read_tool_result(self):
         requests = []

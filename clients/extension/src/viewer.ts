@@ -1,26 +1,38 @@
+import { createVoiceActivity } from './voice-activity-view';
 import { createTranscriptFeed } from './transcript-feed';
+import { detectMeeting, type MeetingRef } from './meeting';
 import {
-  apiBase, listBotMeetings, listDesktopMeetings, watchBotTranscript, watchDesktopTranscript,
+  botBase, listBotMeetings, watchBotTranscript, readBotVoiceSources,
   type BotMeeting,
 } from './bot-transcript';
 import type { TranscriptSegment } from './transcript-rendering';
+import type { VoiceReply } from './voice-replies';
 import { watchTranslation, type TranscriptLanguage, type TranslationSnapshot } from './translation';
 
-type Source = 'bot' | 'desktop';
-type Config = Record<'apiKey' | 'deployment' | 'ingestUrl' | 'gatewayUrl' | 'dashboardUrl' | 'botGatewayUrl' | 'terminalUrl' | 'language', string>;
+type BotTarget = { platform: Exclude<MeetingRef['platform'], 'youtube'>; nativeMeetingId: string; url: string };
+const BOT_PLATFORM_NAMES: Record<BotTarget['platform'], string> = {
+  google_meet: 'Google Meet', zoom: 'Zoom', teams: 'Microsoft Teams',
+};
+const TERMINAL_MEETING_STATUSES = new Set(['completed', 'failed', 'stopped', 'ended', 'past']);
+type Config = Record<'apiKey' | 'deployment' | 'ingestUrl' | 'botGatewayUrl' | 'terminalUrl' | 'language', string>;
 const $ = (id: string) => document.getElementById(id)!;
-const fields = ['apiKey', 'deployment', 'ingestUrl', 'gatewayUrl', 'dashboardUrl', 'botGatewayUrl', 'terminalUrl', 'language'] as const;
+const fields = ['apiKey', 'deployment', 'ingestUrl', 'botGatewayUrl', 'terminalUrl', 'language'] as const;
 const defaults: Config = {
   apiKey: '', deployment: 'desktop', ingestUrl: 'ws://127.0.0.1:9099/ingest',
-  gatewayUrl: 'http://127.0.0.1:8056', dashboardUrl: 'http://127.0.0.1:13001',
-  botGatewayUrl: 'http://127.0.0.1:18056', terminalUrl: 'http://127.0.0.1:13000', language: 'vi',
+  botGatewayUrl: 'https://tinabot.duckdns.org/extension-api',
+  terminalUrl: 'https://tinabot.duckdns.org',
+  language: 'vi',
 };
-const feed = createTranscriptFeed($('feed'), $('transcriptTurns'), $('latestBtn') as HTMLButtonElement);
+const voiceActivityView = createVoiceActivity($('voiceActivity'));
+const feed = createTranscriptFeed($('feed'), $('transcriptTurns'), $('latestBtn') as HTMLButtonElement, {
+  load: (id, signal) => { if (!selected) throw new Error('No Bot meeting'); return readBotVoiceSources(config, selected.id, id, signal); },
+  url: (id, index) => safePageUrl(config.terminalUrl, `/meetings/${selected!.id}?voiceSource=${encodeURIComponent(id)}#voice-source-${id}-${index}`),
+});
 let config = { ...defaults };
-let source: Source = 'bot';
 let meetings: BotMeeting[] = [];
 let selected: BotMeeting | null = null;
 let segments: TranscriptSegment[] = [];
+let replies: VoiceReply[] = [];
 let stopWatching = () => {};
 let listRequest: AbortController | null = null;
 let scope = 0;
@@ -29,27 +41,46 @@ let language: TranscriptLanguage = 'bilingual';
 let translation: TranslationSnapshot | null = null;
 let translationError = false;
 let stopTranslation = () => {};
+let activeMeeting: BotTarget | null = null;
+let sendBotState: { key: string; phase: 'sending' | 'sent' | 'retrying' | 'cancelling' | 'error'; message: string } | null = null;
+let autoRetryPoll: ReturnType<typeof setTimeout> | null = null;
+let activeTabRead = 0;
 
 function renderTranslationControls(): void {
-  const supported = !!selected && source === 'bot';
+  const supported = !!selected;
   const selector = $('transcriptLanguage') as HTMLSelectElement;
   selector.disabled = !supported;
   selector.value = language;
-  const displayLanguage = source === 'desktop' ? 'vi' : language;
+  const displayLanguage = language;
+  const retrying = translation?.groups.filter(g => g.status === 'retrying').length ?? 0;
+  const failed = translation?.groups.filter(g => g.status === 'failed').length ?? 0;
+  const serviceMessages: Record<string, string> = {
+    auth: 'API từ chối quyền truy cập · kiểm tra khóa trong Settings → Models rồi thử lại',
+    configuration: 'Kiểm tra provider và model trong Settings → Models rồi thử lại',
+    rate_limit: 'API đang giới hạn lượt gọi · sẽ tự thử lại',
+    unavailable: 'Dịch vụ dịch chưa khả dụng · sẽ tự thử lại',
+  };
+  const message = translation?.service_error ? serviceMessages[translation.service_error] : undefined;
+  const progress = translation ? [
+    `VI → EN · ${translation.completed}/${translation.total} cụm`,
+    retrying ? `${retrying} cụm chờ thử lại` : '',
+    failed ? `${failed} cụm cần thử lại` : '',
+    translation.groups.some(g => !g.ready) ? 'Đang gom câu…' : '',
+  ].filter(Boolean).join(' · ') : 'Đang tải bản dịch…';
   ($('displayLanguage') as HTMLButtonElement).disabled = !supported;
   $('displayLanguage').textContent = { vi: 'Tiếng Việt', en: 'English', bilingual: 'VI + EN' }[displayLanguage];
   $('translationControls').dataset.state = translationError ? 'error' : translation?.status || 'pending';
-  $('translationStatus').textContent = !selected ? '' : source === 'desktop' ? 'Dịch hiện hỗ trợ Meeting Bot.' : language === 'vi' ? ''
+  $('translationStatus').textContent = !selected || language === 'vi' ? ''
     : translationError ? 'Dịch chưa khả dụng · transcript tiếng Việt vẫn hoạt động'
-    : translation?.status === 'paused' ? 'Dịch tạm dừng · sẽ tự thử lại'
-    : translation ? `VI → EN · ${translation.completed}/${translation.total} cụm${translation.groups.some(g => !g.ready) ? ' · Đang gom câu…' : ''}` : 'Đang tải bản dịch…';
-  $('retryTranslation').hidden = language === 'vi' || !(translationError || translation?.status === 'paused');
+    : message || (translation?.status === 'paused' && !retrying && !failed ? 'Dịch tạm dừng · sẽ tự thử lại'
+    : progress);
+  $('retryTranslation').hidden = language === 'vi' || !(translationError || translation?.status === 'paused' || retrying || failed);
 }
 
 function startTranslation(retry = false): void {
   stopTranslation(); stopTranslation = () => {};
   renderTranslationControls();
-  if (!selected || source !== 'bot' || language === 'vi') return;
+  if (!selected || language === 'vi') return;
   const token = scope, id = selected.id;
   stopTranslation = watchTranslation(config, id, snapshot => {
     if (scope !== token || selected?.id !== id) return;
@@ -76,8 +107,177 @@ function currentKey(meeting: BotMeeting): string {
   return `${meeting.id}|${meeting.platform}|${meeting.nativeMeetingId}`;
 }
 
-function desktopGatewayUrl(): string {
-  return config.gatewayUrl.trim() || 'http://127.0.0.1:8056';
+function botTargetKey(meeting: BotTarget): string {
+  return `${meeting.platform}|${meeting.nativeMeetingId}`;
+}
+
+function failBot(key: string, message = 'Bot failed. You can send it again.'): void {
+  sendBotState = { key, phase: 'error', message };
+  if (activeMeeting && botTargetKey(activeMeeting) === key) renderSendBot();
+}
+
+function syncFailedBotState(): void {
+  if (!activeMeeting || (sendBotState?.phase === 'sending' || sendBotState?.phase === 'cancelling')) return;
+  const key = botTargetKey(activeMeeting);
+  const latest = meetings.filter(row => row.platform === activeMeeting!.platform
+    && row.nativeMeetingId === activeMeeting!.nativeMeetingId).sort((a, b) => b.startMs - a.startMs)[0];
+  const retry = latest?.autoRetry;
+  if (retry && (retry.state === 'scheduled' || retry.state === 'in_progress' && retry.attempt > 1)) {
+    const attempt = retry.attempt + (retry.state === 'scheduled' ? 1 : 0);
+    sendBotState = { key, phase: 'retrying', message: `TINA is retrying automatically (${attempt}/${retry.max_attempts}).` };
+    scheduleAutoRetryPoll(key);
+  } else if (retry?.state === 'succeeded') {
+    sendBotState = { key, phase: 'sent', message: retry.attempt > 1
+      ? 'The automatically retried bot joined the meeting.' : 'The bot joined the meeting.' };
+    clearAutoRetryPoll();
+  } else if (latest?.status === 'failed') {
+    failBot(key, latest.joinFailureSummary || (retry?.state === 'exhausted'
+      ? 'Automatic retries are exhausted. You can send the bot again.'
+      : retry?.state === 'failed'
+        ? 'Automatic retry failed. You can send the bot again.'
+        : retry?.state === 'manual_only'
+          ? 'This meeting needs a passcode. Send the bot again manually.'
+        : retry?.state === 'not_retryable'
+          ? 'This failure is not eligible for automatic retry. You can send the bot again.'
+        : undefined));
+    clearAutoRetryPoll();
+  }
+  if (latest && TERMINAL_MEETING_STATUSES.has(latest.status) && latest.status !== 'failed') {
+    sendBotState = null;
+    clearAutoRetryPoll();
+  }
+  renderSendBot();
+}
+
+function clearAutoRetryPoll(): void {
+  if (autoRetryPoll) clearTimeout(autoRetryPoll);
+  autoRetryPoll = null;
+}
+
+function scheduleAutoRetryPoll(key: string): void {
+  if (autoRetryPoll) return;
+  autoRetryPoll = setTimeout(async () => {
+    autoRetryPoll = null;
+    if (!activeMeeting || botTargetKey(activeMeeting) !== key || sendBotState?.phase !== 'retrying') return;
+    try {
+      const current = sendBotState, gateway = config.botGatewayUrl, apiKey = config.apiKey;
+      const rows = await listBotMeetings({ botGatewayUrl: gateway, apiKey });
+      if (sendBotState !== current || config.botGatewayUrl !== gateway || config.apiKey !== apiKey
+          || !activeMeeting || botTargetKey(activeMeeting) !== key) return;
+      meetings = rows;
+      syncFailedBotState();
+      renderMeetings();
+    } catch { /* the next poll can recover a transient gateway error */ }
+    if (sendBotState?.key === key && sendBotState.phase === 'retrying') scheduleAutoRetryPoll(key);
+  }, 5000);
+}
+
+function renderSendBot(): void {
+  const panel = $('sendBotPanel');
+  const button = $('sendBotBtn') as HTMLButtonElement;
+  if (!activeMeeting) { panel.hidden = true; return; }
+  panel.hidden = false;
+  const key = botTargetKey(activeMeeting);
+  const state = sendBotState?.key === key ? sendBotState : null;
+  const platform = BOT_PLATFORM_NAMES[activeMeeting.platform];
+  $('sendBotTitle').textContent = `${platform} · ${activeMeeting.nativeMeetingId}`;
+  $('sendBotStatus').textContent = state?.message
+    ?? (config.apiKey.trim() ? 'The bot may wait for host admission.' : 'Add your TINA API key in Settings.');
+  panel.dataset.state = state?.phase ?? 'ready';
+  button.disabled = !config.apiKey.trim() || state?.phase === 'sending' || state?.phase === 'cancelling' || state?.phase === 'sent';
+  button.textContent = state?.phase === 'sending' ? 'Sending…' : state?.phase === 'cancelling' ? 'Cancelling…' : state?.phase === 'retrying' ? 'Cancel retry' : state?.phase === 'sent' ? 'Bot sent' : state?.phase === 'error' ? 'Send Bot Again' : 'Send Bot';
+  button.title = `Send a TINA bot to this ${platform} meeting`;
+}
+
+async function refreshActiveMeeting(): Promise<void> {
+  const read = ++activeTabRead;
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (read !== activeTabRead) return;
+    const meetingUrl = tab?.url?.replace(/^(https?:\/\/meet\.google\.com)\/meet\//i, '$1/');
+    const detected = meetingUrl ? detectMeeting(meetingUrl) : null;
+    const next: BotTarget | null = !detected || detected.platform === 'youtube' || !tab?.url ? null : {
+      platform: detected.platform,
+      nativeMeetingId: detected.nativeMeetingId,
+      url: tab.url,
+    };
+    if ((activeMeeting ? botTargetKey(activeMeeting) : null) !== (next ? botTargetKey(next) : null)) {
+      sendBotState = null;
+      clearAutoRetryPoll();
+    }
+    activeMeeting = next;
+    syncFailedBotState();
+  } catch {
+    if (read !== activeTabRead) return;
+    activeMeeting = null; sendBotState = null;
+  }
+  renderSendBot();
+}
+
+async function cancelBotRetry(): Promise<void> {
+  const meeting = activeMeeting;
+  if (!meeting) return;
+  const key = botTargetKey(meeting);
+  sendBotState = { key, phase: 'cancelling', message: 'Cancelling automatic retry…' };
+  clearAutoRetryPoll();
+  renderSendBot();
+  try {
+    const response = await fetch(`${botBase(config.botGatewayUrl)}/bots/${meeting.platform}/${encodeURIComponent(meeting.nativeMeetingId)}`, {
+      method: 'DELETE', headers: { 'X-API-Key': config.apiKey }, credentials: 'omit',
+      redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) throw new Error('Could not confirm cancellation. Refresh the meeting status and try again.');
+    if (!activeMeeting || botTargetKey(activeMeeting) !== key) return;
+    sendBotState = { key, phase: 'error', message: 'Automatic retry cancelled.' };
+  } catch (error) {
+    if (!activeMeeting || botTargetKey(activeMeeting) !== key) return;
+    sendBotState = { key, phase: 'retrying', message: error instanceof Error ? error.message : 'Could not cancel retry.' };
+    scheduleAutoRetryPoll(key);
+  }
+  renderSendBot();
+}
+
+async function sendBotToActiveMeeting(): Promise<void> {
+  const meeting = activeMeeting;
+  if (!meeting || !config.apiKey.trim()) return;
+  const key = botTargetKey(meeting);
+  if (sendBotState?.key === key && sendBotState.phase !== 'error') return;
+  sendBotState = { key, phase: 'sending', message: 'Sending bot request…' };
+  renderSendBot();
+  try {
+    const response = await fetch(`${botBase(config.botGatewayUrl)}/bots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': config.apiKey },
+      body: JSON.stringify({
+        platform: meeting.platform,
+        native_meeting_id: meeting.nativeMeetingId,
+        meeting_url: meeting.platform === 'google_meet' ? `https://meet.google.com/${meeting.nativeMeetingId}` : meeting.url,
+      }),
+      credentials: 'omit', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15000),
+    });
+    const body = await response.json().catch(() => ({})) as { detail?: unknown };
+    if (response.status === 409) {
+      sendBotState = { key, phase: 'sent', message: 'A bot is already active for this meeting.' };
+    } else if (response.status === 429) {
+      throw new Error('Your active bot limit is reached. Stop another bot and try again.');
+    } else if (response.status === 401) {
+      throw new Error('The TINA API key was rejected. Check it in Settings.');
+    } else if (response.status === 403) {
+      throw new Error('This API key needs the “Join meetings” (bot) scope.');
+    } else if (!response.ok) {
+      throw new Error(typeof body.detail === 'string' ? body.detail : `Could not send bot (${response.status}).`);
+    } else {
+      sendBotState = { key, phase: 'sent', message: 'Bot sent. Admit it in the meeting if prompted.' };
+      setTimeout(() => {
+        void refreshMeetings(true).then(() => {
+          if (activeMeeting && botTargetKey(activeMeeting) === key) selectBotTranscript(meeting);
+        });
+      }, 1200);
+    }
+  } catch (error) {
+    failBot(key, error instanceof Error ? error.message : 'Could not send the bot.');
+  }
+  if (activeMeeting && botTargetKey(activeMeeting) === key) renderSendBot();
 }
 
 function setStatus(message: string, state: 'ready' | 'loading' | 'error' = 'ready'): void {
@@ -95,20 +295,22 @@ function applyTheme(): void {
 }
 
 function clearTranscript(): void {
+  voiceActivityView.reset();
   segments = [];
+  replies = [];
   feed.reset();
   $('emptyState').hidden = false;
-  $('transcriptStatus').textContent = 'Choose a meeting to view its transcript.';
+  $('transcriptStatus').textContent = 'Choose a Bot meeting to view its transcript.';
   $('updatedAt').textContent = '';
 }
 
 function renderTranscript(status?: string): void {
-  const hasText = segments.some(row => row.text?.trim());
+  const hasText = segments.some(row => row.text?.trim()) || replies.length > 0;
   $('emptyState').hidden = hasText;
-  feed.render(segments, 'Draft', source === 'bot' ? language : 'vi', translation?.groups ?? [], translationError || translation?.status === 'paused');
+  feed.render(segments, 'Draft', language, translation?.groups ?? [], translationError || translation?.status === 'paused', replies);
   renderTranslationControls();
   if (selected && !hasText) $('emptyStateText').textContent = 'Waiting for transcript text…';
-  $('transcriptStatus').textContent = status || (selected ? selected.status === 'active' ? 'Live transcript' : 'Saved transcript' : 'Choose a meeting to view its transcript.');
+  $('transcriptStatus').textContent = status || (selected ? selected.status === 'active' ? 'Live transcript' : 'Saved transcript' : 'Choose a Bot meeting to view its transcript.');
   $('updatedAt').textContent = hasText ? `Updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : '';
 }
 
@@ -125,26 +327,21 @@ function renderMeetings(): void {
   select.value = selected && meetings.some(row => currentKey(row) === currentKey(selected!)) ? currentKey(selected) : '';
   select.disabled = !meetings.length;
   $('meetingEmpty').hidden = meetings.length > 0;
-  $('meetingEmpty').textContent = meetings.length ? '' : source === 'bot'
-    ? 'No Bot meetings yet. Send a meeting from TINA Terminal, then refresh.'
-    : 'No saved Desktop transcripts were found.';
+  $('meetingEmpty').textContent = meetings.length ? '' : 'No Bot meetings yet. Open a supported meeting tab and use Send Bot here.';
   updateDestinations();
   renderTranslationControls();
 }
 
 function updateDestinations(): void {
   const terminal = $('openTerminal') as HTMLButtonElement;
-  const dashboard = $('openDashboard') as HTMLButtonElement;
-  terminal.disabled = !selected || source !== 'bot';
-  terminal.title = source === 'desktop' ? 'Desktop archive meetings are not Bot rows in TINA Terminal.' : '';
-  dashboard.disabled = !selected || source === 'bot' && !config.dashboardUrl.trim();
-  dashboard.textContent = source === 'desktop' ? 'Open Desktop review ↗' : 'Open Dashboard ↗';
+  terminal.disabled = !selected;
+  terminal.title = '';
 }
 
 function stopCurrentWatch(clear = false): number {
   scope++;
   stopTranslation(); stopTranslation = () => {}; translation = null; translationError = false;
-  stopWatching(); stopWatching = () => {};
+  stopWatching(); stopWatching = () => {}; voiceActivityView.reset();
   if (clear) clearTranscript();
   return scope;
 }
@@ -156,45 +353,57 @@ function watchMeeting(meeting: BotMeeting, token: number): void {
   $('meetingTitle').textContent = meeting.title;
   $('meetingMeta').textContent = `${meeting.platform.replace(/_/g, ' ')} · ${meeting.status}`;
   $('emptyStateText').textContent = 'Waiting for transcript text…';
-  const onUpdate = (rows: TranscriptSegment[], status: string) => {
+  const onUpdate = (rows: TranscriptSegment[], status: string, voice: VoiceReply[] = [], activity?: unknown) => {
     if (token !== scope || !selected || currentKey(selected) !== currentKey(meeting)) return;
+    if (!TERMINAL_MEETING_STATUSES.has(meeting.status) && TERMINAL_MEETING_STATUSES.has(status)) {
+      meetings = meetings.map(row => currentKey(row) === currentKey(meeting) ? { ...row, status } : row);
+      const key = `${meeting.platform}|${meeting.nativeMeetingId}`;
+      if (status === 'failed') failBot(key);
+      returnToMeetingHome(status === 'failed'
+        ? 'The bot failed. Select the meeting from the list to inspect its saved transcript.'
+        : 'Meeting ended. Select it from the list to review the saved transcript.');
+      void refreshMeetings(true);
+      return;
+    }
     segments = rows;
+    replies = voice;
+    if (meeting.platform === 'google_meet') {
+      voiceActivityView.update(activity, ['completed','failed','stopped','ended','past'].includes(status));
+    }
     renderTranscript(status === 'active' ? 'Live transcript' : 'Saved transcript');
     setStatus('Connected', 'ready');
   };
   const onError = (message: string, denied: boolean) => {
     if (token !== scope) return;
+    if (meeting.platform === 'google_meet') voiceActivityView.update(null);
     if (denied) { segments = []; clearTranscript(); }
     setStatus(denied ? 'Access unavailable' : 'Reconnecting…', denied ? 'error' : 'loading');
     $('transcriptStatus').textContent = message;
   };
-  stopWatching = source === 'bot'
-    ? watchBotTranscript({ botGatewayUrl: config.botGatewayUrl, apiKey: config.apiKey }, meeting, onUpdate, onError)
-    : watchDesktopTranscript({ gatewayUrl: desktopGatewayUrl(), apiKey: config.apiKey }, meeting, onUpdate, onError);
+  stopWatching = watchBotTranscript({ botGatewayUrl: config.botGatewayUrl, apiKey: config.apiKey }, meeting, onUpdate, onError);
 }
 
 async function refreshMeetings(preserve = true): Promise<void> {
   listRequest?.abort();
   const controller = new AbortController(); listRequest = controller;
   const token = stopCurrentWatch(false);
-  const sourceAtRequest = source;
-  const endpointAtRequest = source === 'bot' ? config.botGatewayUrl : desktopGatewayUrl();
+  const endpointAtRequest = config.botGatewayUrl;
   const keyAtRequest = config.apiKey;
-  const oldKey = selected ? currentKey(selected) : '';
+  const oldKey = preserve && selected ? currentKey(selected) : '';
   if (!preserve) { selected = null; meetings = []; clearTranscript(); }
   $('meetingTitle').textContent = selected?.title || 'Select a meeting';
   $('meetingMeta').textContent = '';
   setStatus('Loading meetings…', 'loading');
   renderMeetings();
   try {
-    const rows = source === 'bot'
-      ? await listBotMeetings({ botGatewayUrl: endpointAtRequest, apiKey: keyAtRequest }, controller.signal)
-      : await listDesktopMeetings({ gatewayUrl: endpointAtRequest, apiKey: keyAtRequest }, controller.signal);
-    if (controller.signal.aborted || token !== scope || source !== sourceAtRequest || config.apiKey !== keyAtRequest
-        || (source === 'bot' ? config.botGatewayUrl : desktopGatewayUrl()) !== endpointAtRequest) return;
+    const rows = await listBotMeetings({ botGatewayUrl: endpointAtRequest, apiKey: keyAtRequest }, controller.signal);
+    if (controller.signal.aborted || token !== scope || config.apiKey !== keyAtRequest
+        || config.botGatewayUrl !== endpointAtRequest) return;
     meetings = rows;
-    selected = rows.find(row => currentKey(row) === oldKey) || null;
-    if (!selected && rows.length) selected = rows[0];
+    syncFailedBotState();
+    selected = rows.find(row => currentKey(row) === oldKey)
+      || rows.filter(row => !TERMINAL_MEETING_STATUSES.has(row.status)).sort((a, b) => b.startMs - a.startMs)[0]
+      || null;
     renderMeetings();
     if (selected) {
       ($('meetingSelect') as HTMLSelectElement).value = currentKey(selected);
@@ -205,7 +414,7 @@ async function refreshMeetings(preserve = true): Promise<void> {
       $('meetingTitle').textContent = 'Select a meeting';
       clearTranscript();
     }
-    setStatus(source === 'bot' ? 'Terminal connected' : 'Desktop archive connected', 'ready');
+    setStatus('Terminal connected', 'ready');
   } catch (error) {
     if (controller.signal.aborted || token !== scope) return;
     meetings = []; selected = null; renderMeetings(); clearTranscript();
@@ -219,10 +428,33 @@ function selectMeeting(): void {
   stopCurrentWatch(true);
   selected = meetings.find(row => currentKey(row) === ($('meetingSelect') as HTMLSelectElement).value) || null;
   renderMeetings();
-  if (!selected) { $('meetingTitle').textContent = 'Select a meeting'; $('meetingMeta').textContent = ''; return; }
+  if (!selected) { $('meetingTitle').textContent = 'Select a meeting'; $('meetingMeta').textContent = ''; $('transcriptStatus').textContent = 'Choose a Bot meeting to view its transcript.'; return; }
   const token = scope;
   watchMeeting(selected, token);
   setStatus('Connecting…', 'loading');
+}
+
+function selectBotTranscript(target: BotTarget): void {
+  const meeting = meetings.filter(row => row.platform === target.platform && row.nativeMeetingId === target.nativeMeetingId)
+    .sort((a, b) => b.startMs - a.startMs)[0];
+  if (!meeting) return;
+  if (TERMINAL_MEETING_STATUSES.has(meeting.status)) {
+    if (meeting.status === 'failed') syncFailedBotState();
+    returnToMeetingHome(meeting.status === 'failed'
+      ? 'The bot failed. Select the meeting from the list to inspect its saved transcript.'
+      : 'Meeting ended. Select it from the list to review the saved transcript.');
+    return;
+  }
+  ($('meetingSelect') as HTMLSelectElement).value = currentKey(meeting);
+  ($('meetingControls') as HTMLDetailsElement).open = true;
+  selectMeeting();
+}
+
+function returnToMeetingHome(message: string): void {
+  ($('meetingSelect') as HTMLSelectElement).value = '';
+  ($('meetingControls') as HTMLDetailsElement).open = true;
+  selectMeeting();
+  $('transcriptStatus').textContent = message;
 }
 
 function safePageUrl(baseValue: string, path: string): string {
@@ -233,17 +465,12 @@ function safePageUrl(baseValue: string, path: string): string {
   return new URL(path.replace(/^\/+/, ''), url.href.replace(/\/*$/, '/') ).href;
 }
 
-function openDestination(destination: 'terminal' | 'dashboard'): void {
+function openTerminal(): void {
   if (!selected) return;
   try {
-    let url: string;
-    if (source === 'bot' && destination === 'terminal') url = safePageUrl(config.terminalUrl, `/meetings/${selected.id}`);
-    else if (source === 'bot') url = safePageUrl(config.dashboardUrl, `/meetings/${selected.id}`);
-    else if (destination === 'dashboard') url = safePageUrl(apiBase(desktopGatewayUrl()), `/transcripts/${encodeURIComponent(selected.platform)}/${encodeURIComponent(selected.nativeMeetingId)}/review`);
-    else return;
-    void chrome.tabs.create({ url });
+    void chrome.tabs.create({ url: safePageUrl(config.terminalUrl, `/meetings/${selected.id}`) });
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'Unable to open this destination.', 'error');
+    setStatus(error instanceof Error ? error.message : 'Unable to open Terminal.', 'error');
   }
 }
 
@@ -274,13 +501,12 @@ async function init(): Promise<void> {
   }
   if (!['desktop', 'cloud'].includes(config.deployment)) config.deployment = 'desktop';
   ($('deployment') as HTMLSelectElement).value = config.deployment;
-  source = stored.transcriptSource === 'desktop' ? 'desktop' : 'bot';
-  ($('sourceSelect') as HTMLSelectElement).value = source;
-  if (stored.transcriptSource !== source) void chrome.storage.local.set({ transcriptSource: source });
+  if (stored.transcriptSource !== 'bot') void chrome.storage.local.set({ transcriptSource: 'bot' });
   theme = stored.theme === 'light' || stored.theme === 'dark' ? stored.theme : 'system';
   applyTheme();
   renderTranscript();
   bindSettings();
+  void refreshActiveMeeting();
   void refreshMeetings(false);
   if (!config.apiKey) showSettings(true);
 }
@@ -289,20 +515,21 @@ function bindSettings(): void {
   for (const field of fields) $(field).addEventListener('change', () => {
     config[field] = ($(field) as HTMLInputElement).value.trim();
     void chrome.storage.local.set({ [field]: config[field] });
-    if (field === 'apiKey' || field === 'gatewayUrl' || field === 'botGatewayUrl' || field === 'deployment') void refreshMeetings(false);
+    renderSendBot();
+    if (field === 'apiKey' || field === 'botGatewayUrl') void refreshMeetings(false);
     else setStatus('Settings saved', 'ready');
-  });
-  $('sourceSelect').addEventListener('change', () => {
-    source = ($('sourceSelect') as HTMLSelectElement).value === 'desktop' ? 'desktop' : 'bot';
-    void chrome.storage.local.set({ transcriptSource: source });
-    selected = null; meetings = []; stopCurrentWatch(true);
-    ($('sourceSelect') as HTMLSelectElement).value = source; $('meetingTitle').textContent = 'Select a meeting'; $('meetingMeta').textContent = '';
-    void refreshMeetings(false);
   });
   $('meetingSelect').addEventListener('change', selectMeeting);
   $('refreshBtn').addEventListener('click', () => void refreshMeetings(true));
-  $('openTerminal').addEventListener('click', () => openDestination('terminal'));
-  $('openDashboard').addEventListener('click', () => openDestination('dashboard'));
+  $('openTerminal').addEventListener('click', openTerminal);
+  $('sendBotBtn').addEventListener('click', () => {
+    if (sendBotState?.phase === 'retrying') void cancelBotRetry();
+    else void sendBotToActiveMeeting();
+  });
+  chrome.tabs.onActivated.addListener(() => void refreshActiveMeeting());
+  chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+    if (tab.active && (changeInfo.url || changeInfo.status === 'complete')) void refreshActiveMeeting();
+  });
   $('gearBtn').addEventListener('click', () => showSettings(true));
   $('backBtn').addEventListener('click', () => showSettings(false));
   $('doneBtn').addEventListener('click', () => showSettings(false));

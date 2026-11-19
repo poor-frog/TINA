@@ -93,6 +93,19 @@ spec:
                 secretKeyRef:
                   name: {{ include "tina.adminTokenSecretName" . }}
                   key: INTERNAL_API_SECRET
+            # The background Google Calendar importer refreshes only the user's scoped read-only grant.
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tina.adminTokenSecretName" . }}
+                  key: GOOGLE_CLIENT_ID
+                  optional: true
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tina.adminTokenSecretName" . }}
+                  key: GOOGLE_CLIENT_SECRET
+                  optional: true
             # MeetingToken is signed AND verified with the SAME admin secret admin-api holds.
             - name: ADMIN_TOKEN
               valueFrom:

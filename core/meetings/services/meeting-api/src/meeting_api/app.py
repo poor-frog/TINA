@@ -16,9 +16,9 @@ sub-package of ``meeting_api`` mounted here (the v0.12 analog of the parent ``ma
   * **obs** — ``TraceMiddleware`` (logevent.v1 trace_id threading) + the shared ``GET /health``.
 
 webhooks + scheduling are library bricks (no HTTP surface of their own in the core path — they are
-driven by the lifecycle/bot_spawn flows); they are re-exported from the package front door and wired
-by the production composition root in P3. continue_meeting / max-bots / join-retry / the segment
-consumer loop are P3 seams.
+driven by lifecycle/bot_spawn); production background loops are wired by ``meeting_api.__main__``.
+The manual retry path is shared by every ``POST /bots`` client and its bounded transient-failure
+worker runs inside the production auto-join sweep.
 
 ``create_app`` takes every collaborator as an injected port (or builds a default in-memory stack for
 the app factory / tests), so the SAME app runs with real adapters in prod and in-process fakes in
@@ -279,8 +279,13 @@ def create_app(
     else:
         from fakeredis.aioredis import FakeRedis
         playback_redis = FakeRedis(decode_responses=True)
-    app.state.speech_playback = PlaybackStore(playback_redis)
+    app.state.speech_playback = PlaybackStore(playback_redis, meeting_repo.save_voice_reply)
     app.include_router(build_speak_router(meeting_repo, command_publisher, app.state.speech_playback))
+    from .lifecycle.voice import build_voice_router
+    app.include_router(build_voice_router(meeting_repo, playback_redis, command_publisher, app.state.speech_playback))
+    from .lifecycle.audio import build_audio_router
+    app.include_router(build_audio_router(meeting_repo))
+    from .lifecycle.voice_settings import build_voice_settings_router
 
     # Resolve the shared recording storage before mounting the collector: completed-meeting erasure
     # uses this same port to delete objects before its transcript/JSONB finalization.
@@ -295,6 +300,7 @@ def create_app(
     # --- collector: transcripts + meetings + ws-authorize (api.v1) ---
     if transcript_store is None:
         transcript_store = _collector_fakes().InMemoryTranscriptStore()
+    app.include_router(build_voice_settings_router(playback_redis, repo=meeting_repo, store=transcript_store))
     if recording_repo is None:
         recording_repo = _recordings_fakes().InMemoryRecordingRepo()
     from .collector.refinement import BotRefiner
@@ -880,6 +886,9 @@ def _mount_lifecycle(
                         "status": rec.status.value,
                         "when": frame["ts"],
                     }
+                    retry_state = (meeting_row.get("data") or {}).get("auto_retry")
+                    if isinstance(retry_state, dict):
+                        user_frame["auto_retry"] = retry_state
                     try:
                         await redis.publish(
                             f"u:{user_id}:meetings", _json.dumps(user_frame)

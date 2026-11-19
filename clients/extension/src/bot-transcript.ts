@@ -1,8 +1,9 @@
 import type { TranscriptSegment } from './transcript-rendering';
+import { voiceReplies, voiceSources, type VoiceReply } from './voice-replies';
 
 export interface BotConnection { botGatewayUrl: string; apiKey: string }
 export interface DesktopConnection { gatewayUrl: string; apiKey: string }
-export interface BotMeeting { id: number; platform: string; nativeMeetingId: string; title: string; status: string; startMs: number }
+export interface BotMeeting { id: number; platform: string; nativeMeetingId: string; title: string; status: string; startMs: number; joinFailureSummary?: string; autoRetry?: { state: string; attempt: number; max_attempts: number } }
 
 export function apiBase(value: string): string {
   if (!value?.trim()) throw new Error('Set the API gateway in Settings.');
@@ -35,6 +36,10 @@ async function read(config: BotConnection, path: string, signal?: AbortSignal): 
   return readGateway(config.botGatewayUrl, config.apiKey, path, signal);
 }
 
+export async function readBotVoiceSources(config: BotConnection, meetingId: number, requestId: string, signal?: AbortSignal) {
+  return voiceSources(await read(config, `/meetings/${meetingId}/voice-assistant/sources/${encodeURIComponent(requestId)}`, signal));
+}
+
 function epoch(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value < 100_000_000_000 ? value * 1000 : value;
   return typeof value === 'string' ? Date.parse(value) : NaN;
@@ -49,6 +54,8 @@ export async function listBotMeetings(config: BotConnection, signal?: AbortSigna
       id: row.id, platform: row.platform, nativeMeetingId: row.native_meeting_id,
       title: typeof row.data?.title === 'string' ? row.data.title : row.native_meeting_id,
       status: typeof row.status === 'string' ? row.status : 'unknown', startMs: epoch(row.start_time),
+      autoRetry: row.data?.auto_retry && typeof row.data.auto_retry === 'object' ? row.data.auto_retry : undefined,
+      joinFailureSummary: typeof row.data?.join_failure_summary === 'string' ? row.data.join_failure_summary.slice(0,300) : undefined,
     }));
 }
 
@@ -99,20 +106,39 @@ export function botSegments(body: any, meeting: BotMeeting): TranscriptSegment[]
 // shortcut: poll full snapshots; use an exact-row delta feed when transcript size or concurrent viewers justify it.
 /** Exact-row snapshots include Redis drafts and canonical edits, independently of Agent availability. */
 export function watchBotTranscript(config: BotConnection, meeting: BotMeeting,
-  update: (rows: TranscriptSegment[], status: string) => void, error: (message: string, denied: boolean) => void): () => void {
+  update: (rows: TranscriptSegment[], status: string, replies?: VoiceReply[], voiceStatus?: unknown) => void, error: (message: string, denied: boolean) => void): () => void {
   const request = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let replies: VoiceReply[] = [], voiceInFlight = false;
+  let voiceStatus: unknown;
+  let snapshot: { rows: TranscriptSegment[]; status: string } | undefined;
+  const refreshVoice = async () => {
+    voiceInFlight = true;
+    try {
+      const voice = await read(config, `/meetings/${meeting.id}/voice-assistant`, request.signal);
+      replies = voiceReplies(voice.replies);
+      voiceStatus = voice;
+    } catch { replies = []; voiceStatus = null; /* Voice permissions/outages never block the transcript feed. */ }
+    finally {
+      voiceInFlight = false;
+      if (!request.signal.aborted && snapshot) update(snapshot.rows, snapshot.status, replies, voiceStatus);
+    }
+  };
   const poll = async () => {
     let retry = 1500;
     try {
       const body = await read(config, `/transcripts/by-id/${meeting.id}`, request.signal);
       const rows = botSegments(body, meeting);
-      if (!request.signal.aborted) update(rows, typeof body.status === 'string' ? body.status : meeting.status);
+      snapshot = { rows, status: typeof body.status === 'string' ? body.status : meeting.status };
+      if (!request.signal.aborted) {
+        update(rows, snapshot.status, replies, voiceStatus);
+        if (meeting.platform === 'google_meet' && !voiceInFlight) void refreshVoice();
+      }
     } catch (failure) {
       if (request.signal.aborted) return;
       const denied = failure instanceof ReadError && [401, 403, 404, 410].includes(failure.status);
       error(failure instanceof Error ? failure.message : 'Transcript unavailable.', denied);
-      if (denied) return;
+      if (denied) { request.abort(); return; }
       retry = 3000;
     }
     if (!request.signal.aborted) timer = setTimeout(poll, retry);

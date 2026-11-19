@@ -258,6 +258,17 @@ const modelId = spdxId("Package", "hf", "pyannote-segmentation-3.0");
 packages.push(pkgObject(BAKED_MODEL, modelId));
 relationships.push({ spdxElementId: ROOT_ID, relatedSpdxElement: modelId, relationshipType: "CONTAINS" });
 
+const voiceModelId = spdxId("Package", "hf", "multilingual-e5-small");
+packages.push(pkgObject({
+  eco: "huggingface", name: "Xenova/multilingual-e5-small", version: "761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+  licenseDeclared: "MIT", licenseConcluded: "MIT", copyrightText: "Copyright (c) Microsoft Corporation",
+  downloadLocation: "https://huggingface.co/Xenova/multilingual-e5-small",
+  purl: "pkg:huggingface/Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+  supplier: "Organization: Xenova (ONNX conversion of intfloat/multilingual-e5-small)",
+  comment: "Local CPU voice RAG in Agent API; pinned model/tokenizer hashes, notice at /opt/tina/voice-retrieval/LICENSE.txt.",
+}, voiceModelId));
+relationships.push({ spdxElementId: ROOT_ID, relatedSpdxElement: voiceModelId, relationshipType: "CONTAINS" });
+
 const valkeyId = spdxId("Package", "github", "valkey", "8.1.9");
 packages.push(pkgObject(BAKED_VALKEY, valkeyId));
 relationships.push({ spdxElementId: ROOT_ID, relatedSpdxElement: valkeyId, relationshipType: "CONTAINS" });

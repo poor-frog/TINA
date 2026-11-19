@@ -60,6 +60,25 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         sleep.assert_called_once_with(1)
 
+    def test_install_persists_enabled_profiles_without_persisting_tts_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            selected = SimpleNamespace(env={'COMPOSE_PROFILES': 'asr,speech', 'TTS_API_TOKEN': 'must-not-persist'},
+                env_file=root / 'main.env', project='fixture', files=[str(root / 'compose.yml')], control_port=18987,
+                services={'admin-api': {'environment': {'INTERNAL_API_SECRET': 'fixture-control-secret'}}})
+            identity = control.instance_of(selected)
+            fake_stack = SimpleNamespace(ROOT=root, HERE=BIN.parent, CUDA_OVERLAY='unused-overlay')
+            responses = [control.ControlError(503, 'not running'), {'instance': identity}]
+            with patch.dict('sys.modules', {'stack': fake_stack}), patch.object(control.Path, 'home', return_value=root), \
+                 patch.object(control.platform, 'system', return_value='Linux'), \
+                 patch.object(control, 'request_json', side_effect=responses), \
+                 patch.object(control.socket, 'socket') as sock, patch.object(control.subprocess, 'Popen'):
+                sock.return_value.__enter__.return_value.connect_ex.return_value = 1
+                control.install(selected)
+            saved = json.loads((root / '.config/tina/asr-control' / identity / 'config.json').read_text())
+            self.assertEqual(saved['env']['COMPOSE_PROFILES'], 'asr,speech')
+            self.assertNotIn('TTS_API_TOKEN', saved['env'])
+
     def test_missing_optional_viegem_profile_keeps_runtime_status_available(self):
         selected = SimpleNamespace(services={"admin-api": {"environment": {}}, "gipformer": {}},
             viegem_device="disabled", endpoint=lambda service, _: {"gipformer": "http://gipformer"}[service])
@@ -74,13 +93,23 @@ class ControlTests(unittest.TestCase):
         probe.assert_called_once_with("http://gipformer/status", timeout=1)
 
     def test_native_mps_status_does_not_require_a_compose_viegem_service(self):
-        selected = SimpleNamespace(services={"admin-api": {"environment": {}}}, viegem_device="mps",
+        selected = SimpleNamespace(services={"admin-api": {"environment": {}}}, context="orbstack", viegem_device="mps",
                                    native_viegem_access=lambda: ("192.168.139.3", "http://192.168.139.3:18005"))
         with patch.object(control, "request_json", return_value={
                 "model": {"asr_model": "5CD-AI/VieGem-ASR", "device": "mps"}}) as probe:
             result = control.Workers(selected).status("viegem")
         self.assertTrue(result["ready"])
         probe.assert_called_once_with("http://192.168.139.3:18005/status", timeout=1)
+
+    def test_kiri_native_mps_controller_probes_loopback(self):
+        selected = SimpleNamespace(services={"admin-api": {"environment": {}}},
+            context="kiri", viegem_device="mps",
+            native_viegem_access=lambda: ("127.0.0.1", "http://host.docker.internal:18005"))
+        with patch.object(control, "request_json", return_value={
+                "model": {"asr_model": "5CD-AI/VieGem-ASR", "device": "mps"}}) as probe:
+            result = control.Workers(selected).status("viegem")
+        self.assertTrue(result["ready"])
+        probe.assert_called_once_with("http://127.0.0.1:18005/status", timeout=1)
 
     def test_switch_keeps_worker_required_by_another_account(self):
         self.controller.select("1", "gipformer", True, 0)

@@ -167,6 +167,21 @@
       ]
     },
     {
+      "key": "TINA_TTS_PROFILE_KEY",
+      "class": "defaulted",
+      "secret": true,
+      "default": "",
+      "description": "Domain-separated speech-profile signing key derived from INTERNAL_API_SECRET by the stack runner; never forwarded to bots",
+      "targets": ["compose"]
+    },
+    {
+      "key": "TINA_TTS_PREBUFFER_MS",
+      "class": "defaulted",
+      "default": "150",
+      "description": "Bot PCM prebuffer in milliseconds; playback bounds values to 80-1000 ms",
+      "targets": ["compose"]
+    },
+    {
       "key": "DIARIZATION_SERVICE_URL",
       "class": "defaulted",
       "default": "",
@@ -642,10 +657,31 @@
       "targets": []
     },
     {
+      "key": "GOOGLE_CLIENT_ID",
+      "class": "defaulted",
+      "default": "",
+      "description": "Google OAuth client id used to refresh user-scoped read-only Calendar grants during background sync",
+      "targets": [
+        "compose",
+        "helm"
+      ]
+    },
+    {
+      "key": "GOOGLE_CLIENT_SECRET",
+      "class": "defaulted",
+      "default": "",
+      "secret": true,
+      "description": "Google OAuth client secret used only by the server-side Calendar API token refresh",
+      "targets": [
+        "compose",
+        "helm"
+      ]
+    },
+    {
       "key": "CALENDAR_SYNC_INTERVAL_S",
       "class": "defaulted",
       "default": "300",
-      "description": "calendar-sync sweep cadence (s) — how often connected ICS feeds are re-fetched and upserted into planned meetings",
+      "description": "calendar-sync sweep cadence (s) — how often connected ICS or Google Calendar sources are fetched and reconciled into planned meetings",
       "targets": []
     },
     {
@@ -749,6 +785,54 @@
       "targets": [
         "compose"
       ]
+    },
+    {
+      "key": "TINA_MEETING_VOICE",
+      "class": "defaulted",
+      "default": "0",
+      "description": "Opt in to Google Meet bot-hosted KWS and shared TTS; requires speech profile assets and per-meeting owner source approval.",
+      "targets": [
+        "compose"
+      ]
+    },
+    {
+      "key": "TINA_VOICE_TURN_SHADOW",
+      "class": "defaulted",
+      "default": "1",
+      "description": "Enable isolated Smart Turn v3.2 + Namo Multilingual CPU observations for new voice bots; scores never control endpoints",
+      "targets": ["compose"]
+    },
+    {
+      "key": "TINA_LIVEKIT_AUDIO",
+      "class": "defaulted",
+      "default": "0",
+      "description": "Route new Google Meet bot STT windows through the LiveKit SDK and shared local NS stream using signed active-session capabilities",
+      "targets": ["compose"]
+    },
+    {
+      "key": "TINA_LIVEKIT_VAD_SHADOW",
+      "class": "defaulted",
+      "default": "0",
+      "description": "Compare hosted Silero activity and endpoint candidates without changing bot turn authority",
+      "targets": ["compose"]
+    },
+    {
+      "key": "AGENT_API_URL",
+      "class": "defaulted",
+      "default": "(unset — room voice unavailable)",
+      "description": "Internal Agent service for owner-scoped, source-validated meeting voice answers. No owner API key is sent to the bot.",
+      "targets": [
+        "compose"
+      ]
+    },
+    {
+      "key": "LIVEKIT_AGENT_URL",
+      "class": "defaulted",
+      "default": "",
+      "targets": [
+        "compose"
+      ],
+      "description": "Optional internal self-hosted LiveKit Agents pilot. Empty keeps TINA native voice; per-room owner opt-in is required."
     }
   ],
   "capabilities": {

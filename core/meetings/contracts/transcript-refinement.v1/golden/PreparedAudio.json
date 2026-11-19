@@ -1,0 +1,29 @@
+{
+  "version": "transcript-refinement.v1",
+  "id": "gain-example",
+  "meeting": "1",
+  "status": "completed",
+  "model": "custom",
+  "backend": "viegem",
+  "created_at": "2026-11-05T00:00:00Z",
+  "mode": "flagged",
+  "audio_preprocessing": "bounded-gain.v1",
+  "items": [
+    {
+      "segment_id": "quiet",
+      "expected_revision": 0,
+      "state": "ready",
+      "text": "Xin chào.",
+      "audio_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "asr_elapsed_ms": 250,
+      "attempts": 1,
+      "preprocessing": {
+        "method": "bounded-gain.v1",
+        "applied": true,
+        "gain_db": 12,
+        "reason": "gain_applied",
+        "audio_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    }
+  ]
+}

@@ -105,6 +105,23 @@ def test_5xx_raises_llm_error():
         _adapter(handler).complete("p")
 
 
+@pytest.mark.parametrize('adapter_name', ['compat', 'anthropic', 'responses'])
+@pytest.mark.parametrize('status,code', [(400, 'request_rejected'), (401, 'auth'), (403, 'auth'),
+    (404, 'configuration'), (429, 'rate_limit'), (503, 'unavailable'), (504, 'timeout')])
+def test_completion_adapters_preserve_status_for_translation_recovery(adapter_name, status, code):
+    from llm import completion_failure_code
+    from llm.anthropic_api import AnthropicCompletion
+    from llm.openai_responses import OpenAIResponsesCompletion
+    adapter_class = {'compat': OpenAICompatCompletion, 'anthropic': AnthropicCompletion,
+                     'responses': OpenAIResponsesCompletion}[adapter_name]
+    adapter = adapter_class(base_url='https://llm.example/v1', api_key='test-key', model='test-model',
+                            transport=httpx.MockTransport(lambda request: httpx.Response(status, text='irrelevant response text')))
+    with pytest.raises(LLMError) as error:
+        adapter.complete('hello')
+    assert error.value.status_code == status
+    assert completion_failure_code(error.value) == code
+
+
 def test_missing_base_url_fails_loud(monkeypatch):
     for var in ("TINA_LLM_BASE_URL", "ANTHROPIC_BASE_URL"):
         monkeypatch.delenv(var, raising=False)

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "TINA Transcript Viewer",
   "version": "0.1.0",
-  "description": "Read authorized transcripts from TINA Terminal and the Desktop archive. This extension does not capture audio.",
+  "description": "Send TINA Bot to supported meeting tabs and read authorized transcripts. This extension does not capture audio.",
   "permissions": [
     "storage",
     "tabs",
@@ -13,7 +13,8 @@
   },
   "host_permissions": [
     "http://localhost/*",
-    "http://127.0.0.1/*"
+    "http://127.0.0.1/*",
+    "https://tinabot.duckdns.org/*"
   ],
   "background": {
     "service_worker": "viewer-background.js"

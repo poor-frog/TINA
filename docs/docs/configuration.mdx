@@ -336,7 +336,7 @@ stack still boots.
 | `TINA_LOBBY_BUDGET_S` | `900` | How long a spawned bot waits for admission before giving up (`automatic_leave.waitingRoomTimeout`). The reconciler's pre-active grace derives from this, so raising it never leaves a waiting bot reaped early. |
 | `AUTO_JOIN_GRACE_S` | `600` | A meeting whose start passed longer ago than this is skipped — never joined hours late. |
 | `AUTO_JOIN_RETRY_BACKOFF_S` | `300` | Wait after a loud auto-join failure (cap/quota/spawn) before retrying that meeting. |
-| `CALENDAR_SYNC_INTERVAL_S` | `300` | How often connected ICS feeds are re-fetched and upserted. |
+| `CALENDAR_SYNC_INTERVAL_S` | `300` | How often connected ICS feeds and selected Google calendars are fetched and reconciled. |
 | `ADMIN_API_URL` | — | admin-api base URL for the sweeps' internal lookups (spawn context, calendar configs). |
 
 ## Workflows (flows)
@@ -356,6 +356,23 @@ and rate knobs live with the process that reads them, on
 | `TINA_FLOWS_AGENT_API_URL` | — | The **optional** agent domain. Unset, steps that need an agent answer `not_present` instead of reaching for a door that is not there. |
 | `TINA_FLOWS_API_URL` | — | Where admin-api and meeting-api publish facts to. Empty (the stock default) means they publish nothing. Formerly `FLOWS_API_URL`, honoured for one release. |
 | `TINA_UI_URL` | — | The link port. Unset, nothing is mailed with a link. |
+
+### Shared Gmail SMTP configuration
+
+The shared MVP deployment's `deploy/compose/.env` contains dotenvx-encrypted values for
+`TINA_MAIL_ADDR` and `TINA_MAIL_APP_PASSWORD`. They use the existing deployment public key;
+the SMTP configuration update does not create or rotate the dotenvx key pair. The matching
+`.env.keys` stays outside Git and must be supplied privately to authorized team members.
+
+After pulling the updated configuration, load it through the existing dotenvx deployment
+workflow and recreate the flows services. Pulling files alone does not replace the environment
+of an existing container. Keep `TINA_NOTIFY_CHANNEL=smtp` and leave `TINA_MAIL_SMTP_HOST` empty
+for authenticated Gmail SMTP over SSL on port 465.
+
+If dotenvx cannot decrypt the file, check that the existing `.env.keys` is available to the
+deployment loader. If a flow reports missing `TINA_MAIL_ADDR` or `TINA_MAIL_APP_PASSWORD`, check
+that the updated env file was decrypted and loaded into the recreated service. Never commit
+the private key or plaintext credentials.
 
 ## Images & runtime
 

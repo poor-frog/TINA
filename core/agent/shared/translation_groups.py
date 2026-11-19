@@ -42,7 +42,8 @@ def phrases(segments: list[dict], *, tail_ready: bool) -> list[dict]:
         first, last = current[0], current[-1]
         groups.append({
             'group_id': 'phrase:' + hashlib.sha256(first['segment_id'].encode()).hexdigest()[:24],
-            'members': [{'segment_id': row['segment_id'], 'source_text': row['text']} for row in current],
+            'members': [{'segment_id': row['segment_id'], 'source_text': row['text'],
+                         'revision': row.get('revision', 0)} for row in current],
             'source_text': joined(current),
             'speaker_id': first.get('speaker_id') or '',
             'speaker_name': first.get('speaker_name') or first.get('speaker') or '',

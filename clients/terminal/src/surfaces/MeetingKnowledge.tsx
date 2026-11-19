@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invalidateDocLinkCaches, useOpenEntity } from '../ui-kit/docLinks';
 import { MeetingFactReviews, type FactItem } from './MeetingFactReviews';
+import { MeetingVoiceDrafts } from './MeetingVoiceDrafts';
 
 interface Source {
   id: string; kind: 'transcript' | 'document'; quote: string; path?: string; meeting_id?: number; meeting_title?: string;
@@ -178,6 +179,7 @@ export function MeetingKnowledge({ meetingId }: { meetingId: string }) {
     </details>
     {error && <p role="alert">{error} <button style={button} onClick={() => void load()}>Tải lại</button></p>}
     <MeetingFactReviews meetingId={meetingId} items={data?.facts || []} verified={verified} onRefresh={load} />
+    <MeetingVoiceDrafts key={meetingId} meetingId={meetingId} />
     {!!data?.answers.length && <details open={expanded} onToggle={e => setExpanded(e.currentTarget.open)}>
       <summary>Câu trả lời và bản nháp Wiki ({data.answers.length})</summary>
       <div style={{ maxHeight: '42vh', overflow: 'auto' }}>{data.answers.map(answer => <article key={answer.id} id={`meeting-answer-${answer.id}`} style={{ padding: '10px 0', borderTop: '1px solid var(--line)', overflowWrap: 'anywhere' }}>

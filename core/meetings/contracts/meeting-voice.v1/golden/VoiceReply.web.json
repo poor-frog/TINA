@@ -1,0 +1,15 @@
+{
+  "request_id": "00000000-0000-4000-8000-000000000001",
+  "text": "Theo thông tin trên web: Redis là một kho dữ liệu.",
+  "state": "completed",
+  "created_at_ms": 1,
+  "updated_at_ms": 2,
+  "answer_kind": "web",
+  "reason": "answered",
+  "links": [
+    {
+      "title": "Redis documentation",
+      "url": "https://redis.io/docs/"
+    }
+  ]
+}

@@ -746,7 +746,14 @@ export class GmeetCompatibleBuffer {
     buffer: SpeakerBuffer,
     trigger: GmeetCompatibleSubmissionTrigger,
   ): Promise<boolean> {
-    let end = buffer.totalSamples;
+    if (!buffer.idleSubmitted && (trigger === 'interval' || trigger === 'manual')) {
+      // Reserve a cadence plus the next capture frame for both scheduled and replay callers.
+      const limit = Math.min(this.maxBufferDuration, this.maxRetainedDuration);
+      const frameSec = (buffer.chunks.at(-1)?.length ?? 0) / this.sampleRate;
+      const rolloverAt = Math.max(this.minAudioDuration, limit - Math.min(this.submitInterval + frameSec, limit / 2));
+      if (this.unconfirmedSamples(buffer) / this.sampleRate >= rolloverAt) buffer.capCutSample = this.quietCutSample(buffer, 4);
+    }
+    let end = buffer.capCutSample ?? buffer.totalSamples;
     const limit = buffer.confirmedSamples + Math.floor(this.maxBufferDuration * this.sampleRate);
     if (end > limit) { end = this.quietCutSample(buffer, 4, limit); buffer.capCutSample = end; }
     const unconfirmed = end - buffer.confirmedSamples;

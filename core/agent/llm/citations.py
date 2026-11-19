@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import json
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 _REF = re.compile(r'turn\d+(?:search|view|fetch)\d+')
@@ -12,7 +13,8 @@ _INLINE = re.compile(
 )
 
 
-def _source(value):
+def safe_web_source(value):
+    """Validate a provider-recorded HTTP(S) citation for display; this never fetches the URL."""
     if not isinstance(value, dict) or not isinstance(value.get('url'), str):
         return None
     url = value['url']
@@ -39,6 +41,20 @@ def _source(value):
 
 def web_sources(item: dict) -> list[dict]:
     """Extract direct result URLs and opened pages from native or persisted Codex web calls."""
+    if (item.get('type') in ('mcpToolCall', 'mcp_tool_call') and item.get('server') == 'tina-reach'
+            and item.get('tool') in ('reach_web_search','reach_web_read','reach_github_search','reach_github_read')):
+        result = item.get('result')
+        if not isinstance(result, dict) or result.get('isError'):
+            return []
+        for block in (result.get('content') or [])[:5]:
+            if not isinstance(block, dict) or block.get('type') != 'text': continue
+            raw = block.get('text')
+            if not isinstance(raw, str) or len(raw) > 200000: continue
+            try: body = json.loads(raw)
+            except ValueError: continue
+            if isinstance(body, dict) and body.get('ok') is True and isinstance(body.get('items'), list):
+                return [s for row in body['items'][:5] if (s := safe_web_source(row)) is not None]
+        return []
     if item.get('type') not in ('webSearch', 'web_search_call'):
         return []
     results = item.get('results') if isinstance(item.get('results'), list) else []
@@ -46,14 +62,14 @@ def web_sources(item: dict) -> list[dict]:
     action = item.get('action')
     if isinstance(action, dict) and action.get('type') in ('openPage', 'open_page'):
         candidates = [*candidates, action]
-    return [source for value in candidates if (source := _source(value)) is not None][:50]
+    return [source for value in candidates if (source := safe_web_source(value)) is not None][:50]
 
 
 def render_citations(text: str, sources: list[dict]) -> str:
     """Resolve explicit references and append a bounded, source-preserving Markdown bibliography."""
     unique = {}
     for value in sources[:50]:
-        source = _source(value)
+        source = safe_web_source(value)
         if source is None:
             continue
         if source['url'] in unique:

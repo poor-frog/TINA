@@ -64,6 +64,28 @@ healthchecks, and completed initialization jobs.
 
 ## ASR devices and automatic GPU selection
 
+Optional `TINA_LIVEKIT_AUDIO=1` puts both new Google Meet transcript windows and voice-question STT
+through the local LiveKit Agents adapter, retaining the selected model, windows and LocalAgreement.
+Its private audio bridge reuses WebRTC NS Low once for ASR/Silero/KWS. `make all` builds the bot before
+the LiveKit image, which copies the same native DSP library. See [audio bridge](../livekit/README.md#local-audio-bridge)
+for permissions, limits and rollback. The default `0` preserves existing deployment routing.
+
+`TINA_LIVEKIT_VAD_SHADOW=1` observes Silero in the LiveKit worker alongside the bot's existing
+Silero. The model cache is mounted read-only and permission requires enabled room voice. Numeric
+activity/endpoint comparisons never change voice decisions or disable transcript/TTS on failure.
+See [hosted Silero observation](../livekit/README.md#hosted-silero-observation). Default is `0`.
+
+`TINA_AUDIO_DENOISER=dtln` selects local CPU DTLN for noise-enabled Google Meet bots using the audio
+bridge; `webrtc` retains NS Low. `make all` builds hash-verified upstream ONNX weights and their MIT
+notice into the LiveKit image, so no manual model installation or runtime download is needed.
+New bots receive the selected filter; raw archives, 64 ms capture, ASR models/windows and room
+on/off preferences remain unchanged. See [DTLN configuration](../livekit/README.md#local-audio-bridge).
+
+Account speech settings (preset voice and bounded pronunciations) are configured in Terminal.
+The stack derives `TINA_TTS_PROFILE_KEY` from the existing internal secret and supplies it only to
+Meeting API/TTS, so no additional dotenvx key is required. `TINA_TTS_THREADS` defaults to 2;
+`TINA_TTS_PREBUFFER_MS` defaults to 150. See [speech profiles and benchmark](../tts/README.md#account-voice-and-pronunciation-settings).
+
 With a configured `TINA_VIEGEM_TOKEN`, the default `TINA_VIEGEM_DEVICE=auto` resolves to native
 MPS on Apple Silicon or Docker CUDA on Linux/Windows WSL2. `make plan` reports the candidate
 `viegem_device` without allocating GPU resources. Unsupported hosts and failed GPU checks produce
@@ -93,6 +115,31 @@ Only a fresh transcription registry defaults to VieGem; existing ASR preferences
 Enabled account preferences decide which workers remain running; no account can stop another account's ASR.
 
 ## Usage
+
+`make all` also builds the public-only Agent Reach worker on the private network. New configurations
+grant four read-only web/GitHub tools through `TINA_CHAT_TOOLBELT`. Existing explicit toolbelts remain
+unchanged; add `reach.web.search`, `reach.web.read`, `reach.github.search`, `reach.github.read` to enable
+them for chat. `TINA_AGENT_REACH_URL` selects retrieval for voice web queries after the room's existing
+web permission and explicit public-query checks. Empty retains the provider's web search. No host
+cookies or GitHub tokens are imported. See [Agent Reach](../agent-reach/README.md).
+
+New configurations prepare meeting voice by default (`TINA_MEETING_VOICE=1`); set it to `0` for
+a deliberate transcript-only deployment and clear `LIVEKIT_AGENT_URL` when disabling Agents.
+When the main environment has no TTS token, Stack loads `deploy/tts/.env` with the shared root
+`.env.keys`. An optional local TTS pair can override it; its key is never forwarded to containers.
+Provision the root private key privately before first startup. `make plan` reports
+`meeting_voice`, `tts_credentials_ready` and `kws_models_source` without writing configuration.
+
+`make all` verifies the two retained KWS ONNX files in the model volume. If absent, it imports
+`hey_tina.onnx` and `tina_oi.onnx` using the existing checksum-validated atomic installer from
+`TINA_KWS_MODELS_DIR` (relative paths resolve from the repo root; the default is
+`output/wakeword-training/tina-v1/models`). Missing or invalid artifacts stop before application
+restart. A fresh clone still needs the trained artifact pack; setup does not train or download an
+unapproved wake model. Models remain read-only in inference bots.
+
+Application readiness authenticates to TTS and checks Agents `/ready`, including cross-service
+TTS credentials/audio format. `make all` does not print the provisioned API key into logs; the
+explicit `make -C deploy/compose provision-token` command remains available when needed.
 
 The same operations are available as `tina` CLI/TUI after `make cli-install` from the repo root.
 See [CLI commands, output and safety semantics](bin/README.md#local-tina-cli--tui).
@@ -149,6 +196,12 @@ Docker context is pinned for each run, together with the built-in Buildx builder
 Optionally persist DOCKER_CONTEXT in the env file to bind the deployment to its data daemon; an
 explicit shell DOCKER_CONTEXT/DOCKER_HOST wins. The global Docker context is never switched.
 A different BUILDX_BUILDER is refused for local source builds so images cannot be exported to another daemon.
+
+On Kiri, Runtime mounts `~/.kiri/run/docker.sock` so it talks to the selected engine. Kiri currently
+does not enforce Docker `VolumeOptions.Subpath`; because TINA uses that feature to isolate each
+worker's workspace grants, the Compose runner refuses the Kiri Docker runtime and keeps workload
+spawning stopped until a backend with enforced subpath mounts is configured. TINA's API, calendar,
+and meeting history services can still run on Kiri.
 
 Persist optional profiles and override paths in that env file, or pass them in the environment:
 
@@ -284,3 +337,16 @@ exposed to the browser. Private keys remain on the host and ASR tokens never rea
 Identity stores versioned account preferences; the controller serializes lifecycle changes and
 reconciles them every two seconds. `make down` stops the controller first. WSL2 restores its
 detached controller with `make all` after a reboot; Mac uses an owned per-deployment LaunchAgent.
+
+`make doctor` checks the ASR backends demanded by enabled accounts, including native MPS.
+A managed backend with zero current account demand may remain stopped without failing the
+deployment check. Per-session capture/ASR health remains a separate meeting diagnostic.
+
+## Vietnamese turn detector observations
+
+New voice bots default to `TINA_VOICE_TURN_SHADOW=1`. The existing model-bootstrap job prepares
+hash-pinned Smart Turn v3.2 CPU INT8 and Namo Multilingual INT8 assets (about 352 MB with tokenizer)
+in the shared model volume. Bot inference mounts the cache read-only. A separate CPU child produces
+content-free score/timing observations only; existing VAD/ASR endpointing and transcript writes remain
+the authority. Set `TINA_VOICE_TURN_SHADOW=0` and start a new bot to disable observations.
+See [shadow mode](../../docs/tina-turn-shadow.md) for limits and evaluation requirements.

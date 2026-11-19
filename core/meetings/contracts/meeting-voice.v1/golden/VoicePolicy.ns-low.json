@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "include_transcript": false,
+  "documents": [],
+  "revision": 3,
+  "wake_variants": [],
+  "noise_suppression": true
+}

@@ -1,0 +1,49 @@
+/* Hallmark · built: TINA Terminal · redesign: full · shape: app screen · scope: app · genre: modern-minimal · theme: TINA Graphite Emerald · v2.0.0 */
+/* Critique · keep the Emerald signal; derive quiet surfaces from five palette anchors. */
+:root {
+  --terminal-canvas: #0D1310;
+  --terminal-rail: #171F1A;
+  --terminal-surface: #232D26;
+  --terminal-paper: #F6FAF7;
+  --terminal-accent: #43D279;
+  --calendar-color: var(--brand);
+  --agent-color: var(--muted);
+  --agent-tint: color-mix(in srgb, var(--agent-color) 6%, var(--bg));
+  --calendar-tint: color-mix(in srgb, var(--calendar-color) 6%, var(--bg));
+}
+:root[data-theme="dark"] {
+  --canvas: var(--terminal-canvas);
+  --surface: var(--terminal-surface);
+  --subtle: var(--terminal-rail);
+  --raised: color-mix(in srgb, var(--terminal-surface) 72%, var(--terminal-paper));
+  --rail: var(--subtle);
+  --ink: var(--terminal-paper);
+  --muted: color-mix(in srgb, var(--terminal-paper) 80%, var(--terminal-canvas));
+  --quiet: color-mix(in srgb, var(--terminal-paper) 58%, var(--terminal-canvas));
+  --brand: var(--terminal-accent);
+  --brand-hover: color-mix(in srgb, var(--terminal-accent) 82%, var(--terminal-paper));
+  --on-brand: var(--terminal-canvas);
+  --line: color-mix(in srgb, var(--terminal-paper) 25%, var(--terminal-canvas));
+  --control-line: color-mix(in srgb, var(--terminal-paper) 48%, var(--terminal-canvas));
+  --focus: var(--terminal-accent);
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --canvas: var(--terminal-paper);
+  --surface: var(--terminal-paper);
+  --subtle: color-mix(in srgb, var(--terminal-paper) 93%, var(--terminal-canvas));
+  --raised: color-mix(in srgb, var(--terminal-paper) 85%, var(--terminal-canvas));
+  --rail: var(--subtle);
+  --ink: var(--terminal-canvas);
+  --muted: color-mix(in srgb, var(--terminal-canvas) 72%, var(--terminal-paper));
+  --quiet: color-mix(in srgb, var(--terminal-canvas) 52%, var(--terminal-paper));
+  --brand: color-mix(in srgb, var(--terminal-accent) 54%, var(--terminal-canvas));
+  --brand-hover: color-mix(in srgb, var(--terminal-accent) 45%, var(--terminal-canvas));
+  --on-brand: var(--terminal-paper);
+  --line: color-mix(in srgb, var(--terminal-canvas) 20%, var(--terminal-paper));
+  --control-line: color-mix(in srgb, var(--terminal-canvas) 48%, var(--terminal-paper));
+  --focus: var(--brand);
+}
+.terminal-agent-label { color: var(--agent-color); }
+.terminal-agent-response { padding: var(--space-3); border-radius: var(--r); background: var(--agent-tint); }
+.terminal-agent-response a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

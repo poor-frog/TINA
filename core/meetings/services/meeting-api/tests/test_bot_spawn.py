@@ -165,6 +165,57 @@ async def test_request_bot_eager_creates_session_and_spawns(monkeypatch):
     assert repo.sessions[0]["session_uid"] == spawned["connectionId"]
 
 
+@pytest.mark.parametrize('preference,explicit,expected',[(False,None,False),(True,None,True),(None,None,True),(False,True,True),(True,False,False)])
+async def test_account_voice_prepares_only_new_bot_capability_and_explicit_request_wins(monkeypatch,preference,explicit,expected):
+    from meeting_api.bot_spawn import service
+    async def context(user):return {'voice':{'prepare_new_bots':preference}}
+    monkeypatch.setattr(service,'_fetch_bot_context',context)
+    monkeypatch.setenv('TTS_SERVICE_URL','http://tts.test')
+    repo,runtime=InMemoryMeetingRepo(),FakeRuntimeClient()
+    await request_bot(repo,runtime,user_id=USER,platform='google_meet',native_meeting_id='voice-pref-test',
+      transcribe_enabled=False,voice_agent_enabled=explicit,token_secret=SECRET)
+    inv=json.loads(runtime.specs[0]['env']['BOT_CONFIG'])
+    assert inv.get('voiceAgentEnabled',False)==expected
+    assert not next(iter(repo._meetings.values()))['data'].get('voice_assistant',{}).get('enabled')
+
+
+async def test_unreachable_identity_does_not_prepare_voice_from_an_unknown_account_default(monkeypatch):
+    from meeting_api.bot_spawn import service
+    async def context(user):return {}
+    monkeypatch.setattr(service,'_fetch_bot_context',context)
+    monkeypatch.setenv('ADMIN_API_URL','http://identity.test');monkeypatch.setenv('TTS_SERVICE_URL','http://tts.test')
+    repo,runtime=InMemoryMeetingRepo(),FakeRuntimeClient()
+    await request_bot(repo,runtime,user_id=USER,platform='google_meet',native_meeting_id='identity-unavailable',
+      transcribe_enabled=False,voice_agent_enabled=None,token_secret=SECRET)
+    assert not json.loads(runtime.specs[0]['env']['BOT_CONFIG']).get('voiceAgentEnabled',False)
+
+
+@pytest.mark.parametrize('saved',[None,{}, {'enabled':False,'include_transcript':False,'documents':['wiki/approved.md'],'revision':4,'noise_suppression':False,'wake_variants':[]},
+    {'enabled':True,'include_transcript':True,'documents':[],'revision':3,'allow_web_search':True,'auto_web_search':False}])
+async def test_new_room_defaults_on_and_continuation_preserves_explicit_room_choices(monkeypatch,saved):
+    from meeting_api.bot_spawn import service
+    async def context(user):return {'transcription':{'url':'http://asr.test','token':'synthetic'}}
+    monkeypatch.setattr(service,'_fetch_bot_context',context)
+    monkeypatch.setenv('TTS_SERVICE_URL','http://tts.test');monkeypatch.setenv('TINA_MEETING_VOICE','1');monkeypatch.setenv('ADMIN_TOKEN',SECRET)
+    repo,runtime=InMemoryMeetingRepo(),FakeRuntimeClient()
+    await request_bot(repo,runtime,user_id=USER,platform='google_meet',native_meeting_id='new-defaults',voice_agent_enabled=True,token_secret=SECRET)
+    row=next(iter(repo._meetings.values()));policy=row['data']['voice_assistant']
+    assert runtime.specs[0]['env']['TINA_VOICE_TURN_SHADOW']=='1'
+    assert policy['enabled'] and policy['noise_suppression'] and policy['include_transcript'] and policy['documents']==[]
+    assert policy['agent_backend']=='sandbox'
+    assert policy['engine']=='livekit' and policy['allow_general_knowledge'] and policy['allow_web_search']
+    assert policy['auto_web_search'] is True
+    assert policy['include_workspace_wiki'] is True
+    if saved is None:row['data'].pop('voice_assistant')
+    else:row['data']['voice_assistant']=saved.copy()
+    row['status']='completed'
+    await request_bot(repo,runtime,user_id=USER,platform='google_meet',native_meeting_id='new-defaults',voice_agent_enabled=True,token_secret=SECRET,continue_meeting=True)
+    current=next(iter(repo._meetings.values()))['data']['voice_assistant']
+    if not saved:assert current==policy
+    else:assert current==saved
+    assert json.loads(runtime.specs[-1]['env']['BOT_CONFIG'])['transcriptionServiceUrl']=='http://asr.test'
+
+
 def test_iso_utc_marks_naive_utc_with_z():
     # Meeting time columns are naive but hold UTC. Serializing must emit a Z marker so a browser
     # parses it as UTC and renders local — a bare isoformat is read as LOCAL (the 6h-skew bug).

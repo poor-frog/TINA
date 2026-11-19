@@ -8,6 +8,8 @@ export interface TranslationSnapshot {
   version: "meeting-translation.v2";
   meeting_id: number; status: "pending" | "running" | "paused" | "complete";
   total: number; completed: number; retry_after: number; groups: TranslationGroup[];
+  can_advance?: boolean;
+  service_error?: string;
 }
 
 /** Poll independently of capture. POST advances one ready, server-grouped phrase. */
@@ -42,7 +44,7 @@ export function useMeetingTranslation(meetingId: string, language: TranscriptLan
       try {
         const state = await read();
         const force = retryRequested.current;
-        if (!advancing && state.status !== "complete" && (state.retry_after === 0 || force)) {
+        if (!advancing && state.status !== "complete" && (state.can_advance !== false || force) && (state.retry_after === 0 || force)) {
           retryRequested.current = false;
           advancing = true;
           // Do not block GET polling while another client is waiting for the provider.
@@ -68,6 +70,21 @@ export function TranslationControls({ language, onChange, snapshot, error, onRet
   snapshot: TranslationSnapshot | null; error: string; onRetry: () => void; disabled?: boolean;
 }) {
   const paused = snapshot?.status === "paused";
+  const retrying = snapshot?.groups.filter(g => g.status === "retrying").length ?? 0;
+  const failed = snapshot?.groups.filter(g => g.status === "failed").length ?? 0;
+  const serviceMessages: Record<string, string> = {
+    auth: "API từ chối quyền truy cập · kiểm tra khóa trong Settings → Models rồi thử lại",
+    configuration: "Kiểm tra provider và model trong Settings → Models rồi thử lại",
+    rate_limit: "API đang giới hạn lượt gọi · sẽ tự thử lại",
+    unavailable: "Dịch vụ dịch chưa khả dụng · sẽ tự thử lại",
+  };
+  const message = snapshot?.service_error ? serviceMessages[snapshot.service_error] : undefined;
+  const progress = snapshot ? [
+    `VI → EN · ${snapshot.completed}/${snapshot.total} cụm`,
+    retrying ? `${retrying} cụm chờ thử lại` : "",
+    failed ? `${failed} cụm cần thử lại` : "",
+    snapshot.groups.some(g => !g.ready) ? "Đang gom câu…" : "",
+  ].filter(Boolean).join(" · ") : "Đang tải bản dịch…";
   return <>
     <select className={styles.select} aria-label="Transcript language" title="Transcript language" value={language} disabled={disabled}
       onChange={event => onChange(event.currentTarget.value as TranscriptLanguage)}>
@@ -75,8 +92,8 @@ export function TranslationControls({ language, onChange, snapshot, error, onRet
         <option key={mode} value={mode}>{label}</option>)}
     </select>
     {language !== "vi" && <div className={styles.translationStatus} data-state={paused || error ? "attention" : "normal"}>
-      <span role="status">{error || (paused ? "Dịch tạm dừng · sẽ tự thử lại" : snapshot ? `VI → EN · ${snapshot.completed}/${snapshot.total} cụm${snapshot.groups.some(g => !g.ready) ? " · Đang gom câu…" : ""}` : "Đang tải bản dịch…")}</span>
-      {(paused || error) && <button className={styles.retry} type="button" onClick={onRetry}>Thử lại</button>}
+      <span role="status">{error || message || (paused && !retrying && !failed ? "Dịch tạm dừng · sẽ tự thử lại" : progress)}</span>
+      {(paused || error || retrying > 0 || failed > 0) && <button className={styles.retry} type="button" onClick={onRetry}>Thử lại</button>}
     </div>}
   </>;
 }

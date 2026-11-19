@@ -9,13 +9,16 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
+from typing import Literal
 import wave
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator
 
+from .audio_quality import assess_audio, assess_text, prepare_audio
 from .transcript_document import Correction, CorrectionConflict, normalize
 
 ACTIVE = ("running", "paused", "cancelling")
@@ -23,7 +26,10 @@ TERMINAL = ("completed", "failed")
 
 
 class RefinementOptions(BaseModel):
+    mode: Literal["all", "check", "flagged"] = "all"
     glossary: list[str] = Field(default_factory=list, max_length=40)
+    retry_job_id: str | None = Field(default=None, min_length=1, max_length=128)
+    normalize_audio: StrictBool = False
     model_config = ConfigDict(extra="forbid")
 
     @field_validator("glossary")
@@ -42,6 +48,28 @@ class RefinementApply(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def backend_hash(config):
+    # Credentials can be corrected between attempts. Never persist them or the endpoint URL.
+    return hashlib.sha256(str((config["url"].rstrip("/"), config["model"], config["label"])).encode()).hexdigest()
+
+
+def asr_failure(exc):
+    if isinstance(exc, httpx.TimeoutException):
+        return "asr_timeout", "ASR timed out. Try this segment again."
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status in (401, 403):
+            return "asr_auth", "ASR access was denied. Check the transcription credential and permissions in Settings, then retry."
+        if status in (429, 503):
+            return "asr_busy", "ASR is busy or temporarily unavailable. Wait briefly, then retry."
+        if status >= 500:
+            return "asr_unavailable", "ASR returned a server error. Try again after the service recovers."
+        return "asr_rejected", "ASR rejected this request. Check the selected transcription model and service settings."
+    if isinstance(exc, httpx.RequestError):
+        return "asr_unavailable", "Cannot reach ASR. Check that the transcription service is running, then retry."
+    return "asr_invalid_response", "ASR returned empty or invalid text. Listen to the source audio before retrying."
+
+
 def apply_proposal(data, job, sid, correction):
     """Called under the same meeting row lock as the revision write."""
     current = copy.deepcopy(data.get("transcript_refinement"))
@@ -50,7 +78,10 @@ def apply_proposal(data, job, sid, correction):
         raise CorrectionConflict("Suggestion changed; reload before applying")
     item["state"] = "applied"
     data["transcript_refinement"] = current
-    return {"kind": "refinement", "job_id": job["id"], "model": job["model"], "audio_sha256": item["audio_sha256"]}
+    provenance = {"kind": "refinement", "job_id": job["id"], "model": job["model"], "audio_sha256": item["audio_sha256"]}
+    if item.get("preprocessing"):
+        provenance["preprocessing"] = copy.deepcopy(item["preprocessing"])
+    return provenance
 
 
 async def selected_backend(user):
@@ -66,14 +97,21 @@ async def selected_backend(user):
 
 
 def _decode(path, start, duration):
+    first = round(start * 16000)
+    frames = round(duration * 16000)
+    # Keep packet timestamps through a coarse seek; trim on the resampled clock.
+    # Seeking directly to the cut can reapply Opus pre-skip and shorten a boundary.
+    coarse = max(0, int(start) - 1)
+    seek = ["-ss", str(coarse), "-noaccurate_seek"] if coarse else []
     try:
-        proc = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-ss", str(start), "-i", str(path),
+        proc = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-copyts", *seek, "-i", str(path),
+                               "-af", f"aresample=16000,atrim=start_pts={first}:end_pts={first + frames},asetpts=PTS-STARTPTS",
                                "-t", str(duration), "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1"],
                               capture_output=True, timeout=30, check=True)
     except (OSError, subprocess.SubprocessError) as exc:
         raise ValueError("Recording cannot be decoded") from exc
     pcm = proc.stdout
-    if len(pcm) < int(duration * 16000 * 2) - 640:
+    if len(pcm) < (frames - 16) * 2:  # At most 1 ms container-clock quantization; never pad missing audio.
         raise ValueError("Recording does not cover the segment")
     out = io.BytesIO()
     with wave.open(out, "wb") as wav:
@@ -145,6 +183,12 @@ class BotRefiner:
             return await asyncio.to_thread(_decode, path, span["start_ms"] / 1000, duration)
 
     async def start(self, user, mid, options):
+        if options.retry_job_id:
+            if options.glossary or options.mode != "all" or options.normalize_audio:
+                raise ValueError("Retry keeps the original job's mode, vocabulary and audio preparation")
+            return await self.retry(user, mid, options.retry_job_id)
+        if options.mode == "check" and options.normalize_audio:
+            raise ValueError("Audio optimization is only available when requesting ASR")
         async with self.lock:
             if (self.active or getattr(getattr(self, "diarizer", None), "active", None)
                     or getattr(getattr(self, "aligner", None), "active", None) or await self.store.refinement_live()):
@@ -156,21 +200,57 @@ class BotRefiner:
                 raise ValueError("No confirmed transcript to refine")
             if len(doc["segments"]) > 2000:
                 raise ValueError("Refinement is limited to 2000 segments per meeting")
-            config = await self.backend(user)
-            if not config.get("url"):
+            config = {"model": "", "label": "audio-check", "url": "", "token": ""} if options.mode == "check" else await self.backend(user)
+            if options.mode != "check" and not config.get("url"):
                 raise ValueError("No transcription backend configured")
             await self.current(user, mid)
             job = {"version": "transcript-refinement.v1", "id": str(uuid4()), "meeting": str(mid), "status": "running",
                    "model": config["model"], "backend": config["label"], "created_at": datetime.now(timezone.utc).isoformat(),
-                   "glossary": options.glossary,
+                   "glossary": options.glossary, "mode": options.mode, "backend_sha256": backend_hash(config),
+                   "audio_preprocessing": "bounded-gain.v1" if options.normalize_audio else "none",
                    "items": [{"segment_id": s["segment_id"], "expected_revision": s["revision"], "state": "pending"} for s in doc["segments"]]}
+            source_texts = {s["segment_id"]: s["text"] for s in doc["segments"]}
             previous_job = await self.store.get_refinement(user, mid)
             await self.store.save_refinement(user, mid, job, expected_job_id=previous_job["id"] if previous_job else None)
             self.active = (user, mid, job)
-            self.task = asyncio.create_task(self.run(user, mid, job, config))
+            self.task = asyncio.create_task(self.run(user, mid, job, config, source_texts))
             return copy.deepcopy(job)
 
-    async def run(self, user, mid, job, config):
+    async def retry(self, user, mid, job_id):
+        async with self.lock:
+            if (self.active or getattr(getattr(self, "diarizer", None), "active", None)
+                    or getattr(getattr(self, "aligner", None), "active", None) or await self.store.refinement_live()):
+                raise CorrectionConflict("Wait for live meetings and the current refinement to stop")
+            previous = await self.current(user, mid)
+            doc = await self.store.get_transcript_document(user, mid)
+            if not previous or previous["id"] != job_id or not doc or doc["status"] not in TERMINAL:
+                raise CorrectionConflict("Refinement changed; reload before retrying")
+            failed = [i for i in previous["items"] if i["state"] == "failed" and i.get("retryable") and i.get("audio_sha256")]
+            if not failed or not previous.get("backend_sha256"):
+                raise CorrectionConflict("No failed ASR segments available to retry; start a new refinement if needed")
+            if previous.get("audio_preprocessing", "none") not in ("none", "bounded-gain.v1"):
+                raise CorrectionConflict("Audio preparation changed; start a new refinement")
+            config = await self.backend(user)
+            if backend_hash(config) != previous["backend_sha256"]:
+                raise CorrectionConflict("Transcription backend or model changed; start a new refinement")
+            job = copy.deepcopy(previous)
+            job.update(id=str(uuid4()), retry_of=previous["id"], status="running", created_at=datetime.now(timezone.utc).isoformat())
+            job.pop("error", None)
+            for item in job["items"]:
+                if item["state"] == "failed" and item.get("retryable") and item.get("audio_sha256"):
+                    item["state"] = "pending"
+                    for key in ("reason", "error_code", "retryable"):
+                        item.pop(key, None)
+                elif item["state"] == "pending":
+                    item.update(state="skipped", retryable=False,
+                                reason="Not attempted in the previous job. Start a new refinement to process this segment.")
+            await self.store.save_refinement(user, mid, job, expected_job_id=previous["id"])
+            self.active = (user, mid, job)
+            source_texts = {s["segment_id"]: s["text"] for s in doc["segments"]}
+            self.task = asyncio.create_task(self.run(user, mid, job, config, source_texts))
+            return copy.deepcopy(job)
+
+    async def run(self, user, mid, job, config, source_texts=None):
         try:
             url = config["url"].rstrip("/")
             if not url.endswith("/audio/transcriptions"):
@@ -180,6 +260,8 @@ class BotRefiner:
                 cache = {"directory": directory}
                 async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
                     for item in job["items"]:
+                        if item["state"] != "pending":
+                            continue
                         while await self.store.refinement_live() and job["status"] != "cancelling":
                             job["status"] = "paused"; await self.store.save_refinement(user, mid, job)
                             await asyncio.sleep(.5)
@@ -188,32 +270,80 @@ class BotRefiner:
                         job["status"] = "running"
                         try:
                             audio = await self.clip(user, mid, item["segment_id"], cache)
-                        except (ValueError, FileNotFoundError, KeyError):
-                            item.update(state="skipped", reason="Audio is missing, ambiguous, unclocked, beyond the recording, longer than 30 seconds or exceeds size limits.")
+                            if job.get("retry_of"):
+                                doc = await self.store.get_transcript_document(user, mid)
+                                current = next((s for s in (doc or {}).get("segments", []) if s["segment_id"] == item["segment_id"]), None)
+                                if not current or current["revision"] != item["expected_revision"] or hashlib.sha256(audio).hexdigest() != item["audio_sha256"]:
+                                    item.update(state="skipped", error_code="source_changed", retryable=False,
+                                                reason="Transcript or source audio changed. Start a new refinement for this segment.")
+                                    await self.store.save_refinement(user, mid, job)
+                                    continue
+                            item["quality"] = await asyncio.to_thread(assess_audio, audio, (source_texts or {}).get(item["segment_id"], ""))
+                            item["audio_sha256"] = hashlib.sha256(audio).hexdigest()
+                        except (ValueError, OSError, KeyError, wave.Error, EOFError):
+                            item.update(state="skipped", error_code="audio_unavailable", retryable=False,
+                                        reason="Saved audio is missing or cannot be safely mapped to this segment (timing, duration or size limits).")
                         else:
+                            if job.get("mode") == "check" or (job.get("mode") == "flagged" and not item["quality"]["needs_review"]):
+                                item.update(state="checked", reason="Audio checked; no ASR requested." if job.get("mode") == "check" else "No configured review flags; ASR skipped.")
+                                await self.store.save_refinement(user, mid, job)
+                                continue
                             try:
+                                submitted_audio = audio
+                                if job.get("audio_preprocessing") == "bounded-gain.v1":
+                                    submitted_audio, preparation = await asyncio.to_thread(prepare_audio, audio)
+                                    previous = item.get("preprocessing")
+                                    if job.get("retry_of") and previous and previous != preparation:
+                                        item.update(state="skipped", error_code="source_changed", retryable=False,
+                                                    reason="Prepared audio changed. Start a new refinement for this segment.")
+                                        await self.store.save_refinement(user, mid, job)
+                                        continue
+                                    item["preprocessing"] = preparation
                                 # Preparing saved audio can outlast a cancel or the start of a live meeting.
                                 while await self.store.refinement_live() and job["status"] != "cancelling":
                                     job["status"] = "paused"; await self.store.save_refinement(user, mid, job)
                                     await asyncio.sleep(.5)
                                 if job["status"] == "cancelling":
                                     break
+                                if job.get("retry_of"):
+                                    doc = await self.store.get_transcript_document(user, mid)
+                                    current = next((s for s in (doc or {}).get("segments", []) if s["segment_id"] == item["segment_id"]), None)
+                                    if not current or current["revision"] != item["expected_revision"]:
+                                        item.update(state="skipped", error_code="source_changed", retryable=False,
+                                                    reason="Transcript changed while waiting. Start a new refinement for this segment.")
+                                        await self.store.save_refinement(user, mid, job)
+                                        continue
                                 job["status"] = "running"
                                 fields = {"model": config["model"], "response_format": "json"}
                                 if job["glossary"]:
                                     fields["prompt"] = "Vocabulary: " + ", ".join(job["glossary"])
-                                response = await client.post(url, headers=headers, data=fields, files={"file": ("segment.wav", audio, "audio/wav")})
+                                item["attempts"] = item.get("attempts", 0) + 1
+                                started = time.perf_counter()
+                                try:
+                                    response = await client.post(url, headers=headers, data=fields, files={"file": ("segment.wav", submitted_audio, "audio/wav")})
+                                finally:
+                                    item["asr_elapsed_ms"] = max(0, round((time.perf_counter() - started) * 1000))
                                 response.raise_for_status()
-                                text = normalize(response.json().get("text") or "")
+                                data = response.json()
+                                if not isinstance(data, dict) or not isinstance(data.get("text"), str):
+                                    raise ValueError("Invalid ASR response")
+                                text = normalize(data["text"])
                                 if not text or len(text) > 10000:
                                     raise ValueError("Invalid ASR result")
                                 if job["status"] == "cancelling":
                                     break
-                                item.update(state="ready", text=text, audio_sha256=hashlib.sha256(audio).hexdigest())
-                            except Exception:
-                                item.update(state="failed", reason="ASR failed or returned empty text; original transcript is unchanged.")
+                                # Judge the proposal against the same ORIGINAL clip, not
+                                # boosted input. A second ASR pass can also hallucinate.
+                                proposal_quality = await asyncio.to_thread(assess_text, item["quality"], text)
+                                if job["status"] == "cancelling":
+                                    break
+                                item.update(state="ready", text=text, audio_sha256=hashlib.sha256(audio).hexdigest(),
+                                            proposal_quality=proposal_quality)
+                            except Exception as exc:
+                                code, reason = asr_failure(exc)
+                                item.update(state="failed", error_code=code, retryable=True, reason=reason)
                         await self.store.save_refinement(user, mid, job)
-            job["status"] = "cancelled" if job["status"] == "cancelling" else "completed" if any(i["state"] == "ready" for i in job["items"]) else "failed"
+            job["status"] = "cancelled" if job["status"] == "cancelling" else "completed" if any(i["state"] in ("ready", "checked") for i in job["items"]) else "failed"
         except asyncio.CancelledError:
             job["status"] = "interrupted"
         except Exception:

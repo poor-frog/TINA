@@ -1,5 +1,5 @@
 name: gates
-# Push validates main, the live-translation feature branch, and release tags.
+# Push validates main, the live-translation and ASR-quality branches, and release tags.
 # Other feature branches run through pull_request to avoid duplicate runs.
 #
 # SPLIT INTO 3 PARALLEL JOBS (wall-clock law): static / python / node run concurrently
@@ -8,7 +8,7 @@ name: gates
 # (if:always() + explicit check, because a skipped required check would read as satisfied).
 on:
   push:
-    branches: [main, 'Feat/LivetranslationVi2En']
+    branches: [main, 'Feat/LivetranslationVi2En', 'feat/asr-quality-refinement']
     tags: ['v*']
   pull_request:
   # merge queue: the queue's temporary merge-group ref must run (and report) `gates`,
@@ -53,6 +53,7 @@ jobs:
 
   python:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -60,7 +61,9 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.13"
+          # The transcription worker pins numpy<2 (1.26 supports Python through 3.12).
+          # Python 3.13 has no matching NumPy wheel and can stall in source builds.
+          python-version: "3.12"
       - run: pnpm install --frozen-lockfile
         env: { ONNXRUNTIME_NODE_INSTALL: skip }
       - name: Ensure ffmpeg is available for recording tests
@@ -74,12 +77,14 @@ jobs:
       # which (unlike `docker run`) does NOT implicit-pull — pre-pull its fixture image
       - run: docker pull alpine
       - run: pnpm gate:python
+        timeout-minutes: 20
       - name: Install Dotenvx for encrypted TTS startup tests
         run: npm install --global @dotenvx/dotenvx@2.38.2
       - name: TTS protocol, audio and encrypted startup tests (no models)
         run: >-
           uv run --no-project --python 3.11
           --with numpy==2.4.6 --with scipy==1.17.1
+          --with sea-g2p==0.10.0 --with soxr==1.1.0
           python -m unittest discover -s deploy/tts -p 'test_*.py'
 
   node:

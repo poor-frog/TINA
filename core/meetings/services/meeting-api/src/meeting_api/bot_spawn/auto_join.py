@@ -324,6 +324,8 @@ async def auto_join_tick(
                 bot_name=_calendar_bot_name(data) or ctx.get("bot_name"),
                 recording_enabled=recording_enabled,
                 transcribe_enabled=transcribe_enabled,
+                voice_agent_enabled=None if row['platform']=='google_meet' else False,
+                auto_retry_enabled=False,  # calendar sync owns its separate occurrence backoff
                 max_concurrent=ctx.get("max_concurrent"),
                 webhook_url=ctx.get("webhook_url"),
                 webhook_secret=ctx.get("webhook_secret"),
