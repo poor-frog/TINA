@@ -33,7 +33,7 @@ Items:
 - Give each item a unique local key. Set "type" to one of: question, claim, topic,
   agenda, task, correction, answer, commitment, agreement, decision.
 - Write concise, faithful text. Include at least one exact transcript citation.
-- Put every optional detail inside the "details" object. Omit "details" if empty.
+- Put every optional detail inside the "details" object.
   Allowed detail keys: claim_type, tags, assignees_text, deadline_text,
   deliverables, definition_of_done, agenda_ids, question_id, topic_id.
   Detail values are strings or arrays of strings. For claim_type, use one string:
@@ -42,6 +42,12 @@ Items:
   Omit unsupported assignments and deadlines.
 - For topic_id, use an existing topic ID from context or a local key for a topic
   emitted in this batch.
+- Set details.agenda_ids on every item. Use a one-element array containing the exact
+  ID of a host agenda entry from context.agenda when the cited speech supports a
+  clear match. Use an empty array if no entry matches or the match is ambiguous.
+  Never invent agenda IDs or use local keys here. Use a discussion item for speech
+  about an existing host agenda entry, without creating a duplicate agenda entry.
+  Example: {"agenda_ids":["host-agenda-id-from-context"]}; no match: {"agenda_ids":[]}.
 
 Links:
 - Emit a link only when current speech supports the topical relevance of two
@@ -80,7 +86,8 @@ Example: segment "17" is spoken by Alex and contains:
       "details": {
         "assignees_text": ["Jamie"],
         "deadline_text": "by Friday",
-        "topic_id": "topic_1"
+        "topic_id": "topic_1",
+        "agenda_ids": []
       },
       "evidence": [
         {"segment_id":"17","revision":0,"speaker_revision":0,"speaker_name":"Alex",
@@ -282,7 +289,7 @@ def run(stream, inline, *, completion=None):
                     for field in ('topic_id', 'question_id'):
                         if isinstance(item_details.get(field), str):
                             item_details[field] = aliases.get(item_details[field], item_details[field])
-                    if isinstance(item_details.get('agenda_ids'), list):
+                    if 'agenda' not in job['context'] and isinstance(item_details.get('agenda_ids'), list):
                         item_details['agenda_ids'] = [aliases.get(ref, ref) for ref in item_details['agenda_ids']]
                 for link in value.get('links', []):
                     for endpoint in ('from', 'to'):
@@ -300,7 +307,7 @@ def run(stream, inline, *, completion=None):
             if len(groups) > 1:
                 stream.xadd('meeting_state_results', {'payload': json.dumps(dict(base, heartbeat=True))})
         result.update(output=output, provenance={'model': job['model'], 'provider': completion.name,
-                       'prompt_version': '2',
+                       'prompt_version': '3',
                        'prompt_sha256': prompt_hashes[0] if len(prompt_hashes) == 1 else hashlib.sha256(''.join(prompt_hashes).encode()).hexdigest()})
     except Exception as exc:
         result['error'] = type(exc).__name__  # never provider/source bodies

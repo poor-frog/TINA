@@ -53,6 +53,53 @@ def test_timed_flush_no_new_frame_and_no_empty_calls():
     assert call(data, canon, 'claim', {'role': 'fast'}, now=200) is None
 
 
+@pytest.mark.parametrize('match', ['host', 'missing', 'other', 'removed', 'multiple', 'omitted', 'malformed'])
+def test_fast_groups_only_under_an_offered_current_host_agenda(match):
+    data, canon = setup()
+    call(data, canon, 'add', {'type': 'agenda', 'text': 'Retry testing'}, now=101)
+    call(data, canon, 'add', {'type': 'agenda', 'text': 'Support schedule'}, now=102)
+    state = data['live_assist']
+    host, other = state['items'].values()
+    job = call(data, canon, 'claim', {'role': 'fast'})
+    assert job['context']['agenda'] == [{k: item[k] for k in ('id', 'text')} for item in (host, other)]
+    candidate = result(job)['output']['items'][0]
+    if match != 'omitted':
+        candidate['details'] = {'agenda_ids': {
+            'host': [host['id']], 'missing': [], 'other': ['invented'], 'removed': [host['id']],
+            'multiple': [host['id'], other['id']], 'malformed': {'invalid': True},
+        }[match]}
+    if match == 'removed':
+        state['items'][host['id']]['withdrawn'] = True
+    assert call(data, canon, 'result', result(job, [candidate]), now=131)['accepted']
+    item = next(value for value in state['items'].values() if value['type'] == 'task')
+    assert item['details']['agenda_ids'] == ([host['id']] if match == 'host' else [])
+    assert item['provisional'] and 'reason' not in state['jobs']
+    assert len(state['covered']) == 1
+
+
+@pytest.mark.parametrize('locked', [False, True])
+def test_later_fast_mention_fills_an_empty_agenda_unless_human_locked(locked):
+    data, canon = setup()
+    call(data, canon, 'add', {'type': 'agenda', 'text': 'Retry testing'}, now=101)
+    state = data['live_assist']
+    host_id = next(iter(state['items']))
+    first = call(data, canon, 'claim', {'role': 'fast'})
+    assert call(data, canon, 'result', result(first), now=131)['accepted']
+    item = next(value for value in state['items'].values() if value['type'] == 'task')
+    if locked:
+        item['manual_fields'] = ['details.agenda_ids']
+    second_source = segment(2)
+    canon['segments'].append(second_source)
+    call(data, canon, 'state', now=132)
+    second = call(data, canon, 'claim', {'role': 'fast'}, now=162)
+    candidate = result(second)['output']['items'][0]
+    candidate['evidence'][0].update(segment_id='2', start_ms=second_source['start_ms'])
+    candidate['details'] = {'agenda_ids': [host_id]}
+    assert call(data, canon, 'result', result(second, [candidate]), now=163)['accepted']
+    assert len(item['evidence']) == 2
+    assert item['details']['agenda_ids'] == ([] if locked else [host_id])
+
+
 def test_two_stages_can_overlap_and_duplicate_result_is_idempotent():
     data, canon, fast = extracted()
     reason = call(data, canon, 'claim', {'role': 'reason'}, now=131)
@@ -467,7 +514,7 @@ def test_nested_manual_detail_lock_preserves_other_inferred_details():
     payload = reason_result(reason)
     payload['output']['patches'][0]['details'] = {'definition_of_done': 'A documented experiment'}
     assert call(data, canon, 'result', payload)['accepted']
-    assert item['details'] == {'deadline_text': 'Friday', 'definition_of_done': 'A documented experiment'}
+    assert item['details'] == {'agenda_ids': [], 'deadline_text': 'Friday', 'definition_of_done': 'A documented experiment'}
     assert not data['live_assist']['proposals']
 
 

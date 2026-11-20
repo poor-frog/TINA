@@ -33,6 +33,10 @@ source-linked extraction or reasoning candidates. Markdown is a final projection
 - Fast extraction uses compact current state and bounded lexical/recency retrieval from this meeting.
   Provisional questions, claims, topics, actions, corrections and explicit speech signals retain
   exact source quotes. A speech signal of agreement is not automatically group consensus.
+- Fast jobs also carry up to 20 eligible host agenda entries within a 6,000-character budget. Each
+  extracted item gets one supported agenda ID or an explicit empty `details.agenda_ids` list. The
+  Meeting API checks the ID against the job context and the current host agenda. The live view keeps
+  explicit empty matches under Other meeting items. Reasoning can refine the assignment later.
 - Reasoning runs about every two minutes with new work, or early on a debounced boundary. It
   reconciles stable items, summaries, statuses and relationships. Only one job per stage runs per
   meeting, but fast and reason jobs may overlap. Repeated reasoning triggers coalesce.

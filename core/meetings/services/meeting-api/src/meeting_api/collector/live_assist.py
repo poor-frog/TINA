@@ -502,6 +502,25 @@ def shortlist(state, segments):
     return result
 
 
+def host_agenda_context(state):
+    agenda, size = [], 2
+    for item in sorted(state['items'].values(), key=lambda i: (i.get('created_sequence', 0), i['id'])):
+        if not eligible_host_agenda(item):
+            continue
+        entry = {k: item[k] for k in ('id', 'text')}
+        cost = len(json.dumps(entry, ensure_ascii=False)) + (2 if agenda else 0)
+        if len(agenda) == 20 or size + cost > 6000:
+            break
+        agenda.append(entry)
+        size += cost
+    return agenda
+
+
+def eligible_host_agenda(item):
+    return item.get('type') == 'agenda' and item.get('human') and not any(
+        item.get(key) for key in ('hidden', 'stale', 'withdrawn'))
+
+
 def claim(state, canon, status, role, owner, now):
     missing = reconcile(state, canon, status, now)
     if role == 'publish':
@@ -548,7 +567,8 @@ def claim(state, canon, status, role, owner, now):
             if len(previous) >= 8 or sum(len(v['text']) for v in previous) + len(s['text']) > 6000:
                 break
             previous.insert(0, source_projection(s))
-        context = {'goal': goal_context, 'items': shortlist(state, segments), 'summaries': state['summaries'], 'previous': previous, 'active_topic': active_topic}
+        context = {'goal': goal_context, 'items': shortlist(state, segments), 'summaries': state['summaries'],
+                   'previous': previous, 'active_topic': active_topic, 'agenda': host_agenda_context(state)}
     else:
         if terminal and ((missing and state['jobs'].get('fast', {}).get('status') != 'failed')
                          or not state.get('drain_complete') or now - state.get('terminal_observed_at', now) < 5):
@@ -744,6 +764,8 @@ def accept(state, canon, payload, electorate, now):
                 or len(ids) != len(set(ids)) or not {i['id'] for i in job['context']['items']} <= set(ids)):
             fail(state, role, now, 'incomplete_reconciliation')
             return {'accepted': False, 'reason': 'incomplete_reconciliation'}
+    fast_agenda = job['context'].get('agenda') if role == 'fast' else None
+    offered_agenda_ids = {entry['id'] for entry in fast_agenda or []}
     for c in changes:
         if role == 'reason' and isinstance(c, dict) and 'text' not in c and c.get('id') in state['items']:
             c['text'] = state['items'][c['id']]['text']
@@ -755,6 +777,12 @@ def accept(state, canon, payload, electorate, now):
             return {'accepted': False, 'reason': 'invalid_citation_or_item'}
         try:
             raw_details = c.get('details', {})
+            if fast_agenda is not None:
+                selected = raw_details.get('agenda_ids')
+                match = selected[0] if isinstance(selected, list) and len(selected) == 1 else None
+                valid_match = (isinstance(match, str) and match in offered_agenda_ids
+                               and eligible_host_agenda(state['items'].get(match, {})))
+                raw_details = c['details'] = dict(raw_details, agenda_ids=[match] if valid_match else [])
             if (role == 'reason' and isinstance(raw_details, dict) and raw_details.get('deadline_date')
                     and not raw_details.get('timezone')):
                 if state['config'].get('timezone_source') in ('host', 'calendar'):
@@ -816,13 +844,25 @@ def accept(state, canon, payload, electorate, now):
             if prior:
                 iid = prior['id']
                 added = [e for e in c['evidence'] if e not in prior['evidence']]
+                match = c.get('details', {}).get('agenda_ids')
+                prior_details = prior['details']
+                if (fast_agenda is not None and added and match and prior.get('provisional') and not prior.get('human')
+                        and not prior_details.get('agenda_ids') and not prior_details.get('agenda_id')
+                        and not {'details', 'details.agenda_ids'} & set(prior.get('manual_fields', []))):
+                    before = copy.deepcopy(prior)
+                    prior_details['agenda_ids'] = match
+                else:
+                    before = None
                 if added:
                     prior['evidence'] = (prior['evidence'] + added)[-30:]
                     prior['revision'] += 1
                     state['sequence'] += 1
                     prior['sequence'] = state['sequence']
                     prior['document_dependencies'] = sorted(set(prior.get('document_dependencies', [])) | set(read_documents))
-                    event(state, 'fast', 'mention', {'item_id': iid, 'evidence': added}, now)
+                    change = {'item_id': iid, 'evidence': added}
+                    if before is not None:
+                        change.update(before=before, after=prior)
+                    event(state, 'fast', 'mention', change, now)
             aliases[c.get('key', iid)] = iid
             old_item = state['items'].get(iid)
             if old_item and not (old_item.get('withdrawn') and not old_item.get('human')):
@@ -865,7 +905,7 @@ def accept(state, canon, payload, electorate, now):
                     item['details'].pop(field, None)
             refs = item['details'].get('agenda_ids', [])
             refs = [refs] if isinstance(refs, str) else refs
-            if refs:
+            if refs and fast_agenda is None:
                 resolved = [aliases.get(ref, ref) for ref in refs]
                 item['details']['agenda_ids'] = [ref for ref in resolved if state['items'].get(ref, {}).get('type') == 'agenda'
                                                and not any(state['items'][ref].get(k) for k in ('hidden', 'stale', 'withdrawn'))]

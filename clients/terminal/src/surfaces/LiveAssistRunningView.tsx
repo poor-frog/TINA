@@ -16,9 +16,12 @@ const actionButton: React.CSSProperties = {
   padding: "5px 9px", fontSize: 11.5, cursor: "pointer",
 };
 
-function linkedAgendaIds(item: LiveMeetingItem, byId: Map<string, LiveMeetingItem>, seen = new Set<string>()): string[] {
+export function linkedAgendaIds(item: LiveMeetingItem, byId: Map<string, LiveMeetingItem>, seen = new Set<string>()): string[] {
   if (seen.has(item.id)) return [];
   seen.add(item.id);
+  if (Array.isArray(item.details?.agenda_ids)) {
+    return [...new Set(item.details.agenda_ids)].filter((id) => byId.get(id)?.type === "agenda");
+  }
   const raw = item.details?.agenda_ids ?? item.details?.agenda_id;
   const ids = new Set(Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : []);
   for (const ref of [item.details?.topic_id, item.details?.question_id]) {
@@ -162,7 +165,8 @@ export function LiveAssistRunningView({
     const matchesFilter = filter === "all" || filter === "review" && hasReview || filter === "open" && hasOpen;
     return matchesFilter && (!normalizedQuery || itemMatchesText(agenda, normalizedQuery) || linked.some((item) => itemMatchesText(item, normalizedQuery)));
   });
-  const unlinkedItems = items.filter((item) => item.type !== "agenda" && !linkedAgendaIds(item, itemById).length && item.type !== "topic")
+  const unlinkedItems = items.filter((item) => item.type !== "agenda" && !linkedAgendaIds(item, itemById).length
+    && (item.type !== "topic" || Array.isArray(item.details?.agenda_ids)))
     .filter((item) => (filter === "all" || filter === "review" && needsReview(item, state) || filter === "open" && isOpenItem(item)) && itemMatchesText(item, normalizedQuery));
 
   useEffect(() => { if (!goalEditing) setGoal(pendingDraft.goal ?? state.goal?.text ?? ""); }, [pendingDraft.goal, state.goal?.text, goalEditing]);
