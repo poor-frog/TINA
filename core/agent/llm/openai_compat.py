@@ -18,7 +18,7 @@ from typing import Optional
 
 import httpx
 
-from llm.errors import (LLMAuthError, LLMConfigError, LLMError,
+from llm.errors import (LLMAuthError, LLMConfigError, LLMError, LLMResponseError,
                         LLMStructuredOutputUnsupported, structured_output_unsupported)
 from llm.ports import CompletionResult
 
@@ -84,11 +84,14 @@ class OpenAICompatCompletion:
             detail = r.text.replace(self._key, "[redacted]") if self._key else r.text
             raise LLMError(f"{r.status_code} from {self._base}: {detail[:300]}", status_code=r.status_code)
         try:
-            choice = (r.json().get("choices") or [{}])[0]
-            text = (choice.get("message") or {}).get("content") or ""
-        except (ValueError, AttributeError, IndexError, TypeError) as exc:
-            raise LLMError(f"malformed completion payload from {self._base}: {exc}") from exc
-        usage = r.json().get('usage') or {}
+            body = r.json()
+            content = body['choices'][0]['message'].get('content')
+            if content is not None and not isinstance(content, str):
+                raise TypeError('Expected completion text')
+            text = content or ''
+        except (ValueError, AttributeError, KeyError, IndexError, TypeError) as exc:
+            raise LLMResponseError('Malformed completion payload') from exc
+        usage = body.get('usage') or {}
         usage = usage if isinstance(usage, dict) else {}
         cached = usage.get('prompt_tokens_details') or {}
         cached = cached if isinstance(cached, dict) else {}

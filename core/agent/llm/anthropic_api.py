@@ -17,7 +17,7 @@ from typing import Optional
 
 import httpx
 
-from llm.errors import LLMAuthError, LLMConfigError, LLMError
+from llm.errors import LLMAuthError, LLMConfigError, LLMError, LLMResponseError
 from llm.ports import CompletionResult, schema_system
 
 _DEFAULT_BASE = "https://api.anthropic.com"
@@ -87,11 +87,14 @@ class AnthropicCompletion:
         if r.status_code >= 400:
             raise LLMError(f"{r.status_code} from {self._base}: {r.text[:300]}", status_code=r.status_code)
         try:
-            blocks = r.json().get("content") or []
+            body = r.json()
+            blocks = body['content']
+            if not isinstance(blocks, list):
+                raise TypeError('Expected content blocks')
             text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
-        except (ValueError, AttributeError, TypeError) as exc:
-            raise LLMError(f"malformed completion payload from {self._base}: {exc}") from exc
-        usage = r.json().get('usage') or {}
+        except (ValueError, AttributeError, KeyError, TypeError) as exc:
+            raise LLMResponseError('Malformed completion payload') from exc
+        usage = body.get('usage') or {}
         usage = usage if isinstance(usage, dict) else {}
         count = lambda v: v if type(v) is int and v >= 0 else None
         return CompletionResult(text=text, model=target, usage={'input_tokens': count(usage.get('input_tokens')),

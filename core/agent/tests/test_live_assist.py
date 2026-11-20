@@ -4,8 +4,10 @@ import json
 import time
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
+from llm.openai_compat import OpenAICompatCompletion
 from llm.ports import CompletionResult
 from shared.units import MEETING_STATE_PREFIX, is_private_transcript_job, make_dispatch, entrypoint
 from worker.live_assist import run
@@ -55,6 +57,35 @@ def test_oversized_segment_is_atomic_on_second_chunk_failure(monkeypatch):
     assert output.get('error') == 'RuntimeError' and 'output' not in output
     assert len([r for key, r in stream.rows if key == 'meeting_state_results' and not r.get('heartbeat')]) == 1
     assert 'private provider' not in json.dumps(stream.rows)
+
+
+@pytest.mark.parametrize('role', ['fast', 'reason'])
+@pytest.mark.parametrize(('fault', 'category', 'status'), [
+    (401, 'auth', 401), (429, 'rate_limit', 429), (503, 'http_error', 503),
+    ('timeout', 'timeout', None), ('transport', 'transport', None), ('malformed', 'malformed_response', None),
+])
+def test_model_request_failures_keep_only_safe_diagnostics(monkeypatch, role, fault, category, status):
+    monkeypatch.setenv('TINA_OWNER', '7')
+    def respond(request):
+        if fault == 'timeout':
+            raise httpx.ReadTimeout('private provider information', request=request)
+        if fault == 'transport':
+            raise httpx.ConnectError('private provider information', request=request)
+        if fault == 'malformed':
+            return httpx.Response(200, json={'private provider information': True})
+        return httpx.Response(fault, text='private provider information')
+
+    stream = Stream()
+    completion = OpenAICompatCompletion(base_url='https://fixture.invalid', api_key='private credential',
+                                         transport=httpx.MockTransport(respond))
+    result = run(stream, MEETING_STATE_PREFIX + json.dumps(dict(job(), role=role)), completion=completion)
+    assert 'output' not in result
+    span = next(row for key, row in stream.rows if key == 'meeting_state_spans' and row['stage'] == 'model_request')
+    control.record(span)
+    record = control.traces(1)['spans'][-1]
+    assert record['role'] == role and record['status'] == 'error' and record['failure_code'] == category
+    assert record.get('http_status') == status
+    assert 'private ' not in json.dumps([stream.rows, record])
 
 
 @pytest.mark.parametrize(('reply', 'fields'), [

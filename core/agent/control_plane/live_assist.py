@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.request
 
+from llm.errors import MODEL_REQUEST_FAILURE_CODES
 from shared import units
 
 log = logging.getLogger(__name__)
@@ -24,6 +25,13 @@ def record(span):
                'input_tokens', 'output_tokens', 'cache_read_tokens', 'provider_timings', 'status'}
     allowed.add('publication_revision')
     clean = {k: v for k, v in span.items() if k in allowed}
+    if clean.get('stage') == 'model_request' and clean.get('status') == 'error':
+        code = span.get('failure_code')
+        if isinstance(code, str) and code in MODEL_REQUEST_FAILURE_CODES:
+            clean['failure_code'] = code
+        status = span.get('http_status')
+        if type(status) is int and 400 <= status <= 599:
+            clean['http_status'] = status
     if clean.get('stage') == 'parse_and_schema' and clean.get('status') == 'error':
         kind = span.get('error_kind')
         if kind in ('invalid_json', 'schema_invalid', 'non_object', 'validation_error'):

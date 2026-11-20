@@ -120,6 +120,12 @@ their best-effort nature. Prompts, source text, responses, credentials and keys 
 For rejected model replies, `parse_and_schema` reports the failure category and either the JSON
 line and column or the violated schema keyword and schema path. `validate_and_commit` includes
 the Meeting API's rejection code when available.
+Filter the profiler by `generation` and `attempt` to follow the same fast or reasoning job through
+these stages. `model_request` errors expose `failure_code` and, when available, `http_status`.
+The failure categories are `auth`, `configuration`, `rate_limit`, `request_rejected`, `timeout`,
+`http_error`, `transport`, `malformed_response`, and `unknown`. The same structured events can be
+routed through a future deployment's telemetry collector. Use bounded dimensions such as role and
+failure category for metrics, and keep meeting and job IDs in logs or traces.
 
 ## Verification and remaining rollout work
 

@@ -9,6 +9,7 @@ import sys
 from jsonschema.exceptions import ValidationError, best_match
 
 from llm import completion_from_env
+from llm.errors import model_request_failure
 from shared.units import MEETING_STATE_PREFIX
 from contracts.loader import validate_meeting_state_output
 
@@ -248,8 +249,9 @@ def run(stream, inline, *, completion=None):
             call_start = time.perf_counter()
             try:
                 reply = completion.complete(prompt, system=SYSTEM, model=job['model'])
-            except Exception:
-                span('model_request', call_start, model=job['model'], provider=completion.name, status='error')
+            except Exception as exc:
+                span('model_request', call_start, model=job['model'], provider=completion.name, status='error',
+                     **model_request_failure(exc))
                 raise
             usage = getattr(reply, 'usage', None) or {}
             span('model_request', call_start, model=reply.model or job['model'], provider=completion.name, status='ok', **usage)
