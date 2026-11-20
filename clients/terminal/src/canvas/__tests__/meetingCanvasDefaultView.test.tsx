@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { fireEvent } from "@testing-library/react";
+import { registry } from "../../contributions";
+import "../../surfaces/meeting";
 import type { MeetingMock } from "../../surfaces/meetingModel";
 
 /** Behavioral contract of the transcript-pane toggle (fix/terminal-processed-default-view):
@@ -17,6 +20,8 @@ let meetingsState: MeetingMock[] = [];
 
 vi.mock("../../surfaces/liveMeetings", () => ({
   useLiveMeetings: () => meetingsState,
+  useLiveMeetingsConnection: () => true,
+  useLiveMeetingsLoaded: () => true,
   fetchDurableTranscript: vi.fn(async () => ({ lines: durableState.lines, notes: durableState.notes, processingStatus: durableState.processingStatus })),
   mergeNotesById: (seed: { id: string }[], live: { id: string }[]) => [...seed, ...live],
 }));
@@ -149,8 +154,9 @@ describe("MeetingCanvasView — default view + toggle semantics", () => {
       await act(async () => { tools.click(); });
       const review = [...group.querySelectorAll("button")].find(button => button.textContent === "Discussion review")!;
       await act(async () => { review.click(); });
-      const dialog = container.querySelector<HTMLDialogElement>('dialog[aria-label="Đánh giá thảo luận"]')!;
+      const dialog = container.querySelector<HTMLDialogElement>('dialog[open]')!;
       expect(dialog.open).toBe(true);
+      expect(dialog.querySelector('h2')?.textContent).toBe('Đánh giá thảo luận');
       expect(group.contains(dialog)).toBe(false);
       expect(fetchMock.mock.calls.some(([url]) => url === "/api/discussion-reviews/6")).toBe(true);
       expect(processCalls()).toBe(0);
@@ -207,6 +213,38 @@ describe("MeetingCanvasView — default view + toggle semantics", () => {
     const btn = toggleButton();
     expect(btn.getAttribute("aria-pressed")).toBe("false");
     expect(btn.textContent).toContain("Original ASR");
+  });
+
+  it("returns to the live transcript without pausing Live Assist or losing view state", async () => {
+    meetingsState = [meetingRow(true)]; durableState.lines = [LINE]; durableState.notes = [];
+    let enabled = false;
+    const statePath = '/api/transcripts/by-id/6/state';
+    fetchMock.mockImplementation(async (url) => {
+      if (url === `${statePath}/configure`) enabled = true;
+      if (url === '/api/workspace/meeting-knowledge/6') return Response.json({ answers: [], documents: [], segment_count: 0 });
+      const payload = String(url).startsWith(statePath) ? { configured: enabled, enabled, can_configure: true, readonly: false, revision: 1, items: [] } : {};
+      return new Response(JSON.stringify(payload));
+    });
+    const MeetingTab = registry.tabComponent('meeting')!;
+    const services = createContainer([reg(LayoutServiceId, () => createLayoutService('meetings'))]);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<ServicesProvider container={services}><MeetingTab id="meeting:6" params={{ meetingId: '6' }} active /></ServicesProvider>);
+    });
+    const findButton = (label: string) => [...container.querySelectorAll('button')].find(button => button.textContent === label)!;
+    const search = container.querySelector<HTMLInputElement>('[aria-label="Search transcript"]')!;
+    fireEvent.change(search, { target: { value: 'Friday' } });
+    await act(async () => { findButton('Enable live assist').click(); });
+    expect(search.closest('[hidden]')).not.toBeNull();
+    const advanced = findButton('Advanced controls');
+    expect(advanced.closest('[hidden]')).toBeNull();
+    await act(async () => { findButton('Transcript').click(); });
+    expect(search.closest('[hidden]')).toBeNull();
+    expect(search.value).toBe('Friday');
+    expect(advanced.closest('[hidden]')).not.toBeNull();
+    await act(async () => { findButton('Live Assist').click(); });
+    expect(advanced.closest('[hidden]')).toBeNull();
+    expect(fetchMock.mock.calls.filter(([url]) => url === `${statePath}/configure`)).toHaveLength(1);
   });
 
   it("COMPLETED meeting toggle is a pure view switch — never calls the arm endpoint", async () => {

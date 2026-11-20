@@ -15,6 +15,7 @@ import dossierStyles from "./MeetingDetailsRail.module.css";
 import transcriptStyles from "./MeetingTranscript.module.css";
 import { MeetingMemory } from "../surfaces/MeetingMemory";
 import { DiscussionReview } from "../surfaces/DiscussionReview";
+import { LiveMeetingState } from "../surfaces/LiveMeetingState";
 import { SpeakerRegistry } from "../surfaces/SpeakerRegistry";
 import { TranscriptReview } from "../surfaces/TranscriptReview";
 import { MeetingAudioPlayer, type MeetingAudioFragment, type MeetingAudioPlayerHandle, type MeetingAudioPosition } from "./MeetingAudioPlayer";
@@ -144,6 +145,7 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
   const toolsId = useId();
   const [searchQuery, setSearchQuery] = useState("");
   const [speakerFilter, setSpeakerFilter] = useState("");
+  const [sourceJump, setSourceJump] = useState<string | null>(null);
   const transcriptScrollRef = useRef<HTMLElement>(null);
   const transcriptContentRef = useRef<HTMLDivElement>(null);
   const followingTranscript = useRef(true);
@@ -325,6 +327,27 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
     if (viewport) viewport.scrollTop = viewport.scrollHeight;
   };
 
+  const handleSourceJump = (segmentId: string) => {
+    followingTranscript.current = false;
+    setSearchQuery("");
+    setSpeakerFilter("");
+    setOverride(false);
+    setSourceJump(segmentId);
+    if (canPlayMeetingAudio) handleSegmentClick(segmentId);
+  };
+
+  useLayoutEffect(() => {
+    if (!sourceJump) return;
+    const blocks = transcriptContentRef.current?.querySelectorAll<HTMLElement>('[data-segment-ids]') ?? [];
+    const block = Array.from(blocks).find(element => (element.dataset.segmentIds || '').split(/\s+/).includes(sourceJump));
+    if (block) {
+      block.tabIndex = -1;
+      block.focus({ preventScroll: true });
+      block.scrollIntoView?.({ block: 'center' });
+    }
+    setSourceJump(null);
+  }, [sourceJump]);
+
   // LIVE: the toggle ALSO controls backend processing — ON enables the copilot (full-history backfill
   // the first time, else resume); OFF disables it. COMPLETED: pure view switch — there is nothing to
   // arm any more, so we must NOT hit the process endpoint (a stale-live row counts as completed).
@@ -379,7 +402,7 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
         <MeetingMemory hideTrigger meetingId={dialogMeetingId} openRef={memoryOpen} />
         <SpeakerRegistry hideTrigger meetingId={dialogMeetingId} openRef={speakersOpen} />
         <TranscriptReview hideTrigger meetingId={dialogMeetingId} openRef={reviewOpen} />
-        {durableTerminal && <DiscussionReview key={dialogMeetingId} meetingId={dialogMeetingId} openRef={discussionOpen} />}
+        {durableTerminal && <DiscussionReview key={dialogMeetingId} meetingId={dialogMeetingId} meetingTitle={meetingRecord?.title_custom ?? meetingRecord?.native_id ?? meetingRecord?.title} openRef={discussionOpen} />}
       </>}
       <MeetingHealthBanner hideEnded={!!meetingRecord && meetingPhase(meetingRecord) === "post"} />
       {meetingRecord?.summary && <section id={`meeting-summary-${meetingId}`} className={dossierStyles.section} aria-label="Meeting summary">
@@ -409,6 +432,8 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
           {meetingRecord && <button type="button" className={transcriptStyles.info} aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
             {detailsOpen ? "Hide meeting info" : "Meeting info"}
           </button>}
+          {durableTerminal && dialogMeetingId && <LiveMeetingState key={`state-${dialogMeetingId}`} meetingId={dialogMeetingId}
+            meetingTitle={meetingRecord?.title_custom ?? meetingRecord?.native_id ?? meetingRecord?.title} onSourceJump={handleSourceJump} />}
           {durableTerminal && dialogMeetingId && <button type="button" className={transcriptStyles.toolToggle} aria-label="Meeting tools" title="Meeting tools" aria-expanded={toolsOpen} aria-controls={toolsId} onClick={() => setToolsOpen((open) => !open)}>
             Tools <span aria-hidden="true">{toolsOpen ? "⌃" : "⌄"}</span>
           </button>}
@@ -419,7 +444,7 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
           </div>}
           </div>
           {durableTerminal && dialogMeetingId && <div id={toolsId} className={transcriptStyles.recapTools} role="group" aria-label="Meeting tools" hidden={!toolsOpen}>
-            <button type="button" className={transcriptStyles.tool} onClick={() => discussionOpen.current?.()}>Discussion review</button>
+            <button type="button" className={transcriptStyles.tool} aria-haspopup="dialog" onClick={() => discussionOpen.current?.()}>Discussion review</button>
             <button type="button" className={transcriptStyles.tool} onClick={() => memoryOpen.current?.()}>Meeting memory</button>
             <button type="button" className={transcriptStyles.tool} onClick={() => speakersOpen.current?.()}>Speaker identities</button>
             <button type="button" className={transcriptStyles.tool} onClick={() => reviewOpen.current?.()}>Review transcript</button>

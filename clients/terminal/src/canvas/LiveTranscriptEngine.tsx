@@ -223,7 +223,7 @@ export function LiveTranscriptEngine({
         if (!draft && segment.translation?.status === "failed") pendingTranslation = "Chưa dịch được đoạn này · bấm Thử lại";
         if (!draft && segment.translation?.status === "retrying") pendingTranslation = "Đoạn này đang chờ thử lại…";
         const playable = !!segment.id && playableSegmentIds?.has(segment.id) && !!onSegmentClick;
-        return <article data-transcript-segments={JSON.stringify(segment.id ? [segment.id] : [])} tabIndex={-1} className={styles.turn} data-active={!!segment.id && segment.id === activeSegmentId} key={segment.translation?.groupId ?? segment.id ?? index}>
+        return <article data-segment-ids={segment.id || undefined} data-transcript-segments={JSON.stringify(segment.id ? [segment.id] : [])} tabIndex={-1} className={styles.turn} data-active={!!segment.id && segment.id === activeSegmentId} key={segment.translation?.groupId ?? segment.id ?? index}>
           {head(segment.speaker, segment.tsMs)}
           {originalVisible && <div className={styles.original} data-draft={draft}>
             {playable ? <button type="button" onClick={() => onSegmentClick?.(segment.id!)} aria-label="Play transcript segment"
@@ -238,7 +238,7 @@ export function LiveTranscriptEngine({
     </div>;
   }
   const pendingLine = (segment: EngineSegment, index: number) => (
-    <div key={segment.id ?? `pending-${index}`}>
+    <div data-segment-ids={segment.id || undefined} key={segment.id ?? `pending-${index}`}>
       {head(segment.speaker, segment.tsMs)}
       <div style={{ fontSize: 13.5, color: "var(--t3)", lineHeight: 1.6, fontStyle: "italic" }}>
         <BlockText text={segment.text.trim()} entities={entities} actions={actions} /> …
@@ -266,7 +266,7 @@ export function LiveTranscriptEngine({
             ? new Date(segment.tsMs).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })
             : "";
           return (
-            <div data-transcript-segments={JSON.stringify(id ? [id] : [])} tabIndex={-1} key={id ?? `playback-turn-${index}`}>
+            <div data-segment-ids={id || undefined} data-transcript-segments={JSON.stringify(id ? [id] : [])} tabIndex={-1} key={id ?? `playback-turn-${index}`}>
               {showSpeaker && head(segment.speaker)}
               <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                 {timestamp && <time style={{ flex: "none", paddingTop: 5, color: "var(--t3)", font: "11px var(--mono)", fontVariantNumeric: "tabular-nums" }}>{timestamp}</time>}
@@ -340,7 +340,7 @@ export function LiveTranscriptEngine({
       {blocks.map((b, idx) => {
         const isLast = idx === blocks.length - 1;
         return (
-          <div data-transcript-segments={JSON.stringify(b.segmentIds)} tabIndex={-1} key={b.key}>
+          <div data-segment-ids={b.segmentIds.join(' ') || undefined} data-transcript-segments={JSON.stringify(b.segmentIds)} tabIndex={-1} key={b.key}>
             {head(b.speaker, b.tsMs)}
             {b.stale && <span role="status" style={{ color: 'var(--t3)', fontSize: 11 }}>Out of date</span>}
             <div style={{ fontSize: 14, color: "var(--t1)", lineHeight: 1.65 }}>

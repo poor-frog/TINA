@@ -30,6 +30,8 @@ import { manageTabDescriptor } from "./workspaceManage";
 import { defaultBotName } from "./defaultBotName";
 import { meetingUrlFor } from "./meetingId";
 import { requestChat } from "../canvas/actions";
+import { PlannedLiveAssistAgenda, PlannedLiveAssistGoal, PlannedLiveAssistProvider } from "./PlannedLiveAssistEditor";
+import { EMPTY_LIVE_ASSIST_DRAFT, LIVE_ASSIST_DRAFT_TAB_KEY, movePlannedLiveAssistDraft, writePlannedLiveAssistDraft } from "./liveMeetingStateApi";
 
 /** THE BRIEF (prep-v3, owner-locked): the workspace README rendered as the page's stage — ONE doc,
  *  team-facing, always the next occurrence's brief. A SEEDED stub never renders as content (bloat
@@ -216,6 +218,7 @@ function MeetingPrepTab({ params }: TabProps) {
       });
       createdRow.current = row;
       const id = String(row.id);
+      movePlannedLiveAssistDraft(LIVE_ASSIST_DRAFT_TAB_KEY, id);
       refreshMeetings();
       // hand off: the canonical prep tab owns the created meeting; the draft tab closes.
       layout.openTab(prepTabDescriptor({ id, title: title.trim() || "New meeting" }));
@@ -347,10 +350,19 @@ function MeetingPrepTab({ params }: TabProps) {
 
   const remove = async () => {
     if (!m) return;
-    if (isDraft) { layout.closeTab(PREP_DRAFT_TAB_ID); return; }   // nothing persisted — just discard the draft
+    if (isDraft) {
+      writePlannedLiveAssistDraft(LIVE_ASSIST_DRAFT_TAB_KEY, EMPTY_LIVE_ASSIST_DRAFT);
+      layout.closeTab(PREP_DRAFT_TAB_ID);
+      return;
+    }   // nothing persisted — just discard the draft
     if (typeof window !== "undefined" && !window.confirm("Delete this planned meeting?")) return;
     setBusy(true);
-    try { await deletePlannedMeeting(m.id); refreshMeetings(); layout.closeTab(`prep:${m.id}`); }
+    try {
+      await deletePlannedMeeting(m.id);
+      writePlannedLiveAssistDraft(m.id, EMPTY_LIVE_ASSIST_DRAFT);
+      refreshMeetings();
+      layout.closeTab(`prep:${m.id}`);
+    }
     catch (e) { setErr(presentError(e).headline); }
     finally { setBusy(false); }
   };
@@ -387,6 +399,7 @@ function MeetingPrepTab({ params }: TabProps) {
 
   return (
     <div className={styles.surface}>
+      <PlannedLiveAssistProvider meetingId={meetingId} draftKey={meetingId || LIVE_ASSIST_DRAFT_TAB_KEY} readOnly={readOnly} ensureRow={ensureRow}>
       <main className={styles.content}>
         <div className={styles.subjectBlock}>
           {readOnly ? (
@@ -404,6 +417,7 @@ function MeetingPrepTab({ params }: TabProps) {
                 onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} />
             </div>
           )}
+          <PlannedLiveAssistGoal />
         </div>
 
         {m.auto_join_error && (
@@ -614,10 +628,13 @@ function MeetingPrepTab({ params }: TabProps) {
           </section>
         )}
 
+        <PlannedLiveAssistAgenda />
+
         {denial && <ServiceDenialPanel presentation={denial} onRetry={() => void sendNow()} />}
         {err && <div className={styles.error} role="alert">{err}</div>}
         {briefError && <div className={styles.error} role="alert">{briefError}</div>}
       </main>
+      </PlannedLiveAssistProvider>
     </div>
   );
 }

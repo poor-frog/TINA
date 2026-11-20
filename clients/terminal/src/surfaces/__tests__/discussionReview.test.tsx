@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DiscussionReview } from '../DiscussionReview';
 
 const fetchMock = vi.fn();
@@ -42,10 +42,11 @@ it('submits an agenda with the current review identity and shows exact evidence'
   fireEvent.change(screen.getByRole('textbox'), { target: { value: report.agenda } });
   await waitFor(() => expect((screen.getByRole('button', { name: 'Tạo đánh giá thảo luận' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'Tạo đánh giá thảo luận' }));
-  await screen.findByText('Phạm vi: Đúng trọng tâm');
+  const finding = (await screen.findByText('Phạm vi')).closest('section')!;
+  expect(within(finding).getByText('Đúng trọng tâm')).toBeTruthy();
   expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ agenda: report.agenda, expected_id: null });
   expect(screen.getAllByText(source.quote).length).toBeGreaterThan(0);
-  expect(screen.getByText('Tương tác: Không phát hiện tín hiệu tương tác trong danh mục')).toBeTruthy();
+  expect(screen.getByText('Không phát hiện tín hiệu tương tác trong danh mục')).toBeTruthy();
   expect(document.querySelector('audio')?.getAttribute('src')).toBe('/api/transcripts/by-id/42/segments/a%2Fb/audio');
 });
 
@@ -75,7 +76,7 @@ it('shows provider failures without inventing an uncertain result', async () => 
   await waitFor(() => expect((screen.getByRole('button', { name: 'Tạo đánh giá thảo luận' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'Tạo đánh giá thảo luận' }));
   expect((await screen.findByRole('alert')).textContent).toContain('Discussion review is unavailable');
-  expect(screen.queryByText(/Phạm vi:/)).toBeNull();
+  expect(screen.queryByText('Kết quả đánh giá')).toBeNull();
 });
 
 it('supports an external Tools trigger and consumes Escape before workbench navigation', async () => {
