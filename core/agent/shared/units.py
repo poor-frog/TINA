@@ -19,6 +19,7 @@ RUNNER = "claude-code"
 DICTATION_POLISH_PREFIX = "TINA_DICTATION_POLISH_V1:"
 DICTATION_TRANSLATE_PREFIX = "TINA_DICTATION_TRANSLATE_V1:"
 CANONICAL_NOTES_PREFIX = "TINA_CANONICAL_NOTES_V1:"
+MEETING_STATE_PREFIX = "TINA_MEETING_STATE_V1:"
 MEETING_KNOWLEDGE_PREFIX = "TINA_MEETING_KNOWLEDGE_V1:"
 DISCUSSION_REVIEW_PREFIX = "TINA_DISCUSSION_REVIEW_V1:"
 
@@ -66,7 +67,7 @@ def is_dictation_translate(invocation: dict) -> bool:
 def is_private_transcript_job(invocation: dict) -> bool:
     """Transcript-only jobs stay out of dispatch diagnostics and warm input Streams."""
     inline = ((invocation.get('start') or {}).get('entrypoint') or {}).get('inline') or ''
-    return is_dictation_polish(invocation) or is_dictation_translate(invocation) or is_meeting_knowledge(invocation) or is_discussion_review(invocation) or inline.startswith(CANONICAL_NOTES_PREFIX)
+    return is_dictation_polish(invocation) or is_dictation_translate(invocation) or is_meeting_knowledge(invocation) or is_discussion_review(invocation) or inline.startswith((CANONICAL_NOTES_PREFIX, MEETING_STATE_PREFIX))
 
 
 def launcher_for(trigger: str, subject: str, *, ref: str | None = None) -> str:

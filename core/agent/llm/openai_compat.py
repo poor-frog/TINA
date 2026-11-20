@@ -13,6 +13,7 @@ back ``ANTHROPIC_AUTH_TOKEN`` → ``ANTHROPIC_API_KEY``; optional — local runt
 from __future__ import annotations
 
 import os
+import math
 from typing import Optional
 
 import httpx
@@ -87,4 +88,15 @@ class OpenAICompatCompletion:
             text = (choice.get("message") or {}).get("content") or ""
         except (ValueError, AttributeError, IndexError, TypeError) as exc:
             raise LLMError(f"malformed completion payload from {self._base}: {exc}") from exc
-        return CompletionResult(text=str(text), model=target)
+        usage = r.json().get('usage') or {}
+        usage = usage if isinstance(usage, dict) else {}
+        cached = usage.get('prompt_tokens_details') or {}
+        cached = cached if isinstance(cached, dict) else {}
+        count = lambda v: v if type(v) is int and v >= 0 else None
+        # Compatible providers such as Groq report these usage durations in seconds.
+        timings = {target: usage[key]*1000 for key, target in (('queue_time', 'queue_ms'),
+            ('prompt_time', 'prefill_ms'), ('completion_time', 'generation_ms'))
+            if type(usage.get(key)) in (int, float) and math.isfinite(usage[key]) and usage[key] >= 0}
+        return CompletionResult(text=str(text), model=target, usage={
+            'input_tokens': count(usage.get('prompt_tokens')), 'output_tokens': count(usage.get('completion_tokens')),
+            'cache_read_tokens': count(cached.get('cached_tokens')), 'provider_timings': timings})

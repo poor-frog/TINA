@@ -569,6 +569,20 @@ def create_app(
     async def transcript_memory(meeting_id: int, request: Request):
         return await _forward("GET", _meeting(f"/transcripts/by-id/{meeting_id}/memory"), request)
 
+    @app.get("/transcripts/by-id/{meeting_id}/state")
+    async def transcript_live_state(meeting_id: int, request: Request):
+        return await _forward("GET", _meeting(f"/transcripts/by-id/{meeting_id}/state"), request)
+
+    @app.get("/transcripts/by-id/{meeting_id}/state/export")
+    async def transcript_live_state_export(meeting_id: int, request: Request):
+        return await _forward("GET", _meeting(f"/transcripts/by-id/{meeting_id}/state/export"), request)
+
+    @app.post("/transcripts/by-id/{meeting_id}/state/{action}")
+    async def transcript_live_state_action(meeting_id: int, action: str, request: Request):
+        if action not in {"configure", "edit", "add", "vote", "remove-source"}:
+            raise HTTPException(404, "Unknown live-state action")
+        return await _forward("POST", _meeting(f"/transcripts/by-id/{meeting_id}/state/{action}"), request)
+
     @app.get("/transcripts/by-id/{meeting_id}/speakers")
     async def speaker_registry(meeting_id: int, request: Request):
         return await _forward("GET", _meeting(f"/transcripts/by-id/{meeting_id}/speakers"), request)

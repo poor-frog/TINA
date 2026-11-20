@@ -30,6 +30,10 @@ flowchart LR
   asr_recovery_v1[("asr-recovery.v1")]
   stt_foundation_v1[("stt-foundation.v1")]
   stt_metrics_v1[("stt-metrics.v1")]
+  meeting_state_requests[("meeting_state_requests")]
+  meeting_state_results[("meeting_state_results")]
+  meeting_state_jobs[("meeting_state_job:{meeting_id}:{generation}")]
+  meeting_state_diagnostics[("meeting_state_spans")]
   canonical_notes_requests[("canonical_notes_requests")]
   canonical_notes_results[("canonical_notes_results")]
   canonical_notes_approved[("proc:meeting:{id} (canonical approved notes)")]
@@ -45,6 +49,15 @@ flowchart LR
   meeting_voice_state[("Ephemeral per-meeting voice turn and runtime state")]
   meeting_voice_replies[("Owner-only durable TINA voice replies")]
   voice_account_defaults[("Account voice preparation defaults")]
+  agent_api -->|write| meeting_state_jobs
+  agent_worker -.->|read| meeting_state_jobs
+  meeting_api -->|write| meeting_state_requests
+  agent_api -.->|read| meeting_state_requests
+  agent_worker -->|write| meeting_state_results
+  meeting_api -.->|read| meeting_state_results
+  agent_worker -->|write| meeting_state_diagnostics
+  meeting_api -->|write| meeting_state_diagnostics
+  agent_api -.->|read| meeting_state_diagnostics
   bot -->|write| segments_stream
   bot -->|write| tc_mutable
   meeting_api -.->|read| segments_stream

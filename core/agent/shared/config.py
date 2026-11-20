@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     global_system_workspace_ref: str = ""
     agent_model: str = ""
     meeting_model: str = ""
+    state_fast_model: str = ""
+    state_reason_model: str = ""
     # ── llm module dials (provider-agnostic; see core/agent/llm/README.md) ────
     # Non-secret operator config forwarded into workers by dispatch. The SECRETS
     # (TINA_LLM_API_KEY / TINA_LLM_BASE_URL) deliberately have no Settings field — they travel by

@@ -64,6 +64,7 @@ COPY core/agent/worker/codex-requirements.toml /etc/codex/requirements.toml
 
 # The sealed contracts loaded BY PATH at import (walk-up resolves repo_root == /app).
 COPY core/meetings/contracts/transcript.v1/transcript.schema.json  ./meetings/contracts/transcript.v1/transcript.schema.json
+COPY core/meetings/contracts/meeting-state.v1/meeting-state.schema.json ./meetings/contracts/meeting-state.v1/meeting-state.schema.json
 COPY core/agent/contracts/workspace.v1/workspace.schema.json       ./agent/contracts/workspace.v1/workspace.schema.json
 COPY core/agent/contracts/invoke.v1/invoke.schema.json             ./agent/contracts/invoke.v1/invoke.schema.json
 COPY core/agent/contracts/unit.v1/unit.schema.json                 ./agent/contracts/unit.v1/unit.schema.json

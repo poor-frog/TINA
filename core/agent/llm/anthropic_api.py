@@ -91,4 +91,8 @@ class AnthropicCompletion:
             text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         except (ValueError, AttributeError, TypeError) as exc:
             raise LLMError(f"malformed completion payload from {self._base}: {exc}") from exc
-        return CompletionResult(text=text, model=target)
+        usage = r.json().get('usage') or {}
+        usage = usage if isinstance(usage, dict) else {}
+        count = lambda v: v if type(v) is int and v >= 0 else None
+        return CompletionResult(text=text, model=target, usage={'input_tokens': count(usage.get('input_tokens')),
+            'output_tokens': count(usage.get('output_tokens')), 'cache_read_tokens': count(usage.get('cache_read_input_tokens'))})

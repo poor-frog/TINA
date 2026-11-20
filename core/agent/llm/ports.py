@@ -131,6 +131,7 @@ class CompletionResult:
     text: str
     model: str = ""
     sources: tuple[dict, ...] = ()
+    usage: Optional[dict] = None
 
 
 def schema_system(system: Optional[str], response_schema: Optional[dict]) -> Optional[str]:

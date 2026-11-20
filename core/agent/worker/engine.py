@@ -1115,6 +1115,13 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
 
     from shared.units import CANONICAL_NOTES_PREFIX
     inline = start_prompt(start) or ''
+    if os.environ.get('TINA_MEETING_STATE_TRUSTED') == '1':
+        from shared.units import MEETING_STATE_PREFIX
+        if not inline.startswith(MEETING_STATE_PREFIX):
+            raise ValueError('Invalid trusted meeting-state payload')
+        from worker.live_assist import run as run_meeting_state
+        run_meeting_state(client, inline)
+        return
     if (os.environ.get("TINA_CANONICAL_NOTES_TRUSTED") == "1"
             and inline.startswith(CANONICAL_NOTES_PREFIX)):
         from worker.processed_notes import run as run_canonical_notes

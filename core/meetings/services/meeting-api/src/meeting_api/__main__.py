@@ -823,11 +823,24 @@ def _attach_background_loops(
                 log.exception('Canonical notes delivery unavailable; durable leases will retry')
             await asyncio.sleep(2)
 
+    async def _live_assist_loop():
+        from .collector.live_assist_queue import tick
+        cursor = 0
+        while True:
+            try:
+                cursor = await tick(redis_client, transcript_store, cursor)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception('Meeting-state scheduler unavailable; durable leases will recover')
+            await asyncio.sleep(1)
+
     @asynccontextmanager
     async def lifespan(_app):
         if hasattr(transcript_store, "ensure_canonical_transcripts"):
             await transcript_store.ensure_canonical_transcripts()
         tasks = [
+            asyncio.create_task(_live_assist_loop(), name='live-assist'),
             asyncio.create_task(_meeting_memory_loop(), name="meeting-memory"),
             asyncio.create_task(_canonical_notes_loop(), name='canonical-notes'),
             asyncio.create_task(_transcript_revision_loop(), name="transcript-revisions"),

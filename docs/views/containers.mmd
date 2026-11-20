@@ -57,6 +57,7 @@ flowchart LR
   agent_reach["Public Agent Reach retrieval worker"]
   public_content_providers["Public content providers"]
   mail_relay["configured SMTP relay"]
+  meeting_api -->|"HTTP"| agent_api
   meeting_api -->|"write"| segments_table
   bot -->|"HTTPS"| transcription
   meeting_api -->|"JDBC"| postgres

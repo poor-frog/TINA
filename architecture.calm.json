@@ -1686,6 +1686,44 @@
    ]
   },
   {
+   "unique-id": "meeting-state.v1",
+   "node-type": "contract",
+   "name": "meeting-state.v1",
+   "description": "Meeting API-owned two-stage live state: finalized canonical source windows, independent fast/reason leases, exact quote checks, revision-protected human edits and approvals. Agent workers return provisional extraction and reasoning patches. Final shared Wiki projection is create-only; operator profiling is volatile metadata-only.",
+   "metadata": [{"path": "core/meetings/contracts/meeting-state.v1", "domain": "meetings"}]
+  },
+  {
+   "unique-id": "meeting-state-requests",
+   "node-type": "data-asset",
+   "name": "meeting_state_requests",
+   "description": "Signed immutable owner/meeting/role/generation-bound live-state jobs; independent fast and reasoning leases.",
+   "controls": {"ownership": {"description": "single writer", "requirements": [{"requirement-url": "urn:tina:calm:controls:single-writer", "config": {"writers": ["meeting-api"], "match": "meeting_state_requests", "op": "xadd"}}]}},
+   "metadata": [{"contract": "meeting-state.v1"}, {"stage": "derived"}]
+  },
+  {
+   "unique-id": "meeting-state-results",
+   "node-type": "data-asset",
+   "name": "meeting_state_results",
+   "description": "Tool-less fast/reasoning candidate results; only Meeting API may validate and apply them to canonical state.",
+   "controls": {"ownership": {"description": "single writer", "requirements": [{"requirement-url": "urn:tina:calm:controls:single-writer", "config": {"writers": ["agent-worker"], "match": "meeting_state_results", "op": "xadd"}}]}},
+   "metadata": [{"contract": "meeting-state.v1"}, {"stage": "derived"}]
+  },
+  {
+   "unique-id": "meeting-state-jobs",
+   "node-type": "data-asset",
+   "name": "meeting_state_job:{meeting_id}:{generation}",
+   "description": "Short-lived immutable source payload after signed job admission; worker env contains only an owner-bound key reference. Deleted after consumption or artifact purge and bounded by TTL.",
+   "controls": {"ownership": {"description": "single writer", "requirements": [{"requirement-url": "urn:tina:calm:controls:single-writer", "config": {"writers": ["agent-api"], "match": "meeting_state_job:.*", "op": "set"}}]}},
+   "metadata": [{"contract": "meeting-state.v1"}, {"stage": "derived"}]
+  },
+  {
+   "unique-id": "meeting-state-diagnostics",
+   "node-type": "data-asset",
+   "name": "meeting_state_spans",
+   "description": "Bounded temporary scrubbed timing/usage transport into operator-only volatile control-plane diagnostics; no transcript, prompts, credentials or canonical state ownership.",
+   "metadata": [{"contract": "meeting-state.v1"}, {"stage": "derived"}]
+  },
+  {
    "unique-id": "canonical-notes-requests",
    "node-type": "data-asset",
    "name": "canonical_notes_requests",
@@ -1795,7 +1833,7 @@
    "unique-id": "discussion-reviews",
    "node-type": "data-asset",
    "name": "Private discussion review snapshots",
-   "description": "Agent API alone writes .discussion-reviews/{meeting_id}.json in the current private writable workspace. Manual completed-meeting reviews include agenda and the full bounded canonical source, processed chronologically with one isolated tool-less CompletionPort call per window and earlier context only. Each call returns schema-validated labels and source IDs; API derives exact quotes and reauthorizes/rechecks source before atomic locked expected_id publication. Reads mark source changes stale; identical input reuses results. Clients render only. Private snapshots are unavailable through this API when source access is removed. No transcript writes or automatic/live classification."
+    "description": "Agent API alone writes .discussion-reviews/{meeting_id}.json in the current private writable workspace. Manual completed-meeting reviews include agenda and the full bounded canonical source, processed chronologically with one isolated tool-less CompletionPort call per window and earlier context only. Each call returns schema-validated labels and source IDs; API derives exact quotes and reauthorizes/rechecks source before atomic locked expected_id publication. Reads mark source changes stale; identical input reuses results. Clients render only. Private snapshots are unavailable through this API when source access is removed. Offline benchmark-only concurrent and retrospective batch strategies write separate local experiment artifacts, never these snapshots. No transcript writes or automatic/live classification."
   },
   {
    "unique-id": "workspace-human-documents",
@@ -2108,6 +2146,18 @@
   }
  ],
  "relationships": [
+  {"unique-id": "meeting-api-owns-meeting-state-contract", "relationship-type": {"connects": {"source": {"node": "meeting-api"}, "destination": {"node": "meeting-state.v1"}}}, "metadata": [{"access": "own"}], "description": "Meeting API owns schema validation, source coverage, leases, revisions and canonical publication for the meeting-state.v1 contract."},
+  {"unique-id": "agent-worker-emits-meeting-state-contract", "relationship-type": {"connects": {"source": {"node": "agent-worker"}, "destination": {"node": "meeting-state.v1"}}}, "metadata": [{"access": "produce-candidate"}], "description": "Tool-less fast and reasoner workers return candidates conforming to meeting-state.v1; they do not own or publish canonical state."},
+  {"unique-id": "meeting-api-read-state-roster", "relationship-type": {"connects": {"source": {"node": "meeting-api"}, "destination": {"node": "agent-api"}}}, "protocol": "HTTP", "metadata": [{"access": "call"}, {"contract": "meeting-state.v1"}], "description": "Internal-secret-protected authoritative workspace voter roster, fetched outside DB transactions before reasoning proposal publication and votes; failure is closed."},
+  {"unique-id": "agent-api-write-state-jobs", "relationship-type": {"connects": {"source": {"node": "agent-api"}, "destination": {"node": "meeting-state-jobs"}}}, "metadata": [{"access": "write"}], "description": "Store admitted immutable source payload with TTL; raw sources never enter process environment or warm chat streams."},
+  {"unique-id": "agent-worker-read-state-jobs", "relationship-type": {"connects": {"source": {"node": "agent-worker"}, "destination": {"node": "meeting-state-jobs"}}}, "metadata": [{"access": "read"}], "description": "Trusted tool-less worker fetches only its owner/meeting/generation-bound job payload."},
+  {"unique-id": "meeting-api-write-state-requests", "relationship-type": {"connects": {"source": {"node": "meeting-api"}, "destination": {"node": "meeting-state-requests"}}}, "metadata": [{"access": "write"}], "description": "Independent timer and durable checkpoints create signed fast/reason/final publication jobs."},
+  {"unique-id": "agent-api-read-state-requests", "relationship-type": {"connects": {"source": {"node": "agent-api"}, "destination": {"node": "meeting-state-requests"}}}, "metadata": [{"access": "read"}], "description": "Proof and live lease admission before isolated model dispatch or constrained final publication."},
+  {"unique-id": "agent-worker-write-state-results", "relationship-type": {"connects": {"source": {"node": "agent-worker"}, "destination": {"node": "meeting-state-results"}}}, "metadata": [{"access": "write"}], "description": "Source-linked provisional extraction and reasoning candidates; no canonical DB capability."},
+  {"unique-id": "meeting-api-read-state-results", "relationship-type": {"connects": {"source": {"node": "meeting-api"}, "destination": {"node": "meeting-state-results"}}}, "metadata": [{"access": "read"}], "description": "Exact source/lease/revision validation followed by short locked publication and durable audit."},
+  {"unique-id": "agent-worker-write-state-diagnostics", "relationship-type": {"connects": {"source": {"node": "agent-worker"}, "destination": {"node": "meeting-state-diagnostics"}}}, "metadata": [{"access": "write"}], "description": "Scrubbed elapsed-time and token-usage spans only."},
+  {"unique-id": "meeting-api-write-state-diagnostics", "relationship-type": {"connects": {"source": {"node": "meeting-api"}, "destination": {"node": "meeting-state-diagnostics"}}}, "metadata": [{"access": "write"}], "description": "Validation/commit timings without source content."},
+  {"unique-id": "agent-api-read-state-diagnostics", "relationship-type": {"connects": {"source": {"node": "agent-api"}, "destination": {"node": "meeting-state-diagnostics"}}}, "metadata": [{"access": "read"}], "description": "Bounded 24-hour in-memory operator trace cache/export; loss on restart is explicit."},
   {
    "unique-id": "agent-composed",
    "relationship-type": {
@@ -4240,11 +4290,19 @@
    "description": "Dashboard adapts the same owner-only review protocol through its authenticated Gateway proxy."
   },
   {
+   "unique-id": "agent-worker-live-state-completion",
+   "relationship-type": {"connects": {"source": {"node": "agent-worker"}, "destination": {"node": "completion-provider", "interface": "completion-provider-api"}}},
+   "protocol": "HTTP",
+   "metadata": [{"access": "call"}, {"contract": "meeting-state.v1"}],
+   "description": "Separate operator-selected fast/reason model IDs issue tool-less structured CompletionPort calls concurrently from source-fingerprinted jobs. Input may contain finalized transcript text and bounded excerpts from user-requested, meeting-bound shared-workspace documents. Outputs are JSON-schema/source validated before Meeting API publication; no private workspace, audio, prompts or harness tools.",
+   "controls": {"data-egress": {"description": "Meeting transcript and explicitly user-requested shared document excerpts follow the configured CompletionPort endpoint, which may be tenant-hosted or external.", "requirements": [{"requirement-url": "urn:tina:calm:controls:no-egress", "config": {"dataClass": "transcript", "destination": "external-saas", "egressApproved": true}}]}}
+  },
+  {
    "unique-id": "agent-worker-discussion-review-completion",
    "relationship-type": { "connects": { "source": { "node": "agent-worker" }, "destination": { "node": "completion-provider", "interface": "completion-provider-api" } } },
    "protocol": "HTTP",
    "metadata": [{ "access": "call" }],
-   "description": "One tool-less CompletionPort call per chronological window, with explicit agenda, target-window VI/EN text and earlier transcript context only; optional native JSON Schema output where supported, followed by worker/API validation and source-checked evidence. Records actual model identity; sends no audio or unrelated files.",
+    "description": "Production uses one tool-less CompletionPort call per chronological window, with explicit agenda, target-window VI/EN text and earlier transcript context only; optional native JSON Schema output where supported, followed by worker/API validation and source-checked evidence. The offline scripts/benchmark_discussion_review.py invokes the same classifier with bounded two-request concurrency or retrospective batches of two/four windows. Concurrent inputs retain earlier-only isolation; batch inputs expose later targets but enforce per-target citation boundaries. Benchmarks use synthetic/frozen input, separate timing/result artifacts and an isolated local Ollama server; they bypass API publication and do not enable experiments for app requests. Records actual model identity; sends no audio or unrelated files.",
    "controls": {
     "data-egress": {
      "description": "Agenda and transcript text follow the caller's configured CompletionPort, which may be tenant-hosted or external.",

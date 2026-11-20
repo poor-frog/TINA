@@ -356,7 +356,7 @@ def build_unit_env(settings: Settings, invocation: dict, *, unit_id: str, token:
                    memberships: Optional[list[dict]] = None,
                    model_config: Optional[dict] = None,
                    trusted_live_meeting: bool = False,
-                   trusted_canonical_notes: bool = False) -> dict[str, str]:
+                   trusted_canonical_notes: bool = False, trusted_meeting_state: bool = False) -> dict[str, str]:
     """Map a ``unit.v1`` dispatch to the worker's ``runtime.v1`` env (12-factor, P7). The minted token +
     the workspace LIST + the per-dispatch Stream topics travel here; the runtime injects them opaquely."""
     identity = invocation["identity"]
@@ -400,6 +400,12 @@ def build_unit_env(settings: Settings, invocation: dict, *, unit_id: str, token:
         "TINA_WORKSPACE_STORE_URL": settings.workspace_store_url,
         "REDIS_URL": settings.redis_url,
     }
+    if trusted_meeting_state:
+        from shared.units import MEETING_STATE_PREFIX
+        inline = ((invocation.get('start') or {}).get('entrypoint') or {}).get('inline') or ''
+        if invocation.get('trigger') != 'transcription' or not inline.startswith(MEETING_STATE_PREFIX):
+            raise ValueError('Invalid meeting-state dispatch')
+        env['TINA_MEETING_STATE_TRUSTED'] = '1'
     if trusted_canonical_notes:
         inline = ((invocation.get("start") or {}).get("entrypoint") or {}).get("inline")
         if (invocation.get("trigger") != "transcription"
@@ -603,7 +609,7 @@ class Dispatcher:
 
     def dispatch(
         self, invocation: dict, *, trusted_live_meeting: bool = False,
-        trusted_canonical_notes: bool = False,
+        trusted_canonical_notes: bool = False, trusted_meeting_state: bool = False,
     ) -> str:
         """Validate + spawn. Returns the workload id. Raises on a non-conformant envelope (P18).
 
@@ -643,7 +649,7 @@ class Dispatcher:
             raise ModelConfigRefreshError("Could not load your saved model configuration. Retry shortly.")
         env = build_unit_env(self._settings, invocation, unit_id=uid, token=token, memberships=memberships,
                              model_config=model_config, trusted_live_meeting=trusted_live_meeting,
-                             trusted_canonical_notes=trusted_canonical_notes)
+                              trusted_canonical_notes=trusted_canonical_notes, trusted_meeting_state=trusted_meeting_state)
         # WARM DELIVERY (the lost-turn fix). The runtime's create is an IDEMPOTENT TOUCH for a
         # workload that is still starting/running (ADR-0027) — it returns the live status and
         # DISCARDS the spec env, where a chat message's prompt rides. So a message sent while the

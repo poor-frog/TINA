@@ -12,3 +12,6 @@ pilot; the frozen legacy `acts.v1` command shapes remain unchanged.
 epoch fencing for multiple enrolled host clients. Speech playback shapes stay unchanged.
 
 - [`meeting-voice.v1`](meeting-voice.v1/README.md): owner-approved sources, bounded voice questions and ephemeral room status.
+
+`meeting-state.v1` defines independent fast extraction/reasoning jobs, exact cited candidates and
+revision-checked structured live-state publication. Meeting API is canonical; agent workers only propose.
