@@ -1206,7 +1206,7 @@ function MeetingTab({ id, params }: TabProps) {
         </div>
           <div className={pageStyles.actions}>
             {liveAssistMeetingId && liveAssistState?.can_configure && !liveAssistState.enabled && <button type="button" disabled={liveAssistBusy} onClick={() => void enableLiveAssist()}
-              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minHeight: 30, padding: "0 12px", border: "1px solid #43d27a", borderRadius: 7, background: "#43d27a", color: "#102018", fontSize: 12, fontWeight: 700, cursor: liveAssistBusy ? "wait" : "pointer", opacity: liveAssistBusy ? 0.7 : 1 }}>
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minHeight: 30, padding: "0 12px", border: "1px solid var(--accent)", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontSize: 12, fontWeight: 700, cursor: liveAssistBusy ? "wait" : "pointer", opacity: liveAssistBusy ? 0.7 : 1 }}>
               {liveAssistBusy ? "Enabling…" : "Enable live assist"}
             </button>}
             {liveAssistEnabled && <button type="button" className={pageStyles.viewSwitch}
