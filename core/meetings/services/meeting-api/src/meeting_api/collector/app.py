@@ -34,6 +34,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 import json
+import httpx
 
 from fastapi import APIRouter, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -141,6 +142,65 @@ def build_router(
     TraceMiddleware so the conformance harness + this module's tests keep driving shipped code.
     """
     router = APIRouter()
+
+    async def assist_call(meeting_id, request, action, payload=None):
+        user = 0 if action in ('retry', 'policy') and request.headers.get('x-user-id') == '0' else _resolve_user_id(request.headers.get('x-user-id'))
+        if action in ('claim', 'validate', 'result', 'retry', 'policy', 'drain', 'research-context', 'ingest-documents', 'metric-context'):
+            import os
+            import hmac
+            secret = os.environ.get('INTERNAL_API_SECRET', '')
+            if not secret or not hmac.compare_digest(request.headers.get('x-internal-secret', ''), secret):
+                raise HTTPException(403, 'Internal processing capability required')
+        workspaces = {w.strip() for w in request.headers.get('x-user-workspaces', '').split(',') if w.strip()}
+        try:
+            result = await store.live_assist(user, meeting_id, action=action, payload=payload, member_workspaces=workspaces)
+        except CorrectionConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except (RuntimeError, httpx.HTTPError) as exc:
+            raise HTTPException(503, 'Meeting-state authority unavailable; retry shortly') from exc
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(422, 'Invalid meeting-state operation') from exc
+        if result is None and action not in ('claim',):
+            raise HTTPException(404, 'Meeting state not found')
+        return result
+
+    @router.get('/transcripts/by-id/{meeting_id}/state')
+    async def live_state(meeting_id: int, request: Request):
+        raw_offset = request.query_params.get('archive_offset', '0')
+        try:
+            offset = int(raw_offset)
+            if not 0 <= offset <= 50000:
+                raise ValueError()
+            activity_offset = int(request.query_params.get('activity_offset', '0'))
+            if not 0 <= activity_offset <= 50000:
+                raise ValueError()
+        except ValueError:
+            raise HTTPException(422, 'Invalid state history offset') from None
+        return await assist_call(meeting_id, request, 'state', {'archive_offset': offset, 'activity_offset': activity_offset})
+
+    @router.get('/transcripts/by-id/{meeting_id}/state/export')
+    async def export_live_state(meeting_id: int, request: Request):
+        result = await assist_call(meeting_id, request, 'export')
+        return Response(result['markdown'], media_type='text/markdown', headers={'Content-Disposition': 'attachment; filename="meeting-state.md"'})
+
+    @router.post('/transcripts/by-id/{meeting_id}/state/{action}')
+    async def live_state_operation(meeting_id: int, action: str, request: Request):
+        if action not in ('configure', 'edit', 'add', 'vote', 'claim', 'validate', 'result', 'retry', 'policy', 'drain', 'research-context', 'ingest-documents', 'remove-source', 'metric-context'):
+            raise HTTPException(404, 'Unknown operation')
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw) > 512000:
+                raise HTTPException(413, 'Meeting-state payload too large')
+        try:
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise HTTPException(422, 'Expected an object') from None
+        return await assist_call(meeting_id, request, action, payload)
 
     async def foundation_result(meeting_id, x_user_id, replica=None, snapshot=None, expected_revision=None):
         from jsonschema import ValidationError
@@ -757,7 +817,8 @@ def build_router(
             redis, user_id=user_id, meeting_id=row.get("id"), native_id=native_id,
             status=row.get("status"), when=scheduled_at, log_event=log_event,
         )
-        return JSONResponse(status_code=201, content=row)
+        from .projection import project_response_data
+        return JSONResponse(status_code=201, content={**row, 'data': project_response_data(row.get('data'), viewer_is_owner=True)})
 
     # --- PATCH /meetings/{meeting_id} → EDIT a PLANNED meeting by ROW id (title / time / link /
     # workspace / auto_join). Owner-scoped; refused (409) once the row advanced into the bot FSM —

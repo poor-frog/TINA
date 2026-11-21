@@ -371,6 +371,8 @@ async def drain_results(redis, store):
 async def purge_queued(redis, meeting_id):
     """Remove source text held in pending queues when meeting artifacts are deleted."""
     import json
+    from .live_assist_queue import purge
+    await purge(redis, meeting_id)
     for stream, group in ((REQUESTS, 'canonical-agent'), (RESULTS, 'canonical-notes')):
         tail = await redis.xrevrange(stream, count=1)
         if not tail:

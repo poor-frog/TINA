@@ -44,7 +44,7 @@ lives in the cookbook layer *above* both domains, never inside this one. See
 [`workspace.v1`](contracts/workspace.v1) · [`event.v1`](contracts/event.v1) ·
 [`tool.v1`](contracts/tool.v1) · [`task.v1`](contracts/task.v1) ·
 [`invoke.v1`](contracts/invoke.v1) · [`proactive-card.v1`](contracts/proactive-card.v1) ·
-[`tool-approval.v1`](contracts/tool-approval.v1) ·
+[`tool-approval.v1`](contracts/tool-approval.v1) · [`discussion-review.v1`](contracts/discussion-review.v1) ·
 [`meeting-translation.v2`](contracts/meeting-translation.v2/README.md) (current phrase overlay) ·
 [`meeting-translation.v1`](contracts/meeting-translation.v1/README.md) (historical fragment overlay).
 Published schemas are pinned in `contracts.seal.json`; `tool-approval.v1` governs owner-scoped,
@@ -66,6 +66,7 @@ neither raw/canonical transcripts nor workspace Git history.
   ```
 
 ## Status
+- ✅ delivered — manual VI/EN post-meeting [Discussion Review](../../docs/discussion-review.md), with agenda-grounded classification and exact canonical evidence (`discussion-review.v1`)
 - ✅ delivered — one `unit.v1` Dispatcher; every trigger (message/scheduled/event/transcription) → one path
 - ✅ delivered — chat dispatch, warm-session resume, workspace git commit (`workspace.v1`)
 - ✅ delivered — generic event ingress (`event.v1` → `unit.v1`) and tool mechanism (`tool.v1` → `--allowedTools` + injected MCP)

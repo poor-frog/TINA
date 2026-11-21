@@ -44,6 +44,7 @@ COPY core/meetings/contracts/invocation.v1/invocation.schema.json   ./meetings/c
 COPY core/meetings/contracts/lifecycle.v1/lifecycle.schema.json     ./meetings/contracts/lifecycle.v1/lifecycle.schema.json
 COPY core/meetings/contracts/webhook.v1/webhook.schema.json         ./meetings/contracts/webhook.v1/webhook.schema.json
 COPY core/meetings/contracts/stt-foundation.v1/stt-foundation.schema.json ./meetings/contracts/stt-foundation.v1/stt-foundation.schema.json
+COPY core/meetings/contracts/meeting-state.v1/meeting-state.schema.json ./meetings/contracts/meeting-state.v1/meeting-state.schema.json
 COPY core/runtime/contracts/runtime.v1/runtime.schema.json          ./runtime/contracts/runtime.v1/runtime.schema.json
 COPY core/runtime/contracts/schedule.v1/schedule.schema.json        ./runtime/contracts/schedule.v1/schedule.schema.json
 

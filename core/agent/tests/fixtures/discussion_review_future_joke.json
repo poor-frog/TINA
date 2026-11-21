@@ -1,0 +1,10 @@
+{
+  "agenda": "Chọn thiết kế retry cho payment API.",
+  "canonical": {
+    "revision": 1,
+    "segments": [
+      {"segment_id":"ambiguous","revision":0,"speaker_name":"Lan","start_ms":0,"end_ms":8000,"text":"Thiết kế của anh đúng là hoàn hảo quá. Không còn gì để nói."},
+      {"segment_id":"later","revision":0,"speaker_name":"Lan","start_ms":70000,"end_ms":78000,"text":"Câu trước tôi nói mỉa mai đấy, retry vô hạn sẽ làm hệ thống quá tải. Tôi đề xuất giới hạn ba lần."}
+    ]
+  }
+}

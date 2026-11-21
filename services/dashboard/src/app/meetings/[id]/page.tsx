@@ -49,6 +49,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { TranscriptViewer } from "@/components/transcript/transcript-viewer";
 import { TranscriptReview } from "@/components/transcript/transcript-review";
 import { MeetingMemory } from "@/components/transcript/meeting-memory";
+import { DiscussionReview } from "@/components/transcript/discussion-review";
 import { SpeakerRegistry } from "@/components/transcript/speaker-registry";
 import { PlatformIcon } from "@/components/ui/platform-icon";
 import { BotStatusIndicator, BotFailedIndicator } from "@/components/meetings/bot-status-indicator";
@@ -1870,7 +1871,7 @@ export default function MeetingDetailPage() {
               wsError={wsError}
               wsReconnectAttempts={reconnectAttempts}
               headerActions={<div className="flex items-center gap-2"><MeetingMemory key={`memory-${currentMeeting.id}`} meetingId={currentMeeting.id} /><SpeakerRegistry meetingId={currentMeeting.id} onSaved={() => { fetchTranscripts(currentMeeting.platform, currentMeeting.platform_specific_id, String(currentMeeting.id), { silent: true }); }} /><TranscriptReview key={currentMeeting.id} meetingId={currentMeeting.id} onSaved={() => { fetchTranscripts(currentMeeting.platform, currentMeeting.platform_specific_id, String(currentMeeting.id), { silent: true }); }} /><DocsLink href="/docs/cookbook/get-transcripts" /></div>}
-              topBarContent={recordingTopBar}
+              topBarContent={currentMeeting.status === "completed" ? <>{recordingTopBar}<DiscussionReview key={`discussion-${currentMeeting.id}`} meetingId={String(currentMeeting.id)} /></> : recordingTopBar}
               playbackTime={playbackTime}
               playbackAbsoluteTime={playbackAbsoluteTime}
               isPlaybackActive={isPlaybackActive}
