@@ -1,0 +1,21 @@
+{
+  "agenda": "Chọn chiến lược retry cho payment API, làm rõ idempotency và thống nhất tiêu chí hoặc thử nghiệm tiếp theo.",
+  "canonical": {
+    "revision": 1,
+    "segments": [
+      {"segment_id":"demo-0","revision":0,"speaker_name":"Lan","start_ms":0,"end_ms":8000,"text":"Mục tiêu là chọn retry cho payment API. Tôi chọn retry cố định ba lần."},
+      {"segment_id":"demo-1","revision":0,"speaker_name":"Minh","start_ms":12000,"end_ms":20000,"text":"Em không đồng ý vì request chưa có idempotency key. Em đề xuất exponential backoff để giảm double charge."},
+      {"segment_id":"demo-2","revision":0,"speaker_name":"Lan","start_ms":70000,"end_ms":78000,"text":"Cuối tuần đội bóng nào thắng? Chúng ta bàn chuyện bóng đá và đặt vé du lịch nhé."},
+      {"segment_id":"demo-3","revision":0,"speaker_name":"Huy","start_ms":82000,"end_ms":90000,"text":"Tôi muốn nói về trận bóng và khách sạn, không liên quan payment API."},
+      {"segment_id":"demo-4","revision":0,"speaker_name":"Huy","start_ms":140000,"end_ms":148000,"text":"Minh ngu như vậy mà cũng bày đặt thiết kế backend. Im đi, đừng phát biểu nữa."},
+      {"segment_id":"demo-5","revision":0,"speaker_name":"Minh","start_ms":152000,"end_ms":160000,"text":"Đừng công kích cá nhân. Hãy phản biện thiết kế thay vì xúc phạm tôi."},
+      {"segment_id":"demo-6","revision":0,"speaker_name":"Lan","start_ms":210000,"end_ms":218000,"text":"Tôi nhắc lại y nguyên quan điểm ban đầu: retry cố định ba lần. Tôi không có dữ liệu mới hay bước tiếp theo."},
+      {"segment_id":"demo-7","revision":0,"speaker_name":"Minh","start_ms":222000,"end_ms":230000,"text":"Tôi cũng chỉ lặp lại quan điểm cũ: exponential backoff. Chưa có tiêu chí mới, quyết định hay thử nghiệm nào được chốt."}
+    ]
+  },
+  "checks": [
+    {"window":"w1","task":"relevance","label":"off_scope"},
+    {"window":"w2","task":"interaction","label":"personal_hostility"},
+    {"window":"w3","task":"progress","label":"repeating_unresolved_positions"}
+  ]
+}

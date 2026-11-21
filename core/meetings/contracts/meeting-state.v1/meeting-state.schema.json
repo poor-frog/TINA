@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:meeting-state.v1",
+  "$defs": {
+    "StateView": {
+      "type": "object", "required": ["version", "configured", "enabled", "can_configure", "readonly"],
+      "properties": {
+        "version": {"const": "meeting-state.v1"}, "configured": {"type": "boolean"}, "enabled": {"type": "boolean"},
+        "can_configure": {"type": "boolean"}, "readonly": {"type": "boolean"}, "revision": {"type": "integer", "minimum": 0},
+        "organization_policy": {"type": "boolean"}, "research_available": {"type": "boolean"}, "source_notice": {"type": "boolean"},
+        "participants": {"type": "array", "items": {"type": "object", "required": ["name", "status"], "properties": {"name": {"type": "string"}, "status": {"type": "string"}}, "additionalProperties": false}},
+        "goal": {"type": "object"}, "config": {"type": "object"}, "summaries": {"type": "object"}, "freshness": {"type": "object"},
+        "final": {"enum": ["pending", "incomplete", "complete"]}, "wiki": {"enum": ["pending", "failed", "published", "conflict", "export_only"]},
+        "wiki_ref": {"type": "object", "required": ["workspace_id", "path"], "properties": {"workspace_id": {"type": "string"}, "path": {"type": "string"}}, "additionalProperties": false},
+        "active_topic": {"type": ["string", "null"]}, "links": {"type": "array"}, "proposals": {"type": "array"}, "activity": {"type": "array"},
+        "archive_items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/StateItem"}},
+        "archive_offset": {"type": "integer", "minimum": 0}, "archive_count": {"type": "integer", "minimum": 0}, "archive_more": {"type": "boolean"},
+        "activity_offset": {"type": "integer", "minimum": 0}, "activity_count": {"type": "integer", "minimum": 0}, "activity_more": {"type": "boolean"},
+        "items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/StateItem"}}
+      }, "additionalProperties": false
+    },
+    "StateItem": {
+      "type": "object", "required": ["id", "type", "text", "status", "revision", "human", "provisional", "stale", "evidence"], "properties": {
+          "id": {"type": "string"}, "type": {"type": "string"}, "text": {"type": "string", "maxLength": 3000}, "status": {"type": "string"},
+          "revision": {"type": "integer"}, "human": {"type": "boolean"}, "provisional": {"type": "boolean"}, "stale": {"type": "boolean"},
+          "last_editor": {"type": "string"}, "manual_fields": {"type": "array", "items": {"type": "string"}}, "provenance": {"type": "object"}, "details": {"type": "object"}, "evidence": {"type": "array"}
+        }, "additionalProperties": false
+    },
+    "SourceCheck": {
+      "type": "object", "required": ["workspace_id", "documents", "viewers"],
+      "properties": {
+        "workspace_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+        "meeting_id": {"type": "integer", "minimum": 1},
+        "viewers": {"type": "array", "maxItems": 10000, "items": {"type": "integer", "minimum": 1}},
+        "documents": {"type": "array", "maxItems": 37, "items": {"type": "object", "required": ["document_id", "path", "sha256", "workspace_id"], "properties": {
+          "document_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "path": {"type": "string", "maxLength": 500},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "workspace_id": {"type": ["string", "null"]}, "manual_removed": {"type": ["boolean", "null"]}
+        }, "additionalProperties": false}}
+      }, "additionalProperties": false
+    },
+    "Request": {
+      "type": "object", "required": ["role", "generation", "epoch", "fingerprint", "attempts", "lease_until", "queued_at", "user_id", "meeting_id"],
+      "properties": {
+        "role": {"enum": ["fast", "reason", "publish"]}, "generation": {"type": "string", "minLength": 1},
+        "epoch": {"type": "integer", "minimum": 0}, "fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "status": {"const": "running"}, "attempts": {"type": "integer", "minimum": 1, "maximum": 3}, "retry_wait_ms": {"type": "number", "minimum": 0},
+        "lease_until": {"type": "number"}, "queued_at": {"type": "number"}, "dispatched_at": {"type": "number"}, "batch_started_at": {"type": ["number", "null"]},
+        "user_id": {"type": "integer", "minimum": 1}, "meeting_id": {"type": "integer", "minimum": 1},
+        "platform": {"type": "string"}, "proof": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "model": {"type": "string"}, "segments": {"type": "array", "maxItems": 2000, "items": {"type": "object"}},
+        "execution_key": {"type": "string", "pattern": "^meeting_state_lease:[1-9][0-9]*:(fast|reason):[0-9a-f-]{36}$"},
+        "context": {"type": "object"}, "config": {"type": "object"}, "policy": {"type": "object"},
+        "item_revisions": {"type": "object", "additionalProperties": {"type": "integer"}},
+        "goal_revision": {"type": "integer"},
+        "summary_revisions": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+        "markdown": {"type": "string"}, "workspace_id": {"type": ["string", "null"]},
+        "audience_stamp": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "publication_revision": {"type": "integer", "minimum": 0},
+        "source_keys": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+      }, "additionalProperties": false
+    },
+    "Result": {
+      "type": "object", "required": ["role", "generation", "user_id", "meeting_id"],
+      "properties": {
+        "role": {"enum": ["fast", "reason"]}, "generation": {"type": "string"},
+        "user_id": {"type": "integer", "minimum": 1}, "meeting_id": {"type": "integer", "minimum": 1},
+        "error": {"type": "string", "maxLength": 160}, "output": {"type": "object"},
+        "heartbeat": {"const": true},
+        "provenance": {"type": "object"}, "timing": {"type": "object"}
+      }, "additionalProperties": false,
+      "oneOf": [{"required": ["error"]}, {"required": ["output"]}, {"required": ["heartbeat"]}]
+    },
+    "Evidence": {"oneOf": [{"$ref": "#/$defs/TranscriptEvidence"}, {"$ref": "#/$defs/DocumentEvidence"}]},
+    "DocumentEvidence": {
+      "type": "object", "required": ["document_id", "sha256", "quote"],
+      "properties": {"document_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "quote": {"type": "string", "minLength": 1, "maxLength": 1000}},
+      "additionalProperties": false
+    },
+    "TranscriptEvidence": {
+      "type": "object", "required": ["segment_id", "revision", "quote"],
+      "properties": {
+        "segment_id": {"type": "string", "minLength": 1}, "revision": {"type": "integer", "minimum": 0},
+        "speaker_revision": {"type": "integer", "minimum": 0}, "speaker_name": {"type": "string"},
+        "start_ms": {"type": "number"}, "quote": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }, "additionalProperties": false
+    },
+    "Candidate": {
+      "type": "object", "required": ["type", "text", "evidence"],
+      "properties": {
+        "key": {"type": "string"},
+        "type": {"enum": ["question", "claim", "topic", "agenda", "task", "correction", "answer", "commitment", "agreement", "decision"]},
+        "text": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "details": {"type": "object"},
+        "evidence": {"type": "array", "minItems": 1, "maxItems": 6, "items": {"$ref": "#/$defs/Evidence"}}
+      }, "additionalProperties": false
+    },
+    "FastOutput": {
+      "type": "object", "required": ["items"],
+      "properties": {
+        "items": {"type": "array", "maxItems": 40, "items": {"$ref": "#/$defs/Candidate"}},
+        "links": {"type": "array", "maxItems": 30, "items": {"type": "object", "required": ["from", "to", "evidence"], "properties": {
+          "from": {"type": "string"}, "to": {"type": "string"}, "rationale": {"type": "string", "maxLength": 500}, "evidence": {"type": "array", "maxItems": 6, "items": {"$ref": "#/$defs/Evidence"}}
+        }, "additionalProperties": false}}, "explicit_transition": {"type": "boolean"}
+      }, "additionalProperties": false
+    },
+    "ReasonOutput": {
+      "type": "object", "required": ["patches", "summaries"],
+      "properties": {
+        "patches": {"type": "array", "maxItems": 40, "items": {"type": "object", "required": ["id", "evidence"], "properties": {
+          "id": {"type": "string"}, "text": {"type": "string", "minLength": 1, "maxLength": 2000},
+          "type": {"type": "string"}, "status": {"type": "string"}, "withdrawn": {"type": "boolean"}, "details": {"type": "object"},
+          "evidence": {"type": "array", "minItems": 1, "maxItems": 6, "items": {"$ref": "#/$defs/Evidence"}}
+        }, "additionalProperties": false}},
+        "summaries": {"type": "object", "required": ["current", "meeting"], "properties": {
+          "current": {"type": "string", "maxLength": 8000}, "meeting": {"type": "string", "maxLength": 8000}
+        }, "additionalProperties": false},
+        "active_topic": {"type": ["string", "null"]},
+        "goal": {"type": "object", "required": ["text", "evidence"], "properties": {"text": {"type": "string", "minLength": 1, "maxLength": 3000},
+          "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Evidence"}}}, "additionalProperties": false},
+        "progress": {"type": "array", "items": {"type": "object", "required": ["topic_id", "evidence"], "properties": {
+          "topic_id": {"type": "string"}, "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/Evidence"}}
+        }, "additionalProperties": false}},
+        "suggestions": {"type": "array", "maxItems": 5, "items": {"type": "object", "required": ["topic_id", "kind", "text", "evidence"], "properties": {
+          "topic_id": {"type": "string"}, "kind": {"enum": ["stall", "research", "angle"]}, "text": {"type": "string", "minLength": 1, "maxLength": 2000},
+          "evidence": {"type": "array", "minItems": 1, "maxItems": 6, "items": {"$ref": "#/$defs/Evidence"}}
+        }, "additionalProperties": false}},
+        "relations": {"type": "array", "maxItems": 30, "items": {"type": "object", "required": ["from", "to", "kind", "evidence"], "properties": {
+          "from": {"type": "string"}, "to": {"type": "string"}, "kind": {"enum": ["supports", "contradicts", "answers", "clarifies", "tests", "depends_on", "related"]},
+          "evidence": {"type": "array", "minItems": 1, "maxItems": 6, "items": {"$ref": "#/$defs/Evidence"}}
+        }, "additionalProperties": false}}
+      }, "additionalProperties": false
+    }
+  }
+}

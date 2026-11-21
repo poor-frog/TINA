@@ -18,7 +18,7 @@ import subprocess
 from typing import Callable, Optional
 
 from llm.errors import LLMAuthError, LLMError, looks_like_auth_failure
-from llm.ports import CompletionResult, scrubbed_git_env
+from llm.ports import CompletionResult, scrubbed_git_env, schema_system
 
 # A blocking CLI runner: argv, cwd, timeout → (returncode, stdout+stderr text). Injected for tests.
 CliRun = Callable[[list[str], str, float], tuple[int, str]]
@@ -54,7 +54,8 @@ class ClaudeCliCompletion:
         self._cwd = cwd or "/tmp"
 
     def complete(self, prompt: str, *, system: Optional[str] = None,
-                 model: Optional[str] = None) -> CompletionResult:
+                  model: Optional[str] = None, response_schema: Optional[dict] = None) -> CompletionResult:
+        system = schema_system(system, response_schema)
         target = (model or "").strip() or self._model  # empty ⇒ subscription default (no --model)
         argv = build_argv(prompt, system=system, model=target or None)
         try:

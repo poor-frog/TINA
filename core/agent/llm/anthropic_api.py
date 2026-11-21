@@ -17,8 +17,8 @@ from typing import Optional
 
 import httpx
 
-from llm.errors import LLMAuthError, LLMConfigError, LLMError
-from llm.ports import CompletionResult
+from llm.errors import LLMAuthError, LLMConfigError, LLMError, LLMResponseError
+from llm.ports import CompletionResult, schema_system
 
 _DEFAULT_BASE = "https://api.anthropic.com"
 _API_VERSION = "2023-06-01"
@@ -58,7 +58,8 @@ class AnthropicCompletion:
         self._client = httpx.Client(timeout=timeout, transport=transport)
 
     def complete(self, prompt: str, *, system: Optional[str] = None,
-                 model: Optional[str] = None) -> CompletionResult:
+                  model: Optional[str] = None, response_schema: Optional[dict] = None) -> CompletionResult:
+        system = schema_system(system, response_schema)
         target = (model or "").strip() or self._model
         if not target:
             raise LLMConfigError(
@@ -86,8 +87,15 @@ class AnthropicCompletion:
         if r.status_code >= 400:
             raise LLMError(f"{r.status_code} from {self._base}: {r.text[:300]}", status_code=r.status_code)
         try:
-            blocks = r.json().get("content") or []
+            body = r.json()
+            blocks = body['content']
+            if not isinstance(blocks, list):
+                raise TypeError('Expected content blocks')
             text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
-        except (ValueError, AttributeError, TypeError) as exc:
-            raise LLMError(f"malformed completion payload from {self._base}: {exc}") from exc
-        return CompletionResult(text=text, model=target)
+        except (ValueError, AttributeError, KeyError, TypeError) as exc:
+            raise LLMResponseError('Malformed completion payload') from exc
+        usage = body.get('usage') or {}
+        usage = usage if isinstance(usage, dict) else {}
+        count = lambda v: v if type(v) is int and v >= 0 else None
+        return CompletionResult(text=text, model=target, usage={'input_tokens': count(usage.get('input_tokens')),
+            'output_tokens': count(usage.get('output_tokens')), 'cache_read_tokens': count(usage.get('cache_read_input_tokens'))})

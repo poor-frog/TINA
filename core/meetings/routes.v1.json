@@ -364,6 +364,27 @@
     },
     {
       "method": "GET",
+      "path": "/transcripts/by-id/{meeting_id}/state",
+      "scopes": [
+        "tx"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/transcripts/by-id/{meeting_id}/state/export",
+      "scopes": [
+        "tx"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/transcripts/by-id/{meeting_id}/state/{action}",
+      "scopes": [
+        "tx"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/transcripts/by-id/{meeting_id}/alignment",
       "scopes": [
         "tx"

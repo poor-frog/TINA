@@ -47,6 +47,7 @@ class InMemoryTranscriptStore:
         # meeting_id -> {user_id, platform, native_meeting_id, status, start_time, end_time,
         #                data, segments: {segment_id: seg}}
         self._meetings: dict[int, dict] = {}
+        self.workspace_rosters: dict[str, list[int]] = {}
         self._next_id = 1
         # Optional live-segment redis (fakeredis in tests) — mirrors the prod adapter's split
         # between the in-flight hash (redis) and the durable rows (the dict standing in for PG).
@@ -240,6 +241,62 @@ class InMemoryTranscriptStore:
                 'windows': [{k: v for k, v in job.items() if k not in ('generation', 'revoked_generation', 'lease_until', 'inflight_until')}
                             for job in data.get('canonical_notes', {}).get('windows', {}).values()],
                 'view': next((v for v in data.get('processed', {}).get('views', []) if v['id'] == processing.VIEW_ID), None)}
+
+    async def live_assist(self, user_id, meeting_id, *, action='state', payload=None, member_workspaces=None):
+        from . import live_assist as assist
+        row = self._meetings.get(meeting_id)
+        if not row or row['data'].get('artifact_deletion'):
+            return None
+        data, owner = row['data'], row['user_id']
+        if action in ('retry', 'policy') and user_id == 0:
+            user_id = owner
+        if not (user_id == owner or user_id in data.get('transcript_viewers', [])
+                or (member_workspaces and data.get('workspace_id') in member_workspaces)):
+            return None
+        if action in ('claim', 'validate', 'result', 'retry', 'policy', 'drain') and user_id != owner:
+            raise PermissionError('Owner-scoped processing required')
+        state = data.get('live_assist', {})
+        if action == 'metric-context':
+            if not state or not assist.permitted(state, user_id, 'readers'):
+                raise PermissionError('Metric context is not authorized')
+            return {'revision': state['revision']}
+        if action == 'research-context':
+            if not state.get('enabled') or row['status'] in ('completed', 'failed'):
+                raise assist.CorrectionConflict('Enable an active/draft assistant before researching')
+            if not assist.permitted(state, user_id, 'readers'):
+                raise PermissionError('Research restricted by policy')
+            return {'workspace_id': data.get('workspace_id'), 'viewers': sorted(set([owner, *data.get('transcript_viewers', []), user_id])),
+                    'epoch': state['epoch'], 'audience': assist.audience_stamp(data, owner)}
+        if action == 'ingest-documents' and ((payload or {}).get('epoch') != state.get('epoch')
+                or (payload or {}).get('audience') != assist.audience_stamp(data, owner)):
+            raise assist.CorrectionConflict('Research context changed')
+        projection = await self.get_meeting_memory(owner, meeting_id)
+        result = assist.transition(data, projection['canonical'], row['status'], action, payload or {}, user_id, owner,
+                                   sorted(set([owner, user_id, *data.get('transcript_viewers', []), *self.workspace_rosters.get(data.get('workspace_id'), [])])))
+        events = data.get('live_assist', {}).pop('_events', [])
+        row.setdefault('_assist_events', []).extend(events)
+        if action == 'state' and result:
+            all_events = row['_assist_events']
+            offset = max(0, int((payload or {}).get('activity_offset', 0)))
+            end = max(0, len(all_events) - offset)
+            page = all_events[max(0, end-100):end]
+            result['activity'] = [assist.public_event(e, data.get('live_assist')) for e in page]
+            result.update(activity_offset=offset, activity_count=len(all_events), activity_more=max(0, end-100) > 0)
+        if isinstance(result, dict) and 'configured' in result:
+            viewers = set([owner, *data.get('transcript_viewers', [])])
+            roster = set(self.workspace_rosters.get(data.get('workspace_id'), []))
+            result['research_available'] = bool(data.get('workspace_id') and data.get('live_assist', {}).get('enabled') and row['status'] not in ('completed', 'failed') and viewers <= roster)
+            if data.get('live_assist', {}).get('wiki') == 'published' and user_id in self.workspace_rosters.get(data.get('workspace_id'), []):
+                result['wiki_ref'] = {'workspace_id': data['workspace_id'], 'path': f'wiki/meetings/{meeting_id}/state.md'}
+        if action == 'claim' and result:
+            result.update(user_id=owner, meeting_id=meeting_id, platform=row['platform'])
+            if result['role'] == 'publish':
+                result['workspace_id'] = data.get('workspace_id')
+        return result
+
+    async def assist_candidates(self, after=0, limit=20):
+        return [{'meeting_id': mid, 'user_id': row['user_id'], 'status': row['status']} for mid, row in sorted(self._meetings.items())
+                if mid > after and row['data'].get('live_assist', {}).get('enabled') and not row['data'].get('artifact_deletion')][:limit]
 
     async def processing_candidates(self, after=0, limit=10):
         return [{'meeting_id': mid, 'user_id': row['user_id']} for mid, row in sorted(self._meetings.items())
@@ -669,7 +726,8 @@ class InMemoryTranscriptStore:
                                      auto_join_error=None):
         if self._dup_non_terminal(user_id, platform, native_meeting_id):
             return {"error": "duplicate"}
-        data: dict = {"auto_join": bool(auto_join)}
+        from .live_assist import fresh
+        data: dict = {"auto_join": bool(auto_join), 'live_assist': fresh()}
         if title:
             data["title"] = title
         if scheduled_at:
@@ -965,7 +1023,8 @@ class InMemoryTranscriptStore:
             return False
         m["segments"] = {}
         data = dict(m.get("data") or {})
-        for key in ("canonical_transcript", "meeting_memory", "canonical_notes", "stt_replicas", "stt_foundation", "stt_instance_id", "recordings", "processed", "notes", "share_grants", "transcript_viewers", "transcript_refinement", "transcript_diarization", "transcript_alignment", "transcript_revision_sequences", "transcript_outbox", "speaker_registry", "voice_replies"):
+        m.pop('_assist_events', None)
+        for key in ("live_assist", "canonical_transcript", "meeting_memory", "canonical_notes", "stt_replicas", "stt_foundation", "stt_instance_id", "recordings", "processed", "notes", "share_grants", "transcript_viewers", "transcript_refinement", "transcript_diarization", "transcript_alignment", "transcript_revision_sequences", "transcript_outbox", "speaker_registry", "voice_replies"):
             data.pop(key, None)
         metadata = dict(data.get("metadata") or {})
         data.pop("summary", None)

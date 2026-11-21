@@ -396,6 +396,8 @@ services:
       - TINA_AGENT_REACH_URL=${TINA_AGENT_REACH_URL-http://agent-reach:8080}
       - TINA_AGENT_MODEL=${TINA_AGENT_MODEL:-}
       - TINA_MEETING_MODEL=${TINA_MEETING_MODEL:-}
+      - TINA_STATE_FAST_MODEL=${TINA_STATE_FAST_MODEL:-}
+      - TINA_STATE_REASON_MODEL=${TINA_STATE_REASON_MODEL:-}
       - TINA_OPENAI_AUTH_DIR=/var/lib/tina/openai-auth
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL come from env_file (below), NOT environment: — an
@@ -504,6 +506,7 @@ services:
       # Discord voice sessions are served by the opt-in `discord-connector` profile service.
       # Routing key: workload profile "discord-bot" on create, `dc-` id prefix on stop/get.
       - DISCORD_CONNECTOR_URL=${DISCORD_CONNECTOR_URL:-http://discord-connector:8091}
+      - MEETING_AGENT_API_URL=http://agent-api:8100
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
       # The bot's display name in the meeting. The terminal omits bot_name on join, so this is what
       # participants see; set DEFAULT_BOT_NAME in .env and restart meeting-api (no terminal rebuild).

@@ -33,7 +33,7 @@ _DEFAULT_ENABLED = frozenset({"meeting.completed"})
 
 # Internal meeting.data keys stripped before delivery (parent's _INTERNAL_DATA_KEYS).
 _INTERNAL_DATA_KEYS = frozenset({
-    "canonical_transcript", "meeting_memory", "canonical_notes",
+    "canonical_transcript", "meeting_memory", "canonical_notes", "live_assist",
     "speaker_registry",
     "transcript_outbox",
     "transcript_refinement", "transcript_diarization",

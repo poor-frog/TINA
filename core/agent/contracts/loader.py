@@ -27,6 +27,19 @@ _ROUTINE_SCHEMA = Path("agent/contracts/routine.v1/routine.schema.json")
 _EVENT_SCHEMA = Path("agent/contracts/event.v1/event.schema.json")
 _TOOL_SCHEMA = Path("agent/contracts/tool.v1/tool.schema.json")
 _TOOL_APPROVAL_SCHEMA = Path("agent/contracts/tool-approval.v1/tool-approval.schema.json")
+_MEETING_STATE_SCHEMA = Path('meetings/contracts/meeting-state.v1/meeting-state.schema.json')
+
+
+def validate_meeting_state_output(value, role):
+    _validator(_MEETING_STATE_SCHEMA, 'FastOutput' if role == 'fast' else 'ReasonOutput').validate(value)
+
+
+def validate_meeting_state_job(value):
+    _validator(_MEETING_STATE_SCHEMA, 'Request').validate(value)
+
+
+def validate_meeting_state_sources(value):
+    _validator(_MEETING_STATE_SCHEMA, 'SourceCheck').validate(value)
 
 
 def _repo_root() -> Path:

@@ -8,6 +8,11 @@
 .phase { display: inline-flex; align-items: center; flex: none; padding: var(--space-1) var(--space-2); border-radius: var(--radius-small); color: var(--violet); background: var(--violetbg); font-size: var(--ui-type-meta); font-weight: 600; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .actions > button, .actions > span > button, .actions > div > button { min-height: 36px; }
+.view { height: 100%; min-height: 0; }
+.view[hidden] { display: none; }
+.viewSwitch { display: inline-flex; align-items: center; gap: 6px; padding: 0 var(--space-3); border: 1px solid var(--line2); border-radius: 7px; background: transparent; color: var(--t2); font: 600 var(--ui-type-meta)/1.4 var(--sans); cursor: pointer; }
+.viewSwitch svg { color: var(--t3); }
+.viewSwitch:hover { background: var(--sidebar); color: var(--t1); }
 .identity button:focus-visible, .actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .identity button:active, .actions button:active { background: var(--panel2); }
 .metadata { grid-column: 1; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); padding-left: 40px; color: var(--t3); font-size: var(--ui-type-meta); line-height: 1.5; }

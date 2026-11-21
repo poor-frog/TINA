@@ -1,0 +1,8 @@
+{
+  "windows": [{
+    "id": "w0",
+    "relevance": { "label": "relevant", "reason": "Trao đổi trực tiếp về retry của payment service.", "source_ids": ["s0"] },
+    "interaction": { "labels": ["constructive_disagreement"], "reason": "Phản biện phương án bằng rủi ro double charge.", "source_ids": ["s0"] },
+    "progress": { "label": "exploring", "reason": "Đang làm rõ rủi ro trước khi chọn phương án.", "source_ids": ["s0"] }
+  }]
+}

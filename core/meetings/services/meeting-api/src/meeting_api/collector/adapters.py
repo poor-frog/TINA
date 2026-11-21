@@ -652,6 +652,247 @@ class SqlAlchemyTranscriptStore:
                 await db.commit()
             return result
 
+    async def live_assist(self, user_id, meeting_id, *, action='state', payload=None, member_workspaces=None):
+        import copy
+        import time
+        import json
+        from datetime import datetime, timezone, timedelta
+        from sqlalchemy import select, update, or_, func
+        from .models import Meeting, Transcription
+        from ..sessions.models import MeetingStateEvent
+        from .memory import persist
+        from . import live_assist as assist
+        roster, checked_documents = [], None
+        timings = {}
+        started = time.perf_counter()
+        role = (payload or {}).get('role')
+        roster_checked = (action in ('vote', 'state', 'research-context')
+            or (action == 'configure' and 'approvers' in (payload or {}))
+            or (action == 'claim' and role == 'publish')
+            or (action == 'validate' and role == 'publish')
+            or (action == 'result' and ((role == 'reason' and not (payload or {}).get('error')) or role == 'publish')))
+        async with self._session_factory() as preflight:
+            row = (await preflight.execute(select(Meeting).where(Meeting.id == meeting_id))).scalars().first()
+            if not row or (row.data or {}).get('artifact_deletion'):
+                return None
+            current = copy.deepcopy(row.data or {})
+            internal_operator = user_id == 0 and action in ('retry', 'policy')
+            if not (internal_operator or user_id == row.user_id or user_id in current.get('transcript_viewers', [])
+                    or (member_workspaces and current.get('workspace_id') in member_workspaces)):
+                return None
+            roster_workspace = current.get('workspace_id')
+            if action in ('state', 'research-context') and roster_workspace:
+                roster_checked = True
+            preflight_owner = row.user_id
+            descriptors = assist.document_descriptors(current.get('live_assist', {}))
+            viewers = sorted(set([row.user_id, *current.get('transcript_viewers', []), user_id]))
+        timings['state_preflight_query'] = (time.perf_counter()-started)*1000
+        # All network/file authority work happens after the preflight session closes.
+        from .live_assist_roster import fetch_roster, fetch_sources
+        started = time.perf_counter()
+        incoming = (payload or {}).get('documents', []) if action == 'ingest-documents' else []
+        if not isinstance(incoming, list) or len(incoming) > 5 or any(not isinstance(d, dict) for d in incoming):
+            raise ValueError('Invalid incoming document sources')
+        if (descriptors or incoming) and roster_workspace:
+            checked_documents, roster = await fetch_sources(roster_workspace, descriptors + incoming, viewers, meeting_id)
+        elif descriptors and not roster_workspace:
+            checked_documents, roster = set(), []
+        elif incoming and not roster_workspace:
+            raise assist.CorrectionConflict('Bind a shared workspace before document research')
+        elif roster_checked:
+            roster = await fetch_roster(roster_workspace)
+        audience = assist.audience_stamp(current, preflight_owner, roster)
+        timings['authority_check'] = (time.perf_counter()-started)*1000
+        async with self._session_factory() as db:
+            started = time.perf_counter()
+            meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id).with_for_update())).scalars().first()
+            timings['state_lock_query'] = (time.perf_counter()-started)*1000
+            if not meeting or (meeting.data or {}).get('artifact_deletion'):
+                return None
+            data = copy.deepcopy(meeting.data or {})
+            owner = meeting.user_id
+            prior_jobs = copy.deepcopy(data.get('live_assist', {}).get('jobs', {}))
+            if (audience != assist.audience_stamp(data, owner, roster) or descriptors != assist.document_descriptors(data.get('live_assist', {}))):
+                raise assist.CorrectionConflict('Meeting audience or sources changed; reload before retrying')
+            if action in ('retry', 'policy') and user_id == 0:
+                user_id = owner  # internal operator route; HTTP boundary requires the internal secret
+            if not (user_id == owner or user_id in data.get('transcript_viewers', [])
+                    or (member_workspaces and data.get('workspace_id') in member_workspaces)):
+                return None
+            if action in ('claim', 'validate', 'result', 'retry', 'policy', 'drain') and user_id != owner:
+                raise PermissionError('Owner-scoped processing required')
+            state = data.get('live_assist', {})
+            if checked_documents is not None:
+                for key, document in state.get('documents', {}).items():
+                    document['active'] = key in checked_documents and not document.get('manual_removed')
+            if action == 'metric-context':
+                if not state or not assist.permitted(state, user_id, 'readers'):
+                    raise PermissionError('Metric context is not authorized')
+                return {'revision': state['revision']}
+            if action == 'research-context':
+                if not state.get('enabled') or meeting.status in ('completed', 'failed'):
+                    raise assist.CorrectionConflict('Enable an active/draft assistant before researching')
+                if not assist.permitted(state, user_id, 'readers'):
+                    raise PermissionError('Research restricted by organization policy')
+                return {'workspace_id': data.get('workspace_id'), 'viewers': viewers, 'epoch': state['epoch'], 'audience': audience}
+            if action == 'ingest-documents':
+                if ((payload or {}).get('epoch') != state.get('epoch') or (payload or {}).get('audience') != audience
+                        or any(d.get('workspace_id') != data.get('workspace_id') or d.get('document_id') not in (checked_documents or []) for d in incoming)):
+                    raise assist.CorrectionConflict('Research sources or audience changed; run research again')
+            started = time.perf_counter()
+            rows = (await db.execute(select(Transcription).where(Transcription.meeting_id == meeting_id).limit(2001))).scalars().all()
+            segments = [{'segment_id': r.segment_id, 'start': r.start_time, 'end': r.end_time, 'text': r.text,
+                         'speaker': r.speaker, 'session_uid': r.session_uid} for r in rows]
+            canon = persist({'id': meeting.id, 'status': meeting.status, 'platform': meeting.platform,
+                             'native_meeting_id': meeting.platform_specific_id}, data, segments)['canonical']
+            if data.get('live_assist'):
+                data['live_assist'].setdefault('metadata', {})['speaker_status'] = {
+                    sid: entry.get('status', 'unknown') for sid, entry in data.get('speaker_registry', {}).get('speakers', {}).items()}
+                planned = set()
+                for attendee in data.get('attendees') or []:
+                    if isinstance(attendee, dict):
+                        name = attendee.get('name') or attendee.get('display_name') or attendee.get('email')
+                    else:
+                        name = attendee if isinstance(attendee, str) else None
+                    if isinstance(name, str) and name.strip():
+                        planned.add(name.strip())
+                data['live_assist']['metadata']['planned_participants'] = sorted(planned)
+                if meeting.start_time:
+                    start = meeting.start_time
+                    data['live_assist']['metadata']['meeting_started_at'] = (start.replace(tzinfo=timezone.utc) if start.tzinfo is None else start).isoformat()
+            timings['canonical_projection'] = (time.perf_counter()-started)*1000
+            electorate = sorted(set([owner, *data.get('transcript_viewers', []), *roster]))
+            if data.get('live_assist') and meeting.status in ('completed', 'failed') and meeting.end_time:
+                ended = meeting.end_time
+                data['live_assist']['ended_at'] = (ended.replace(tzinfo=timezone.utc) if ended.tzinfo is None else ended).timestamp()
+            if user_id not in electorate:
+                electorate.append(user_id)  # authenticated workspace member, authorized above
+            started = time.perf_counter()
+            result = assist.transition(data, canon, meeting.status, action, payload or {}, user_id, owner, electorate)
+            timings['state_transition'] = (time.perf_counter()-started)*1000
+            state = data.get('live_assist', {})
+            if action == 'claim' and result and result.get('role') == 'publish':
+                publication = {'audience_stamp': audience, 'publication_revision': state['revision'],
+                               'source_keys': {key: doc['sha256'] for key, doc in state['documents'].items() if doc.get('active')}}
+                result.update(publication, workspace_id=data.get('workspace_id'))
+                state['jobs']['publish'].update(publication)
+            if action in ('validate', 'result') and role == 'publish' and (
+                    (payload or {}).get('audience_stamp') != audience or
+                    (payload or {}).get('publication_revision') != state.get('revision') or
+                    (payload or {}).get('source_keys') != {key: doc['sha256'] for key, doc in state.get('documents', {}).items() if doc.get('active')}):
+                job = state.get('jobs', {}).get('publish', {})
+                if job.get('generation') == (payload or {}).get('generation'):
+                    job.update(status='pending', lease_until=0, attempts=0, error='publication_context_changed')
+                    assist.compact_job(job)
+                result = {'valid': False} if action == 'validate' else {'accepted': False, 'reason': 'stale_publication'}
+            if isinstance(result, dict) and 'configured' in result:
+                result['research_available'] = bool(data.get('workspace_id') and state.get('enabled') and meeting.status not in ('completed', 'failed')
+                    and owner in roster and set(viewers) <= set(roster))
+                if state.get('wiki') == 'published' and data.get('workspace_id') in (member_workspaces or set()):
+                    result['wiki_ref'] = {'workspace_id': data['workspace_id'], 'path': f'wiki/meetings/{meeting_id}/state.md'}
+            expiry = (datetime.fromtimestamp(state['ended_at'], timezone.utc) + timedelta(days=state['policy'].get('audit_days', 14))) if state.get('ended_at') else None
+            for e in state.pop('_events', []):
+                db.add(MeetingStateEvent(id=e['id'], meeting_id=meeting_id, sequence=e['sequence'], payload=e, expires_at=expiry))
+            if expiry:
+                await db.execute(update(MeetingStateEvent).where(MeetingStateEvent.meeting_id == meeting_id).values(expires_at=expiry))
+            if action == 'state' and result:
+                event_filter = (MeetingStateEvent.meeting_id == meeting_id,
+                    or_(MeetingStateEvent.expires_at.is_(None), MeetingStateEvent.expires_at > datetime.now(timezone.utc)))
+                count = (await db.execute(select(func.count()).select_from(MeetingStateEvent).where(*event_filter))).scalar_one()
+                activity_offset = max(0, min(int((payload or {}).get('activity_offset', 0)), 50000))
+                events = (await db.execute(select(MeetingStateEvent).where(*event_filter)
+                    .order_by(MeetingStateEvent.sequence.desc()).offset(activity_offset).limit(100))).scalars().all()
+                result['activity'] = [assist.public_event(e.payload, state) for e in reversed(events)]
+                result.update(activity_offset=activity_offset, activity_count=count, activity_more=activity_offset + len(events) < count)
+            if action == 'claim' and result:
+                result.update(user_id=owner, meeting_id=meeting_id, platform=meeting.platform)
+                if result['role'] == 'publish':
+                    result['workspace_id'] = data.get('workspace_id')
+            if data != (meeting.data or {}):
+                meeting.data = data
+            started = time.perf_counter()
+            await db.commit()
+            timings['state_commit'] = (time.perf_counter()-started)*1000
+        log_timings = action == 'result' or (action == 'claim' and result) or action in ('edit', 'add', 'vote', 'configure', 'ingest-documents')
+        if self._redis is not None:
+            try:
+                pipe = self._redis.pipeline(transaction=False)
+                commands = False
+                current_sources = assist.sources(canon, state)
+                for role, prior in prior_jobs.items():
+                    if role not in ('fast', 'reason') or not prior.get('generation') or prior.get('status') != 'running':
+                        continue
+                    capability = {'role': role, 'generation': prior['generation']}
+                    present = state.get('jobs', {}).get(role, {})
+                    if (not assist.valid_job(state, capability, time.time()) or any(
+                            key not in current_sources or assist.source_key(current_sources[key]) != fp for key, fp in present.get('source_keys', {}).items())):
+                        pipe.delete(f'meeting_state_lease:{meeting_id}:{role}:{prior["generation"]}')
+                        commands = True
+                for stage, duration in timings.items() if log_timings else []:
+                    pipe.xadd('meeting_state_spans', {'payload': json.dumps({'meeting_id': meeting_id,
+                        'generation': (payload or {}).get('generation') or (result or {}).get('generation'),
+                        'role': (payload or {}).get('role', action), 'stage': stage, 'duration_ms': duration,
+                        'publication_revision': state.get('revision')})}, maxlen=10000, approximate=True)
+                    commands = True
+                if commands:
+                    await pipe.execute()
+            except Exception:
+                pass  # diagnostic loss cannot turn a committed state change into a failed request
+        return result
+
+    async def assist_candidates(self, after=0, limit=20):
+        import time
+        from functools import reduce
+        from sqlalchemy import select, delete, update, or_, and_, func, cast, Float, Integer
+        from datetime import datetime, timezone, timedelta
+        from .models import Meeting
+        from ..sessions.models import MeetingStateEvent
+        async with self._session_factory() as db:
+            utcnow = datetime.now(timezone.utc)
+            await db.execute(delete(MeetingStateEvent).where(MeetingStateEvent.expires_at < utcnow))
+            ended = (await db.execute(select(Meeting.id, Meeting.end_time, Meeting.updated_at, Meeting.data).where(
+                Meeting.id > after, Meeting.status.in_(('completed', 'failed')), ~Meeting.data.has_key('artifact_deletion'),
+                Meeting.data.has_key('live_assist')).order_by(Meeting.id).limit(100))).all()
+            for meeting_id, end_time, updated_at, meeting_data in ended:
+                assist_state = (meeting_data or {}).get('live_assist') or {}
+                policy = assist_state.get('policy') or {}
+                days = int(policy.get('audit_days', 14))
+                end = end_time or updated_at
+                if end is None:
+                    continue
+                end = end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end.astimezone(timezone.utc)
+                expiry = end + timedelta(days=days)
+                await db.execute(update(MeetingStateEvent).where(MeetingStateEvent.meeting_id == meeting_id,
+                    MeetingStateEvent.expires_at.is_(None)).values(expires_at=expiry))
+            current = time.time()
+            state = Meeting.data['live_assist']
+            get = lambda *keys: reduce(lambda value, key: value[key], keys, state).astext
+            fast_available = and_(func.coalesce(get('jobs', 'fast', 'status'), '') != 'failed',
+                or_(func.coalesce(get('jobs', 'fast', 'status'), '') != 'running', cast(func.coalesce(get('jobs', 'fast', 'lease_until'), '0'), Float) <= current),
+                cast(func.coalesce(get('inflight', 'fast', 'until'), '0'), Float) <= current)
+            reason_available = and_(func.coalesce(get('jobs', 'reason', 'status'), '') != 'failed',
+                or_(func.coalesce(get('jobs', 'reason', 'status'), '') != 'running', cast(func.coalesce(get('jobs', 'reason', 'lease_until'), '0'), Float) <= current),
+                cast(func.coalesce(get('inflight', 'reason', 'until'), '0'), Float) <= current)
+            fast_due = and_(state['enabled'].as_boolean() == True, state['final'].astext != 'complete',
+                fast_available, state['window_at'].astext.isnot(None),
+                cast(state['window_at'].astext, Float) <= current - cast(func.coalesce(get('config', 'fast_seconds'), '30'), Float))
+            reason_due = and_(state['enabled'].as_boolean() == True, state['final'].astext != 'complete',
+                reason_available, or_(cast(func.coalesce(get('boundary_sequence'), '0'), Integer) > cast(func.coalesce(get('reasoned_sequence'), '0'), Integer),
+                    and_(or_(cast(func.coalesce(get('sequence'), '0'), Integer) > cast(func.coalesce(get('reasoned_sequence'), '0'), Integer),
+                             cast(func.coalesce(get('pending_reason_sources'), '0'), Integer) > 0),
+                         cast(func.coalesce(get('last_reason_at'), '0'), Float) <= current - cast(func.coalesce(get('config', 'reason_seconds'), '120'), Float))))
+            terminal_due = and_(state['enabled'].as_boolean() == True, Meeting.status.in_(('completed', 'failed')),
+                or_(state['drain_complete'].as_boolean() != True, state['final'].astext == 'pending'))
+            publish_due = and_(state['enabled'].as_boolean() == True, state['final'].astext == 'complete',
+                func.coalesce(state['wiki'].astext, 'pending').notin_(('published', 'conflict', 'export_only')),
+                func.coalesce(get('jobs', 'publish', 'status'), '') != 'failed')
+            rows = (await db.execute(select(Meeting.id, Meeting.user_id, Meeting.status).where(Meeting.id > after,
+                ~Meeting.data.has_key('artifact_deletion'), Meeting.data.has_key('live_assist'),
+                or_(fast_due, reason_due, terminal_due, publish_due))
+                .order_by(Meeting.id).limit(limit))).all()
+            await db.commit()
+            return [{'meeting_id': mid, 'user_id': owner, 'status': status} for mid, owner, status in rows]
+
     async def processing_candidates(self, after=0, limit=10):
         from sqlalchemy import select, func, cast
         from sqlalchemy.dialects.postgresql import JSONPATH
@@ -1623,7 +1864,8 @@ class SqlAlchemyTranscriptStore:
 
         from .models import Meeting
 
-        data: dict = {"auto_join": bool(auto_join)}
+        from .live_assist import fresh
+        data: dict = {"auto_join": bool(auto_join), 'live_assist': fresh()}
         if title:
             data["title"] = title
         if scheduled_at:
@@ -2090,7 +2332,10 @@ class SqlAlchemyTranscriptStore:
                 return False
             await db.execute(delete(Transcription).where(Transcription.meeting_id == meeting_id))
             data = dict(meeting.data) if isinstance(meeting.data, dict) else {}
-            for key in ("canonical_transcript", "meeting_memory", "canonical_notes", "stt_replicas", "stt_foundation", "stt_instance_id", "recordings", "processed", "notes", "share_grants", "transcript_viewers", "transcript_refinement", "transcript_diarization", "transcript_alignment", "transcript_revision_sequences", "transcript_outbox", "speaker_registry", "voice_replies"):
+            from ..sessions.models import MeetingStateEvent
+            from sqlalchemy import delete
+            await db.execute(delete(MeetingStateEvent).where(MeetingStateEvent.meeting_id == meeting_id))
+            for key in ("live_assist", "canonical_transcript", "meeting_memory", "canonical_notes", "stt_replicas", "stt_foundation", "stt_instance_id", "recordings", "processed", "notes", "share_grants", "transcript_viewers", "transcript_refinement", "transcript_diarization", "transcript_alignment", "transcript_revision_sequences", "transcript_outbox", "speaker_registry", "voice_replies"):
                 data.pop(key, None)
             metadata = dict(data.get("metadata") or {})
             data.pop("summary", None)

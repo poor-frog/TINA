@@ -54,6 +54,31 @@ def test_per_call_model_overrides_default():
     assert _adapter(handler).complete("p", model="beat-model").model == "beat-model"
 
 
+def test_structured_completion_sends_native_schema_without_changing_plain_calls():
+    import os
+    schema = {'type': 'object', 'properties': {'label': {'enum': ['relevant', 'uncertain']}},
+              'required': ['label'], 'additionalProperties': False}
+    calls = []
+    def handler(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={'choices': [{'message': {'content': '{"label":"relevant"}'}}]})
+    adapter = _adapter(handler)
+    assert adapter.complete('classify', response_schema=schema).text == '{"label":"relevant"}'
+    assert calls[0]['response_format'] == {'type': 'json_schema', 'json_schema': {
+        'name': 'structured_completion', 'strict': True, 'schema': schema}}
+    assert calls[0]['max_tokens'] == 4096
+    adapter.complete('plain')
+    assert 'response_format' not in calls[1]
+
+
+def test_output_token_limit_is_configurable_for_local_structured_calls(monkeypatch):
+    monkeypatch.setenv('TINA_LLM_MAX_TOKENS', '1200')
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)['max_tokens'] == 1200
+        return httpx.Response(200, json={'choices': [{'message': {'content': '{"label":"relevant"}'}}]})
+    assert _adapter(handler).complete('classify').text == '{"label":"relevant"}'
+
+
 def test_no_key_means_no_auth_header(monkeypatch):
     for var in ("TINA_LLM_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(var, raising=False)

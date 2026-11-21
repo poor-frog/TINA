@@ -189,6 +189,20 @@
       ]
     },
     {
+      "key": "TINA_STATE_FAST_MODEL",
+      "class": "defaulted",
+      "default": "",
+      "description": "Operator-selected live-state extraction model; empty disables successful inference, no fallback",
+      "targets": ["compose", "helm"]
+    },
+    {
+      "key": "TINA_STATE_REASON_MODEL",
+      "class": "defaulted",
+      "default": "",
+      "description": "Operator-selected live-state reconciliation model on the shared completion endpoint",
+      "targets": ["compose", "helm"]
+    },
+    {
       "key": "TINA_MODEL_ALLOWLIST",
       "class": "defaulted",
       "default": "(empty \u2014 allow any workspace-pinned model)",

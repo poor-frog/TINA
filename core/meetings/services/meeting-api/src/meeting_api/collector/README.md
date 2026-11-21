@@ -205,3 +205,14 @@ reproduced on WebM/Opus. Reconstructed clip hashes may differ from older jobs;
 existing source-hash checks reject stale Apply/retry and require a fresh refinement.
 
 Apply copies the prepared-input metadata into immutable correction history; later jobs and Restore preserve that provenance. The evaluation CLI reuses the existing transcription environment keys and introduces no deployment configuration.
+
+# Two-stage live state
+
+`live_assist.py` owns the bounded fast/reason state machine. The independent scheduler in
+`live_assist_queue.py` claims separate generation/epoch jobs from finalized canonical sources and
+drains the per-role result stream. The adapter rechecks the source, current document audience and
+item revisions under the meeting-row lock before committing. Expensive membership/filesystem/model
+work occurs outside that transaction. Human edit events go to `meeting_state_events`, with expiry
+independent of the canonical `meeting.data.live_assist` snapshot. List/meeting/webhook projections
+never expose the internal snapshot; participants use the narrow by-row state route. See
+`core/meetings/contracts/meeting-state.v1/README.md` and `docs/live-assist.md`.

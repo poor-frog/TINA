@@ -83,6 +83,8 @@ system agent  # the execution domain: a trigger becomes one governed agent turn 
   contract meeting-translation.v1
   database meeting-translation-cache [writers: agent-api]
   contract meeting-translation.v2
+  data-asset discussion-review.v1
+  data-asset discussion-reviews
 
 system gateway-system  # the one public edge (api.v1, ws.v1)
   service conformance
@@ -134,6 +136,18 @@ system foreground-application  # User-selected local application with the focuse
 system speech-client  # Optional host speech CLI: per-microphone KWS, bounded pre-roll and Silero VAD question capture, explicit Start/Stop and participant-only credentials. A 1200 ms post-wake continuation window retains a question after the wake's VAD endpoint; anchored ASR validation also accepts the spelling hay tina, never mid-sentence or empty questions. Opt-in run/run-file sends bounded WAV to the single-room speech coordinator; ordinary listen/file remain local. Wake is activation, not authentication. Default TTS remains Truc Ly. Room-wide polling suppresses KWS/pre-roll while busy; stale status/boot changes disarm until explicit restart; idle requires 800 ms quiet.
 
 edges:
+  meeting-api -own-> meeting-state.v1  # Meeting API owns schema validation, source coverage, leases, revisions and canonical publication for the meeting-state.v1 contract.
+  agent-worker -produce-candidate-> meeting-state.v1  # Tool-less fast and reasoner workers return candidates conforming to meeting-state.v1; they do not own or publish canonical state.
+  meeting-api -call-> agent-api  # Internal-secret-protected authoritative workspace voter roster, fetched outside DB transactions before reasoning proposal publication and votes; failure is closed.
+  agent-api -write-> meeting-state-jobs  # Store admitted immutable source payload with TTL; raw sources never enter process environment or warm chat streams.
+  agent-worker -read-> meeting-state-jobs  # Trusted tool-less worker fetches only its owner/meeting/generation-bound job payload.
+  meeting-api -write-> meeting-state-requests  # Independent timer and durable checkpoints create signed fast/reason/final publication jobs.
+  agent-api -read-> meeting-state-requests  # Proof and live lease admission before isolated model dispatch or constrained final publication.
+  agent-worker -write-> meeting-state-results  # Source-linked provisional extraction and reasoning candidates; no canonical DB capability.
+  meeting-api -read-> meeting-state-results  # Exact source/lease/revision validation followed by short locked publication and durable audit.
+  agent-worker -write-> meeting-state-diagnostics  # Scrubbed elapsed-time and token-usage spans only.
+  meeting-api -write-> meeting-state-diagnostics  # Validation/commit timings without source content.
+  agent-api -read-> meeting-state-diagnostics  # Bounded 24-hour in-memory operator trace cache/export; loss on restart is explicit.
   bot -write-> segments-stream
   bot -write-> tc-mutable
   meeting-api -read-> segments-stream  # Producer session_uid is retained durably for recording-to-segment mapping.
@@ -226,9 +240,14 @@ edges:
   meeting-api -read-> canonical-notes-results  # Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view.
   meeting-api -write-> canonical-notes-approved  # Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view.
   agent-api -read-> canonical-notes-approved  # Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view.
-  agent-api -req-> meeting-api  # Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A across an anchor meeting and up to four explicitly selected meetings; each source is reauthorized, and there are no transcript writes. Owner-authenticated voice handoff GET rechecks policy revision, expiry and source fingerprints for each private chat turn; Terminal prepares the composer only.
+  agent-api -req-> meeting-api  # Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A across an anchor meeting and up to four explicitly selected meetings and for manual post-meeting discussion reviews. Each source is reauthorized, and there are no transcript writes. Owner-authenticated voice handoff GET rechecks policy revision, expiry and source fingerprints for each private chat turn; Terminal prepares the composer only.
   agent-api -write-> meeting-knowledge-pages  # Persist private answer/source snapshots and explicitly reviewed create-only Wiki pages; no overwrites.
   terminal -read-> meeting-knowledge-pages  # Through existing authenticated Gateway workspace proxy: related docs, bounded multi-meeting answers, source-meeting quotes/audio, freshness warnings and revision-guarded fact reviews.
+  agent-api -write-> discussion-reviews  # Manual owner request -> private read-only unit.v1 worker -> validated classification -> canonical recheck -> locked compare-and-swap report publication.
+  terminal -read-> discussion-reviews  # Authenticated Gateway proxy: agenda form, exact quoted evidence, classifications and stale-state display; no client classification.
+  dashboard -read-> discussion-reviews  # Dashboard adapts the same owner-only review protocol through its authenticated Gateway proxy.
+  agent-worker -call-> completion-provider  # Separate operator-selected fast/reason model IDs issue tool-less structured CompletionPort calls concurrently from source-fingerprinted jobs. Input may contain finalized transcript text and bounded excerpts from user-requested, meeting-bound shared-workspace documents. Outputs are JSON-schema/source validated before Meeting API publication; no private workspace, audio, prompts or harness tools.
+  agent-worker -call-> completion-provider  # Production uses one tool-less CompletionPort call per chronological window, with explicit agenda, target-window VI/EN text and earlier transcript context only; optional native JSON Schema output where supported, followed by worker/API validation and source-checked evidence. The offline scripts/benchmark_discussion_review.py invokes the same classifier with bounded two-request concurrency or retrospective batches of two/four windows. Concurrent inputs retain earlier-only isolation; batch inputs expose later targets but enforce per-target citation boundaries. Benchmarks use synthetic/frozen input, separate timing/result artifacts and an isolated local Ollama server; they bypass API publication and do not enable experiments for app requests. Records actual model identity; sends no audio or unrelated files.
   agent-api -write-> workspace-human-documents  # Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane.
   bot -call-> tts-sidecar  # Existing owner-authorized Speak commands make the voice-enabled browser bot send text to TTS_SERVICE_URL/v1/audio/speech with X-API-Key. PCM is resampled by the optional sidecar to 24 kHz and played by the unchanged PulseAudio virtual microphone path; speak_stop aborts request and playback.
   speech-client -req-> speech-coordinator  # Participant-authenticated bounded WAV and turn status; no shared service secrets on clients. Authenticated speech-room.v1 occupancy polling plus epoch/revision capture fencing; all hosts pause wake dispatch during a shared turn.

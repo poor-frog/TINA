@@ -28,6 +28,16 @@ from datetime import datetime
 Base = declarative_base()
 
 
+class MeetingStateEvent(Base):
+    __tablename__ = 'meeting_state_events'
+    id = Column(String(36), primary_key=True)
+    meeting_id = Column(Integer, ForeignKey('meetings.id', ondelete='CASCADE'), nullable=False, index=True)
+    sequence = Column(Integer, nullable=False)
+    payload = Column(JSONB, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    __table_args__ = (UniqueConstraint('meeting_id', 'sequence', name='uq_meeting_state_event_sequence'),)
+
+
 # --------------------------------------------------------------------------- #
 # identity tables (parent: libs/admin-models/admin_models/models.py)
 # --------------------------------------------------------------------------- #
