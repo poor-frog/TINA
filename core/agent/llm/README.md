@@ -32,6 +32,10 @@ fakes.
 HTTP completion adapters use raw `httpx`; CLI harnesses use the provider's supported local process
 interface so TINA can keep its existing workspace and event boundary.
 
+`CompletionPort.complete` accepts optional `response_schema`. OpenAI-compatible and Responses
+adapters send native JSON Schema output settings to supporting endpoints; Messages/CLI adapters
+append the schema to the system prompt. Callers still validate structure and source evidence.
+
 OpenAI Responses and Chat Completions adapters also expose the optional
 `complete_structured(prompt, system=..., schema=...)` capability for meeting voice. They request
 strict JSON Schema using `text.format` or `response_format`; ordinary `complete` calls keep their
@@ -55,7 +59,7 @@ and harness behavior is unchanged. Existing wrapped exceptions retain their caus
 | `TINA_LLM_BASE_URL` | provider endpoint | anthropic: `https://api.anthropic.com`; openai-compat: **required** (falls back to `ANTHROPIC_BASE_URL`) |
 | `TINA_LLM_API_KEY` | credential (optional for local runtimes) | falls back `ANTHROPIC_AUTH_TOKEN` → `ANTHROPIC_API_KEY` |
 | `TINA_LLM_MODEL` | deployment-default model (free string) | empty → fail-loud at completion call |
-| `TINA_LLM_MAX_TOKENS` | Messages-API max_tokens | 4096 |
+| `TINA_LLM_MAX_TOKENS` | Completion output-token cap (also Messages-API `max_tokens`) | 4096 |
 | `TINA_RUNNER` | harness adapter key: `claude-code` \| `codex` \| `antigravity` | `claude-code` |
 | `TINA_CODEX_AUTH_MODE` | Codex credentials: `api-key` \| `chatgpt-plan` \| `groq` | `api-key` |
 | `TINA_ANTIGRAVITY_AUTH_MODE` | Antigravity CLI credentials: `gemini-api` \| `oauth` | auto from `GEMINI_API_KEY` |

@@ -599,6 +599,28 @@ def test_memory_views_forward_identity_with_tx_scope():
         assert downstream.last['headers'].get('x-user-id')
 
 
+def test_live_state_routes_forward_identity_and_reject_internal_actions():
+    client, downstream = _client()
+    for method, path in [
+        ('GET', '/transcripts/by-id/42/state'),
+        ('GET', '/transcripts/by-id/42/state/export'),
+        ('POST', '/transcripts/by-id/42/state/configure'),
+        ('POST', '/transcripts/by-id/42/state/edit'),
+        ('POST', '/transcripts/by-id/42/state/add'),
+        ('POST', '/transcripts/by-id/42/state/vote'),
+        ('POST', '/transcripts/by-id/42/state/remove-source'),
+    ]:
+        response = client.request(method, path, headers=AUTH, json={} if method == 'POST' else None)
+        assert response.status_code == 200
+        assert downstream.last['url'] == f'http://meeting-api{path}'
+        assert downstream.last['headers']['x-user-id'] == '7'
+
+    prior = downstream.last
+    response = client.post('/transcripts/by-id/42/state/retry', headers=AUTH, json={})
+    assert response.status_code == 404
+    assert downstream.last is prior
+
+
 def test_alignment_routes_forward_identity_and_guard_actions():
     client, downstream = _client()
     for method,path in [('GET','/transcripts/by-id/42/alignment'),('POST','/transcripts/by-id/42/alignment/start'),

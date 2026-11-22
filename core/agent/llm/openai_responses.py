@@ -32,8 +32,9 @@ class OpenAIResponsesCompletion:
         self._client = httpx.Client(timeout=timeout, transport=transport)
 
     def complete(self, prompt: str, *, system: Optional[str] = None,
-                 model: Optional[str] = None) -> CompletionResult:
-        return self._complete(prompt, system=system, model=model)
+                 model: Optional[str] = None, response_schema: Optional[dict] = None) -> CompletionResult:
+        return self._complete(prompt, system=system, model=model, schema=response_schema,
+                              schema_name="structured_completion")
 
     def complete_structured(self, prompt: str, *, system: str, schema: dict) -> CompletionResult:
         return self._complete(prompt, system=system, schema=schema)
@@ -48,7 +49,7 @@ class OpenAIResponsesCompletion:
 
     def _complete(self, prompt: str, *, system: Optional[str] = None,
                   model: Optional[str] = None, web_search: bool = False,
-                  schema: dict | None = None) -> CompletionResult:
+                  schema: dict | None = None, schema_name: str = "tina_voice") -> CompletionResult:
         target = (model or "").strip() or self._model
         if not self._key:
             raise LLMConfigError("OpenAI Responses credential is missing")
@@ -64,7 +65,7 @@ class OpenAIResponsesCompletion:
         if system:
             payload["instructions"] = system
         if schema is not None:
-            payload['text'] = {'format': {'type': 'json_schema', 'name': 'tina_voice',
+            payload['text'] = {'format': {'type': 'json_schema', 'name': schema_name,
                                          'strict': True, 'schema': schema}}
         if web_search:
             payload.update(tools=[{"type": "web_search"}], tool_choice="required")

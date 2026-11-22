@@ -138,6 +138,9 @@ models:
   anthropicHaikuModel: ""
   agentModel: ""        # TINA_AGENT_MODEL
   meetingModel: ""      # TINA_MEETING_MODEL
+  # Live state uses explicit independent role IDs; empty has no silent model fallback.
+  stateFastModel: ""    # TINA_STATE_FAST_MODEL
+  stateReasonModel: ""  # TINA_STATE_REASON_MODEL
 
 # ============ Components ============
 

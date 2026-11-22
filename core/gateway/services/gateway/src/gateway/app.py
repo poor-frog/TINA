@@ -611,6 +611,20 @@ def create_app(
     async def transcript_processed_notes(meeting_id: int, request: Request):
         return await _forward("GET", _meeting(f"/transcripts/by-id/{meeting_id}/processed-notes"), request)
 
+    @app.get("/transcripts/by-id/{meeting_id}/state")
+    async def transcript_live_state(meeting_id: int, request: Request):
+        return await _forward("GET", _meeting(f"/transcripts/by-id/{meeting_id}/state"), request)
+
+    @app.get("/transcripts/by-id/{meeting_id}/state/export")
+    async def transcript_live_state_export(meeting_id: int, request: Request):
+        return await _forward("GET", _meeting(f"/transcripts/by-id/{meeting_id}/state/export"), request)
+
+    @app.post("/transcripts/by-id/{meeting_id}/state/{action}")
+    async def transcript_live_state_action(meeting_id: int, action: str, request: Request):
+        if action not in {"configure", "edit", "add", "vote", "remove-source"}:
+            raise HTTPException(404, "Unknown live-state action")
+        return await _forward("POST", _meeting(f"/transcripts/by-id/{meeting_id}/state/{action}"), request)
+
     @app.get("/transcripts/by-id/{meeting_id}/speakers")
     async def speaker_registry(meeting_id: int, request: Request):
         return await _forward("GET", _meeting(f"/transcripts/by-id/{meeting_id}/speakers"), request)
@@ -1052,7 +1066,8 @@ def create_app(
         @app.api_route("/agent/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
         async def agent_proxy(path: str, request: Request):
             # Isolated model jobs have a server-side deadline; preserve JSON/errors past cold start.
-            if request.method == 'POST' and re.fullmatch(r'workspace/meeting-knowledge/[1-9]\d*/ask', path):
+            if request.method == 'POST' and (re.fullmatch(r'workspace/meeting-knowledge/[1-9]\d*/ask', path)
+                                             or re.fullmatch(r'discussion-reviews/[1-9]\d*', path)):
                 return await _forward_stream_verbatim('POST', _agent(path), request)
             return await _forward(request.method, _agent(path), request)
 

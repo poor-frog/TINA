@@ -14,6 +14,12 @@ selects an offline profile for untrusted/read-only turns; keep the managed `enab
 See [Codex networking](../llm/README.md#codex-web-and-command-networking) for the separate hosted
 web-search grant, credential boundaries and verification scope.
 
+`discussion_review.py` runs private, read-only CompletionPort calls for a bounded completed meeting
+and agenda: one call per chronological window, with at most one correction retry when validation
+fails. It requests schema-shaped VI/EN classifications, validates class/evidence/window coverage,
+and returns model provenance over the short-lived private output stream. Agent API owns freshness
+checking and report publication; the worker has no tools or transcript write access.
+
 Terminal dictation polish is a one-shot, read-only `CompletionPort` job in the worker. It has no
 harness tools and does not write chat history or workspace files.
 
@@ -128,3 +134,11 @@ See [Agent-Reach limits](../../../deploy/agent-reach/README.md) for fallback and
 Public voice verification now allows one API-only repair using the original public question, draft, rejection indexes and unchanged excerpts. The repair shares the voice deadline and lease, cannot search or access a private workspace, and must pass numeric and semantic verification again. A later semantic failure is reported as verification_rejected rather than retaining an earlier numeric label. Supported subsets are reviewed independently before release.
 
 Gold-price web questions use an eight-row structured extraction instead of free-form numeric claims. Each row binds source ID/URL, literal product/amount, side, scale, currency, per-lượng/per-chỉ/per-ounce basis and optional original update text. An independent API reviewer checks row/column/table/date relationships against all original excerpts. One repair shares the existing deadline and Stop fence. Fixed output retains source date/time, avoids cross-source buy/sell merging and warns when a today request lacks a matching price update date. Missing product uses the existing heard clarification flow; only fixed public product choices resume it. `price_extract`, `price_repair` and `price_verify` spans contain timings only.
+
+## Two-model meeting state
+
+`live_assist.py` handles separately admitted fast extraction and reasoning jobs before the legacy
+live loop. Each workload fetches its immutable owner-bound payload from a short-lived Redis key,
+calls CompletionPort without tools, validates `meeting-state.v1`, and returns candidates. It emits
+scrubbed per-attempt timing/usage spans, never source/prompt/response bodies. Oversized segments
+are internally chunked; only a complete candidate set can be published by Meeting API.

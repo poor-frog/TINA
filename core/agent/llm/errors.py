@@ -37,6 +37,32 @@ class LLMStructuredOutputUnsupported(LLMError):
     """The endpoint explicitly rejected the structured-output request parameter."""
 
 
+class LLMResponseError(LLMError):
+    """The provider returned a malformed completion envelope."""
+
+
+MODEL_REQUEST_FAILURE_CODES = frozenset({
+    'auth', 'configuration', 'rate_limit', 'request_rejected', 'timeout',
+    'http_error', 'transport', 'malformed_response', 'unknown',
+})
+
+
+def model_request_failure(exc: Exception) -> dict[str, str | int]:
+    """Describe completion failures without inspecting exception messages or response bodies."""
+    status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else getattr(exc, 'status_code', None)
+    if type(status) is int and 400 <= status <= 599:
+        code = completion_failure_code(exc)
+        return {'failure_code': 'http_error' if code == 'unavailable' else code, 'http_status': status}
+    if isinstance(exc, LLMResponseError):
+        return {'failure_code': 'malformed_response'}
+    code = completion_failure_code(exc)
+    if code in ('auth', 'configuration', 'timeout'):
+        return {'failure_code': code}
+    if isinstance(exc, httpx.RequestError) or isinstance(exc.__cause__, httpx.RequestError):
+        return {'failure_code': 'transport'}
+    return {'failure_code': 'unknown'}
+
+
 def structured_output_unsupported(response: httpx.Response, parameter: str) -> bool:
     if response.status_code not in (400, 422):
         return False

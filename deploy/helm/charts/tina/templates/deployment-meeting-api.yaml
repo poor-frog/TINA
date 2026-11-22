@@ -72,6 +72,8 @@ spec:
               value: {{ include "tina.redisUrl" . | quote }}
             - name: RUNTIME_API_URL
               value: "http://{{ include "tina.componentName" (list . "runtime") }}:{{ .Values.runtime.service.port }}"
+            - name: MEETING_AGENT_API_URL
+              value: "http://{{ include "tina.componentName" (list . "agent-api") }}:{{ .Values.agentApi.service.port }}"
             # Discord voice sessions are served by the optional discord-connector Deployment (below,
             # same chart). Empty when the connector is off — that DISABLES the Discord branch, so a
             # Discord spawn is a typed 422 ("unsupported here") rather than a 502 at an absent Service.

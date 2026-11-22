@@ -141,4 +141,8 @@ def persist(meeting, data, rows):
     data["meeting_memory"] = result["memory"]
     from .processed_notes import reconcile
     reconcile(data, result['canonical'], result['memory'])
+    if data.get('live_assist') is not None:
+        from .live_assist import reconcile as reconcile_state
+        import time
+        reconcile_state(data['live_assist'], result['canonical'], meeting['status'], time.time())
     return result

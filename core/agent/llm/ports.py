@@ -21,6 +21,7 @@ This module imports NOTHING from product code — it must stay liftable into a s
 from __future__ import annotations
 
 import contextvars
+import json
 import logging
 import os
 import shlex
@@ -130,6 +131,14 @@ class CompletionResult:
     text: str
     model: str = ""
     sources: tuple[dict, ...] = ()
+    usage: Optional[dict] = None
+
+
+def schema_system(system: Optional[str], response_schema: Optional[dict]) -> Optional[str]:
+    """Prompt fallback for completion dialects without a native schema field."""
+    if response_schema is None:
+        return system
+    return (system or '') + '\nReturn JSON matching this schema:\n' + json.dumps(response_schema, ensure_ascii=False)
 
 
 class CompletionPort(Protocol):
@@ -139,7 +148,7 @@ class CompletionPort(Protocol):
     name: str
 
     def complete(self, prompt: str, *, system: Optional[str] = None,
-                 model: Optional[str] = None) -> CompletionResult: ...
+                  model: Optional[str] = None, response_schema: Optional[dict] = None) -> CompletionResult: ...
 
 
 class HarnessPort(Protocol):

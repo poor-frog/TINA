@@ -30,7 +30,7 @@ from shared.config import Settings
 from shared.ports import IdentityPort, RuntimePort
 from shared.units import (
     CANONICAL_NOTES_PREFIX, chat_session, dispatch_id, input_topic, is_dictation_polish,
-    is_dictation_translate, is_meeting_knowledge, is_private_transcript_job, output_topic,
+    is_dictation_translate, is_meeting_knowledge, is_discussion_review, is_private_transcript_job, output_topic,
 )
 from pathlib import Path
 
@@ -356,7 +356,7 @@ def build_unit_env(settings: Settings, invocation: dict, *, unit_id: str, token:
                    memberships: Optional[list[dict]] = None,
                    model_config: Optional[dict] = None,
                    trusted_live_meeting: bool = False,
-                   trusted_canonical_notes: bool = False) -> dict[str, str]:
+                   trusted_canonical_notes: bool = False, trusted_meeting_state: bool = False) -> dict[str, str]:
     """Map a ``unit.v1`` dispatch to the worker's ``runtime.v1`` env (12-factor, P7). The minted token +
     the workspace LIST + the per-dispatch Stream topics travel here; the runtime injects them opaquely."""
     identity = invocation["identity"]
@@ -400,6 +400,12 @@ def build_unit_env(settings: Settings, invocation: dict, *, unit_id: str, token:
         "TINA_WORKSPACE_STORE_URL": settings.workspace_store_url,
         "REDIS_URL": settings.redis_url,
     }
+    if trusted_meeting_state:
+        from shared.units import MEETING_STATE_PREFIX
+        inline = ((invocation.get('start') or {}).get('entrypoint') or {}).get('inline') or ''
+        if invocation.get('trigger') != 'transcription' or not inline.startswith(MEETING_STATE_PREFIX):
+            raise ValueError('Invalid meeting-state dispatch')
+        env['TINA_MEETING_STATE_TRUSTED'] = '1'
     if trusted_canonical_notes:
         inline = ((invocation.get("start") or {}).get("entrypoint") or {}).get("inline")
         if (invocation.get("trigger") != "transcription"
@@ -416,6 +422,8 @@ def build_unit_env(settings: Settings, invocation: dict, *, unit_id: str, token:
         # Knowledge jobs receive authorized snapshots; a harness must never see chat workspace mounts.
         env.update(TINA_MOUNTS='[]', TINA_WORKSPACES='[]', TINA_UNIT_TOOLS='[]',
                    TINA_WORKSPACE_PATH='/tmp/tina-meeting-knowledge')
+    if is_discussion_review(invocation):
+        env['TINA_DISCUSSION_REVIEW'] = '1'
     # Attribution (D4 / WP-A1.2): the per-mount turn commit is authored by the dispatch PRINCIPAL (the
     # authenticated human whose input drives the turn), committer stays the platform. Until membership/
     # sharing lands (later WPs) the principal IS the subject; a caller that already resolved a distinct
@@ -601,7 +609,7 @@ class Dispatcher:
 
     def dispatch(
         self, invocation: dict, *, trusted_live_meeting: bool = False,
-        trusted_canonical_notes: bool = False,
+        trusted_canonical_notes: bool = False, trusted_meeting_state: bool = False,
     ) -> str:
         """Validate + spawn. Returns the workload id. Raises on a non-conformant envelope (P18).
 
@@ -641,7 +649,7 @@ class Dispatcher:
             raise ModelConfigRefreshError("Could not load your saved model configuration. Retry shortly.")
         env = build_unit_env(self._settings, invocation, unit_id=uid, token=token, memberships=memberships,
                              model_config=model_config, trusted_live_meeting=trusted_live_meeting,
-                             trusted_canonical_notes=trusted_canonical_notes)
+                              trusted_canonical_notes=trusted_canonical_notes, trusted_meeting_state=trusted_meeting_state)
         # WARM DELIVERY (the lost-turn fix). The runtime's create is an IDEMPOTENT TOUCH for a
         # workload that is still starting/running (ADR-0027) — it returns the live status and
         # DISCARDS the spec env, where a chat message's prompt rides. So a message sent while the

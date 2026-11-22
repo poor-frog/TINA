@@ -4,6 +4,7 @@
  *  • "meeting" TAB (center): fixed meeting chrome around the Meeting Canvas body.
  *    The generated canvas view consumes this meeting's live MeetingState. */
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { FileText, List } from "lucide-react";
 import { useService } from "../platform";
 import { LayoutServiceId, type TabDescriptor } from "../workbench/layout";
 import { registerList, registerTab, registerCommand, type TabProps } from "../contributions";
@@ -26,6 +27,18 @@ import { getJitsiHosts } from "./jitsiHosts";
 import { mintTranscriptShare, mintInvite, listSharedMemberships, type Membership } from "./workspaceApi";
 import { deletePlannedMeeting, MAX_CALENDARS, listCalendars, createCalendar, updateCalendar, syncCalendar, getCalendarSyncStatus, type CalendarConnection, type CalendarSyncStamp } from "./plannedApi";
 import { prepTabDescriptor, prepDraftTabDescriptor } from "./meetingPrep";
+import { LiveAssistRunningView } from "./LiveAssistRunningView";
+import {
+  EMPTY_LIVE_ASSIST_DRAFT,
+  mergeLiveMeetingState,
+  readAllLiveMeetingState,
+  readLiveMeetingState,
+  readPlannedLiveAssistDraft,
+  writePlannedLiveAssistDraft,
+  postLiveMeetingStateAction,
+  type LiveMeetingStateSnapshot,
+  type PlannedLiveAssistDraft,
+} from "./liveMeetingStateApi";
 
 // ── "Share session" — mint a link to this meeting's LIVE FEED (independent transcript share) and,
 //    optionally, BUNDLE a shared-workspace invite into the SAME link (?tshare=…&invite=…). The two are
@@ -982,6 +995,67 @@ function MeetingTab({ id, params }: TabProps) {
   const ended = !!m && meetingPhase(m) === "post";
   const durationLabel = meetingDurationLabel(m);
   const whenLabel = m ? meetingWhenLabel(m) : "";
+  const liveAssistMeetingId = m && meetingPhase(m) === "live" ? String(m.id) : "";
+  const [liveAssistState, setLiveAssistState] = useState<LiveMeetingStateSnapshot | null>(null);
+  const [transcriptViewMeetingId, setTranscriptViewMeetingId] = useState("");
+  const liveAssistEnabled = !!(liveAssistMeetingId && liveAssistState?.enabled);
+  const showingLiveAssist = liveAssistEnabled && transcriptViewMeetingId !== liveAssistMeetingId;
+  const liveAssistStateRef = useRef<LiveMeetingStateSnapshot | null>(null);
+  const [liveAssistError, setLiveAssistError] = useState("");
+  const [liveAssistBusy, setLiveAssistBusyState] = useState(false);
+  const liveAssistBusyRef = useRef(false);
+  const liveAssistRequestSerial = useRef(0);
+  const [liveAssistSyncedAt, setLiveAssistSyncedAt] = useState<number | null>(null);
+  const [liveAssistDraft, setLiveAssistDraft] = useState<PlannedLiveAssistDraft>({ ...EMPTY_LIVE_ASSIST_DRAFT, agendaItems: [], agendaEdits: [] });
+  const publishLiveAssistState = useCallback((next: LiveMeetingStateSnapshot, mergeHistory = true, refreshed = true) => {
+    const published = mergeHistory ? mergeLiveMeetingState(liveAssistStateRef.current, next) : next;
+    liveAssistStateRef.current = published;
+    setLiveAssistState(published);
+    if (refreshed) setLiveAssistSyncedAt(Date.now());
+  }, []);
+
+  useEffect(() => {
+    liveAssistStateRef.current = null;
+    setLiveAssistState(null);
+    setLiveAssistError("");
+    setLiveAssistSyncedAt(null);
+    if (!liveAssistMeetingId) {
+      setLiveAssistDraft({ ...EMPTY_LIVE_ASSIST_DRAFT, agendaItems: [], agendaEdits: [] });
+      return;
+    }
+    setLiveAssistDraft(readPlannedLiveAssistDraft(liveAssistMeetingId));
+    const controller = new AbortController();
+    const refresh = async () => {
+      if (liveAssistBusyRef.current) return;
+      const ticket = ++liveAssistRequestSerial.current;
+      try {
+        const previous = liveAssistStateRef.current;
+        let next = previous
+          ? await readLiveMeetingState(liveAssistMeetingId, controller.signal)
+          : await readAllLiveMeetingState(liveAssistMeetingId, controller.signal);
+        let reloadHistory = !previous;
+        if (previous && next.configured
+            && (!previous.configured || previous.archive_count !== next.archive_count || (!previous.source_notice && !!next.source_notice))) {
+          next = await readAllLiveMeetingState(liveAssistMeetingId, controller.signal);
+          reloadHistory = true;
+        }
+        if (!controller.signal.aborted && ticket === liveAssistRequestSerial.current) {
+          publishLiveAssistState(next, !reloadHistory);
+          setLiveAssistError("");
+        }
+      } catch (reason) {
+        if (!controller.signal.aborted && ticket === liveAssistRequestSerial.current) setLiveAssistError(reason instanceof Error ? reason.message : "Could not load Live Assist state");
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => { controller.abort(); window.clearInterval(timer); liveAssistRequestSerial.current++; };
+  }, [liveAssistMeetingId, publishLiveAssistState]);
+
+  const setLiveAssistBusy = (value: boolean) => {
+    liveAssistBusyRef.current = value;
+    setLiveAssistBusyState(value);
+  };
   const canDeleteMeeting = !!m && m.status === "past" && !!m.native_id && !m.shared
     && ["completed", "failed", "stopped"].includes(m.live_status ?? "");
   const deleteMeeting = async (): Promise<string | null> => {
@@ -999,6 +1073,122 @@ function MeetingTab({ id, params }: TabProps) {
     } finally {
       setDeletingMeeting(false);
     }
+  };
+
+  const syncLiveAssistDraft = async (meetingId: string, initial: LiveMeetingStateSnapshot) => {
+    let current = initial;
+    let pending = readPlannedLiveAssistDraft(meetingId);
+    setLiveAssistDraft(pending);
+    const commit = async (action: string, payload: unknown) => {
+      liveAssistRequestSerial.current++;
+      current = await postLiveMeetingStateAction(meetingId, action, payload);
+      publishLiveAssistState(current, true, false);
+    };
+    if (pending.goal !== null) {
+      const goal = pending.goal;
+      await commit("edit", { id: "goal", expected_revision: current.goal?.revision || 0, patch: { text: goal } });
+      pending = { ...pending, goal: null };
+      writePlannedLiveAssistDraft(meetingId, pending);
+      setLiveAssistDraft(pending);
+    }
+    for (const item of [...pending.agendaItems]) {
+      await commit("add", { type: "agenda", text: item.text, details: {} });
+      pending = { ...pending, agendaItems: pending.agendaItems.filter((candidate) => candidate.id !== item.id) };
+      writePlannedLiveAssistDraft(meetingId, pending);
+      setLiveAssistDraft(pending);
+    }
+    for (const item of [...pending.agendaEdits]) {
+      const revision = current.items?.find((candidate) => candidate.id === item.id)?.revision ?? item.revision;
+      await commit("edit", { id: item.id, expected_revision: revision, patch: { text: item.text } });
+      pending = { ...pending, agendaEdits: pending.agendaEdits.filter((candidate) => candidate.id !== item.id) };
+      writePlannedLiveAssistDraft(meetingId, pending);
+      setLiveAssistDraft(pending);
+    }
+  };
+
+  const enableLiveAssist = async () => {
+    const meetingId = liveAssistMeetingId;
+    const current = liveAssistStateRef.current;
+    if (!meetingId || !current?.can_configure || current.enabled || liveAssistBusyRef.current) return;
+    setLiveAssistBusy(true);
+    setLiveAssistError("");
+    try {
+      liveAssistRequestSerial.current++;
+      const enabled = await postLiveMeetingStateAction(meetingId, "configure", {
+        enabled: true,
+        ...(!current.configured ? { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone } : {}),
+      });
+      setTranscriptViewMeetingId("");
+      publishLiveAssistState(enabled, true, false);
+      await syncLiveAssistDraft(meetingId, enabled);
+    } catch (reason) {
+      setLiveAssistError(reason instanceof Error ? reason.message : "Could not enable Live Assist");
+    } finally {
+      setLiveAssistBusy(false);
+    }
+  };
+
+  const retryLiveAssistDraft = async () => {
+    const meetingId = liveAssistMeetingId;
+    const current = liveAssistStateRef.current;
+    if (!meetingId || !current?.configured || liveAssistBusyRef.current) return;
+    setLiveAssistBusy(true);
+    setLiveAssistError("");
+    try { await syncLiveAssistDraft(meetingId, current); }
+    catch (reason) { setLiveAssistError(reason instanceof Error ? reason.message : "Could not sync planned Live Assist edits"); }
+    finally { setLiveAssistBusy(false); }
+  };
+
+  const liveAssistAction = async (action: string, payload: unknown) => {
+    const meetingId = liveAssistMeetingId;
+    if (!meetingId || liveAssistBusyRef.current) return false;
+    setLiveAssistBusy(true);
+    setLiveAssistError("");
+    try {
+      liveAssistRequestSerial.current++;
+      publishLiveAssistState(await postLiveMeetingStateAction(meetingId, action, payload), true, false);
+      const request = payload && typeof payload === "object" ? payload as { id?: string; type?: string; text?: string; patch?: { text?: string } } : {};
+      if (action === "edit" && request.id && (payload as { patch?: { status?: string } }).patch?.status === "withdrawn" && liveAssistStateRef.current) {
+        const next = { ...liveAssistStateRef.current, items: (liveAssistStateRef.current.items || []).filter((item) => item.id !== request.id) };
+        liveAssistStateRef.current = next;
+        setLiveAssistState(next);
+      }
+      let pending = readPlannedLiveAssistDraft(meetingId);
+      if (action === "edit" && request.id === "goal" && typeof request.patch?.text === "string") {
+        pending = { ...pending, goal: null };
+      } else if (action === "edit" && request.id && typeof request.patch?.text === "string") {
+        pending = { ...pending, agendaEdits: pending.agendaEdits.filter((item) => item.id !== request.id) };
+      } else if (action === "add" && request.type === "agenda" && typeof request.text === "string") {
+        const index = pending.agendaItems.findIndex((item) => item.text === request.text);
+        if (index >= 0) pending = { ...pending, agendaItems: pending.agendaItems.filter((_, itemIndex) => itemIndex !== index) };
+      }
+      writePlannedLiveAssistDraft(meetingId, pending);
+      setLiveAssistDraft(pending);
+      return true;
+    } catch (reason) {
+      setLiveAssistError(reason instanceof Error ? reason.message : "Could not save Live Assist state");
+      const request = payload && typeof payload === "object" ? payload as { id?: string; type?: string; text?: string; patch?: { text?: string } } : {};
+      let pending = readPlannedLiveAssistDraft(meetingId);
+      let retained = false;
+      if (action === "edit" && request.id === "goal" && typeof request.patch?.text === "string") {
+        pending = { ...pending, goal: request.patch.text };
+        retained = true;
+      } else if (action === "edit" && request.id && typeof request.patch?.text === "string") {
+        const revision = liveAssistStateRef.current?.items?.find((item) => item.id === request.id)?.revision ?? 0;
+        pending = { ...pending, agendaEdits: [...pending.agendaEdits.filter((item) => item.id !== request.id), { id: request.id, text: request.patch.text, revision }] };
+        retained = true;
+      } else if (action === "add" && request.type === "agenda" && typeof request.text === "string") {
+        const draftId = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `draft-${Date.now()}`;
+        pending = { ...pending, agendaItems: [...pending.agendaItems, { id: draftId, text: request.text }] };
+        retained = true;
+      }
+      if (retained) {
+        writePlannedLiveAssistDraft(meetingId, pending);
+        setLiveAssistDraft(pending);
+      }
+      return retained;
+    }
+    finally { setLiveAssistBusy(false); }
   };
 
   // An unknown id — a stale/foreign/mistyped meeting URL — is a clean dead end, never a crash and never
@@ -1031,6 +1221,14 @@ function MeetingTab({ id, params }: TabProps) {
           </h1>
         </div>
           <div className={pageStyles.actions}>
+            {liveAssistMeetingId && liveAssistState?.can_configure && !liveAssistState.enabled && <button type="button" disabled={liveAssistBusy} onClick={() => void enableLiveAssist()}
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minHeight: 30, padding: "0 12px", border: "1px solid var(--accent)", borderRadius: 7, background: "var(--accent)", color: "var(--on-accent)", fontSize: 12, fontWeight: 700, cursor: liveAssistBusy ? "wait" : "pointer", opacity: liveAssistBusy ? 0.7 : 1 }}>
+              {liveAssistBusy ? "Enabling…" : "Enable live assist"}
+            </button>}
+            {liveAssistEnabled && <button type="button" className={pageStyles.viewSwitch}
+              onClick={() => setTranscriptViewMeetingId(showingLiveAssist ? liveAssistMeetingId : "")}>
+              {showingLiveAssist ? <><List size={16} aria-hidden="true" />Transcript</> : <><FileText size={16} aria-hidden="true" />Live Assist</>}
+            </button>}
             {m && !meetingsOnly() && <button type="button" aria-expanded={knowledgeOpen} aria-controls={`meeting-knowledge-${m.id}`} onClick={() => setKnowledgeOpen((open) => !open)}
               style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 var(--space-3)", border: "1px solid var(--line2)", borderRadius: 7, background: "transparent", color: "var(--accent)", fontSize: "var(--ui-type-meta)", fontWeight: 600, cursor: "pointer" }}>
               {knowledgeOpen ? "Close TINA" : "Ask TINA"}
@@ -1038,6 +1236,7 @@ function MeetingTab({ id, params }: TabProps) {
             {m && <BotControls m={m} connected={connected} />}
             {m?.native_id && <ShareSessionButton platform={platformSlug(m.platform)} native={m.native_id} />}
           </div>
+        {liveAssistError && !liveAssistState?.enabled && <div role="alert" style={{ margin: "0 0 8px", color: "var(--danger)", fontSize: 11.5 }}>{liveAssistError}</div>}
         {m && <div className={pageStyles.metadata}>
           <span>{m.platform}</span>
           {ended && <span className={pageStyles.ended} data-failed={m.live_status === "failed"} role="status">{m.live_status === "failed" ? "Bot session failed" : "Meeting ended"}</span>}
@@ -1051,7 +1250,23 @@ function MeetingTab({ id, params }: TabProps) {
           <MeetingKnowledge key={`knowledge-${m.id}`} meetingId={String(m.id)} />
       </div>}
       <div style={{ flex: 1, minHeight: 0 }}>
-        <MeetingCanvasView key={requestedMeetingId} meetingId={requestedMeetingId} meetingRecord={m} onDeleteMeeting={canDeleteMeeting ? deleteMeeting : undefined} deletingMeeting={deletingMeeting} />
+        <div className={pageStyles.view} hidden={showingLiveAssist}>
+          <MeetingCanvasView key={requestedMeetingId} meetingId={requestedMeetingId} meetingRecord={m} onDeleteMeeting={canDeleteMeeting ? deleteMeeting : undefined} deletingMeeting={deletingMeeting} />
+        </div>
+        {liveAssistMeetingId && liveAssistState?.enabled && <div className={pageStyles.view} hidden={!showingLiveAssist}>
+          <LiveAssistRunningView
+              key={liveAssistMeetingId}
+              meetingId={liveAssistMeetingId}
+              meetingTitle={m?.title_custom ?? (m?.native_id ?? m?.title ?? "Meeting").replace(/^Google Meet · /, "")}
+              state={liveAssistState}
+              busy={liveAssistBusy}
+              error={liveAssistError}
+              syncedAt={liveAssistSyncedAt}
+              pendingDraft={liveAssistDraft}
+              onAction={liveAssistAction}
+              onRetryDraft={() => void retryLiveAssistDraft()}
+          />
+        </div>}
       </div>
     </div>
   );

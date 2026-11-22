@@ -13,11 +13,12 @@ back ``ANTHROPIC_AUTH_TOKEN`` → ``ANTHROPIC_API_KEY``; optional — local runt
 from __future__ import annotations
 
 import os
+import math
 from typing import Optional
 
 import httpx
 
-from llm.errors import (LLMAuthError, LLMConfigError, LLMError,
+from llm.errors import (LLMAuthError, LLMConfigError, LLMError, LLMResponseError,
                         LLMStructuredOutputUnsupported, structured_output_unsupported)
 from llm.ports import CompletionResult
 
@@ -37,14 +38,15 @@ class OpenAICompatCompletion:
         self._client = httpx.Client(timeout=timeout, transport=transport)
 
     def complete(self, prompt: str, *, system: Optional[str] = None,
-                 model: Optional[str] = None) -> CompletionResult:
-        return self._complete(prompt, system=system, model=model)
+                 model: Optional[str] = None, response_schema: Optional[dict] = None) -> CompletionResult:
+        return self._complete(prompt, system=system, model=model, schema=response_schema,
+                              schema_name="structured_completion")
 
     def complete_structured(self, prompt: str, *, system: str, schema: dict) -> CompletionResult:
         return self._complete(prompt, system=system, schema=schema)
 
     def _complete(self, prompt: str, *, system: Optional[str] = None,
-                  model: Optional[str] = None, schema: dict | None = None) -> CompletionResult:
+                  model: Optional[str] = None, schema: dict | None = None, schema_name: str = "tina_voice") -> CompletionResult:
         target = (model or "").strip() or self._model
         if not self._base:
             raise LLMConfigError(
@@ -59,10 +61,14 @@ class OpenAICompatCompletion:
         messages = ([{"role": "system", "content": system}] if system else [])
         messages.append({"role": "user", "content": prompt})
         headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
-        payload = {"model": target, "messages": messages}
+        try:
+            max_tokens = int(os.environ.get("TINA_LLM_MAX_TOKENS", "4096"))
+        except ValueError:
+            max_tokens = 4096
+        payload = {"model": target, "messages": messages, "max_tokens": max_tokens}
         if schema is not None:
             payload['response_format'] = {'type': 'json_schema', 'json_schema': {
-                'name': 'tina_voice', 'strict': True, 'schema': schema}}
+                'name': schema_name, 'strict': True, 'schema': schema}}
         try:
             r = self._client.post(f"{self._base}/chat/completions",
                                   json=payload, headers=headers)
@@ -78,8 +84,22 @@ class OpenAICompatCompletion:
             detail = r.text.replace(self._key, "[redacted]") if self._key else r.text
             raise LLMError(f"{r.status_code} from {self._base}: {detail[:300]}", status_code=r.status_code)
         try:
-            choice = (r.json().get("choices") or [{}])[0]
-            text = (choice.get("message") or {}).get("content") or ""
-        except (ValueError, AttributeError, IndexError, TypeError) as exc:
-            raise LLMError(f"malformed completion payload from {self._base}: {exc}") from exc
-        return CompletionResult(text=str(text), model=target)
+            body = r.json()
+            content = body['choices'][0]['message'].get('content')
+            if content is not None and not isinstance(content, str):
+                raise TypeError('Expected completion text')
+            text = content or ''
+        except (ValueError, AttributeError, KeyError, IndexError, TypeError) as exc:
+            raise LLMResponseError('Malformed completion payload') from exc
+        usage = body.get('usage') or {}
+        usage = usage if isinstance(usage, dict) else {}
+        cached = usage.get('prompt_tokens_details') or {}
+        cached = cached if isinstance(cached, dict) else {}
+        count = lambda v: v if type(v) is int and v >= 0 else None
+        # Compatible providers such as Groq report these usage durations in seconds.
+        timings = {target: usage[key]*1000 for key, target in (('queue_time', 'queue_ms'),
+            ('prompt_time', 'prefill_ms'), ('completion_time', 'generation_ms'))
+            if type(usage.get(key)) in (int, float) and math.isfinite(usage[key]) and usage[key] >= 0}
+        return CompletionResult(text=str(text), model=target, usage={
+            'input_tokens': count(usage.get('prompt_tokens')), 'output_tokens': count(usage.get('completion_tokens')),
+            'cache_read_tokens': count(cached.get('cached_tokens')), 'provider_timings': timings})

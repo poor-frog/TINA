@@ -56,6 +56,7 @@ COPY core/agent/workspace-seeds ./workspace-seeds
 # walk-up (Path(__file__).resolve().parents → /app/contracts/loader.py → /app) resolves
 # `meetings/contracts/...` and `agent/contracts/...` (repo_root == /app).
 COPY core/meetings/contracts/transcript.v1/transcript.schema.json  ./meetings/contracts/transcript.v1/transcript.schema.json
+COPY core/meetings/contracts/meeting-state.v1/meeting-state.schema.json ./meetings/contracts/meeting-state.v1/meeting-state.schema.json
 COPY core/agent/contracts/workspace.v1/workspace.schema.json       ./agent/contracts/workspace.v1/workspace.schema.json
 COPY core/agent/contracts/invoke.v1/invoke.schema.json             ./agent/contracts/invoke.v1/invoke.schema.json
 COPY core/agent/contracts/unit.v1/unit.schema.json                 ./agent/contracts/unit.v1/unit.schema.json

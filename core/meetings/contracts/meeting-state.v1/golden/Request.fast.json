@@ -1,0 +1,20 @@
+{
+  "role": "fast",
+  "generation": "00000000-0000-0000-0000-000000000001",
+  "epoch": 1,
+  "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+  "attempts": 1,
+  "status": "running",
+  "lease_until": 210,
+  "queued_at": 30,
+  "batch_started_at": 0,
+  "user_id": 7,
+  "meeting_id": 1,
+  "segments": [{"segment_id": "s1", "revision": 0, "speaker_revision": 0, "speaker_name": "A", "start_ms": 1000, "end_ms": 2000, "text": "Should we test retries?"}],
+  "context": {"goal": {"text": "Test service reliability", "revision": 1, "human": true}, "items": [], "previous": []},
+  "config": {"fast_seconds": 30, "reason_seconds": 120, "timezone": "UTC", "eagerness": "normal"},
+  "policy": {"version": 1, "external_search": false},
+  "item_revisions": {},
+  "source_keys": {"s1": "0000000000000000000000000000000000000000000000000000000000000000"},
+  "goal_revision": 1
+}

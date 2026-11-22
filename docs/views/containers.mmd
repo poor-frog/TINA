@@ -59,6 +59,7 @@ flowchart LR
   google_meet_api["Google Meet REST API"]
   google_people_api["Google People API"]
   mail_relay["configured SMTP relay"]
+  meeting_api -->|"HTTP"| agent_api
   meeting_api -->|"write"| segments_table
   bot -->|"HTTPS"| transcription
   meeting_api -->|"JDBC"| postgres

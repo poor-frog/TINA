@@ -65,6 +65,19 @@ def test_custom_endpoint_falls_back_to_openai_dialect():
     assert out["ok"]
 
 
+@pytest.mark.parametrize('base', ['http://ollama:11434/v1', 'http://ollama:11434/v1/'])
+def test_custom_endpoint_preserves_a_single_v1_prefix(base):
+    calls = []
+    def post(url, payload, headers):
+        calls.append(url)
+        if url == 'http://ollama:11434/v1/chat/completions':
+            return 200, '{}'
+        return 404, '{}'
+    out = ct.test_custom_endpoint(base, '', 'qwen2.5:7b-instruct', post=post)
+    assert out['ok']
+    assert calls == ['http://ollama:11434/v1/messages', 'http://ollama:11434/v1/chat/completions']
+
+
 def test_custom_endpoint_unreachable():
     def post(url, payload, headers):
         raise OSError("connection refused")

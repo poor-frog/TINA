@@ -118,6 +118,10 @@ spec:
               value: {{ .Values.models.agentModel | default "" | quote }}
             - name: TINA_MEETING_MODEL
               value: {{ .Values.models.meetingModel | default "" | quote }}
+            - name: TINA_STATE_FAST_MODEL
+              value: {{ .Values.models.stateFastModel | default "" | quote }}
+            - name: TINA_STATE_REASON_MODEL
+              value: {{ .Values.models.stateReasonModel | default "" | quote }}
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:

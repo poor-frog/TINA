@@ -30,6 +30,13 @@
       "session_start_time": "Column(DateTime(timezone=True), nullable=False, server_default=func.now())",
       "session_uid": "Column(String, nullable=False, index=True)"
     },
+    "meeting_state_events": {
+      "expires_at": "Column(DateTime(timezone=True), nullable=True, index=True)",
+      "id": "Column(String(36), primary_key=True)",
+      "meeting_id": "Column(Integer, ForeignKey('meetings.id', ondelete='CASCADE'), nullable=False, index=True)",
+      "payload": "Column(JSONB, nullable=False)",
+      "sequence": "Column(Integer, nullable=False)"
+    },
     "meetings": {
       "bot_container_id": "Column(String(255), nullable=True)",
       "created_at": "Column(DateTime, server_default=func.now(), index=True)",
@@ -78,6 +85,13 @@
       "meeting_id": "Column(Integer, ForeignKey('meetings.id'), nullable=False, index=True)",
       "session_start_time": "Column(DateTime(timezone=True), nullable=False, server_default=func.now())",
       "session_uid": "Column(String, nullable=False, index=True)"
+    },
+    "meeting_state_events": {
+      "expires_at": "Column(DateTime(timezone=True), nullable=True, index=True)",
+      "id": "Column(String(36), primary_key=True)",
+      "meeting_id": "Column(Integer, ForeignKey('meetings.id', ondelete='CASCADE'), nullable=False, index=True)",
+      "payload": "Column(JSONB, nullable=False)",
+      "sequence": "Column(Integer, nullable=False)"
     },
     "meetings": {
       "bot_container_id": "Column(String(255), nullable=True)",

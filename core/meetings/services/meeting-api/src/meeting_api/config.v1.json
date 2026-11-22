@@ -3,6 +3,13 @@
   "service": "meeting-api",
   "keys": [
     {
+      "key": "MEETING_AGENT_API_URL",
+      "class": "defaulted",
+      "default": "http://agent-api:8100",
+      "description": "Internal authoritative workspace roster lookup for live-state proposal creation and voting; never called under a meeting row lock",
+      "targets": ["compose", "helm"]
+    },
+    {
       "key": "ADMIN_TOKEN",
       "class": "required-explicit",
       "secret": true,

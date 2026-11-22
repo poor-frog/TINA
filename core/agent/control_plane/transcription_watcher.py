@@ -231,6 +231,8 @@ def start(redis_url: str, dispatcher, live, *, subject: str = "u_live") -> threa
     authorization can select a live copilot's workspace or enable transcript access."""
     from control_plane.processed_notes import start as start_canonical_notes
     start_canonical_notes(redis_url, dispatcher)
+    from control_plane.live_assist import start as start_meeting_state
+    start_meeting_state(redis_url, dispatcher)
     keymap: dict[str, str] = {}
     t = threading.Thread(
         target=_run_arm, args=(redis_url, dispatcher, live, subject, keymap),

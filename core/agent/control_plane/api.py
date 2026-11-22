@@ -1060,6 +1060,9 @@ def create_app(
             return fallback
         raise HTTPException(status_code=401, detail="missing X-User-Id (agent-api is fronted by the gateway)")
 
+    from control_plane.live_assist_documents import register as register_state_research
+    register_state_research(app, subject_of, settings, mindex)
+
     @app.get("/health")
     def health():
         ok = dispatcher is not None
@@ -1190,10 +1193,10 @@ def create_app(
         request: Request,
         *,
         text: str,
-        task: Literal["polish", "translate", "knowledge"],
+        task: Literal["polish", "translate", "knowledge", "discussion"],
         target_language: str | None = None,
     ) -> str:
-        label = {'polish': 'Text polish', 'translate': 'Live translation', 'knowledge': 'Meeting answer'}[task]
+        label = {'polish': 'Text polish', 'translate': 'Live translation', 'knowledge': 'Meeting answer', 'discussion': 'Discussion review'}[task]
         if dispatcher is None or stream_reader is None:
             raise HTTPException(status_code=503, detail=f"{label} is not configured")
         subject = subject_of(request)
@@ -1202,6 +1205,8 @@ def create_app(
             prefix, session = units.DICTATION_POLISH_PREFIX, "dictation-polish"
         elif task == 'knowledge':
             prefix, session = units.MEETING_KNOWLEDGE_PREFIX, 'meeting-knowledge'
+        elif task == 'discussion':
+            prefix, session = units.DISCUSSION_REVIEW_PREFIX, 'discussion-review'
         else:
             prefix, session = units.DICTATION_TRANSLATE_PREFIX, "dictation-translate"
         payload = {"request_id": request_id, "text": text}
@@ -1251,7 +1256,14 @@ def create_app(
 
         output_parts: list[str] = []
         translation_complete = False
-        deadline = time.monotonic() + 60.0
+        deadline_seconds = 60.0
+        if task == 'discussion':
+            try:
+                window_count = max(1, len(json.loads(text).get('windows', [])))
+            except (ValueError, TypeError):
+                window_count = 1
+            deadline_seconds = min(900.0, 90.0 + window_count * 40.0)
+        deadline = time.monotonic() + deadline_seconds
         voice_cancelled = False
         voice_redis = None
         should_continue = None
@@ -1508,6 +1520,65 @@ def create_app(
         `native_resolve: {ok:false, kind:'unauthorized', detail:…}` instead of silent dead air."""
         from control_plane import transcription_watcher as _txw
         return _txw.relay_health()
+
+    @app.post('/api/internal/meeting-state-sources')
+    def meeting_state_sources(request: Request, body: dict):
+        secret = settings.internal_api_secret.get_secret_value()
+        if not secret or not hmac.compare_digest(request.headers.get('x-internal-secret', ''), secret):
+            raise HTTPException(403, 'Internal secret required')
+        from control_plane.live_assist_documents import validate_sources
+        try:
+            started = time.perf_counter()
+            result = validate_sources(settings, body)
+            if body.get('meeting_id') is not None:
+                from control_plane.live_assist import record
+                record({'meeting_id': body['meeting_id'], 'stage': 'document_source_validation', 'duration_ms': (time.perf_counter()-started)*1000})
+            return result
+        except (ValueError, OSError, membership_mod.MembershipError):
+            raise HTTPException(503, 'Shared document authority unavailable') from None
+
+    @app.get('/api/internal/meeting-state-roster')
+    def meeting_state_roster(workspace_id: str, request: Request):
+        secret = settings.internal_api_secret.get_secret_value()
+        if not secret or not hmac.compare_digest(request.headers.get('x-internal-secret', ''), secret):
+            raise HTTPException(403, 'Internal secret required')
+        try:
+            from control_plane.live_assist import workspace_roster
+            subjects = workspace_roster(settings, workspace_id)
+        except (ValueError, OSError, membership_mod.MembershipError):
+            raise HTTPException(503, 'Workspace membership unavailable') from None
+        return {'subjects': subjects}
+
+    @app.get('/api/admin/meeting-state/{meeting_id}')
+    def meeting_state_profile(meeting_id: int, request: Request):
+        secret = settings.internal_api_secret.get_secret_value()
+        if not secret or not hmac.compare_digest(request.headers.get('x-internal-secret', ''), secret):
+            raise HTTPException(403, 'Internal secret required')
+        from control_plane.live_assist import traces
+        return traces(meeting_id)
+
+    @app.post('/api/admin/meeting-state/{meeting_id}')
+    def meeting_state_retry(meeting_id: int, request: Request):
+        secret = settings.internal_api_secret.get_secret_value()
+        if not secret or not hmac.compare_digest(request.headers.get('x-internal-secret', ''), secret):
+            raise HTTPException(403, 'Internal secret required')
+        from control_plane.live_assist import meeting_post
+        return meeting_post(settings, {'user_id': 0, 'meeting_id': meeting_id}, 'retry', {})
+
+    @app.post('/api/admin/meeting-state/{meeting_id}/policy')
+    async def meeting_state_policy(meeting_id: int, request: Request):
+        secret = settings.internal_api_secret.get_secret_value()
+        if not secret or not hmac.compare_digest(request.headers.get('x-internal-secret', ''), secret):
+            raise HTTPException(403, 'Internal secret required')
+        raw = await request.body()
+        if len(raw) > 16000:
+            raise HTTPException(413, 'Policy too large')
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            raise HTTPException(422, 'Invalid policy') from None
+        from control_plane.live_assist import meeting_post
+        return await run_in_threadpool(meeting_post, settings, {'user_id': 0, 'meeting_id': meeting_id}, 'policy', payload)
 
     @app.get("/api/admin/overview")
     def admin_overview(request: Request):
@@ -2000,6 +2071,10 @@ def create_app(
 
     from control_plane.workspace_documents import register as register_workspace_documents
     register_workspace_documents(app, subject_of, _read_target, _private_write_target, wsr)
+
+    from control_plane.discussion_review import register as register_discussion_review
+    register_discussion_review(app, subject_of, _private_write_target, wsr, settings.meeting_api_url if settings else '',
+                               lambda request, text: _transcript_completion(request, text=text, task='discussion'))
 
     @app.post("/api/workspace/upload")
     async def ws_upload(request: Request, files: list[UploadFile] = File(...)):

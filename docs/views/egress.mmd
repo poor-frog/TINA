@@ -53,5 +53,9 @@ flowchart LR
   meeting_api ==>|"participant-identifiers -> owner-authorized Google Workspace APIs"| google_people_api
   transcription["transcription"]
   discord_connector ==>|"audio -> tenant-hosted"| transcription
+  completion_provider["configured completion provider"]
+  agent_worker ==>|"transcript -> external-saas"| completion_provider
+  completion_provider["configured completion provider"]
+  agent_worker ==>|"transcript -> external-saas"| completion_provider
   mail_relay["configured SMTP relay"]
   flows_worker ==>|"notification -> operator-configured"| mail_relay
