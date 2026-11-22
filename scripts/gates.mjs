@@ -726,7 +726,7 @@ function gateContractConformance() {
   const pkgs = pyPackages().filter((d) => existsSync(join(d, "tests", "test_contract_conformance.py")));
   if (!pkgs.length) return fail(["gate:contract-conformance — no tests/test_contract_conformance.py (api.v1↔impl conformance is unproven)"]);
   for (const d of pkgs) {
-    try { execSync("uv run pytest -q tests/test_contract_conformance.py", { cwd: d, stdio: "pipe" }); }
+    try { execSync("uv run python -m pytest -q tests/test_contract_conformance.py", { cwd: d, stdio: "pipe" }); }
     catch (e) { return fail([`contract-conformance ${rel(d)}:\n${errText(e).slice(-1500)}`]); }
   }
   console.log(`  ✓ gate:contract-conformance — ${pkgs.length} service(s) conform to the sealed api.v1 (impl⊆contract + contract⊆impl + golden shapes; gaps audited in KNOWN_GAPS.json)`);
