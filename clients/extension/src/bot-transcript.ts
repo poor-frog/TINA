@@ -116,10 +116,19 @@ export async function listBotMeetings(config: BotConnection, signal?: AbortSigna
       id: row.id, platform: row.platform, nativeMeetingId: row.native_meeting_id,
       title: typeof row.data?.title === 'string' ? row.data.title : row.native_meeting_id,
       status: typeof row.status === 'string' ? row.status : 'unknown', startMs: epoch(row.start_time),
-      shared: row.shared === true,
+      shared: typeof row.shared === 'boolean' ? row.shared : undefined,
       autoRetry: row.data?.auto_retry && typeof row.data.auto_retry === 'object' ? row.data.auto_retry : undefined,
       joinFailureSummary: typeof row.data?.join_failure_summary === 'string' ? row.data.join_failure_summary.slice(0,300) : undefined,
     }));
+}
+
+/** A spawn conflict can mean the room already has this account's bot, or that the spawn was refused. */
+export async function hasOwnedBotInRoom(config: BotConnection, room: Pick<BotMeeting, 'platform' | 'nativeMeetingId'>): Promise<boolean> {
+  const meetings = await listBotMeetings(config).catch(() => []);
+  const roomId = (id: string) => room.platform === 'google_meet' ? id.toLowerCase() : id;
+  return meetings.some(meeting => meeting.shared === false && meeting.platform === room.platform
+    && roomId(meeting.nativeMeetingId) === roomId(room.nativeMeetingId)
+    && ['requested', 'joining', 'awaiting_admission', 'active'].includes(meeting.status.toLowerCase()));
 }
 
 /** Read existing processed notes for this exact meeting row, without enabling generation. */

@@ -2,7 +2,7 @@ import { createVoiceActivity } from './voice-activity-view';
 import { createTranscriptFeed } from './transcript-feed';
 import { detectMeeting, type MeetingRef } from './meeting';
 import {
-  botFetch, listBotMeetings, watchBotTranscript, readBotVoiceSources,
+  botFetch, hasOwnedBotInRoom, listBotMeetings, watchBotTranscript, readBotVoiceSources,
   type BotConnection, type BotMeeting,
 } from './bot-transcript';
 import { ACCOUNT_KEY, DEFAULT_GATEWAY, DEFAULT_TERMINAL, sessionCommand, storedAccount } from './extension-session';
@@ -241,10 +241,13 @@ async function sendBotToActiveMeeting(): Promise<void> {
   const session = config.account.key;
   const key = botTargetKey(meeting);
   if (sendBotState?.key === key && sendBotState.phase !== 'error') return;
-  sendBotState = { key, phase: 'sending', message: 'Sending bot request…' };
+  const connection = { ...config };
+  const request = { key, phase: 'sending' as const, message: 'Sending bot request…' };
+  const isCurrent = () => session === config.account?.key && sendBotState === request;
+  sendBotState = request;
   renderSendBot();
   try {
-    const response = await botFetch(config, '/bots', {
+    const response = await botFetch(connection, '/bots', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -255,8 +258,13 @@ async function sendBotToActiveMeeting(): Promise<void> {
       signal: AbortSignal.timeout(15000),
     });
     const body = await response.json().catch(() => ({})) as { detail?: unknown };
-    if (session !== config.account?.key) return;
+    if (!isCurrent()) return;
+    const failure = typeof body?.detail === 'string' && body.detail.trim()
+      ? body.detail : `Could not send bot (${response.status}).`;
     if (response.status === 409) {
+      const confirmed = await hasOwnedBotInRoom(connection, meeting);
+      if (!isCurrent()) return;
+      if (!confirmed) throw new Error(failure);
       sendBotState = { key, phase: 'sent', message: 'A bot is already active for this meeting.' };
     } else if (response.status === 429) {
       throw new Error('Your active bot limit is reached. Stop another bot and try again.');
@@ -265,7 +273,7 @@ async function sendBotToActiveMeeting(): Promise<void> {
     } else if (response.status === 403) {
       throw new Error('This account cannot manage bots in this meeting.');
     } else if (!response.ok) {
-      throw new Error(typeof body.detail === 'string' ? body.detail : `Could not send bot (${response.status}).`);
+      throw new Error(failure);
     } else {
       sendBotState = { key, phase: 'sent', message: 'Bot sent. Admit it in the meeting if prompted.' };
       setTimeout(() => {
@@ -276,7 +284,7 @@ async function sendBotToActiveMeeting(): Promise<void> {
       }, 1200);
     }
   } catch (error) {
-    if (session !== config.account?.key) return;
+    if (!isCurrent()) return;
     failBot(key, error instanceof Error ? error.message : 'Could not send the bot.');
   }
   if (activeMeeting && botTargetKey(activeMeeting) === key) renderSendBot();

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { botBase, botSegments, listBotMeetings, readBotProcessedNotes, readBotRecap, readBotSpeakerLinks, stopBotMeeting, watchBotTranscript } from './bot-transcript';
+import { botBase, botSegments, hasOwnedBotInRoom, listBotMeetings, readBotProcessedNotes, readBotRecap, readBotSpeakerLinks, stopBotMeeting, watchBotTranscript } from './bot-transcript';
 import { meetAvatarUrl, readMeetAvatars } from './meet-avatars';
 import { notesPreview, recapGroups, recapText } from './meet-notes';
 import { voiceReplies,voiceSources } from './voice-replies';
@@ -85,6 +85,17 @@ try {
   assert.equal(calls[0].options.headers!['Authorization' as keyof HeadersInit], 'Bearer fixture-secret');
   assert.equal(calls[0].options.redirect, 'error');
   assert.ok(calls.every(call => !call.url.includes('fixture-secret')));
+  const room = { platform: 'google_meet', nativeMeetingId: 'abc-defg-hij' };
+  const active = { id: 23, platform: 'google_meet', native_meeting_id: 'ABC-DEFG-HIJ', status: 'active', shared: false };
+  respond = async () => Response.json({ meetings: [
+    { ...active, shared: true }, { ...active, shared: undefined },
+    { ...active, native_meeting_id: 'other-room' }, { ...active, status: 'stopping' },
+  ] });
+  assert.equal(await hasOwnedBotInRoom(config, room), false);
+  respond = async () => Response.json({ meetings: [active] });
+  assert.equal(await hasOwnedBotInRoom(config, room), true);
+  respond = async () => new Response('', { status: 503 });
+  assert.equal(await hasOwnedBotInRoom(config, room), false);
   respond = async () => Response.json(doc());
   const stop = watchBotTranscript(config, meeting, rows => updates.push(rows[0]?.text), (_message, denied) => errors.push(denied));
   await turn(); assert.equal(updates.length, 1);

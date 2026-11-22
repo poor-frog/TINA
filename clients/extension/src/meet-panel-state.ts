@@ -7,7 +7,7 @@ export function isTerminalBotStatus(status: string): boolean {
 }
 
 export function isOwnedActiveBot(meeting: BotMeeting | null): boolean {
-  return !!meeting && !meeting.shared && !isTerminalBotStatus(meeting.status);
+  return meeting?.shared === false && !isTerminalBotStatus(meeting.status);
 }
 
 /** Prefer an active owned run, while still supporting shared and saved transcripts. */

@@ -1,5 +1,5 @@
 import { createTranscriptFeed } from './transcript-feed';
-import { botFetch, listBotMeetings, readBotProcessedNotes, readBotRecap, readBotSpeakerLinks, readBotTranscript, stopBotMeeting, watchBotTranscript, type BotConnection, type BotMeeting, type BotProcessedNotes, type BotSpeakerLink } from './bot-transcript';
+import { botFetch, hasOwnedBotInRoom, listBotMeetings, readBotProcessedNotes, readBotRecap, readBotSpeakerLinks, readBotTranscript, stopBotMeeting, watchBotTranscript, type BotConnection, type BotMeeting, type BotProcessedNotes, type BotSpeakerLink } from './bot-transcript';
 import { ACCOUNT_KEY, DEFAULT_GATEWAY, DEFAULT_TERMINAL, sessionCommand, storedAccount } from './extension-session';
 import { meetAvatarUrl } from './meet-avatars';
 import type { TranscriptSegment } from './transcript-rendering';
@@ -119,26 +119,33 @@ function safeTerminalUrl(path: string): string {
 async function sendBot(): Promise<void> {
   if (!validMeetId || !config.account || sendBotState === 'sending' || stopping || hasStoppableBot()) return;
   if (sendBotResetTimer) clearTimeout(sendBotResetTimer);
+  const connection = config;
   const account = config.account;
+  const isCurrent = () => !disposed && config.account?.key === account.key;
   sendBotState = 'sending';
   setFooterStatus('Đang gửi yêu cầu TINA Bot…');
   renderFooterActions();
   try {
-    const response = await botFetch(config, '/bots', {
+    const response = await botFetch(connection, '/bots', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ platform: 'google_meet', native_meeting_id: meetId, meeting_url: `https://meet.google.com/${meetId}` }),
       signal: AbortSignal.timeout(15000),
     });
     const body = await response.json().catch(() => ({})) as { detail?: unknown };
-    if (config.account?.key !== account?.key) return;
+    if (!isCurrent()) return;
+    const failure = typeof body?.detail === 'string' && body.detail.trim()
+      ? body.detail.slice(0, 300) : `Không gửi được Bot (${response.status}).`;
     if (response.status === 409) {
+      const confirmed = await hasOwnedBotInRoom(connection, { platform: 'google_meet', nativeMeetingId: meetId });
+      if (!isCurrent()) return;
+      if (!confirmed) throw new Error(failure);
       sendBotState = 'sent';
-      setFooterStatus('TINA Bot đã chạy trong cuộc họp này.');
+      setFooterStatus('TINA Bot đã được mời vào phòng này.');
     } else if (response.status === 429) throw new Error('Đã đạt giới hạn Bot đang chạy. Hãy dừng một phiên khác rồi thử lại.');
     else if (response.status === 401) throw new Error('Hãy đăng nhập TINA lại để tiếp tục.');
     else if (response.status === 403) throw new Error('Tài khoản này chưa có quyền mời TINA Bot.');
-    else if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail.slice(0, 300) : `Không gửi được Bot (${response.status}).`);
+    else if (!response.ok) throw new Error(failure);
     else {
       sendBotState = 'sent';
       setFooterStatus('Đã gửi Bot · hãy chấp nhận trong Meet nếu được hỏi.');
@@ -152,7 +159,7 @@ async function sendBot(): Promise<void> {
       }
     }, 15000);
   } catch (error) {
-    if (config.account?.key !== account?.key) return;
+    if (!isCurrent()) return;
     sendBotState = 'error';
     setFooterStatus(error instanceof Error ? error.message : 'Không gửi được TINA Bot.', true);
   }

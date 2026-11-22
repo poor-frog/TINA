@@ -4,7 +4,7 @@ import type { BotMeeting } from './bot-transcript';
 import { pinScope, pinSource, pinsFromStorage } from './meet-pins';
 
 const meeting = (id: number, nativeMeetingId: string, status: string, startMs: number, platform = 'google_meet'): BotMeeting => ({
-  id, nativeMeetingId, status, startMs, platform, title: `Meet ${id}`,
+  id, nativeMeetingId, status, startMs, platform, title: `Meet ${id}`, shared: false,
 });
 
 assert.equal(isTerminalBotStatus('stopped'), true);
@@ -26,6 +26,7 @@ assert.equal(currentGoogleMeetBot([shared, owned], 'abc-defg-hij'), owned);
 assert.equal(currentGoogleMeetBot([shared], 'abc-defg-hij'), shared);
 assert.equal(isOwnedActiveBot(owned), true);
 assert.equal(isOwnedActiveBot(shared), false);
+assert.equal(isOwnedActiveBot({ ...owned, shared: undefined }), false);
 assert.equal(isOwnedActiveBot({ ...owned, status: 'completed' }), false);
 
 const gateway = 'http://127.0.0.1:28056';
