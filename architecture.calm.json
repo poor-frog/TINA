@@ -1137,6 +1137,17 @@
    ]
   },
   {
+   "unique-id": "terminal-web",
+   "node-type": "module",
+   "name": "terminal/web",
+   "description": "User App shell for meetings, Ask Tina, tasks, routines and settings. Reuses Terminal's auth gates, views and API clients.",
+   "metadata": [
+    {
+     "path": "clients/terminal/src/web"
+    }
+   ]
+  },
+  {
    "unique-id": "terminal-workbench",
    "node-type": "module",
    "name": "terminal/workbench",
@@ -2541,6 +2552,7 @@
       "terminal-platform",
       "terminal-surfaces",
       "terminal-ui-kit",
+      "terminal-web",
       "terminal-workbench"
      ]
     }
