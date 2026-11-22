@@ -123,10 +123,19 @@ describe("Google Calendar onboarding", () => {
     const [provider, options, params] = vi.mocked(signIn).mock.calls[0];
     expect(provider).toBe("google-calendar");
     expect(new URL(options!.callbackUrl!).searchParams.get("tina-calendar-settings")).toBe("google-linked");
-    expect(params).toMatchObject({
-      access_type: "offline",
-      scope: "openid email profile https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events.readonly",
-    });
+    const authorization = new URLSearchParams(params);
+    expect(authorization.get("access_type")).toBe("offline");
+    expect(authorization.get("scope")?.split(/\s+/).sort()).toEqual([
+      "openid",
+      "email",
+      "profile",
+      "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+      "https://www.googleapis.com/auth/calendar.events.readonly",
+      "https://www.googleapis.com/auth/meetings.space.readonly",
+      "https://www.googleapis.com/auth/contacts.readonly",
+      "https://www.googleapis.com/auth/contacts.other.readonly",
+      "https://www.googleapis.com/auth/directory.readonly",
+    ].sort());
   });
 
   it("shows a failed link preparation without redirecting to Google", async () => {

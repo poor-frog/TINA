@@ -82,16 +82,25 @@ it('shows per-channel numbers and leaves missing queue measurements blank', asyn
   expect(screen.getByText('Không có sample clock')).toBeTruthy();
 });
 
-it('audio snapshots disappear on expiry even if subsequent polling fails', async () => {
-  const now=Date.now();let first=true;
-  vi.stubGlobal('fetch',vi.fn(async()=>{
-    if(!first)throw new Error('offline');first=false;
-    return {ok:true,json:async()=>({available:true,policy:{enabled:true,include_transcript:true,documents:[],revision:1,wake_variants:[]},
-      runtime:{state:'LISTENING',audio:{observed_at_ms:now-14900,channels:[]}}})};
-  }));
-  render(<MeetingVoice meetingId="42"/>);
-  await screen.findByText('Audio theo kênh · 0');
-  await waitFor(()=>expect(screen.queryByText('Audio theo kênh · 0')).toBeNull());
+it('expires audio snapshots while the next status poll is still pending', async () => {
+  vi.useFakeTimers();
+  const observedAt = Date.now() - 11000;
+  const fetch = vi.fn().mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({
+      available: true,
+      policy: { enabled: true, include_transcript: true, documents: [], revision: 1, wake_variants: [] },
+      runtime: { state: 'LISTENING', audio: { observed_at_ms: observedAt, channels: [] } },
+    }),
+  }).mockImplementation(() => new Promise(() => {}));
+  vi.stubGlobal('fetch', fetch);
+  await act(async () => { render(<MeetingVoice meetingId="42" />); });
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(3999); });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(screen.getByText('Audio theo kênh · 0')).toBeTruthy();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+  expect(screen.queryByText('Audio theo kênh · 0')).toBeNull();
 });
 
 it('shows verified TINA text independently of the closed settings and marks interrupted playback', async () => {

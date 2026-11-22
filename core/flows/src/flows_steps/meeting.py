@@ -49,9 +49,12 @@ def meeting_row(uid: str, meeting_id, native: str | None = None):
 def meeting_participants(uid: str, meeting_id, platform: str, native: str):
     """Read participant sources for the exact owner-scoped meeting row."""
     query = urlencode({"meeting_id": str(meeting_id)})
-    url = (f"{meetings_door()}/meetings/{quote(platform, safe='')}/"
-           f"{quote(native, safe='')}/participants?{query}")
-    status, body = http("GET", url, {"X-API-Key": user_api_key(str(uid))}, timeout=30)
+    status, body = http(
+        "GET",
+        f"{meetings_door()}/meetings/{quote(platform, safe='')}/"
+        f"{quote(native, safe='')}/participants?{query}",
+        {"X-API-Key": user_api_key(str(uid))}, timeout=30,
+    )
     if status in (408, 429) or status >= 500:
         raise StepError("Meeting attendance is temporarily unavailable")
     if status != 200 or not isinstance(body, dict) or str(body.get("meeting_id")) != str(meeting_id):
