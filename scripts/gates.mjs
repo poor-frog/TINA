@@ -106,6 +106,14 @@ function gateReadme() {
   const missing = dirs.filter((d) => {
     const r = join(d, "README.md");
     return !existsSync(r) || readFileSync(r, "utf8").trim().length === 0;
+  }).filter((d) => {
+    try {
+      execFileSync("git", ["check-ignore", "-q", "--", rel(d)], { cwd: ROOT, stdio: "ignore" });
+      return false;
+    } catch (error) {
+      if (error.status === 1) return true;
+      throw error;
+    }
   });
   if (missing.length) return fail(missing.map((d) => `missing/empty README: ${rel(d)}/`));
   console.log(`  ✓ gate:readme — ${dirs.length} dirs each carry a README`);
