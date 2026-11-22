@@ -3,9 +3,9 @@ import "./globals.css";
 import { Analytics } from "./AnalyticsScript";
 
 export const metadata: Metadata = {
-  title: "TINA Terminal",
+  title: "TINA — AI Meeting Companion",
   description:
-    "AI-first knowledge-worker terminal — Claude Code × Outlook on TINA's meeting-bot + agentic-runtime backend.",
+    "Self-hosted meeting bots, live bilingual transcription, grounded notes, and developer workbench.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -1,0 +1,536 @@
+"use client";
+/** SettingsView — Production Personal / Team Settings Hub with URL query sync
+ *  (`?nav=settings&settingsWorkspace=personal|team&settingsSection=<id>`).
+ *  100% wired to real TINA APIs & panels — zero mock toggles or placeholder billing controls. */
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { applyTheme, useTheme, type Theme } from "../app/theme";
+import { CalendarConnectionsPanel } from "../surfaces/calendarConnections";
+import { ModelsSection } from "../surfaces/settings";
+import { VoiceSettings } from "../surfaces/voiceSettings";
+import { AsrStatusPanel } from "../surfaces/asrStatus";
+import { GitHubTokenCard, TokensPanel } from "../surfaces/tokens";
+import { WebAvatar } from "./Avatar";
+import { WebIcon, type WebIconName } from "./Icons";
+import { SharedWorkspacesPanel } from "./SharedWorkspacesPanel";
+import type { WebUser } from "./useWebIdentity";
+
+export type SettingsWorkspace = "personal" | "team";
+export type SettingsSectionId =
+  | "calendar"
+  | "models"
+  | "voice"
+  | "tokens"
+  | "github"
+  | "appearance"
+  | "account"
+  | "workspaces"
+  | "global-models"
+  | "asr-status";
+
+interface SectionDef {
+  id: SettingsSectionId;
+  workspace: SettingsWorkspace;
+  group: string;
+  label: string;
+  description: string;
+  icon: WebIconName;
+  keywords: string;
+  adminOnly?: boolean;
+}
+
+const SECTIONS: readonly SectionDef[] = [
+  // Personal workspace
+  {
+    id: "calendar",
+    workspace: "personal",
+    group: "Meetings",
+    label: "Calendar & Auto-join",
+    description: "Connect Google or Microsoft calendars so TINA tracks your upcoming meetings and joins automatically.",
+    icon: "calendar",
+    keywords: "calendar google microsoft outlook schedule auto join meeting recording",
+  },
+  {
+    id: "models",
+    workspace: "personal",
+    group: "AI & Capture",
+    label: "AI Models & Transcription",
+    description: "Choose your personal agent LLM provider, ChatGPT plan, and speech-to-text transcription backend.",
+    icon: "cpu",
+    keywords: "models llm claude openai chatgpt gemini deepseek groq bedrock transcription stt asr gipformer viegem",
+  },
+  {
+    id: "voice",
+    workspace: "personal",
+    group: "AI & Capture",
+    label: "Voice Assistant",
+    description: "Configure voice dictation, wake words, and real-time voice interaction preferences.",
+    icon: "mic",
+    keywords: "voice dictation microphone audio speech tts",
+  },
+  {
+    id: "tokens",
+    workspace: "personal",
+    group: "Developer & Connections",
+    label: "API Tokens & MCP",
+    description: "Create and revoke personal access tokens for MCP clients, CLI integrations, and scripts.",
+    icon: "key",
+    keywords: "api tokens mcp cli keys authentication secret",
+  },
+  {
+    id: "github",
+    workspace: "personal",
+    group: "Developer & Connections",
+    label: "GitHub",
+    description: "Store a reusable GitHub Personal Access Token for pushing and pulling workspace repositories.",
+    icon: "github",
+    keywords: "github git pat token repository sync push pull",
+  },
+  {
+    id: "appearance",
+    workspace: "personal",
+    group: "Preferences",
+    label: "Appearance",
+    description: "Switch between TINA Obsidian Dark and Paper Light themes across your workspace.",
+    icon: "sun",
+    keywords: "appearance theme dark light mode color interface display",
+  },
+  {
+    id: "account",
+    workspace: "personal",
+    group: "Profile",
+    label: "Account",
+    description: "Review your signed-in identity, workspace role, and session controls.",
+    icon: "user",
+    keywords: "account profile user email sign out logout terminal admin",
+  },
+  // Team workspace
+  {
+    id: "workspaces",
+    workspace: "team",
+    group: "Team Workspace",
+    label: "Workspaces & Members",
+    description: "Create shared workspaces, mount team knowledge bases, manage member roles, and mint invite links.",
+    icon: "users",
+    keywords: "team shared workspace members invite link collaboration permissions role",
+  },
+  {
+    id: "global-models",
+    workspace: "team",
+    group: "Deployment Admin",
+    label: "Global Defaults",
+    description: "Set deployment-wide default LLM and transcription endpoints for everyone without personal overrides.",
+    icon: "globe",
+    keywords: "global admin default models transcription deployment funasr sherpa viegem apple nvidia",
+    adminOnly: true,
+  },
+  {
+    id: "asr-status",
+    workspace: "team",
+    group: "Deployment Admin",
+    label: "ASR Workers",
+    description: "Inspect live speech-recognition worker health, queue saturation, and p50/p95 latency telemetry.",
+    icon: "shield",
+    keywords: "asr status workers diagnostics latency queue telemetry health speech recognition",
+    adminOnly: true,
+  },
+];
+
+const DEFAULT_USER: WebUser = {
+  name: "Account",
+  firstName: "Account",
+  email: "",
+  image: null,
+};
+
+function defaultSectionFor(workspace: SettingsWorkspace): SettingsSectionId {
+  return workspace === "team" ? "workspaces" : "calendar";
+}
+
+function readSettingsRouteFromUrl(isAdmin: boolean): { workspace: SettingsWorkspace; section: SettingsSectionId } {
+  if (typeof window === "undefined") {
+    return { workspace: "personal", section: "calendar" };
+  }
+  const params = new URLSearchParams(window.location.search);
+  const rawWs = params.get("settingsWorkspace");
+  const rawSec = params.get("settingsSection");
+
+  const matchedSec = SECTIONS.find((s) => s.id === rawSec && (!s.adminOnly || isAdmin));
+  if (matchedSec) {
+    return { workspace: matchedSec.workspace, section: matchedSec.id };
+  }
+  const workspace: SettingsWorkspace = rawWs === "team" ? "team" : "personal";
+  return { workspace, section: defaultSectionFor(workspace) };
+}
+
+function syncSettingsUrl(workspace: SettingsWorkspace, section: SettingsSectionId) {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (url.pathname !== "/") return;
+  url.searchParams.set("nav", "settings");
+  url.searchParams.set("settingsWorkspace", workspace);
+  url.searchParams.set("settingsSection", section);
+  const next = `${url.pathname}?${url.searchParams.toString()}${url.hash}`;
+  if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== next) {
+    try {
+      window.history.replaceState(window.history.state, "", next);
+    } catch {
+      /* ignore sandboxed history */
+    }
+  }
+}
+
+export function SettingsView({
+  user = DEFAULT_USER,
+  isAdmin = false,
+  canOpenTerminal = false,
+  terminalHref = "/terminal",
+  onSignOut,
+}: {
+  user?: WebUser;
+  isAdmin?: boolean;
+  canOpenTerminal?: boolean;
+  terminalHref?: string;
+  onSignOut?: () => void;
+} = {}) {
+  const pendingAdminSectionRef = useRef<SettingsSectionId | null>(
+    typeof window !== "undefined" && !isAdmin
+      ? (SECTIONS.find(
+          (s) => s.id === new URLSearchParams(window.location.search).get("settingsSection") && s.adminOnly,
+        )?.id ?? null)
+      : null,
+  );
+  const initial = useMemo(() => readSettingsRouteFromUrl(isAdmin), [isAdmin]);
+  const [workspace, setWorkspace] = useState<SettingsWorkspace>(initial.workspace);
+  const [section, setSection] = useState<SettingsSectionId>(initial.section);
+  const [search, setSearch] = useState("");
+  const [theme, toggleTheme] = useTheme();
+
+  // If the URL requested an admin section before `isAdmin` resolved, honor it once `isAdmin` flips true.
+  useEffect(() => {
+    if (!isAdmin || !pendingAdminSectionRef.current) return;
+    const pendingId = pendingAdminSectionRef.current;
+    pendingAdminSectionRef.current = null;
+    const adminMatch = SECTIONS.find((s) => s.id === pendingId && s.adminOnly);
+    if (adminMatch) {
+      setWorkspace(adminMatch.workspace);
+      setSection(adminMatch.id);
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (pendingAdminSectionRef.current) return;
+    syncSettingsUrl(workspace, section);
+  }, [workspace, section]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      pendingAdminSectionRef.current = null;
+      const next = readSettingsRouteFromUrl(isAdmin);
+      setWorkspace(next.workspace);
+      setSection(next.section);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [isAdmin]);
+
+  const availableSections = useMemo(
+    () => SECTIONS.filter((item) => !item.adminOnly || isAdmin),
+    [isAdmin],
+  );
+
+  const selectWorkspace = useCallback(
+    (nextWs: SettingsWorkspace) => {
+      pendingAdminSectionRef.current = null;
+      setWorkspace(nextWs);
+      setSearch("");
+      setSection((cur) => {
+        const curDef = availableSections.find((s) => s.id === cur);
+        if (curDef && curDef.workspace === nextWs) return cur;
+        return defaultSectionFor(nextWs);
+      });
+    },
+    [availableSections],
+  );
+
+  const selectSection = useCallback((next: SectionDef) => {
+    pendingAdminSectionRef.current = null;
+    setWorkspace(next.workspace);
+    setSection(next.id);
+    setSearch("");
+  }, []);
+
+  const query = search.trim().toLowerCase();
+
+  const visibleSections = useMemo(() => {
+    if (query) {
+      return availableSections.filter((item) =>
+        `${item.label} ${item.group} ${item.description} ${item.keywords} ${item.workspace}`
+          .toLowerCase()
+          .includes(query),
+      );
+    }
+    return availableSections.filter((item) => item.workspace === workspace);
+  }, [availableSections, query, workspace]);
+
+  const groupedSections = useMemo(() => {
+    const groups: Array<{ label: string; items: SectionDef[] }> = [];
+    for (const item of visibleSections) {
+      const existing = groups.find((g) => g.label === item.group);
+      if (existing) existing.items.push(item);
+      else groups.push({ label: item.group, items: [item] });
+    }
+    return groups;
+  }, [visibleSections]);
+
+  const activeDef =
+    availableSections.find((s) => s.id === section) ??
+    availableSections.find((s) => s.workspace === workspace) ??
+    availableSections[0];
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed) return;
+    const match = availableSections.find((item) =>
+      `${item.label} ${item.group} ${item.description} ${item.keywords} ${item.workspace}`
+        .toLowerCase()
+        .includes(trimmed),
+    );
+    if (match) {
+      setWorkspace(match.workspace);
+      setSection(match.id);
+    }
+  };
+
+  const setThemeDirect = (nextTheme: Theme) => {
+    if (theme !== nextTheme) {
+      toggleTheme();
+    } else {
+      applyTheme(nextTheme);
+    }
+  };
+
+  const renderSectionBody = (id: SettingsSectionId): ReactNode => {
+    switch (id) {
+      case "calendar":
+        return (
+          <div className="tina-web-settings-card tina-web-settings-embed">
+            <CalendarConnectionsPanel />
+          </div>
+        );
+      case "models":
+        return (
+          <div className="tina-web-settings-card tina-web-settings-embed">
+            <ModelsSection key="personal-models" initialScope="agent" />
+          </div>
+        );
+      case "voice":
+        return (
+          <div className="tina-web-settings-card tina-web-settings-embed">
+            <VoiceSettings />
+          </div>
+        );
+      case "tokens":
+        return (
+          <div className="tina-web-settings-card tina-web-settings-embed">
+            <TokensPanel />
+          </div>
+        );
+      case "github":
+        return (
+          <div className="tina-web-settings-card tina-web-settings-embed">
+            <GitHubTokenCard />
+          </div>
+        );
+      case "appearance":
+        return (
+          <div className="tina-web-settings-stack">
+            <section className="tina-web-settings-card">
+              <div className="tina-web-settings-card-head">
+                <div>
+                  <h3>Color theme</h3>
+                  <p>Applies immediately across the TINA Production app and TINA Terminal.</p>
+                </div>
+              </div>
+              <div className="tina-web-theme-grid" role="radiogroup" aria-label="Color theme">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={theme === "dark"}
+                  className={`tina-web-theme-option ${theme === "dark" ? "selected" : ""}`}
+                  onClick={() => setThemeDirect("dark")}
+                >
+                  <span className="tina-web-theme-preview dark" aria-hidden="true">
+                    <span className="tina-web-theme-bar" />
+                    <span className="tina-web-theme-dot" />
+                  </span>
+                  <span className="tina-web-theme-copy">
+                    <strong>
+                      <WebIcon name="moon" size={14} /> Obsidian Dark
+                    </strong>
+                    <span>Low-glare charcoal surfaces with Tina Teal &amp; Quiet Mint accents.</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={theme === "light"}
+                  className={`tina-web-theme-option ${theme === "light" ? "selected" : ""}`}
+                  onClick={() => setThemeDirect("light")}
+                >
+                  <span className="tina-web-theme-preview light" aria-hidden="true">
+                    <span className="tina-web-theme-bar" />
+                    <span className="tina-web-theme-dot" />
+                  </span>
+                  <span className="tina-web-theme-copy">
+                    <strong>
+                      <WebIcon name="sun" size={14} /> Paper Light
+                    </strong>
+                    <span>Crisp daylight canvas with high-contrast charcoal ink and deep teal highlights.</span>
+                  </span>
+                </button>
+              </div>
+            </section>
+          </div>
+        );
+      case "account":
+        return (
+          <div className="tina-web-settings-stack">
+            <section className="tina-web-settings-card">
+              <div className="tina-web-account-row">
+                <WebAvatar name={user.name} image={user.image} size={52} />
+                <div className="tina-web-account-copy">
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <h3>{user.name}</h3>
+                    <span className={`tina-web-status-pill ${isAdmin ? "live" : "completed"}`}>
+                      {isAdmin ? "Administrator" : "Member"}
+                    </span>
+                  </div>
+                  <p>{user.email || "Signed-in session"}</p>
+                </div>
+              </div>
+              <div className="tina-web-account-actions">
+                {canOpenTerminal && (
+                  <a href={terminalHref} className="tina-web-btn-ghost">
+                    <WebIcon name="terminal" size={14} />
+                    <span>Open TINA Terminal</span>
+                  </a>
+                )}
+                {onSignOut && (
+                  <button
+                    type="button"
+                    className="tina-web-btn-ghost"
+                    onClick={onSignOut}
+                    style={{ color: "var(--tw-danger)" }}
+                  >
+                    <WebIcon name="logout" size={14} />
+                    <span>Log out</span>
+                  </button>
+                )}
+              </div>
+            </section>
+          </div>
+        );
+      case "workspaces":
+        return <SharedWorkspacesPanel />;
+      case "global-models":
+        return (
+          <div className="tina-web-settings-card tina-web-settings-embed">
+            <ModelsSection key="global-defaults" initialScope="global" />
+          </div>
+        );
+      case "asr-status":
+        return (
+          <div className="tina-web-settings-card tina-web-settings-embed">
+            <AsrStatusPanel />
+          </div>
+        );
+    }
+  };
+
+  return (
+    <div className="tina-web-settings-shell tina-web-embedded-surface">
+      <aside className="tina-web-settings-rail" aria-label="Settings navigation">
+        <div className="tina-web-settings-rail-head">
+          <h2>Settings</h2>
+          <div className="tina-web-ws-switcher" role="tablist" aria-label="Settings workspace scope">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={workspace === "personal"}
+              className={`tina-web-ws-tab ${workspace === "personal" ? "active" : ""}`}
+              onClick={() => selectWorkspace("personal")}
+            >
+              <WebIcon name="user" size={13} />
+              <span>Personal</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={workspace === "team"}
+              className={`tina-web-ws-tab ${workspace === "team" ? "active" : ""}`}
+              onClick={() => selectWorkspace("team")}
+            >
+              <WebIcon name="users" size={13} />
+              <span>Team</span>
+            </button>
+          </div>
+          <label className="tina-web-settings-search">
+            <WebIcon name="search" size={14} />
+            <input
+              type="search"
+              aria-label="Search settings"
+              placeholder="Search settings…"
+              value={search}
+              onChange={(e) => handleSearchChange(e.target.value)}
+            />
+          </label>
+        </div>
+
+        <nav className="tina-web-settings-nav" aria-label="Settings sections">
+          {groupedSections.map((group) => (
+            <div key={group.label} className="tina-web-settings-group">
+              <div className="tina-web-settings-group-title">{group.label}</div>
+              {group.items.map((item) => {
+                const active = activeDef.id === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-current={active ? "page" : undefined}
+                    className={`tina-web-settings-item ${active ? "active" : ""}`}
+                    onClick={() => selectSection(item)}
+                  >
+                    <WebIcon name={item.icon} size={15} />
+                    <span>{item.label}</span>
+                    {item.adminOnly && <span className="tina-web-admin-chip">Admin</span>}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+          {groupedSections.length === 0 && (
+            <div role="status" className="tina-web-muted-note" style={{ padding: "8px 10px" }}>
+              No matching settings
+            </div>
+          )}
+        </nav>
+      </aside>
+
+      <section className="tina-web-settings-main" aria-label={activeDef.label}>
+        <div className="tina-web-settings-content">
+          <header className="tina-web-settings-header">
+            <div className="tina-web-settings-crumb">
+              <span>{activeDef.workspace === "team" ? "Team Settings" : "Personal Settings"}</span>
+              <span>/</span>
+              <span>{activeDef.group}</span>
+            </div>
+            <h1>{activeDef.label}</h1>
+            <p>{activeDef.description}</p>
+          </header>
+          {renderSectionBody(activeDef.id)}
+        </div>
+      </section>
+    </div>
+  );
+}

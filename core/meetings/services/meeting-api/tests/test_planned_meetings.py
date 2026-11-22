@@ -216,6 +216,11 @@ def test_workspace_member_sees_planned_meeting_as_shared():
     assert len(rows) == 1
     assert rows[0]["data"]["title"] == "Client prep"
     assert rows[0]["shared"] is True
+    detail_url = f"/meetings/{rows[0]['id']}"
+    detail = client.get(detail_url, headers={"x-user-id": "99", "x-user-workspaces": "ws-42"})
+    assert detail.status_code == 200
+    assert detail.json()["shared"] is True
+    assert client.get(detail_url, headers={"x-user-id": "99"}).status_code == 404
 
 
 def test_non_member_does_not_see_planned_meeting():

@@ -60,7 +60,15 @@ import { liveMeetingsNow } from "../surfaces/liveMeetings";
 import { ContextRail } from "../surfaces/context";
 import { shellStore, THREAD_TAB_KIND } from "./shell";
 import { firstViewPlan } from "./firstView";
-import { isOwnedPath, meetingIdFromPath, meetingPath } from "../app/meetingRoute";
+import {
+  isOwnedPath,
+  isTerminalOwnedPath,
+  meetingIdFromPath,
+  meetingPath,
+  TERMINAL_ROUTE_PREFIX,
+  terminalMeetingIdFromPath,
+  terminalMeetingPath,
+} from "../app/meetingRoute";
 import { OPEN_ENTITY_EVENT } from "../canvas/actions";
 import { useTheme } from "../app/theme";
 import { meetingsOnly } from "../app/mode";
@@ -841,20 +849,24 @@ export function Workbench() {
   // (including the URL-sync effect below) can rewrite the address bar. This is the durable reference:
   // a hard reload, a pasted link, or a brand-new session all arrive here.
   const routeMeetingId = useRef<string | null>(
-    typeof window === "undefined" ? null : meetingIdFromPath(window.location.pathname),
+    typeof window === "undefined"
+      ? null
+      : terminalMeetingIdFromPath(window.location.pathname) ?? meetingIdFromPath(window.location.pathname),
   );
 
   // ── URL SYNC — the open meeting is reflected in the address bar, so what's on screen is always
   // referenceable. `replaceState` (not push): in-app navigation keeps its own history (Escape /
   // Alt+Left via layout.goBack), and we never want a stack of dockview states in the browser's.
-  // Only the two shapes we own (`/`, `/meetings/<id>`) are ever rewritten; query + hash are preserved
-  // so an in-flight ?invite= / ?tshare= round-trip is untouched.
+  // Supports both `/terminal` (dev shell) and `/` (direct/test) routes without clobbering other paths.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const mid = activeTab?.kind === "meeting" ? String((activeTab.params as { meetingId?: unknown })?.meetingId ?? "") : "";
     const cur = window.location.pathname;
-    if (!isOwnedPath(cur)) return;
-    const next = mid ? meetingPath(mid) : "/";
+    const inTerminal = isTerminalOwnedPath(cur);
+    if (!inTerminal && !isOwnedPath(cur)) return;
+    const next = inTerminal
+      ? (mid ? terminalMeetingPath(mid) : TERMINAL_ROUTE_PREFIX)
+      : (mid ? meetingPath(mid) : "/");
     if (next === cur) return;
     try { window.history.replaceState(window.history.state, "", next + window.location.search + window.location.hash); }
     catch { /* history unavailable (sandboxed frame) — the in-app path still works */ }
@@ -982,6 +994,22 @@ export function Workbench() {
                 </span>
               )}
               <OpsNotice />
+              <a
+                href="/"
+                title="Switch to TINA User App"
+                style={{
+                  fontSize: 11.5,
+                  color: "var(--t2)",
+                  textDecoration: "none",
+                  border: "1px solid var(--line)",
+                  borderRadius: 6,
+                  padding: "2px 8px",
+                  lineHeight: 1.5,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                User App ↗
+              </a>
             </div>
             {!meetOnly && (
               <button

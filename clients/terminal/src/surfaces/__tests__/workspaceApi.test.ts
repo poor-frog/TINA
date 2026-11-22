@@ -59,6 +59,16 @@ describe("workspaceApi — scoped (no subject) + fail-loud", () => {
     expect(lastUrl()).toBe("/api/workspace/invites/accept");
     expect(lastBody()).toEqual({ token: "TOK" });
   });
+  it("mints a transcript share for the selected meeting ID and rejects room codes", async () => {
+    const { mintTranscriptShare } = await import("../workspaceApi");
+    mock(true, 200, { id: "grant", token: "41.fixture", mode: "restricted", expires_at: "" });
+    const opts = { mode: "restricted", allowed_emails: ["reader@example.test"], expires_in_sec: 604800 };
+    expect((await mintTranscriptShare("41", opts)).token).toBe("41.fixture");
+    expect(lastUrl()).toBe("/api/meetings/41/share");
+    expect(lastBody()).toEqual(opts);
+    await expect(mintTranscriptShare("abc-defg-hij", opts)).rejects.toThrow("saved meeting ID");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
   it("readWorkspaceGit returns a valid GitState on 200", async () => {
     mock(true, 200, { branch: "main", changes: [], commits: [] });
     expect((await readWorkspaceGit()).branch).toBe("main");

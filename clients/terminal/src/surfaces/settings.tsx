@@ -395,9 +395,10 @@ function TestRow({ label, run, disabled = false, hint }: {
 /** Models — which LLM the agent runs on and which STT backend the bot transcribes with; your own
  *  settings first, the deployment-wide defaults below for admins. Empty fields = the level below
  *  decides (global settings, then the deployment env). */
-export function ModelsSection() {
+export function ModelsSection({ initialScope = "agent" }: { initialScope?: ModelSettingsScope } = {}) {
   const [globalAdmin, setGlobalAdmin] = useState(false);
-  const [scope, setScope] = useState<ModelSettingsScope>("agent");
+  const [scope, setScope] = useState<ModelSettingsScope>(initialScope);
+  useEffect(() => { setScope(initialScope); }, [initialScope]);
   const [modelSummary, setModelSummary] = useState<Record<string, string>>({});
   const [transcriptionSummary, setTranscriptionSummary] = useState<Record<string, string>>({});
   const [effectiveTranscription, setEffectiveTranscription] = useState<{ label: string; source: string } | null>(null);
@@ -641,7 +642,7 @@ function AccountSection() {
   );
 }
 
-function SettingsBody({ hideHeading = false }: { hideHeading?: boolean } = {}) {
+export function SettingsBody({ hideHeading = false }: { hideHeading?: boolean } = {}) {
   const [section, setSection] = useState<SectionId>("calendar");
   const [isAdmin, setIsAdmin] = useState(false);
   const [search, setSearch] = useState("");

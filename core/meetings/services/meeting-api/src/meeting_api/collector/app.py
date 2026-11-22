@@ -687,11 +687,13 @@ def build_router(
         request: Request,
         meeting_id: int,
         x_user_id: Optional[str] = Header(default=None),
+        x_user_workspaces: Optional[str] = Header(default=None),
     ):
         from .projection import project_response_data
 
         user_id = _resolve_user_id(x_user_id)
-        meetings = await store.list_meetings(user_id, meeting_id=meeting_id)
+        member_workspaces = {w.strip() for w in (x_user_workspaces or "").split(",") if w.strip()}
+        meetings = await store.list_meetings(user_id, meeting_id=meeting_id, member_workspaces=member_workspaces)
         meeting = next((m for m in meetings if m.get("id") == meeting_id), None)
         if meeting is None:
             return JSONResponse(status_code=404, content={"detail": "Meeting not found"})

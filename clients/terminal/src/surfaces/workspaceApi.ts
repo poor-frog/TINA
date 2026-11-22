@@ -141,9 +141,10 @@ export async function acceptTranscriptShare(token: string): Promise<{ meeting_id
   });
 }
 
-/** MINT an independent transcript share link for a meeting (owner). Token returned once. */
-export async function mintTranscriptShare(opts: { platform: string; native_meeting_id: string; mode?: string; allowed_emails?: string[]; expires_in_sec?: number }): Promise<{ id: string; token: string; mode: string; expires_at: string }> {
-  return getJson(`/api/meetings/${encodeURIComponent(opts.platform)}/${encodeURIComponent(opts.native_meeting_id)}/share`, {
+/** Mint a share for the selected meeting row. The token is returned once. */
+export async function mintTranscriptShare(meetingId: string, opts: { mode?: string; allowed_emails?: string[]; expires_in_sec?: number }): Promise<{ id: string; token: string; mode: string; expires_at: string }> {
+  if (!/^[1-9]\d*$/.test(meetingId)) throw new Error("A saved meeting ID is required to share this session.");
+  return getJson(`/api/meetings/${meetingId}/share`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode: opts.mode ?? "open", allowed_emails: opts.allowed_emails ?? [], expires_in_sec: opts.expires_in_sec ?? 86400 }),
   });

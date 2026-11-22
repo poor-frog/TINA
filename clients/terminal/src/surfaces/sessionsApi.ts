@@ -19,7 +19,7 @@ export async function listSessions(): Promise<SessionSummary[]> {
   return data.sessions ?? [];
 }
 
-export async function sessionHistory(session: string): Promise<SessionHistory> {
-  const data = await getJson<{ turns?: SessionHistory["turns"] }>(`/api/sessions/${encodeURIComponent(session)}/history`);
+export async function sessionHistory(session: string, signal?: AbortSignal): Promise<SessionHistory> {
+  const data = await getJson<{ turns?: SessionHistory["turns"] }>(`/api/sessions/${encodeURIComponent(session)}/history`, { signal });
   return { turns: data.turns ?? [] };
 }

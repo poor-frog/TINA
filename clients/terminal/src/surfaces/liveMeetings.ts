@@ -7,6 +7,7 @@
 import { useSyncExternalStore } from "react";
 import type { MeetingAudioRecording, MeetingAutoRetry, MeetingMock, TranscriptLine } from "./meetingModel";
 import { onGatewayWSConnected, onMeetingStatus } from "./gatewayWS";
+import { ApiError, getJson } from "./apiClient";
 
 /** A row from meeting-api GET /meetings (live AND past). */
 interface MeetingRowDTO {
@@ -399,6 +400,17 @@ export async function fetchTranscript(meetingId: string): Promise<TranscriptLine
 /** Last-known meeting by id (sync) — lets non-hook lookups resolve a real meeting. */
 export function getLiveMeeting(id: string): MeetingMock | undefined {
   return meetings.find((m) => m.id === id);
+}
+
+export async function fetchMeetingById(id: string, signal: AbortSignal): Promise<MeetingMock | null> {
+  try {
+    const row = await getJson<MeetingRowDTO>(`/api/meetings/${encodeURIComponent(id)}`, { cache: "no-store", signal });
+    if (String(row?.id) !== id) throw new Error("The server returned a different meeting.");
+    return row.data?.artifact_deletion?.state === "completed" ? null : toMock(row);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null;
+    throw error;
+  }
 }
 
 /** All last-known real meetings (sync) — used by the auto-open command (prefers a live one). */

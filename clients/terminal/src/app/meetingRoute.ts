@@ -14,6 +14,8 @@
 
 /** The single route prefix. */
 export const MEETING_ROUTE_PREFIX = "/meetings/";
+export const TERMINAL_ROUTE_PREFIX = "/terminal";
+export const TERMINAL_MEETING_PREFIX = "/terminal/meetings/";
 
 /** Ids we are willing to put in, and take out of, a path segment. Row ids are numeric today, but a
  *  reference may also carry a native meeting code (`abc-defg-hij`, `19:meeting_…@thread.v2`,
@@ -48,4 +50,25 @@ export function meetingIdFromPath(pathname: string | null | undefined): string |
  *  rewrites these two shapes, so it can never clobber a route someone else adds later. */
 export function isOwnedPath(pathname: string | null | undefined): boolean {
   return pathname === "/" || meetingIdFromPath(pathname) !== null;
+}
+
+/** Canonical terminal meeting path (`/terminal/meetings/<id>`), or `/terminal` when unusable. */
+export function terminalMeetingPath(id: string): string {
+  const v = (id ?? "").trim();
+  return isMeetingRouteId(v) ? `${TERMINAL_MEETING_PREFIX}${encodeURIComponent(v)}` : TERMINAL_ROUTE_PREFIX;
+}
+
+/** Extract meeting id from `/terminal/meetings/<id>`, or null otherwise. */
+export function terminalMeetingIdFromPath(pathname: string | null | undefined): string | null {
+  if (!pathname || !pathname.startsWith(TERMINAL_MEETING_PREFIX)) return null;
+  const rest = pathname.slice(TERMINAL_MEETING_PREFIX.length).replace(/\/+$/, "");
+  if (!rest || rest.includes("/")) return null;
+  let id: string;
+  try { id = decodeURIComponent(rest); } catch { return null; }
+  return isMeetingRouteId(id) ? id : null;
+}
+
+/** True when pathname belongs to the dev Terminal shell (`/terminal` or `/terminal/meetings/<id>`). */
+export function isTerminalOwnedPath(pathname: string | null | undefined): boolean {
+  return pathname === TERMINAL_ROUTE_PREFIX || pathname === `${TERMINAL_ROUTE_PREFIX}/` || terminalMeetingIdFromPath(pathname) !== null;
 }

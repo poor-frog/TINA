@@ -1,0 +1,3695 @@
+/* ==========================================================================
+   TINA Production User UI — Strictly scoped under .tina-web & .tina-login-shell
+   Zero global overrides so /terminal (Dockview + Tailwind) stays untouched.
+   ========================================================================== */
+
+.tina-web,
+.tina-login-shell {
+  --tw-teal: var(--teal-600, #176b5b);
+  --tw-teal-hover: var(--teal-700, #115447);
+  --tw-mint: var(--teal-300, #91d7be);
+  --tw-mint-bright: var(--teal-200, #b5e8d1);
+  --tw-surface-teal: var(--teal-900, #173330);
+  --tw-subtle-teal: var(--teal-800, #173b36);
+  --tw-bg: oklch(14.8% 0.005 285);
+  --tw-chrome: oklch(19.2% 0.006 285);
+  --tw-card: oklch(16.5% 0.005 285);
+  --tw-raised: oklch(24% 0.004 285);
+  --tw-line: oklch(24% 0.004 285);
+  --tw-line-soft: oklch(21% 0.004 285);
+  --tw-line-strong: oklch(29% 0.005 285);
+  --tw-text: oklch(98.5% 0.002 285);
+  --tw-text-2: oklch(85% 0.004 285);
+  --tw-text-3: oklch(72% 0.005 285);
+  --tw-text-4: oklch(59% 0.006 285);
+  --tw-danger: #f08d90;
+  --tw-danger-bg: rgba(240, 141, 144, 0.14);
+  --tw-font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --tw-font-display: "DM Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: dark;
+  font-family: var(--tw-font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.tina-web *,
+.tina-web *::before,
+.tina-web *::after,
+.tina-login-shell *,
+.tina-login-shell *::before,
+.tina-login-shell *::after {
+  box-sizing: border-box;
+}
+
+.tina-web :where(button),
+.tina-login-shell :where(button) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tina-web :where(a),
+.tina-login-shell :where(a) {
+  color: inherit;
+  text-decoration: none;
+}
+
+.tina-web button:active,
+.tina-login-shell button:active {
+  scale: 0.985;
+}
+
+.tina-web button:focus-visible,
+.tina-web input:focus-visible,
+.tina-web select:focus-visible,
+.tina-web textarea:focus-visible,
+.tina-web a:focus-visible,
+.tina-login-shell button:focus-visible,
+.tina-login-shell input:focus-visible {
+  outline: 2px solid var(--tw-mint);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Split-Screen Login Gate (.tina-login-shell)
+   ========================================================================== */
+
+.tina-login-checking {
+  height: 100vh;
+  background: oklch(14.8% 0.005 285);
+}
+
+.tina-login-shell {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background-color: var(--tw-bg);
+  background-image:
+    radial-gradient(ellipse 60% 45% at 22% 10%, rgba(23, 107, 91, 0.25), transparent 72%),
+    radial-gradient(ellipse 48% 40% at 84% 85%, rgba(145, 215, 190, 0.1), transparent 70%);
+  color: var(--tw-text);
+}
+
+.tina-login-modal {
+  display: flex;
+  width: min(1240px, 94vw);
+  min-height: min(760px, 88vh);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(12, 13, 15, 0.94);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.tina-login-form-panel {
+  flex: 0 0 50%;
+  width: 50%;
+  display: flex;
+  justify-content: center;
+  padding: 40px 36px 28px;
+  background: #0c0d0f;
+}
+
+.tina-login-inner {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.tina-login-center {
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.tina-login-top {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tina-login-logo {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid rgba(145, 215, 190, 0.22);
+  background: linear-gradient(180deg, rgba(23, 107, 91, 0.35), rgba(14, 36, 35, 0.7));
+}
+
+.tina-login-heading {
+  margin: 0;
+  font-family: var(--tw-font-display);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: -0.025em;
+  white-space: pre-line;
+  color: var(--tw-text);
+}
+
+.tina-login-sub {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--tw-text-3);
+}
+
+.tina-login-claim-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(145, 215, 190, 0.24);
+  background: rgba(23, 107, 91, 0.22);
+  color: var(--tw-mint);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tina-login-claim-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tw-mint);
+}
+
+.tina-login-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tina-login-oauth-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tina-login-oauth-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 46px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: linear-gradient(180deg, rgba(31, 34, 38, 0.9), rgba(20, 22, 25, 0.96));
+  color: var(--tw-text);
+  font-size: 14px;
+  font-weight: 500;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.tina-login-oauth-btn:hover {
+  border-color: rgba(145, 215, 190, 0.36);
+  background: linear-gradient(180deg, rgba(28, 43, 40, 0.92), rgba(18, 25, 24, 0.96));
+}
+
+.tina-login-oauth-leading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tina-login-notice {
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--tw-text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tina-login-debug-toggle {
+  align-self: flex-start;
+  color: var(--tw-text-4);
+  font-size: 12px;
+}
+
+.tina-login-debug-toggle:hover {
+  color: var(--tw-mint);
+}
+
+.tina-login-direct-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tina-login-direct-hint {
+  font-size: 12px;
+  color: var(--tw-text-3);
+}
+
+.tina-login-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--tw-text);
+  font-size: 14px;
+  outline: none;
+}
+
+.tina-login-input:focus {
+  border-color: var(--tw-mint);
+}
+
+.tina-login-error {
+  font-size: 12px;
+  color: var(--tw-danger);
+}
+
+.tina-login-submit {
+  height: 42px;
+  border-radius: 9px;
+  background: var(--tw-teal);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 140ms ease;
+}
+
+.tina-login-submit:hover:not(:disabled) {
+  background: var(--tw-teal-hover);
+}
+
+.tina-login-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tina-login-claim-foot {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--tw-text-4);
+}
+
+.tina-login-bottom {
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tina-login-security {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tw-text-4);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+}
+
+.tina-login-security svg {
+  color: var(--tw-mint);
+  flex: none;
+}
+
+.tina-login-showcase {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 40px;
+  background:
+    radial-gradient(ellipse 75% 55% at 25% 15%, rgba(23, 107, 91, 0.42), transparent 72%),
+    radial-gradient(ellipse 55% 45% at 85% 12%, rgba(222, 162, 102, 0.2), transparent 70%),
+    linear-gradient(160deg, #0e1617 0%, #0b0d10 100%);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.tina-login-glow {
+  position: absolute;
+  top: 24%;
+  left: 50%;
+  width: 360px;
+  height: 190px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: linear-gradient(90deg, rgba(23, 107, 91, 0.55), rgba(145, 215, 190, 0.42), rgba(226, 178, 120, 0.35));
+  filter: blur(88px);
+  pointer-events: none;
+}
+
+.tina-login-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(181, 232, 209, 0.16) 1px, transparent 1px);
+  background-size: 24px 24px;
+  -webkit-mask-image: radial-gradient(ellipse 78% 58% at 50% 34%, #000 0%, transparent 78%);
+  mask-image: radial-gradient(ellipse 78% 58% at 50% 34%, #000 0%, transparent 78%);
+  pointer-events: none;
+}
+
+.tina-login-float-notes {
+  position: relative;
+  z-index: 2;
+  margin-bottom: 18px;
+}
+
+.tina-login-float-input {
+  position: relative;
+  z-index: 3;
+  margin-bottom: 36px;
+}
+
+.tina-login-parallax {
+  transition: transform 220ms ease-out;
+}
+
+.tina-login-card {
+  max-width: 440px;
+  margin: 0 auto;
+  padding: 18px 20px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(16, 20, 21, 0.8);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.tina-login-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.tina-login-card-title {
+  font-family: var(--tw-font-display);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.tina-login-card-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(145, 215, 190, 0.22);
+  background: rgba(23, 107, 91, 0.26);
+  color: var(--tw-mint);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.tina-login-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tina-login-note-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12.5px;
+  line-height: 1.48;
+  color: var(--tw-text-2);
+}
+
+.tina-login-note-row.muted {
+  color: var(--tw-text-3);
+}
+
+.tina-login-note-dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--tw-mint);
+  flex: none;
+}
+
+.tina-login-note-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 4px;
+}
+
+.tina-login-bar {
+  display: block;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tina-login-bar.wide { width: 78%; }
+.tina-login-bar.narrow { width: 52%; }
+
+.tina-login-prompt-card {
+  max-width: 440px;
+  margin: 0 auto;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(145, 215, 190, 0.24);
+  background: rgba(17, 22, 23, 0.88);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.48);
+}
+
+.tina-login-prompt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tina-login-prompt-text {
+  font-size: 13px;
+  color: var(--tw-text-2);
+}
+
+.tina-login-prompt-send {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--tw-teal);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  flex: none;
+}
+
+.tina-login-prompt-pill {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--tw-mint);
+}
+
+.tina-login-quote {
+  position: relative;
+  z-index: 2;
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.tina-login-quote-tag {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--tw-mint);
+  margin-bottom: 10px;
+}
+
+.tina-login-quote h2 {
+  margin: 0 0 8px;
+  font-family: var(--tw-font-display);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--tw-text);
+}
+
+.tina-login-quote p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--tw-text-3);
+}
+
+/* ==========================================================================
+   Main Production App Shell (.tina-web)
+   ========================================================================== */
+
+.tina-web {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--tw-bg);
+  color: var(--tw-text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.tina-web-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.tina-web-main {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--tw-bg);
+}
+
+/* ---------- Sidebar ---------- */
+
+.tina-web-sidebar {
+  flex: 0 0 232px;
+  width: 232px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 8px 18px;
+  background: var(--tw-chrome);
+  border-right: 1px solid var(--tw-line-soft);
+  overflow: hidden;
+}
+
+.tina-web-sidebar.collapsed {
+  flex-basis: 56px;
+  width: 56px;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.tina-web-sidebar-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 4px;
+}
+
+.tina-web-sidebar.collapsed .tina-web-sidebar-head {
+  padding: 0;
+}
+
+.tina-web-user-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  margin-left: 6px;
+  padding-right: 34px;
+  border-radius: 6px;
+  color: var(--tw-text-2);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.tina-web-user-btn:hover {
+  color: var(--tw-text);
+}
+
+.tina-web-user-name {
+  min-width: 0;
+  max-width: 132px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tina-web-sidebar.collapsed .tina-web-user-btn {
+  margin-left: 18px;
+  padding-right: 0;
+}
+
+.tina-web-sidebar.collapsed .tina-web-user-name,
+.tina-web-sidebar.collapsed .tina-web-user-chevron,
+.tina-web-sidebar.collapsed .tina-web-nav-label {
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.tina-web-collapse-btn {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: #aeaeb2;
+  opacity: 0.65;
+  pointer-events: auto;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.tina-web-sidebar:hover .tina-web-collapse-btn,
+.tina-web-collapse-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.04);
+  opacity: 1;
+}
+
+.tina-web-collapse-btn:hover,
+.tina-web-collapse-btn:focus-visible {
+  background: #2a2a2c;
+  color: #fff;
+}
+
+.tina-web-sidebar.collapsed .tina-web-collapse-btn {
+  right: 14px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tina-web-sidebar.collapsed:hover .tina-web-user-btn,
+.tina-web-sidebar.collapsed:has(.tina-web-collapse-btn:focus-visible, .tina-web-user-btn:focus-visible) .tina-web-user-btn {
+  opacity: 0;
+}
+
+.tina-web-sidebar.collapsed:hover .tina-web-collapse-btn,
+.tina-web-sidebar.collapsed:has(.tina-web-collapse-btn:focus-visible, .tina-web-user-btn:focus-visible) .tina-web-collapse-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tina-web-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  overflow: hidden;
+  border-radius: 999px;
+  color: #fff;
+  font-weight: 600;
+  user-select: none;
+}
+
+.tina-web-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tina-web-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 18px;
+}
+
+.tina-web-nav-gap {
+  display: block;
+  height: 12px;
+}
+
+.tina-web-sidebar.collapsed .tina-web-nav-gap {
+  height: 4px;
+}
+
+.tina-web-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 33px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  color: var(--tw-text-2);
+  font-size: 14px;
+  text-align: left;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.tina-web-nav-item svg {
+  flex: none;
+  color: var(--tw-text-3);
+}
+
+.tina-web-nav-item.ask svg {
+  color: var(--tw-mint);
+}
+
+.tina-web-nav-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--tw-text);
+}
+
+.tina-web-nav-item.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--tw-text);
+  font-weight: 500;
+}
+
+.tina-web-nav-item.active svg {
+  color: var(--tw-mint);
+}
+
+.tina-web-nav-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tina-web-nav-badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(23, 107, 91, 0.28);
+  color: var(--tw-mint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tina-web-sidebar.collapsed .tina-web-nav-item {
+  gap: 0;
+  padding: 6px 0 6px 20px;
+}
+
+.tina-web-sidebar.collapsed .tina-web-nav-badge {
+  display: none;
+}
+
+.tina-web-spacer {
+  flex: 1;
+  min-height: 16px;
+}
+
+.tina-web-nav-bottom {
+  margin-top: 0;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tina-web-dev-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 33px;
+  margin-bottom: 4px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(145, 215, 190, 0.18);
+  background: rgba(23, 107, 91, 0.14);
+  color: var(--tw-mint);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.tina-web-dev-link:hover {
+  background: rgba(23, 107, 91, 0.28);
+  border-color: rgba(145, 215, 190, 0.34);
+}
+
+.tina-web-sidebar.collapsed .tina-web-dev-link {
+  padding: 6px 0 6px 19px;
+  gap: 0;
+  border-color: transparent;
+}
+
+/* ---------- User Dropdown Menu ---------- */
+
+.tina-web-usermenu {
+  position: fixed;
+  top: 50px;
+  left: 12px;
+  z-index: 90;
+  width: 262px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: var(--tw-chrome);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.58);
+}
+
+.tina-web-usermenu-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+}
+
+.tina-web-usermenu-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.tina-web-usermenu-meta strong {
+  display: block;
+  color: var(--tw-text);
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tina-web-usermenu-meta span {
+  display: block;
+  margin-top: 1px;
+  color: var(--tw-text-4);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tina-web-usermenu-divider {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--tw-line);
+}
+
+.tina-web-usermenu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--tw-text-2);
+  font-size: 13.5px;
+  text-align: left;
+}
+
+.tina-web-usermenu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--tw-text);
+}
+
+.tina-web-usermenu-item.danger {
+  color: #ff9a9a;
+}
+
+.tina-web-usermenu-item.danger:hover {
+  background: rgba(255, 90, 90, 0.12);
+  color: #ffb3b3;
+}
+
+/* ---------- TopBar ---------- */
+
+.tina-web-topbar {
+  position: relative;
+  z-index: 12;
+  flex: 0 0 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--tw-chrome);
+  border-bottom: 1px solid var(--tw-line-soft);
+}
+
+.tina-web-topbar-left {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--tw-text-3);
+  font-size: 14px;
+}
+
+.tina-web-mobile-menu {
+  display: none;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--tw-text-2);
+}
+
+.tina-web-mobile-menu:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tina-web-search-wrap {
+  flex: 2 1 0;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.tina-web-search-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(340px, 100%);
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--tw-card);
+  color: var(--tw-text-4);
+  font-size: 13.5px;
+  text-align: left;
+}
+
+.tina-web-search-trigger:hover {
+  border-color: rgba(145, 215, 190, 0.25);
+  color: var(--tw-text-2);
+}
+
+.tina-web-search-trigger span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tina-web-search-trigger kbd {
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--tw-text-4);
+}
+
+.tina-web-topbar-right {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.tina-web-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(145, 215, 190, 0.28);
+  background: rgba(23, 107, 91, 0.24);
+  color: var(--tw-mint);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tina-web-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6ce9a6;
+}
+
+.tina-web-capture-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 6px;
+  background: var(--tw-teal);
+  color: #fff;
+  font-family: var(--tw-font-display);
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 140ms ease;
+}
+
+.tina-web-capture-btn:hover {
+  background: var(--tw-teal-hover);
+}
+
+/* ==========================================================================
+   Home Canvas — Atmospheric Tina Teal + Afternoon Champagne Backdrop
+   ========================================================================== */
+
+@keyframes tina-home-aurora {
+  0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.88; }
+  100% { transform: translate3d(1.5%, 8px, 0) scale(1.035); opacity: 1; }
+}
+
+.tina-web-home {
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background-color: var(--tw-bg);
+  background-image:
+    linear-gradient(
+      90deg,
+      transparent 3%,
+      rgba(145, 215, 190, 0.32) 24%,
+      rgba(145, 215, 190, 0.11) 54%,
+      rgba(232, 184, 126, 0.22) 82%,
+      transparent 97%
+    ),
+    radial-gradient(
+      ellipse 66% 50% at 17% -8%,
+      rgba(23, 107, 91, 0.42) 0%,
+      rgba(18, 78, 68, 0.21) 36%,
+      rgba(14, 38, 36, 0.07) 62%,
+      transparent 78%
+    ),
+    radial-gradient(
+      ellipse 46% 32% at 40% -10%,
+      rgba(145, 215, 190, 0.17) 0%,
+      rgba(90, 182, 153, 0.065) 45%,
+      transparent 74%
+    ),
+    radial-gradient(
+      ellipse 54% 44% at 86% -4%,
+      rgba(222, 162, 102, 0.19) 0%,
+      rgba(164, 106, 118, 0.08) 42%,
+      transparent 74%
+    ),
+    radial-gradient(
+      ellipse 92% 60% at 48% 44%,
+      rgba(19, 44, 41, 0.17) 0%,
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 780px 240px at 52% 106%,
+      rgba(23, 107, 91, 0.27) 0%,
+      rgba(145, 215, 190, 0.09) 38%,
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 340px 140px at 62% 100%,
+      rgba(178, 226, 140, 0.09) 0%,
+      transparent 70%
+    );
+  background-repeat: no-repeat;
+  background-size: 100% 1px, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
+  background-position: top center, center, center, center, center, center, center;
+}
+
+.tina-web-home::before {
+  content: "";
+  position: absolute;
+  inset: -4% -2% 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 52% 34% at 26% 3%, rgba(90, 182, 153, 0.12) 0%, rgba(23, 107, 91, 0.045) 46%, transparent 72%),
+    radial-gradient(ellipse 44% 32% at 80% 8%, rgba(238, 194, 136, 0.1) 0%, transparent 68%);
+  animation: tina-home-aurora 18s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+
+.tina-web-home::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle, rgba(181, 232, 209, 0.135) 1px, transparent 1px),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  background-size: 26px 26px, 160px 160px;
+  -webkit-mask-image:
+    radial-gradient(ellipse 78% 48% at 50% 10%, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.32) 48%, transparent 80%),
+    radial-gradient(ellipse 520px 160px at 52% 100%, rgba(0, 0, 0, 0.55) 0%, transparent 76%);
+  mask-image:
+    radial-gradient(ellipse 78% 48% at 50% 10%, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.32) 48%, transparent 80%),
+    radial-gradient(ellipse 520px 160px at 52% 100%, rgba(0, 0, 0, 0.55) 0%, transparent 76%);
+}
+
+.tina-web-home-scroll {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 122px), transparent calc(100% - 84px));
+  mask-image: linear-gradient(180deg, #000 calc(100% - 122px), transparent calc(100% - 84px));
+  background: transparent;
+}
+
+.tina-web-home-inner {
+  max-width: 948px;
+  margin: 0 auto;
+  padding: 40px 56px 128px;
+}
+
+.tina-web-greeting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tina-web-greeting {
+  margin: 0;
+  font-family: var(--tw-font-display);
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 32px;
+  color: var(--tw-text);
+}
+
+.tina-web-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 28px;
+  color: var(--tw-text-3);
+}
+
+.tina-web-section-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--tw-text-3);
+}
+
+.tina-web-section-action {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--tw-text-2);
+  font-family: var(--tw-font-display);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.tina-web-section-action:hover {
+  color: var(--tw-text);
+}
+
+.tina-web-pa-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.tina-web-pa-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-height: 126px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(20, 24, 24, 0.72) 0%, rgba(13, 15, 16, 0.78) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055), 0 10px 26px -14px rgba(0, 0, 0, 0.65);
+  color: var(--tw-text);
+  text-align: left;
+  transition: border-color 180ms ease, background 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.tina-web-pa-card:hover {
+  border-color: rgba(145, 215, 190, 0.24);
+  background: linear-gradient(180deg, rgba(25, 34, 33, 0.82) 0%, rgba(15, 19, 19, 0.86) 100%);
+  box-shadow: inset 0 1px 0 rgba(145, 215, 190, 0.12), 0 14px 30px -14px rgba(0, 0, 0, 0.75);
+  transform: translateY(-1px);
+}
+
+.tina-web-pa-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 16px;
+  border-radius: 8px;
+  color: #fff;
+}
+
+.tina-web-pa-icon.teal { background: var(--tw-teal); }
+.tina-web-pa-icon.rose { background: linear-gradient(180deg, #b89a85 0%, #9f6494 100%); }
+.tina-web-pa-icon.sage { background: linear-gradient(180deg, #b0b671 0%, #6d862d 100%); }
+
+.tina-web-pa-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tw-text);
+}
+
+.tina-web-pa-sub {
+  margin-top: 4px;
+  font-size: 13.5px;
+  color: var(--tw-text-4);
+}
+
+.tina-web-tabs-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 40px;
+}
+
+.tina-web-tabs {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.tina-web-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 5px;
+  color: var(--tw-text-3);
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tina-web-tab:hover {
+  color: var(--tw-text-2);
+}
+
+.tina-web-tab.active {
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--tw-text);
+}
+
+.tina-web-feed {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tina-web-feed-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  text-align: left;
+  transition: background 140ms ease;
+}
+
+.tina-web-feed-row:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.tina-web-feed-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tina-web-feed-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tw-text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.tina-web-feed-meta {
+  color: var(--tw-text-4);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tina-web-caught-up {
+  display: flex;
+  justify-content: center;
+  margin: 18px 0 48px;
+}
+
+.tina-web-caught-up span {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 4px 12px;
+  border: 1px solid rgba(145, 215, 190, 0.18);
+  border-radius: 999px;
+  background: rgba(23, 107, 91, 0.22);
+  color: var(--tw-mint);
+  font-family: var(--tw-font-display);
+  font-size: 12px;
+}
+
+/* ---------- Floating Home Composer ---------- */
+
+.tina-web-composer-wrap {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  bottom: 28px;
+  display: flex;
+  justify-content: center;
+  padding: 0 24px;
+  pointer-events: none;
+}
+
+.tina-web-composer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(620px, 100%);
+  height: 56px;
+  padding: 5px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #282828 0%, #202020 100%);
+  box-shadow: 0 12px 16px -4px rgba(0, 0, 0, 0.35), 0 4px 8px -2px rgba(0, 0, 0, 0.25);
+  pointer-events: auto;
+}
+
+.tina-web-composer-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #b2e28c 0%, #79b59a 100%);
+  -webkit-mask-image: linear-gradient(90deg, transparent 70%, rgba(0, 0, 0, 0.45) 82%, #000 91%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 70%, rgba(0, 0, 0, 0.45) 82%, #000 91%, transparent 100%);
+  pointer-events: none;
+}
+
+.tina-web-composer-ring {
+  position: absolute;
+  z-index: 1;
+  inset: 5px;
+  border-radius: 8px;
+  background: var(--tw-card);
+  pointer-events: none;
+}
+
+.tina-web-composer input {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 12px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--tw-text);
+  font-size: 13.5px;
+}
+
+.tina-web-composer input::placeholder {
+  color: var(--tw-text-4);
+}
+
+.tina-web-composer-actions {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 10px;
+}
+
+.tina-web-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--tw-text-3);
+}
+
+.tina-web-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--tw-text);
+}
+
+.tina-web-icon-btn.recording {
+  color: #6ce9a6;
+  background: rgba(23, 107, 91, 0.3);
+}
+
+.tina-web-send-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--tw-teal);
+  color: #fff;
+}
+
+.tina-web-send-btn:hover {
+  background: var(--tw-teal-hover);
+}
+
+/* ==========================================================================
+   Shared View Layouts (Meetings, Meeting Detail, Ask Tina, Tasks, Routines, Settings)
+   ========================================================================== */
+
+.tina-web-view-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--tw-bg);
+}
+
+.tina-web-page-wrap {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 28px 32px 64px;
+}
+
+.tina-web-meetings-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.tina-web-channels {
+  flex: 0 0 228px;
+  width: 228px;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 10px;
+  background: rgba(255, 255, 255, 0.015);
+  border-right: 1px solid var(--tw-line-soft);
+  overflow-y: auto;
+}
+
+.tina-web-channels-title {
+  padding: 6px 10px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tw-text-4);
+}
+
+.tina-web-channel-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--tw-text-2);
+  font-size: 13.5px;
+  text-align: left;
+}
+
+.tina-web-channel-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--tw-text);
+}
+
+.tina-web-channel-btn.active {
+  background: rgba(23, 107, 91, 0.24);
+  color: var(--tw-mint);
+  font-weight: 500;
+}
+
+.tina-web-meetings-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tina-web-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--tw-line-soft);
+}
+
+.tina-web-filter-input {
+  height: 34px;
+  width: min(280px, 100%);
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--tw-card);
+  color: var(--tw-text);
+  font-size: 13.5px;
+  outline: none;
+}
+
+.tina-web-filter-input:focus {
+  border-color: var(--tw-mint);
+}
+
+.tina-web-meeting-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 24px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.tina-web-group-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tw-text-4);
+}
+
+.tina-web-meeting-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+  margin-bottom: 6px;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.tina-web-meeting-card:hover {
+  border-color: rgba(145, 215, 190, 0.24);
+  background: rgba(23, 107, 91, 0.08);
+}
+
+.tina-web-meeting-main {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tina-web-meeting-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tina-web-meeting-title {
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--tw-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tina-web-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tina-web-status-pill.live {
+  background: rgba(35, 63, 45, 0.85);
+  color: #b2e8c1;
+}
+
+.tina-web-status-pill.scheduled {
+  background: rgba(38, 61, 85, 0.85);
+  color: #bbd9fa;
+}
+
+.tina-web-status-pill.completed {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--tw-text-3);
+}
+
+.tina-web-status-pill.failed {
+  background: var(--tw-danger-bg);
+  color: var(--tw-danger);
+}
+
+.tina-web-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.tina-web-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--tw-text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tina-web-btn-ghost:hover:not(:disabled) {
+  border-color: rgba(145, 215, 190, 0.3);
+  color: var(--tw-text);
+}
+
+.tina-web-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 7px;
+  background: var(--tw-teal);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tina-web-btn-primary:hover:not(:disabled) {
+  background: var(--tw-teal-hover);
+}
+
+.tina-web-btn-primary:disabled,
+.tina-web-btn-ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- Meeting Detail Shell ---------- */
+
+.tina-web-detail {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.tina-web-detail-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--tw-line-soft);
+  background: var(--tw-chrome);
+}
+
+.tina-web-detail-id {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tina-web-detail-title {
+  margin: 0;
+  font-family: var(--tw-font-display);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--tw-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tina-web-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--tw-text-3);
+}
+
+.tina-web-detail-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.tina-web-detail-canvas {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tina-web-detail-ask {
+  flex: 0 0 400px;
+  width: 400px;
+  min-height: 0;
+  border-left: 1px solid var(--tw-line-soft);
+  background: var(--tw-card);
+  overflow-y: auto;
+  padding: 14px;
+}
+
+/* ---------- Ask Tina View ---------- */
+
+.tina-web-ask {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 64% 40% at 32% 0%, rgba(23, 107, 91, 0.24), transparent 72%),
+    var(--tw-bg);
+}
+
+.tina-web-ask-sessions {
+  flex: 0 0 256px;
+  width: 256px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 10px;
+  border-right: 1px solid var(--tw-line-soft);
+  background: rgba(255, 255, 255, 0.015);
+  overflow-y: auto;
+}
+
+.tina-web-ask-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tina-web-ask-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 28px 28px 20px;
+}
+
+.tina-web-ask-thread {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.tina-web-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tina-web-msg.user {
+  align-items: flex-end;
+}
+
+.tina-web-msg-bubble {
+  max-width: 88%;
+  padding: 12px 15px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.58;
+}
+
+.tina-web-msg.user .tina-web-msg-bubble {
+  background: rgba(23, 107, 91, 0.34);
+  border: 1px solid rgba(145, 215, 190, 0.25);
+  color: var(--tw-text);
+}
+
+.tina-web-msg.agent .tina-web-msg-bubble {
+  max-width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--tw-text-2);
+}
+
+.tina-web-ops-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.tina-web-op-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(145, 215, 190, 0.1);
+  color: var(--tw-mint);
+  font-size: 11.5px;
+}
+
+.tina-web-ask-footer {
+  flex: none;
+  padding: 14px 28px 24px;
+  border-top: 1px solid var(--tw-line-soft);
+  background: rgba(10, 11, 13, 0.85);
+}
+
+.tina-web-ask-form {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: var(--tw-card);
+}
+
+.tina-web-ask-form textarea {
+  width: 100%;
+  min-height: 44px;
+  max-height: 160px;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--tw-text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.tina-web-ask-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tina-web-ask-select {
+  height: 30px;
+  max-width: 260px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--tw-text-2);
+  font-size: 12.5px;
+}
+
+/* ---------- Modal & Command Palette ---------- */
+
+.tina-web-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 72px 16px 24px;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.tina-web-modal {
+  width: min(560px, 100%);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--tw-chrome);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+}
+
+.tina-web-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--tw-line-soft);
+}
+
+.tina-web-modal-head h2 {
+  margin: 0;
+  font-family: var(--tw-font-display);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.tina-web-modal-body {
+  padding: 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tina-web-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--tw-text-2);
+}
+
+.tina-web-field input,
+.tina-web-field select {
+  height: 38px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--tw-card);
+  color: var(--tw-text);
+  font-size: 13.5px;
+}
+
+.tina-web-field input:focus,
+.tina-web-field select:focus {
+  border-color: var(--tw-mint);
+  outline: none;
+}
+
+/* ---------- Tasks & Settings & Routines wrappers ---------- */
+
+.tina-web-tasks-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.tina-web-panel {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 16px;
+}
+
+.tina-web-task-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.tina-web-task-pill.done,
+.tina-web-task-pill.accepted { background: #233f2d; color: #b2e8c1; }
+.tina-web-task-pill.draft { background: #403924; color: #ebddad; }
+.tina-web-task-pill.rejected { background: #4f2d2a; color: #ffc6bc; }
+.tina-web-task-pill.open,
+.tina-web-task-pill.pending { background: #263d55; color: #bbd9fa; }
+
+.tina-web-embedded-surface {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--tw-bg);
+  color: var(--tw-text);
+}
+
+/* ---------- Light Theme Support (wired to src/app/theme.ts) ---------- */
+
+html[data-theme="light"] .tina-web {
+  --tw-teal: #176b5b;
+  --tw-teal-hover: #115447;
+  --tw-mint: #146353;
+  --tw-mint-bright: #0f4c40;
+  --tw-surface-teal: #e5f2ee;
+  --tw-subtle-teal: #d7ebe5;
+  --tw-bg: #f6f8f7;
+  --tw-chrome: #ffffff;
+  --tw-card: #ffffff;
+  --tw-raised: #eef2f0;
+  --tw-line: #dde3e0;
+  --tw-line-soft: #e6ebe9;
+  --tw-line-strong: #c6d0cc;
+  --tw-text: #111815;
+  --tw-text-2: #36423d;
+  --tw-text-3: #5b6963;
+  --tw-text-4: #7a8781;
+  --tw-danger: #c43b42;
+  --tw-danger-bg: rgba(196, 59, 66, 0.1);
+  color-scheme: light;
+}
+
+html[data-theme="light"] .tina-web .tina-web-nav-item:hover {
+  background: rgba(17, 24, 21, 0.05);
+}
+
+html[data-theme="light"] .tina-web .tina-web-nav-item.active {
+  background: rgba(23, 107, 91, 0.11);
+  color: var(--tw-teal);
+}
+
+html[data-theme="light"] .tina-web .tina-web-collapse-btn {
+  color: var(--tw-text-3);
+}
+
+html[data-theme="light"] .tina-web .tina-web-collapse-btn:hover {
+  background: var(--tw-raised);
+  color: var(--tw-text);
+}
+
+html[data-theme="light"] .tina-web .tina-web-btn-ghost {
+  border-color: var(--tw-line-strong);
+  background: var(--tw-card);
+}
+
+html[data-theme="light"] .tina-web .tina-web-btn-ghost:hover {
+  background: var(--tw-raised);
+}
+
+/* ---------- Terminal-to-Web CSS Variable Bridge (Harmonizes Embedded Surfaces) ---------- */
+
+.tina-web-embedded-surface,
+.tina-web-detail {
+  --bg: var(--tw-bg);
+  --canvas: var(--tw-bg);
+  --sidebar: var(--tw-chrome);
+  --rail: var(--tw-chrome);
+  --subtle: var(--tw-chrome);
+  --panel: var(--tw-card);
+  --surface: var(--tw-card);
+  --panel2: var(--tw-raised);
+  --raised: var(--tw-raised);
+  --line: var(--tw-line);
+  --line2: var(--tw-line-strong);
+  --control-line: var(--tw-line-strong);
+  --t1: var(--tw-text);
+  --ink: var(--tw-text);
+  --t2: var(--tw-text-2);
+  --muted: var(--tw-text-2);
+  --t3: var(--tw-text-3);
+  --quiet: var(--tw-text-3);
+  --accent: var(--tw-mint);
+  --brand: var(--tw-mint);
+  --brand-hover: var(--tw-mint-bright);
+  --accentbg: rgba(23, 107, 91, 0.22);
+  --on-accent: #081210;
+  --on-brand: #081210;
+  --focus: var(--tw-mint);
+  --sans: var(--tw-font-body);
+  --display: var(--tw-font-display);
+}
+
+html[data-theme="light"] .tina-web-embedded-surface,
+html[data-theme="light"] .tina-web-detail {
+  --accent: var(--tw-teal);
+  --brand: var(--tw-teal);
+  --brand-hover: var(--tw-teal-hover);
+  --accentbg: rgba(23, 107, 91, 0.12);
+  --on-accent: #ffffff;
+  --on-brand: #ffffff;
+  --focus: var(--tw-teal);
+}
+
+/* ---------- Upgraded Settings Hub (Personal / Team) ---------- */
+
+.tina-web-settings-shell {
+  flex-direction: row;
+  background: var(--tw-bg);
+}
+
+.tina-web-settings-rail {
+  flex: 0 0 264px;
+  width: 264px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--tw-line-soft);
+  background: var(--tw-chrome);
+  overflow: hidden;
+}
+
+.tina-web-settings-rail-head {
+  flex: none;
+  padding: 18px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-bottom: 1px solid var(--tw-line-soft);
+}
+
+.tina-web-settings-rail-head h2 {
+  margin: 0;
+  font-family: var(--tw-font-display);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--tw-text);
+}
+
+.tina-web-ws-switcher {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 9px;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-bg);
+}
+
+.tina-web-ws-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--tw-text-3);
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.tina-web-ws-tab:hover {
+  color: var(--tw-text);
+}
+
+.tina-web-ws-tab.active {
+  background: var(--tw-teal);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.tina-web-settings-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-bg);
+  color: var(--tw-text-3);
+}
+
+.tina-web-settings-search:focus-within {
+  border-color: var(--tw-mint);
+}
+
+.tina-web-settings-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--tw-text);
+  font-size: 13px;
+}
+
+.tina-web-settings-search input::placeholder {
+  color: var(--tw-text-4);
+}
+
+.tina-web-settings-nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 10px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tina-web-settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tina-web-settings-group-title {
+  padding: 0 10px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tw-text-4);
+}
+
+.tina-web-settings-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 35px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: var(--tw-text-2);
+  text-align: left;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.tina-web-settings-item svg {
+  flex: none;
+  color: var(--tw-text-3);
+}
+
+.tina-web-settings-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--tw-text);
+}
+
+html[data-theme="light"] .tina-web-settings-item:hover {
+  background: rgba(17, 24, 21, 0.05);
+}
+
+.tina-web-settings-item.active {
+  background: rgba(23, 107, 91, 0.22);
+  color: var(--tw-text);
+  font-weight: 500;
+}
+
+html[data-theme="light"] .tina-web-settings-item.active {
+  background: rgba(23, 107, 91, 0.12);
+  color: var(--tw-teal);
+}
+
+.tina-web-settings-item.active svg {
+  color: var(--tw-mint);
+}
+
+html[data-theme="light"] .tina-web-settings-item.active svg {
+  color: var(--tw-teal);
+}
+
+.tina-web-admin-chip {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(145, 215, 190, 0.26);
+  background: rgba(23, 107, 91, 0.24);
+  color: var(--tw-mint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.tina-web-settings-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: clamp(20px, 3vw, 36px) clamp(20px, 4vw, 44px) 56px;
+}
+
+.tina-web-settings-content {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+.tina-web-settings-header {
+  margin-bottom: 22px;
+}
+
+.tina-web-settings-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tw-mint);
+}
+
+.tina-web-settings-header h1 {
+  margin: 0 0 6px;
+  font-family: var(--tw-font-display);
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--tw-text);
+}
+
+.tina-web-settings-header p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--tw-text-3);
+}
+
+.tina-web-settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tina-web-settings-card {
+  border-radius: 14px;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-card);
+  padding: 20px 22px;
+}
+
+.tina-web-settings-embed {
+  padding: 20px 22px;
+}
+
+.tina-web-settings-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.tina-web-settings-card-head h3 {
+  margin: 0 0 4px;
+  font-family: var(--tw-font-display);
+  font-size: 15.5px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.tina-web-settings-card-head p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--tw-text-3);
+}
+
+.tina-web-alert {
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.tina-web-alert.danger {
+  border: 1px solid rgba(240, 141, 144, 0.35);
+  background: var(--tw-danger-bg);
+  color: var(--tw-danger);
+}
+
+.tina-web-alert.success {
+  border: 1px solid rgba(145, 215, 190, 0.32);
+  background: rgba(23, 107, 91, 0.22);
+  color: var(--tw-mint);
+}
+
+.tina-web-muted-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--tw-text-3);
+}
+
+.tina-web-inline-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tina-web-input {
+  flex: 1;
+  min-width: 200px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--tw-line-strong);
+  background: var(--tw-bg);
+  color: var(--tw-text);
+  font-size: 13.5px;
+}
+
+.tina-web-input:focus {
+  border-color: var(--tw-mint);
+  outline: none;
+}
+
+.tina-web-select-compact {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--tw-line-strong);
+  background: var(--tw-bg);
+  color: var(--tw-text);
+  font-size: 12.5px;
+}
+
+.tina-web-ws-list,
+.tina-web-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tina-web-ws-row,
+.tina-web-roster-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-bg);
+}
+
+.tina-web-ws-row.selected {
+  border-color: rgba(145, 215, 190, 0.42);
+  background: rgba(23, 107, 91, 0.14);
+}
+
+.tina-web-ws-select {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.tina-web-ws-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-card);
+  color: var(--tw-mint);
+}
+
+.tina-web-ws-copy,
+.tina-web-roster-id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tina-web-ws-copy strong,
+.tina-web-roster-id strong {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--tw-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tina-web-ws-copy span,
+.tina-web-roster-id span {
+  font-size: 12px;
+  color: var(--tw-text-3);
+}
+
+.tina-web-ws-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.tina-web-role-pill {
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-card);
+  color: var(--tw-text-2);
+  font-size: 11.5px;
+  text-transform: capitalize;
+}
+
+.tina-web-subblock {
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid var(--tw-line-soft);
+}
+
+.tina-web-subblock-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tw-text-4);
+  margin-bottom: 10px;
+}
+
+.tina-web-invite-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tina-web-invite-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tina-web-minted-box {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Appearance theme cards */
+
+.tina-web-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.tina-web-theme-option {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-bg);
+  text-align: left;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.tina-web-theme-option:hover {
+  border-color: var(--tw-line-strong);
+}
+
+.tina-web-theme-option.selected {
+  border-color: var(--tw-mint);
+  background: rgba(23, 107, 91, 0.14);
+}
+
+.tina-web-theme-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 54px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.22);
+}
+
+.tina-web-theme-preview.dark {
+  background: linear-gradient(135deg, #101514 0%, #172320 100%);
+}
+
+.tina-web-theme-preview.light {
+  background: linear-gradient(135deg, #ffffff 0%, #eaf3ef 100%);
+}
+
+.tina-web-theme-bar {
+  width: 56%;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(145, 215, 190, 0.45);
+}
+
+.tina-web-theme-preview.light .tina-web-theme-bar {
+  background: rgba(23, 107, 91, 0.35);
+}
+
+.tina-web-theme-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #176b5b;
+}
+
+.tina-web-theme-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tina-web-theme-copy strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.tina-web-theme-copy span {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--tw-text-3);
+}
+
+.tina-web-account-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.tina-web-account-copy h3 {
+  margin: 0;
+  font-family: var(--tw-font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.tina-web-account-copy p {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  color: var(--tw-text-3);
+}
+
+.tina-web-account-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: 1px solid var(--tw-line-soft);
+}
+
+/* ---------- Harmonized Routines Surface ---------- */
+
+.tina-web-routines-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--tw-line-soft);
+  background: var(--tw-chrome);
+  flex: none;
+}
+
+.tina-web-routines-intro {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tina-web-routines-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(145, 215, 190, 0.25);
+  background: rgba(23, 107, 91, 0.22);
+  color: var(--tw-mint);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tina-web-routines-sub {
+  font-size: 13px;
+  color: var(--tw-text-3);
+}
+
+.tina-web-routines-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.tina-web-routines h1 {
+  font-family: var(--tw-font-display) !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.025em !important;
+}
+
+.tina-web-routines table {
+  border-collapse: collapse;
+}
+
+/* ---------- Upgraded Meeting Detail (Live Assist + Speaker Talk Time) ---------- */
+
+.tina-web-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tina-web-btn-ghost.active {
+  border-color: rgba(145, 215, 190, 0.4);
+  background: rgba(23, 107, 91, 0.22);
+  color: var(--tw-mint);
+}
+
+.tina-web-view-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  border: 1px solid var(--tw-line-strong);
+  background: var(--tw-bg);
+}
+
+.tina-web-view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--tw-text-3);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.tina-web-view-tab:hover {
+  color: var(--tw-text);
+}
+
+.tina-web-view-tab.active {
+  background: var(--tw-teal);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.tina-web-detail-banner {
+  flex: none;
+  padding: 8px 20px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--tw-line-soft);
+}
+
+.tina-web-detail-banner.danger {
+  background: var(--tw-danger-bg);
+  color: var(--tw-danger);
+}
+
+.tina-web-detail-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tina-web-detail-pane[hidden] {
+  display: none !important;
+}
+
+.tina-web-detail-insights {
+  flex: 0 0 300px;
+  width: 300px;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--tw-line-soft);
+  background: var(--tw-chrome);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tina-web-insights-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tina-web-insights-head h2 {
+  margin: 0;
+  font-family: var(--tw-font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.tina-web-insights-head p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--tw-text-3);
+}
+
+.tina-web-icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-card);
+  color: var(--tw-text-2);
+}
+
+.tina-web-icon-btn:hover {
+  border-color: var(--tw-mint);
+  color: var(--tw-mint);
+}
+
+.tina-web-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tina-web-metric-box {
+  padding: 10px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-card);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tina-web-metric-box span {
+  font-size: 11px;
+  color: var(--tw-text-4);
+}
+
+.tina-web-metric-box strong {
+  font-family: var(--tw-font-display);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--tw-text);
+}
+
+.tina-web-insights-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.tina-web-speaker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tina-web-speaker-card {
+  padding: 10px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tina-web-speaker-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tina-web-speaker-ring {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex: none;
+  padding: 3px;
+}
+
+.tina-web-speaker-ring span {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--tw-card);
+  display: grid;
+  place-items: center;
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--tw-text);
+}
+
+.tina-web-speaker-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tina-web-speaker-meta strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tw-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tina-web-speaker-meta span {
+  font-size: 11.5px;
+  color: var(--tw-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.tina-web-speaker-wpm {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-bg);
+  color: var(--tw-text-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tina-web-speaker-bar-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--tw-line);
+  overflow: hidden;
+}
+
+.tina-web-speaker-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.tina-web-participant-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tina-web-participant-chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-card);
+  color: var(--tw-text-2);
+  font-size: 12px;
+}
+
+/* ---------- Option B: Split-Button Capture ▾ & Dropdowns ---------- */
+
+.tina-web-capture-split {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  height: 32px;
+  border-radius: 7px;
+  background: var(--tw-teal);
+  color: #ffffff;
+  font-family: var(--tw-font-display);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.tina-web-capture-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px 0 12px;
+  border-radius: 7px 0 0 7px;
+  color: #ffffff;
+  white-space: nowrap;
+  transition: background 140ms ease;
+}
+
+.tina-web-capture-caret {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  border-left: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 0 7px 7px 0;
+  color: #ffffff;
+  transition: background 140ms ease;
+}
+
+.tina-web-capture-main:hover,
+.tina-web-capture-caret:hover {
+  background: var(--tw-teal-hover);
+}
+
+.tina-web-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 80;
+  width: 288px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--tw-line-strong);
+  background: var(--tw-chrome);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tina-web-dropdown-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 8px;
+  text-align: left;
+  color: var(--tw-text);
+  transition: background 120ms ease;
+}
+
+.tina-web-dropdown-item svg {
+  margin-top: 2px;
+  flex: none;
+  color: var(--tw-mint);
+}
+
+.tina-web-dropdown-item span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tina-web-dropdown-item strong {
+  font-family: var(--tw-font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.tina-web-dropdown-item small {
+  font-family: var(--tw-font-body);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--tw-text-3);
+}
+
+.tina-web-dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+html[data-theme="light"] .tina-web-dropdown-item:hover {
+  background: rgba(17, 24, 21, 0.05);
+}
+
+.tina-web-dropdown-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--tw-line);
+}
+
+/* ---------- Option B: Meetings Notebook Multi-Filter & Row ••• Menu ---------- */
+
+.tina-web-filter-wrap {
+  position: relative;
+}
+
+.tina-web-filter-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--tw-teal);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tina-web-filter-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 75;
+  width: min(460px, 92vw);
+  display: grid;
+  grid-template-columns: 144px minmax(0, 1fr);
+  border-radius: 12px;
+  border: 1px solid var(--tw-line-strong);
+  background: var(--tw-chrome);
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.56);
+  overflow: hidden;
+}
+
+.tina-web-filter-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-right: 1px solid var(--tw-line-soft);
+  background: var(--tw-bg);
+}
+
+.tina-web-filter-tab {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  text-align: left;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--tw-text-3);
+}
+
+.tina-web-filter-tab:hover {
+  color: var(--tw-text);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tina-web-filter-tab.active {
+  background: rgba(23, 107, 91, 0.24);
+  color: var(--tw-mint);
+}
+
+.tina-web-filter-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 220px;
+}
+
+.tina-web-filter-pane {
+  padding: 12px 14px;
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tina-web-filter-options {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.tina-web-filter-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--tw-text-2);
+  cursor: pointer;
+}
+
+.tina-web-filter-check input {
+  accent-color: var(--tw-teal);
+}
+
+.tina-web-filter-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--tw-line-soft);
+}
+
+.tina-web-filter-dates label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--tw-text-3);
+}
+
+.tina-web-filter-dates input {
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--tw-line-strong);
+  background: var(--tw-bg);
+  color: var(--tw-text);
+  font-size: 12px;
+}
+
+.tina-web-filter-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--tw-line-soft);
+  background: var(--tw-bg);
+}
+
+.tina-web-filter-strip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 9px 24px;
+  border-bottom: 1px solid var(--tw-line-soft);
+  background: rgba(23, 107, 91, 0.06);
+}
+
+.tina-web-filter-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tina-web-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(145, 215, 190, 0.28);
+  background: rgba(23, 107, 91, 0.22);
+  color: var(--tw-mint);
+  font-size: 12px;
+}
+
+.tina-web-filter-chip:hover {
+  background: rgba(23, 107, 91, 0.34);
+}
+
+.tina-web-clear-link {
+  font-size: 12px;
+  color: var(--tw-text-3);
+  padding: 2px 6px;
+}
+
+.tina-web-clear-link:hover {
+  color: var(--tw-text);
+}
+
+.tina-web-toast-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--tw-mint);
+}
+
+.tina-web-group-label.live {
+  color: var(--tw-mint);
+}
+
+.tina-web-group-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--tw-text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tina-web-row-menu-wrap {
+  position: relative;
+}
+
+.tina-web-row-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 70;
+  min-width: 214px;
+  padding: 5px;
+  border-radius: 10px;
+  border: 1px solid var(--tw-line-strong);
+  background: var(--tw-chrome);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.56);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tina-web-row-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--tw-text-2);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.tina-web-row-menu-item svg {
+  flex: none;
+  color: var(--tw-text-3);
+}
+
+.tina-web-row-menu-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--tw-text);
+}
+
+html[data-theme="light"] .tina-web-row-menu-item:hover:not(:disabled) {
+  background: rgba(17, 24, 21, 0.05);
+}
+
+.tina-web-row-menu-item.danger {
+  color: var(--tw-danger);
+}
+
+.tina-web-row-menu-item.danger svg {
+  color: var(--tw-danger);
+}
+
+.tina-web-row-menu-item.danger:hover:not(:disabled) {
+  background: var(--tw-danger-bg);
+}
+
+.tina-web-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 7px;
+  background: #b93840;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.tina-web-btn-danger:hover:not(:disabled) {
+  background: #a02f36;
+}
+
+.tina-web-btn-danger-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 7px;
+  border: 1px solid rgba(240, 141, 144, 0.35);
+  background: transparent;
+  color: var(--tw-danger);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.tina-web-btn-danger-ghost:hover:not(:disabled) {
+  background: var(--tw-danger-bg);
+}
+
+/* ---------- Option B: Ask Tina Sessions Search, Response Actions & Tool Approval ---------- */
+
+.tina-web-ask-session-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tina-web-session-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 7px;
+  color: var(--tw-text-2);
+  text-align: left;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.tina-web-session-row svg {
+  flex: none;
+  color: var(--tw-text-3);
+}
+
+.tina-web-session-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--tw-text);
+}
+
+.tina-web-session-row.active {
+  background: rgba(23, 107, 91, 0.24);
+  color: var(--tw-mint);
+}
+
+.tina-web-session-row.active svg {
+  color: var(--tw-mint);
+}
+
+.tina-web-session-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.tina-web-session-copy strong {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tina-web-session-copy small {
+  font-size: 11px;
+  color: var(--tw-text-4);
+}
+
+.tina-web-msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--tw-line-soft);
+}
+
+.tina-web-msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid var(--tw-line);
+  background: transparent;
+  color: var(--tw-text-3);
+  font-size: 12px;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.tina-web-msg-action-btn:hover {
+  border-color: rgba(145, 215, 190, 0.34);
+  background: rgba(23, 107, 91, 0.16);
+  color: var(--tw-mint);
+}
+
+.tina-web-msg-feedback {
+  margin-left: 4px;
+  font-size: 11.5px;
+  color: var(--tw-mint);
+}
+
+.tina-web-approval-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.tina-web-approval-card {
+  padding: 13px 15px;
+  border-radius: 10px;
+  border: 1px solid var(--tw-line-strong);
+  border-left: 3px solid var(--tw-mint);
+  background: var(--tw-card);
+}
+
+.tina-web-approval-card.denied,
+.tina-web-approval-card.expired {
+  border-left-color: var(--tw-danger);
+}
+
+.tina-web-approval-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--tw-mint);
+}
+
+.tina-web-approval-head code {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--tw-bg);
+  color: var(--tw-text-3);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.tina-web-approval-title {
+  margin-top: 6px;
+  font-family: var(--tw-font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.tina-web-approval-desc {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--tw-text-3);
+}
+
+.tina-web-approval-msg {
+  margin-top: 7px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--tw-text-2);
+}
+
+.tina-web-approval-params {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 10px 0 0;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--tw-line-soft);
+  background: var(--tw-bg);
+  font-size: 12px;
+}
+
+.tina-web-approval-param-row {
+  display: grid;
+  grid-template-columns: minmax(80px, auto) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.tina-web-approval-param-row dt {
+  color: var(--tw-text-4);
+}
+
+.tina-web-approval-param-row dd {
+  margin: 0;
+  color: var(--tw-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tina-web-approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tina-web-approval-status {
+  margin-top: 9px;
+  font-size: 12px;
+  color: var(--tw-text-3);
+}
+
+.tina-web-approval-error {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--tw-danger);
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 960px) {
+  .tina-login-modal { flex-direction: column; }
+  .tina-login-form-panel { width: 100%; flex: none; padding: 32px 24px; }
+  .tina-login-showcase { display: none; }
+  .tina-web-channels,
+  .tina-web-ask-sessions { display: none; }
+  .tina-web-detail-body { flex-direction: column; }
+  .tina-web-detail-insights {
+    width: 100%;
+    flex: 0 0 auto;
+    max-height: 260px;
+    border-right: 0;
+    border-bottom: 1px solid var(--tw-line-soft);
+  }
+  .tina-web-detail-ask { width: 100%; flex: 0 0 320px; border-left: 0; border-top: 1px solid var(--tw-line-soft); }
+  .tina-web-settings-shell { flex-direction: column; }
+  .tina-web-settings-rail {
+    width: 100%;
+    flex: 0 0 auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--tw-line-soft);
+  }
+  .tina-web-settings-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .tina-web-settings-group {
+    flex-direction: row;
+    align-items: center;
+  }
+  .tina-web-settings-group-title { display: none; }
+  .tina-web-theme-grid { grid-template-columns: 1fr; }
+  .tina-web-tasks-grid { grid-template-columns: 1fr; }
+  .tina-web-pa-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .tina-web-sidebar { display: none; }
+  .tina-web-sidebar.mobile-open {
+    display: flex;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+    width: 248px;
+    flex-basis: 248px;
+    box-shadow: 12px 0 36px rgba(0, 0, 0, 0.6);
+  }
+  .tina-web-mobile-menu { display: grid; }
+  .tina-web-search-wrap { display: none; }
+  .tina-web-home-inner { padding: 24px 16px 124px; }
+  .tina-web-pa-grid { grid-template-columns: 1fr; }
+  .tina-web-page-wrap { padding: 18px 16px 48px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tina-web-home::before { animation: none; }
+}

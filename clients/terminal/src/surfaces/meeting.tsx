@@ -43,10 +43,7 @@ import {
 // ── "Share session" — mint a link to this meeting's LIVE FEED (independent transcript share) and,
 //    optionally, BUNDLE a shared-workspace invite into the SAME link (?tshare=…&invite=…). The two are
 //    decoupled capabilities; this is the one-click way to hand someone both at once. ─────────────────
-function platformSlug(display: string): string {
-  return display === "Google Meet" ? "google_meet" : display.toLowerCase().replace(/\s+/g, "_");
-}
-function ShareSessionButton({ platform, native }: { platform: string; native: string }) {
+export function ShareSessionButton({ meetingId }: { meetingId: string }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState("open");
   const [emails, setEmails] = useState("");
@@ -68,7 +65,7 @@ function ShareSessionButton({ platform, native }: { platform: string; native: st
     setBusy(true); setErr(null);
     try {
       const allowed = mode === "restricted" ? emails.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean) : undefined;
-      const t = await mintTranscriptShare({ platform, native_meeting_id: native, mode, allowed_emails: allowed, expires_in_sec: ttlDays * 86400 });
+      const t = await mintTranscriptShare(meetingId, { mode, allowed_emails: allowed, expires_in_sec: ttlDays * 86400 });
       const params = new URLSearchParams();
       params.set("tshare", t.token);
       if (wsId) {  // bundle a workspace membership invite into the same link
@@ -1234,7 +1231,7 @@ function MeetingTab({ id, params }: TabProps) {
               {knowledgeOpen ? "Close TINA" : "Ask TINA"}
             </button>}
             {m && <BotControls m={m} connected={connected} />}
-            {m?.native_id && <ShareSessionButton platform={platformSlug(m.platform)} native={m.native_id} />}
+            {m?.id && !m.shared && <ShareSessionButton key={m.id} meetingId={m.id} />}
           </div>
         {liveAssistError && !liveAssistState?.enabled && <div role="alert" style={{ margin: "0 0 8px", color: "var(--danger)", fontSize: 11.5 }}>{liveAssistError}</div>}
         {m && <div className={pageStyles.metadata}>
