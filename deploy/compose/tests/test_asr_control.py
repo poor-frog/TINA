@@ -95,11 +95,30 @@ class ControlTests(unittest.TestCase):
     def test_native_mps_status_does_not_require_a_compose_viegem_service(self):
         selected = SimpleNamespace(services={"admin-api": {"environment": {}}}, context="orbstack", viegem_device="mps",
                                    native_viegem_access=lambda: ("192.168.139.3", "http://192.168.139.3:18005"))
-        with patch.object(control, "request_json", return_value={
+        with tempfile.TemporaryDirectory() as directory, patch.object(control.Path, "home", return_value=Path(directory)), \
+             patch.dict("sys.modules", {"native_viegem": SimpleNamespace(LABEL="local.tina.viegem", ROOT=BIN.parents[2])}), \
+             patch.object(control, "request_json", return_value={
                 "model": {"asr_model": "5CD-AI/VieGem-ASR", "device": "mps"}}) as probe:
             result = control.Workers(selected).status("viegem")
         self.assertTrue(result["ready"])
         probe.assert_called_once_with("http://192.168.139.3:18005/status", timeout=1)
+
+    def test_orbstack_preserves_owned_loopback_worker_after_context_switch(self):
+        root = BIN.parents[2]
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            selected = SimpleNamespace(services={"admin-api": {"environment": {}}},
+                context="orbstack", viegem_device="mps", env_file=home / "main.env",
+                native_viegem_access=lambda: ("192.168.139.3", "http://192.168.139.3:18005"))
+            agent = home / "Library/LaunchAgents/local.tina.viegem.plist"
+            agent.parent.mkdir(parents=True)
+            with patch.object(control.Path, "home", return_value=home), \
+                 patch.dict("sys.modules", {"native_viegem": SimpleNamespace(LABEL="local.tina.viegem", ROOT=root)}):
+                for env_file, expected_host in [(selected.env_file, "127.0.0.1"),
+                                                (home / "other.env", "192.168.139.3")]:
+                    agent.write_bytes(control.plistlib.dumps({"WorkingDirectory": str(root), "EnvironmentVariables": {
+                        "TINA_VIEGEM_HOST": "127.0.0.1", "TINA_VIEGEM_ENV_FILE": str(env_file.resolve())}}))
+                    self.assertEqual(control.Workers(selected).endpoint("viegem"), f"http://{expected_host}:18005")
 
     def test_kiri_native_mps_controller_probes_loopback(self):
         selected = SimpleNamespace(services={"admin-api": {"environment": {}}},

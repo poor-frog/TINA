@@ -476,6 +476,35 @@ test('failed KWS refuses ASR-only activation and stale worker events cannot wake
   } finally {await f.voice.stop();}
 });
 
+test('KWS failure retries with backoff and returns to listening after both new workers are ready', async () => {
+  const attempts: Array<{event: Parameters<WorkerFactory>[0]; fail: Parameters<WorkerFactory>[1]}> = [];
+  const f = fixture(undefined, undefined, (event, fail) => {
+    attempts.push({event, fail});
+    return {send: () => true, close() {}};
+  });
+  const voice = f.voice as any;
+  const poll = async () => { clearTimeout(voice.pollTimer); await voice.poll(); clearTimeout(voice.pollTimer); };
+  const ready = {event: 'kws', status: 'ready', models: ['hey_tina', 'tina_oi'], generation: 0};
+  try {
+    await f.voice.start(); clearTimeout(voice.pollTimer);
+    f.emit({event: 'state', state: 'LISTENING'}); attempts[0].event(ready);
+    attempts[0].fail('input_backpressure'); attempts[0].fail('child_exit');
+    await tick(5);
+    assert.equal(f.states.at(-1), 'ERROR');
+    assert.equal(f.logs.filter(line => line.includes('input_backpressure')).length, 1);
+    await poll(); assert.equal(attempts.length, 1);
+    voice.kwsRetryAt = Date.now(); await poll(); assert.equal(attempts.length, 2);
+    f.emit({event: 'state', state: 'LISTENING'}); attempts[0].event(ready);
+    assert.notEqual(f.states.at(-1), 'LISTENING');
+    attempts[1].event(ready); await tick(5);
+    assert.equal(f.states.at(-1), 'LISTENING');
+    assert.equal(f.diagnostics.at(-1)?.code, 'listening');
+    attempts[1].fail('child_exit'); await tick(5);
+    assert(voice.kwsRetryAt - Date.now() > 2000);
+    await f.voice.stop(); await poll(); assert.equal(attempts.length, 2);
+  } finally { await f.voice.stop(); }
+});
+
 test('independently identified speakers do not cancel or contaminate the caller during overlapping speech',async()=>{
   const f=acousticFixture();
   try{

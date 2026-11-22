@@ -148,6 +148,49 @@ def test_meeting_row_does_not_depend_on_the_first_meetings_page(monkeypatch):
     assert calls == ["http://gateway.test/meetings/41"]
 
 
+def test_missing_meeting_row_never_falls_back_to_a_reused_meet_link(monkeypatch):
+    from flows_steps import meeting
+
+    monkeypatch.setattr(meeting, "meetings_door", lambda: "http://gateway.test")
+    monkeypatch.setattr(meeting, "user_api_key", lambda _: "test-key")
+    other_row = {"id": 42, "native_meeting_id": "abc-defg-hij"}
+    monkeypatch.setattr(meeting, "http", lambda _method, url, _headers:
+                        (404, {}) if url.endswith("/41") else (200, {"meetings": [other_row]}))
+    assert meeting.meeting_row("7", 41, "abc-defg-hij") is None
+    assert meeting.meeting_row("7", None, "abc-defg-hij") == other_row
+
+
+def test_meet_sends_verified_partial_roster_and_retries_without_duplicate_mail(world, monkeypatch):
+    from flows_steps import meeting
+
+    reg, channel, ctx, writes, shares = world
+    meeting.meeting_row("7", 41).update(platform="google_meet", native_meeting_id="abc-defg-hij")
+    completed = False
+
+    def roster(uid, mid, platform, native):
+        assert (uid, mid, platform, native) == ("7", 41, "google_meet", "abc-defg-hij")
+        participants = [
+            {"email": "ben@outside.test", "source": "invite"},
+            {"email": "joined-via-link@outside.test", "source": "attendance"},
+        ]
+        if completed:
+            participants.append({"email": "recovered@outside.test", "source": "attendance"})
+        return {"observed_roster": "recorded", "attendance_retryable": not completed,
+                "participants": participants}
+
+    monkeypatch.setattr(meeting, "meeting_participants", roster)
+    step = reg.steps["email_meeting_followup"]
+    with pytest.raises(StepError, match="waiting for Google attendance lookup") as error:
+        step(ctx)
+    assert error.value.retryable
+    assert ctx.scratch["sent"] == ["anna@bank.test", "joined-via-link@outside.test"]
+    completed = True
+    assert step(ctx).result["sent"] == 3
+    assert shares == ["joined-via-link@outside.test", "recovered@outside.test"]
+    assert [m["to"] for m in channel.sent] == ["anna@bank.test", *shares]
+    assert len(writes) == 1
+
+
 def test_new_post_meeting_version_sends_before_workspace_delivery(world):
     reg, *_ = world
     flow = reg.flows[("post_meeting", 5)]

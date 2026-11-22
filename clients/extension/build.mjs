@@ -15,6 +15,9 @@ const postBuild = {
     build.onEnd(result => {
       if (result.errors.length) return;
       cpSync('src/sidepanel.html', `${outdir}/sidepanel.html`);
+      cpSync('src/meet-panel.html', `${outdir}/meet-panel.html`);
+      cpSync('src/welcome.html', `${outdir}/welcome.html`);
+      cpSync('src/welcome.css', `${outdir}/welcome.css`);
       cpSync('assets', `${outdir}/assets`, { recursive: true });
       cpSync(resolve(__dirname, '../../branding/tokens.css'), `${outdir}/assets/tina-tokens.css`);
       const now = new Date();
@@ -30,7 +33,11 @@ const postBuild = {
 };
 
 const ctx = await context({
-  entryPoints: { sidepanel: 'src/viewer.ts', 'viewer-background': 'src/viewer-background.ts' },
+  entryPoints: {
+    sidepanel: 'src/viewer.ts', 'viewer-background': 'src/viewer-background.ts',
+    'meet-content': 'src/meet-content.ts', 'meet-panel': 'src/meet-panel.ts',
+    welcome: 'src/welcome.ts',
+  },
   outdir, bundle: true, format: 'iife', target: 'es2020', logLevel: 'silent', plugins: [postBuild],
 });
 if (WATCH) await ctx.watch();

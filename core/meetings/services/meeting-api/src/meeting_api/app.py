@@ -183,6 +183,8 @@ def create_app(
     # calendar-sync user edges (async callables from the composition root; None → routes 503)
     calendar_sync_now: Optional["object"] = None,
     calendar_sync_status: Optional["object"] = None,
+    # Google Meet participant email lookup; only the production composition root wires OAuth I/O.
+    attendee_email_lookup: Optional["object"] = None,
 ) -> FastAPI:
     """Build the unified meeting-api app from the injected ports.
 
@@ -318,6 +320,7 @@ def create_app(
                                             aligner=app.state.transcript_aligner,
                                             calendar_sync_now=calendar_sync_now,
                                             calendar_sync_status=calendar_sync_status,
+                                            attendee_email_lookup=attendee_email_lookup,
                                             artifact_object_deleter=_delete_recording_objects))
 
     # --- recordings: chunk upload + finalize → meeting.data JSONB (recording.v1) ---

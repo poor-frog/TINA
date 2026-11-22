@@ -31,22 +31,51 @@ def send(ctx):
     organizer = _address(owner["email"])
     title = " ".join(str(data.get("title") or ctx.refs.get("title") or ctx.refs.get("native") or "Cuộc họp").split())[:512]
     participants = [organizer]
-    attendees = list(data.get("attendees") or []) + list(ctx.refs.get("participants") or [])
-    declined = {_address(a.get("email")) for a in attendees
-                if isinstance(a, dict) and str(a.get("partstat", "")).upper() == "DECLINED"}
-    for attendee in attendees:
-        if isinstance(attendee, dict):
-            if str(attendee.get("partstat", "")).upper() == "DECLINED":
-                continue
-            attendee = attendee.get("email")
-        address = _address(attendee)
-        if address and address not in declined and address not in participants:
-            participants.append(address)
+    followup = ctx.flow.param("attendee_followup") if ctx.flow else None
+    attendee_followup_on = (ctx.refs.get("share") is not False
+                            and (followup is None or str(followup).strip().lower()
+                                 not in ("off", "none", "false", "0")))
+    platform = row.get("platform") or ctx.refs.get("platform")
+    attendance_lookup = None
+    attendance_retryable = False
+    if platform == "google_meet":
+        attendees = []
+        attendance_lookup = "not_requested"
+        if attendee_followup_on:
+            attendance_lookup = "unavailable"
+            native = row.get("native_meeting_id") or ctx.refs.get("native")
+            try:
+                roster = (meeting.meeting_participants(uid, mid, platform, str(native))
+                          if native else None)
+                if roster:
+                    attendance_lookup = str(roster.get("observed_roster") or "unavailable")
+                    attendance_retryable = roster.get("attendance_retryable") is True
+                    if attendance_lookup == "recorded":
+                        rows = roster.get("participants")
+                        attendees = [p.get("email") for p in rows if isinstance(p, dict)
+                                     and p.get("source") == "attendance"] if isinstance(rows, list) else []
+            except StepError:
+                attendance_retryable = True
+            for attendee in attendees:
+                address = _address(attendee)
+                if address and address not in participants:
+                    participants.append(address)
+    else:
+        attendees = list(data.get("attendees") or []) + list(ctx.refs.get("participants") or [])
+        declined = {_address(a.get("email")) for a in attendees
+                    if isinstance(a, dict) and str(a.get("partstat", "")).upper() == "DECLINED"}
+        for attendee in attendees:
+            if isinstance(attendee, dict):
+                if str(attendee.get("partstat", "")).upper() == "DECLINED":
+                    continue
+                attendee = attendee.get("email")
+            address = _address(attendee)
+            if address and address not in declined and address not in participants:
+                participants.append(address)
     mailbox = _address(mailtext.mailbox_address())
     participants = [a for a in participants if a != mailbox]
     recipients = [organizer] if organizer in participants and common.setting(uid, "mail_minutes") else []
-    followup = ctx.flow.param("attendee_followup") if ctx.flow else None
-    if ctx.refs.get("share") is not False and (followup is None or str(followup).strip().lower() not in ("off", "none", "false", "0")):
+    if attendee_followup_on:
         recipients.extend(a for a in participants if a != organizer)
 
     report = str(ctx.prior["process_meeting"]["report"]).strip()
@@ -99,7 +128,12 @@ def send(ctx):
         ctx.checkpoint()
     if failed:
         raise StepError(f"Meeting follow-up pending for {failed} recipient(s): {', '.join(sorted(errors))}")
-    return Done({"sent": len(sent), "to": list(sent), "drops": list(drops),
-                 "organizer": organizer, "participants": participants,
-                 "title": title, "link": links.get(organizer), "owner_link": links.get(organizer),
-                 "message_id": drops[0]["message_id"] if drops else None, "followup": "on"})
+    if attendance_retryable:
+        raise StepError("Meeting follow-up is waiting for Google attendance lookup")
+    result = {"sent": len(sent), "to": list(sent), "drops": list(drops),
+              "organizer": organizer, "participants": participants,
+              "title": title, "link": links.get(organizer), "owner_link": links.get(organizer),
+              "message_id": drops[0]["message_id"] if drops else None, "followup": "on"}
+    if platform == "google_meet":
+        result["attendance_lookup"] = attendance_lookup
+    return Done(result)

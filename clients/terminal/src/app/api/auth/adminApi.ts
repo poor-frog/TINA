@@ -120,7 +120,7 @@ function allowlistConfigured(): boolean {
   return (process.env.TINA_ADMIN_EMAILS || "").split(",").some((e) => e.trim());
 }
 
-async function internalRequest<T>(path: string, init: RequestInit = {}): Promise<AdminResult<T>> {
+export async function internalRequest<T>(path: string, init: RequestInit = {}): Promise<AdminResult<T>> {
   const url = (process.env.TINA_ADMIN_API_URL || "").replace(/\/$/, "");
   const secret = process.env.TINA_INTERNAL_API_SECRET || "";
   if (!url || !secret) {
@@ -135,7 +135,8 @@ async function internalRequest<T>(path: string, init: RequestInit = {}): Promise
     });
     if (!res.ok) {
       const detail = (await res.text().catch(() => "")).slice(0, 500);
-      return { ok: false, status: res.status, error: detail || `admin-api returned ${res.status}` };
+      return { ok: false, status: res.status, ...(res.status === 404 && { notFound: true }),
+        error: detail || `admin-api returned ${res.status}` };
     }
     return { ok: true, status: res.status, data: (await res.json()) as T };
   } catch (err) {
@@ -324,8 +325,20 @@ async function pruneLoginTokens(userId: string | number): Promise<void> {
  *  Returns the user + token, or an error with an HTTP-ish status for the caller to surface. */
 export async function findOrCreateUserToken(
   email: string,
+  googleSubject?: string,
 ): Promise<{ ok: true; user: AdminUser; token: string } | { ok: false; status: number; error: string }> {
-  const found = await findUserByEmail(email);
+  const googleLogin = (userId?: string | number) => internalRequest<AdminUser>("/internal/google-login", {
+    method: "POST", body: JSON.stringify({ subject: googleSubject, ...(userId !== undefined && { user_id: Number(userId) }) }),
+  });
+  const bound = googleSubject ? await googleLogin() : null;
+  if (bound && !bound.ok && !bound.notFound) {
+    return { ok: false, status: bound.status || 503, error: "Failed to verify the Google account binding" };
+  }
+  // Google is authoritative for Gmail addresses when adopting an existing email-keyed account.
+  if (googleSubject && !bound?.ok && !email.endsWith("@gmail.com")) {
+    return { ok: false, status: 403, error: "This Google account requires an existing account binding" };
+  }
+  const found = bound?.ok ? bound : await findUserByEmail(email);
 
   let user: AdminUser | undefined;
   let justCreated = false;
@@ -342,6 +355,13 @@ export async function findOrCreateUserToken(
     return { ok: false, status: found.status || 503, error: found.error || "Failed to look up user" };
   }
 
+  if (googleSubject && !bound?.ok) {
+    const linked = await googleLogin(user.id);
+    if (!linked.ok || !linked.data) {
+      return { ok: false, status: linked.status || 503, error: "Failed to link the Google account" };
+    }
+    user = linked.data;
+  }
   // Mint the login token with a stable `terminal-login` name so it is distinguishable from
   // user-created self-serve tokens and can be bounded (find-or-create used to mint unconditionally
   // with no name and no cap → one live token per sign-in, forever).

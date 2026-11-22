@@ -1,0 +1,83 @@
+{{- $reach := .Values.agentReach | default dict }}
+{{- if $reach.enabled }}
+{{- if not .Values.agentApi.enabled }}
+{{- fail "agentReach.enabled requires agentApi.enabled" }}
+{{- end }}
+{{- $name := include "tina.componentName" (list . "agent-reach") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "tina.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  {{- include "tina.deploymentStrategy" . | nindent 2 }}
+  selector:
+    matchLabels:
+      {{- include "tina.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent-reach
+  template:
+    metadata:
+      labels:
+        {{- include "tina.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: agent-reach
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: agent-reach
+          image: "{{ $reach.image.repository }}:{{ .Values.global.imageTag | default $reach.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- toYaml (merge (dict "readOnlyRootFilesystem" true) .Values.global.securityContext) | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            failureThreshold: 15
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+          resources:
+            {{- toYaml $reach.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "tina.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "tina.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-reach
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+{{- end }}

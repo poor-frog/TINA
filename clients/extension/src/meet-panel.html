@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="assets/tina-tokens.css" />
+  <title>TINA meeting transcript</title>
+  <style>
+    :root { color-scheme: light; --background: var(--canvas); --foreground: var(--ink); --muted-foreground: var(--muted); --border: var(--line); --subtle-bg: var(--subtle); }
+    :root[data-theme="dark"] { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; min-width: 0; margin: 0; overflow: hidden; }
+    body { display: flex; flex-direction: column; background: var(--background); color: var(--foreground); font: 13px/1.45 var(--font-body); }
+    button, select, input, textarea { color: inherit; font: inherit; }
+    button { cursor: pointer; }
+    [hidden] { display: none !important; }
+    .header { display: flex; flex: none; align-items: center; gap: var(--space-2); min-height: 56px; padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--border); background: var(--surface); cursor: grab; touch-action: none; user-select: none; }
+    .header:active { cursor: grabbing; }
+    .logo { width: 26px; height: 28px; object-fit: contain; flex: 0 0 auto; }
+    .heading { min-width: 0; flex: 1; }
+    .overline { display: block; color: var(--muted-foreground); font-size: 12px; }
+    #meetingTitle { display: block; overflow: hidden; margin: 1px 0 0; font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    .icon-button { display: grid; flex: 0 0 32px; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--muted-foreground); font-size: 20px; line-height: 1; }
+    .icon-button:hover { background: var(--subtle-bg); color: var(--foreground); }
+    .move-handle { flex: 0 0 44px; width: 44px; height: 44px; cursor: grab; touch-action: none; }
+    .move-handle:active { cursor: grabbing; }
+    .move-handle:disabled, .resize-handle:disabled { cursor: not-allowed; opacity: .55; }
+    .move-handle svg { width: 16px; height: 16px; }
+    .icon-button:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    .panel-menu { --menu-top: 60px; position: fixed; inset: var(--menu-top) 52px auto auto; width: min(216px, calc(100% - 64px)); max-height: calc(100% - var(--menu-top) - var(--space-3)); margin: 0; padding: var(--space-1); overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); color: var(--foreground); box-shadow: 0 8px 24px #0004; cursor: default; touch-action: auto; }
+    .panel-menu-account { padding: var(--space-2) var(--space-3); margin-bottom: var(--space-1); border-radius: var(--radius-control); background: var(--subtle-bg); }
+    .panel-menu-account span { display: block; color: var(--muted-foreground); font-size: 12px; }
+    .panel-menu-account strong { display: block; margin-top: 2px; font-weight: 650; overflow-wrap: anywhere; user-select: text; }
+    .panel-menu button { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); width: 100%; min-height: 40px; padding: var(--space-1) var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; text-align: left; }
+    .panel-menu button:hover:not(:disabled) { background: var(--subtle-bg); }
+    .panel-menu button:focus-visible { outline-offset: -2px; }
+    .panel-menu button:disabled { opacity: .55; cursor: default; }
+    .panel-menu-separator { margin: var(--space-1) var(--space-2); border: 0; border-top: 1px solid var(--border); }
+    #signOut { color: var(--rejected); }
+    .theme-track { flex: 0 0 32px; height: 18px; padding: 2px; border: 1px solid var(--control-line); border-radius: 999px; color: var(--muted-foreground); }
+    .theme-track::after { content: ""; display: block; width: 12px; height: 12px; border-radius: 50%; background: currentColor; }
+    #panelTheme[aria-checked="true"] .theme-track { border-color: var(--brand); background: var(--brand); color: var(--on-brand); }
+    #panelTheme[aria-checked="true"] .theme-track::after { margin-left: auto; }
+    .view-tabs { display: flex; flex: 0 0 auto; gap: 4px; padding: 6px 12px 0; border-bottom: 1px solid var(--border); }
+    .view-tab { min-height: 34px; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted-foreground); font-size: 12px; }
+    .view-tab[aria-selected="true"] { border-bottom-color: var(--brand); color: var(--brand); font-weight: 650; }
+    .view-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+    .panel-view { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 12px 7px; }
+    .toolbar h2 { margin: 0; font-size: 13px; font-weight: 650; }
+    #language { min-width: 74px; height: 30px; margin-left: auto; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--surface); color: var(--brand); }
+    .button { min-height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); font-size: 11px; }
+    .button:hover:not(:disabled) { border-color: var(--brand); }
+    .button:disabled { cursor: default; opacity: .55; }
+    .button.primary { border-color: var(--brand); background: var(--brand); color: var(--on-brand); font-weight: 650; }
+    .button.danger { color: var(--rejected); }
+    .button.icon-only { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; }
+    .button.icon-only svg { width: 16px; height: 16px; }
+    #translationStatus { min-height: 18px; padding: 0 14px 5px; color: var(--muted-foreground); font-size: 10px; }
+    #translationStatus[data-state="error"], #translationStatus[data-state="paused"] { color: var(--draft); }
+    .stop-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--border); background: var(--rejected-bg); font-size: 11px; }
+    .stop-confirm span { flex: 1 1 160px; }
+    #feed { position: relative; flex: 1; min-height: 100px; overflow: auto; padding: 10px 14px 14px; scrollbar-width: thin; scrollbar-color: var(--control-line) transparent; }
+    #transcriptTurns { min-width: 0; }
+    .empty-state { display: flex; min-height: 180px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 18px; color: var(--muted-foreground); text-align: center; }
+    .empty-state strong { color: var(--foreground); font-size: 13px; }
+    .empty-state span { max-width: 300px; font-size: 11px; }
+    .transcript-turn { margin-bottom: 14px; overflow-wrap: anywhere; }
+    .turn-header { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+    .speaker-avatar { display: grid; flex: 0 0 22px; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--subtle-bg); color: var(--brand); font-size: 10px; }
+    .speaker-avatar > * { grid-area: 1 / 1; }
+    .speaker-photo { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; background: var(--subtle-bg); }
+    .speaker-name { font-size: 12px; font-weight: 650; }
+    .turn-time { margin-left: auto; color: var(--muted-foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
+    .turn-copy { margin: 0; font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .turn-draft { margin-top: 6px; padding-left: 8px; border-left: 2px solid var(--control-line); }
+    .draft-label { display: block; margin-bottom: 3px; color: var(--muted-foreground); font-size: 9px; }
+    .segment-bilingual, .segment-original, .segment-english { display: block; }
+    .segment-bilingual { margin-bottom: 9px; padding-bottom: 9px; border-bottom: 1px solid var(--border); }
+    .segment-bilingual:last-child { margin-bottom: 0; padding-bottom: 0; border: 0; }
+    .segment-original[hidden] { display: none; }
+    .pinnable-segment { display: flex; gap: var(--space-2); align-items: flex-start; }
+    .pinnable-segment > .transcript-segment { flex: 1; min-width: 0; }
+    .pinnable-segment > .segment-bilingual { margin: 0; padding: 0; border: 0; }
+    .pinnable-segment + .pinnable-segment { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--border); }
+    .note-pin-toggle { display: grid; flex: none; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--surface); color: var(--muted-foreground); }
+    .note-pin-toggle svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .note-pin-toggle:hover:not(:disabled) { color: var(--brand); border-color: var(--brand); }
+    .note-pin-toggle[aria-pressed="true"] { border-color: var(--control-line); background: var(--subtle-bg); color: var(--brand); }
+    .note-pin-toggle[aria-pressed="true"] svg path:first-child { fill: currentColor; }
+    .transcript-source-target { background: var(--subtle-bg); outline: 2px solid var(--brand); outline-offset: 2px; border-radius: var(--radius-small); }
+    .segment-english { margin-top: 4px; padding: 5px 8px; border-left: 2px solid var(--control-line); border-radius: 0 var(--radius-small) var(--radius-small) 0; background: var(--subtle-bg); color: var(--muted-foreground); font-size: 12px; white-space: pre-wrap; }
+    #latestBtn { position: sticky; bottom: 4px; display: block; margin: 0 auto; min-height: 32px; padding: 0 12px; border: 1px solid var(--control-line); border-radius: 999px; background: var(--surface); color: var(--brand); }
+    .notes-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); }
+    .notes-toolbar h2 { margin: 0; font-size: 14px; font-weight: 650; }
+    .notes-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .notes-status { display: block; margin-top: var(--space-1); color: var(--muted-foreground); font-size: 11px; }
+    .note-feedback { margin: 0; padding: var(--space-2) var(--space-4) 0; color: var(--muted-foreground); font-size: 11px; }
+    .notes-status[data-state="stale"], .notes-status[data-state="failed"] { color: var(--draft); }
+    #notesFeed { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px 14px 14px; scrollbar-width: thin; scrollbar-color: var(--control-line) transparent; }
+    .notes-group { margin: 0 0 var(--space-4); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
+    .notes-group h3 { margin: 0 0 var(--space-2); font-size: 14px; overflow-wrap: anywhere; }
+    .notes-group ul { list-style: none; margin: 0; padding: 0; }
+    .note-item + .note-item { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+    .note-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-bottom: 5px; color: var(--muted-foreground); font-size: 10px; }
+    .note-copy { margin: 0; font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .note-stale { color: var(--draft); font-weight: 600; }
+    .note-pin-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-2); margin-top: var(--space-2); }
+    .note-pin-actions form { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+    .note-pin-actions summary { cursor: pointer; color: var(--muted-foreground); font-size: 12px; line-height: 32px; }
+    .note-pin-actions input { min-width: 0; width: 150px; max-width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--canvas); color: var(--foreground); font: inherit; }
+    .note-time { min-height: 24px; padding: 0 var(--space-1); border: 0; border-radius: var(--radius-small); color: var(--brand); background: var(--subtle-bg); font: inherit; font-weight: 650; }
+    .notes-cleaned { margin-top: var(--space-3); color: var(--muted-foreground); }
+    .notes-cleaned summary { cursor: pointer; margin-bottom: var(--space-2); font-size: 12px; }
+    .note-facts { margin-bottom: var(--space-4); padding-bottom: var(--space-3); border-bottom: 1px solid var(--border); }
+    .note-facts h3, .fact-group h4 { margin: 0 0 var(--space-2); font-size: 13px; }
+    .fact-group { margin-top: var(--space-3); }
+    .fact-card { margin-top: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); overflow-wrap: anywhere; }
+    .fact-card .note-copy { margin-block: var(--space-1); }
+    .fact-card details { margin-block: var(--space-1); color: var(--muted-foreground); font-size: 12px; }
+    .fact-card summary { cursor: pointer; }
+    .fact-card blockquote { margin: var(--space-1) 0; padding-inline-start: var(--space-2); border-left: 2px solid var(--border); white-space: pre-wrap; }
+    .fact-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+    .fact-status { margin: 0; color: var(--muted-foreground); font-size: 12px; }
+    .ask-feed { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-4); overflow-wrap: anywhere; scrollbar-width: thin; scrollbar-color: var(--control-line) transparent; }
+    .ask-welcome { display: grid; align-content: center; min-height: 100%; max-width: 320px; margin: auto; }
+    .ask-welcome h2 { margin: 0 0 var(--space-3); font-size: 18px; line-height: 1.25; }
+    .ask-prompts { display: grid; gap: var(--space-2); }
+    .ask-prompts button { min-height: 36px; text-align: left; font-size: 13px; }
+    .ask-answer + .ask-answer { margin-top: var(--space-6); }
+    .ask-question { width: fit-content; max-width: 88%; margin: 0 0 var(--space-3) auto; padding: var(--space-2) var(--space-3); border-radius: var(--radius-panel); background: var(--subtle-bg); font-size: 14px; font-weight: 550; line-height: 1.5; white-space: pre-wrap; }
+    .ask-reply { padding-inline: var(--space-1); font-size: 14px; line-height: 1.55; }
+    .ask-reply p { margin: 0; white-space: pre-wrap; }
+    .ask-pending { display: flex; gap: var(--space-2); align-items: center; color: var(--muted-foreground); font-size: 12px; }
+    .ask-spinner { flex: none; width: 12px; height: 12px; border: 1.5px solid var(--control-line); border-top-color: var(--brand); border-radius: 50%; animation: ask-spin .8s linear infinite; }
+    @keyframes ask-spin { to { transform: rotate(1turn); } }
+    @media (prefers-reduced-motion: reduce) { .ask-spinner { animation: none; } }
+    .ask-claim + .ask-claim, .ask-reply .ask-status, .ask-save { margin-top: var(--space-2); }
+    .ask-source { margin-top: var(--space-1); color: var(--muted-foreground); font-size: 12px; }
+    .ask-source summary, .ask-save summary, .ask-documents summary { width: fit-content; max-width: 100%; cursor: pointer; }
+    .ask-source summary { padding: var(--space-1) var(--space-2); border-radius: var(--radius-small); background: var(--subtle-bg); font-variant-numeric: tabular-nums; }
+    .ask-source blockquote { margin: var(--space-1) 0 0; padding: var(--space-1) var(--space-2); border-left: 2px solid var(--border); white-space: pre-wrap; }
+    .ask-save { color: var(--brand); font-size: 12px; }
+    .ask-save p { margin-top: var(--space-1); color: var(--muted-foreground); }
+    .ask-form { flex: none; padding: var(--space-2) var(--space-4); border-top: 1px solid var(--border); }
+    .ask-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-width: 0; }
+    .ask-tools .button { flex: none; min-height: 28px; color: var(--brand); font-size: 12px; }
+    .ask-tools .ask-documents { min-width: 0; margin-left: auto; padding-block: var(--space-1); }
+    .ask-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-1) var(--space-2); padding: var(--space-2); border: 1px solid var(--control-line); border-radius: var(--radius-panel); background: var(--surface); }
+    .ask-composer:focus-within { border-color: var(--brand); }
+    .ask-composer textarea { grid-column: 1 / -1; width: 100%; min-width: 0; min-height: 32px; max-height: min(96px, 26vh); padding: var(--space-1); border: 0; background: transparent; font-size: 14px; field-sizing: content; resize: none; }
+    .ask-composer textarea:focus-visible { outline: none; }
+    #askSend { border-radius: 50%; }
+    .ask-documents { max-height: min(76px, 18vh); overflow: auto; overflow-wrap: anywhere; color: var(--muted-foreground); font-size: 12px; }
+    .ask-documents label { display: block; }
+    .ask-status { margin: 0; color: var(--muted-foreground); font-size: 12px; }
+    .ask-status[data-error="true"] { color: var(--rejected); }
+    .ask-feed > .ask-status:not([hidden]) { padding-top: var(--space-2); }
+    #askReload { margin-top: var(--space-2); }
+    .ask-confirm { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .footer { display: grid; flex: none; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2) max(4px, env(safe-area-inset-bottom)) var(--space-4); border-top: 1px solid var(--border); color: var(--muted-foreground); font-size: 12px; }
+    .footer-actions { grid-column: 2; grid-row: 1; }
+    .footer-action { min-height: 36px; padding: 0 var(--space-2); border: 1px solid var(--brand); border-radius: var(--radius-control); background: var(--brand); color: var(--on-brand); font-size: 12px; font-weight: 650; white-space: nowrap; }
+    .footer-action.danger { border-color: var(--rejected); background: var(--surface); color: var(--rejected); }
+    .footer-action:hover:not(:disabled) { filter: brightness(.96); }
+    .footer-action:disabled { cursor: default; opacity: .58; }
+    .footer-status { grid-column: 1 / -1; color: var(--muted-foreground); font-size: 10px; overflow-wrap: anywhere; }
+    .footer-status[data-state="error"] { color: var(--rejected); }
+    .footer .voice-activity { display: inline-flex; grid-column: 1; grid-row: 1; justify-self: start; align-items: center; gap: 6px; width: fit-content; min-width: 0; max-width: 100%; min-height: 32px; overflow: hidden; margin: 0; padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--subtle-bg); color: var(--muted-foreground); font-size: 11px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+    .footer .voice-name { flex: none; font-size: 11px; font-weight: 700; letter-spacing: .025em; }
+    .footer .voice-label { min-width: 0; overflow: hidden; padding-left: 6px; border-left: 1px solid var(--border); font-weight: 500; text-overflow: ellipsis; }
+    .footer .voice-wave { flex: none; }
+    .footer .voice-activity[data-phase="LISTENING"], .footer .voice-activity[data-phase="CAPTURING"], .footer .voice-activity[data-phase="SPEAKING"] { border-color: color-mix(in srgb, var(--brand) 35%, var(--border)); background: var(--subtle-bg); color: var(--brand); }
+    .footer .voice-activity[data-phase="ERROR"] { color: var(--rejected); }
+    .footer .voice-activity[data-phase="CAPTURING"] .voice-wave path, .footer .voice-activity[data-phase="SPEAKING"] .voice-wave path { transform-origin: center; animation: voice-wave 1.2s ease-in-out infinite; }
+    .footer .voice-wave path:nth-child(2) { animation-delay: -.4s; }
+    .footer .voice-wave path:nth-child(3) { animation-delay: -.8s; }
+    @keyframes voice-wave { 0%, 100% { transform: scaleY(.6); } 50% { transform: scaleY(1); } }
+    @media (prefers-reduced-motion: reduce) { .footer .voice-wave path { animation: none !important; } }
+    .resize-handle { display: grid; grid-column: 3; grid-row: 1; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--surface); color: var(--muted-foreground); cursor: nwse-resize; touch-action: none; }
+    .resize-handle:hover:not(:disabled) { border-color: var(--brand); color: var(--foreground); }
+    .resize-handle svg { width: 16px; height: 16px; }
+    @media (pointer: coarse) { .move-handle, .resize-handle { flex-basis: 48px; width: 48px; height: 48px; } }
+    @media (max-width: 420px) { .header { gap: 7px; padding-inline: 10px; } }
+    @media (max-width: 300px) { .panel-menu { --menu-top: 68px; } }
+    @media (max-height: 360px) {
+      .ask-feed { padding-block: var(--space-1); }
+      .ask-form { gap: var(--space-1); padding-block: var(--space-1); }
+      .ask-composer textarea { max-height: 56px; }
+      .ask-documents { max-height: 32px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <header id="panelHeader" class="header">
+    <img id="logo" class="logo" src="assets/tina-dark.svg" alt="TINA" />
+    <div class="heading"><span class="overline">Google Meet · TINA Bot</span><h1 id="meetingTitle">Đang kết nối…</h1></div>
+    <span id="botStatus" class="visually-hidden" data-state="loading" role="status" aria-live="polite">Đang kiểm tra Bot</span>
+    <button id="movePanel" class="icon-button move-handle" type="button" aria-label="Di chuyển bảng TINA bằng cách kéo" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight" title="Kéo hoặc dùng phím mũi tên">
+      <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="6" cy="4" r="1.2" fill="currentColor"/><circle cx="12" cy="4" r="1.2" fill="currentColor"/><circle cx="6" cy="9" r="1.2" fill="currentColor"/><circle cx="12" cy="9" r="1.2" fill="currentColor"/><circle cx="6" cy="14" r="1.2" fill="currentColor"/><circle cx="12" cy="14" r="1.2" fill="currentColor"/></svg>
+    </button>
+    <button class="icon-button" type="button" aria-label="More options" title="More options" popovertarget="panelMenu">⋯</button>
+    <div id="panelMenu" class="panel-menu" popover lang="en">
+      <div id="panelMenuAccount" class="panel-menu-account" hidden>
+        <span>Signed in as</span>
+        <strong id="accountEmail"></strong>
+      </div>
+      <button id="openTerminal" type="button" popovertarget="panelMenu" popovertargetaction="hide">
+        Open Terminal <span aria-hidden="true">↗</span>
+      </button>
+      <button id="askNewQuestion" type="button" popovertarget="panelMenu" popovertargetaction="hide" hidden disabled>New question</button>
+      <button id="panelTheme" type="button" role="switch" aria-checked="false">
+        Dark mode <span class="theme-track" aria-hidden="true"></span>
+      </button>
+      <hr id="panelMenuSeparator" class="panel-menu-separator" hidden>
+      <button id="signOut" type="button" popovertarget="panelMenu" popovertargetaction="hide" hidden>Sign out</button>
+    </div>
+    <button id="closePanel" class="icon-button" type="button" aria-label="Đóng bảng TINA" title="Đóng">×</button>
+  </header>
+  <div id="panelTabs" class="view-tabs" role="tablist" aria-label="Nội dung cuộc họp">
+    <button id="transcriptTab" class="view-tab" type="button" role="tab" aria-selected="true" aria-controls="transcriptView" tabindex="0">Transcript</button>
+    <button id="notesTab" class="view-tab" type="button" role="tab" aria-selected="false" aria-controls="notesView" tabindex="-1">Notes</button>
+    <button id="askTab" class="view-tab" type="button" role="tab" aria-selected="false" aria-controls="askView" tabindex="-1">Ask TINA</button>
+  </div>
+  <section id="transcriptView" class="panel-view" role="tabpanel" aria-labelledby="transcriptTab">
+    <div class="toolbar" aria-label="Transcript controls">
+      <h2>Transcript</h2>
+      <select id="language" aria-label="Ngôn ngữ transcript">
+        <option value="bilingual" selected>VI + EN</option>
+        <option value="vi">Tiếng Việt</option>
+        <option value="en">English</option>
+      </select>
+      <button id="refreshBot" class="button icon-only" type="button" aria-label="Làm mới" title="Làm mới" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8m0-5v5h-5m5 4a9 9 0 0 1-15.4 6.4L3 16m0 5v-5h5"/>
+        </svg>
+      </button>
+      <button id="retryTranslation" class="button" type="button" hidden>Thử lại bản dịch</button>
+    </div>
+    <div id="translationStatus" role="status" aria-live="polite"></div>
+    <p id="pinFeedback" class="note-feedback" role="status" hidden></p>
+    <div id="stopConfirm" class="stop-confirm" hidden>
+      <span>Dừng các phiên TINA Bot đang chạy cho phòng này. Transcript đã lưu vẫn giữ nguyên.</span>
+      <button id="cancelStop" class="button" type="button">Hủy</button>
+      <button id="confirmStop" class="button primary" type="button">Xác nhận dừng</button>
+    </div>
+    <main id="feed" role="region" aria-label="Live meeting transcript" tabindex="0">
+      <div id="emptyState" class="empty-state">
+        <strong id="emptyTitle">Đang kết nối transcript</strong>
+        <span id="emptyMessage">Transcript từ TINA Bot sẽ xuất hiện ở đây.</span>
+      </div>
+      <div id="transcriptTurns" role="list" aria-label="Transcript turns"></div>
+      <button id="latestBtn" type="button" hidden>Latest Transcript ↓</button>
+    </main>
+  </section>
+  <section id="notesView" class="panel-view" role="tabpanel" aria-labelledby="notesTab" hidden>
+    <div class="notes-toolbar">
+      <div>
+        <h2 id="notesHeading">Notes sau họp</h2>
+        <span id="notesStatus" class="notes-status" role="status"></span>
+      </div>
+      <div class="notes-actions">
+        <button id="generateNotes" class="button primary" type="button" disabled>Tạo tóm tắt</button>
+        <button id="copyNotes" class="button icon-only" type="button" aria-label="Copy notes" title="Copy notes" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+        </button>
+        <button id="refreshNotes" class="button icon-only" type="button" aria-label="Refresh notes" title="Refresh notes">
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.6-4L4 9"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4L20 15"/><path d="M20 20v-5h-5"/></svg>
+        </button>
+      </div>
+    </div>
+    <p id="noteFeedback" class="note-feedback" role="status" hidden></p>
+    <main id="notesFeed" role="region" aria-label="Ghi chú cuộc họp" tabindex="0">
+      <section id="storedRecap" class="notes-group" aria-labelledby="storedRecapTitle" hidden>
+        <h3 id="storedRecapTitle">Tóm tắt đã lưu</h3>
+        <p id="storedRecapText" class="note-copy"></p>
+      </section>
+      <section id="meetingPins" class="notes-group" aria-labelledby="meetingPinsTitle" hidden>
+        <h3 id="meetingPinsTitle">Đoạn đã ghim</h3>
+        <ul id="meetingPinEntries"></ul>
+      </section>
+      <section id="notesFacts" class="note-facts" aria-labelledby="notesFactsTitle" hidden>
+        <h3 id="notesFactsTitle">Quyết định &amp; Việc cần làm</h3>
+        <p id="notesFactsStatus" class="fact-status" role="status"></p>
+        <div id="notesFactsEntries"></div>
+      </section>
+      <div id="notesEmpty" class="empty-state" role="status">
+        <strong id="notesEmptyTitle">Notes của cuộc họp</strong>
+        <span id="notesEmptyMessage">Ghi chú đã xử lý sẽ xuất hiện ở đây.</span>
+      </div>
+      <div id="notesEntries"></div>
+      <details id="notesCleaned" class="notes-cleaned" hidden>
+        <summary>Transcript đã làm sạch</summary>
+        <div id="notesCleanedEntries"></div>
+      </details>
+    </main>
+  </section>
+  <section id="askView" class="panel-view" role="tabpanel" aria-labelledby="askTab" hidden>
+    <div id="askFeed" class="ask-feed" role="region" aria-label="Câu trả lời và nguồn" tabindex="0">
+      <div id="askWelcome" class="ask-welcome" hidden>
+        <h2>Hỏi về cuộc họp này</h2>
+        <div id="askPrompts" class="ask-prompts">
+          <button class="button" type="button">Tóm tắt đến giờ</button>
+          <button class="button" type="button">Đã chốt gì?</button>
+          <button class="button" type="button">Ai phụ trách việc nào?</button>
+        </div>
+      </div>
+      <div id="askAnswers"></div>
+      <p id="askStatus" class="ask-status" role="status" aria-live="polite" hidden></p>
+      <button id="askReload" class="button" type="button" hidden>Tải lại Ask TINA</button>
+    </div>
+    <form id="askForm" class="ask-form">
+      <div class="ask-composer">
+        <label for="askQuestion" class="visually-hidden">Câu hỏi về cuộc họp</label>
+        <textarea id="askQuestion" rows="1" placeholder="Hỏi về cuộc họp…" maxlength="2000" required disabled></textarea>
+        <div class="ask-tools">
+          <details id="askDocuments" class="ask-documents" hidden>
+            <summary>Tài liệu liên quan</summary>
+            <div id="askDocumentChoices"></div>
+          </details>
+        </div>
+        <button id="askSend" type="submit" class="button primary icon-only" aria-label="Send question" title="Send question" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+        </button>
+      </div>
+    </form>
+  </section>
+  <footer class="footer">
+    <div class="footer-actions">
+      <button id="signIn" class="footer-action" type="button" hidden>Đăng nhập bằng Google</button>
+      <button id="sendBot" class="footer-action" type="button">Invite TINA</button>
+      <button id="stopBot" class="footer-action danger" type="button" hidden>Stop TINA Bot</button>
+    </div>
+    <span id="footerStatus" class="footer-status" role="status" aria-live="polite" hidden></span>
+    <span id="voiceActivity" hidden></span>
+    <button id="resizePanel" class="resize-handle" type="button" aria-label="Thay đổi kích thước bảng TINA bằng cách kéo" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight" title="Kéo hoặc dùng phím mũi tên">
+      <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13 13 5M8 13h5V8"/></svg>
+    </button>
+  </footer>
+  <script src="meet-panel.js"></script>
+</body>
+</html>

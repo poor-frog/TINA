@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 import { watchTranslation, translationSegments, type TranslationGroup, type TranslationSnapshot } from './translation';
+const gateway = 'http://127.0.0.1:18056';
+const connection = { botGatewayUrl: gateway, account: { id: '7', email: 'fixture@example.test',
+  key: 'a'.repeat(43), gateway, terminal: 'http://127.0.0.1:23000' } };
+(globalThis as any).chrome = { runtime: { sendMessage: async () => ({ ok: true, token: 'tina-test-only' }) } };
+
 
 const source = [{ segment_id: 'a', text: 'Mục tiêu', absolute_start_time: '2026-11-03T08:00:00Z', absolute_end_time: '2026-11-03T08:00:01Z' },
   { segment_id: 'b', text: 'là tối ưu mô hình.', absolute_start_time: '2026-11-03T08:00:01Z', absolute_end_time: '2026-11-03T08:00:02Z' }];
@@ -10,6 +15,7 @@ const projected = translationSegments(source, [phrase]);
 assert.equal(projected.length, 1);
 assert.equal(projected[0].text, phrase.source_text);
 assert.equal(projected[0].translation?.text, phrase.translated_text);
+assert.deepEqual(projected[0].translation?.sourceIds, ['a', 'b']);
 assert.equal(projected[0].absolute_end_time, '2026-11-03T08:00:02.000Z');
 assert.equal(translationSegments([source[0], { ...source[1], text: 'Đã sửa.' }], [phrase]).some(s => s.translation), false);
 assert.equal(translationSegments(source, [{ ...phrase, ready: false, translated_text: null }])[0].translation?.ready, false);
@@ -30,7 +36,7 @@ globalThis.fetch = async (input, init = {}) => {
 try {
   let done!: () => void;
   const finished = new Promise<void>(resolve => { done = resolve; });
-  const stop = watchTranslation({ botGatewayUrl: 'http://127.0.0.1:18056', apiKey: 'tina-test-only' }, 6,
+  const stop = watchTranslation(connection, 6,
     state => { if (state.completed) done(); }, () => assert.fail('Unexpected translation error'));
   await finished;
   stop();
@@ -38,7 +44,7 @@ try {
   assert.equal(calls[1].url, 'http://127.0.0.1:18056/agent/meeting-translations/6');
   assert.equal(calls[1].init.credentials, 'omit');
   assert.equal(calls[1].init.redirect, 'error');
-  assert.equal((calls[1].init.headers as Record<string, string>)['X-API-Key'], 'tina-test-only');
+  assert.equal((calls[1].init.headers as Record<string, string>)['Authorization'], 'Bearer tina-test-only');
   assert.deepEqual(JSON.parse(String(calls[1].init.body)), { retry: false, segment_ids: [] });
   console.log('translation shared-cache client passed');
 } finally { globalThis.fetch = original; }
@@ -62,7 +68,7 @@ for (const [state, retry, posts] of [
     requests.push(init);
     return Response.json(state);
   };
-  const stop = watchTranslation({ botGatewayUrl: 'http://127.0.0.1:18056', apiKey: 'tina-test-only' }, 6,
+  const stop = watchTranslation(connection, 6,
     () => {}, () => assert.fail('Unexpected translation error'), retry);
   try {
     await new Promise(resolve => setTimeout(resolve, 0));

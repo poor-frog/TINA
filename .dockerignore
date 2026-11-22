@@ -17,6 +17,8 @@ node_modules/
 .git/
 .env
 .env.*
+**/.env
+**/.env.*
 .recordings/
 deploy/transcription/models/
 clients/

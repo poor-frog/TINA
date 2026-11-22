@@ -68,6 +68,27 @@ class User(Base):
     )
 
 
+class GoogleLogin(Base):
+    __tablename__ = "google_logins"
+
+    # The issuer is fixed to Google by Terminal's OAuth provider.
+    subject = Column(String(255), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+
+
+class ExtensionSession(Base):
+    __tablename__ = "extension_sessions"
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    extension_id = Column(String(32), nullable=False)
+    challenge = Column(String(43), nullable=True)
+    access_digest = Column(String(64), unique=True, nullable=True)
+    refresh_digest = Column(String(64), unique=True, nullable=True)
+    access_expires_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+
+
 class PlatformSetting(Base):
     """Deployment-wide runtime config, one JSONB value per key (`models`, `transcription`).
     The DB layer between per-user prefs (users.data) and the process env: services resolve

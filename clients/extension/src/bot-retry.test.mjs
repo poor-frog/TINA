@@ -6,7 +6,8 @@ import { build } from 'esbuild';
 const elements = new Map();
 const element = id => {
   if (!elements.has(id)) elements.set(id, { dataset: {}, listeners: {}, value: '',
-    addEventListener(type, fn) { this.listeners[type] = fn; } });
+    addEventListener(type, fn) { this.listeners[type] = fn; },
+    setAttribute(name, value) { (this.attributes ??= {})[name] = value; } });
   return elements.get(id);
 };
 const calls = [];
@@ -15,12 +16,13 @@ const context = {
   console, URL, URLSearchParams, AbortSignal, Date,
   document: { getElementById: element },
   setTimeout: () => 1, clearTimeout() {},
-  chrome: { tabs: { onActivated: { addListener() {} }, onUpdated: { addListener() {} } } },
+  chrome: { runtime: { sendMessage: async () => ({ ok: true, token: 'test-token' }) },
+    storage: { onChanged: { addListener() {} } }, tabs: { onActivated: { addListener() {} }, onUpdated: { addListener() {} } } },
   fetch: async (url, options) => { calls.push({ url, options }); return { ok }; },
 };
 const source = readFileSync(new URL('./viewer.ts', import.meta.url), 'utf8').replace('void init();', '') + `
   globalThis.retryProbe = {
-    set(row) { config.apiKey = 'test-key'; activeMeeting = {platform:'google_meet',nativeMeetingId:'abc-defg-hij'};
+    set(row) { config.account = { key: 'test-session', gateway: config.botGatewayUrl }; activeMeeting = {platform:'google_meet',nativeMeetingId:'abc-defg-hij'};
       meetings = [row]; sendBotState = null; syncFailedBotState(); bindSettings(); },
     state() { return sendBotState; }, cancelBotRetry,
   };

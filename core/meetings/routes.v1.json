@@ -364,6 +364,13 @@
     },
     {
       "method": "GET",
+      "path": "/transcripts/by-id/{meeting_id}/processed-notes",
+      "scopes": [
+        "tx"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/transcripts/by-id/{meeting_id}/alignment",
       "scopes": [
         "tx"

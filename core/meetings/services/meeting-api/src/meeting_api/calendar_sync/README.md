@@ -5,6 +5,14 @@ One concern: turn a user's secret ICS feed or selected Google Calendar into PLAN
 auto-join sweep sends the bot when each meeting starts. ICS URLs and Google OAuth grants are managed
 by the identity domain. Google refresh tokens are encrypted at rest and cross only the internal
 calendar-config edge; new Google connections keep auto-join off until enabled per calendar.
+The linked Google account also authorizes read-only Meet attendance and People lookups. After a
+Google Meet, Meeting API requires one conference covering the bot's admission time for the room
+code. It accepts emails verified on a Google account or profile with the matching participant
+account ID. Unavailable or private addresses remain unresolved. A temporary provider error can
+leave a partial list of verified addresses that Flows can use while scheduling a retry.
+Google lists conference records only to
+organizer accounts; if no linked Google grant can access the record, the attendee lookup is
+unavailable and follow-up falls back to the owner only.
 
 ## Public surface
 - `parse_ics(text, now, horizon_days=14)` → `{"events": [PlannedEvent], "cancelled_uids": […]}`

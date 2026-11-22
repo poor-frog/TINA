@@ -3,6 +3,7 @@ travels in step results (receipts), never in process memory."""
 from __future__ import annotations
 
 import time
+from urllib.parse import quote, urlencode
 
 from flows import Block, Done, StepCtx, StepError, Wait
 
@@ -23,8 +24,9 @@ from .common import http, meetings_door, setting, user_api_key
 
 def meeting_row(uid: str, meeting_id, native: str | None = None):
     """Read a row directly by id; legacy native references fall back to the list."""
+    exact_id = str(meeting_id or "").isdigit()
     try:
-        if str(meeting_id or "").isdigit():
+        if exact_id:
             status, row = http("GET", f"{meetings_door()}/meetings/{int(meeting_id)}",
                                {"X-API-Key": user_api_key(str(uid))})
             if status == 200 and isinstance(row, dict) and str(row.get("id")) == str(meeting_id):
@@ -39,9 +41,22 @@ def meeting_row(uid: str, meeting_id, native: str | None = None):
             continue
         if meeting_id is not None and str(m.get("id")) == str(meeting_id):
             return m
-        if native and m.get("native_meeting_id") == native:
+        if not exact_id and native and m.get("native_meeting_id") == native:
             found = m
     return found
+
+
+def meeting_participants(uid: str, meeting_id, platform: str, native: str):
+    """Read participant sources for the exact owner-scoped meeting row."""
+    query = urlencode({"meeting_id": str(meeting_id)})
+    url = (f"{meetings_door()}/meetings/{quote(platform, safe='')}/"
+           f"{quote(native, safe='')}/participants?{query}")
+    status, body = http("GET", url, {"X-API-Key": user_api_key(str(uid))}, timeout=30)
+    if status in (408, 429) or status >= 500:
+        raise StepError("Meeting attendance is temporarily unavailable")
+    if status != 200 or not isinstance(body, dict) or str(body.get("meeting_id")) != str(meeting_id):
+        return None
+    return body
 
 
 class ShareMintError(StepError):

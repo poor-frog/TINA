@@ -5,6 +5,8 @@
 export interface TranscriptSegment {
   text: string;
   speaker?: string;
+  speaker_id?: string;
+  speaker_revision?: number;
   absolute_start_time: string;
   absolute_end_time: string;
   completed?: boolean;

@@ -749,6 +749,8 @@ async def request_bot(
                 "attempt": auto_retry_attempt,
                 "max_attempts": DEFAULT_MAX_ATTEMPTS,
             }
+        if "canonical_notes" not in (reused_row.get("data") or {}):
+            policy_patch["canonical_notes"] = {"enabled": True, "windows": {}}
         if (voice_agent_enabled and transcribe_enabled and platform=='google_meet' and env_flag('TINA_MEETING_VOICE',False)
                 and not (reused_row.get('data') or {}).get('voice_assistant')):
             from ..lifecycle.voice import new_meeting_voice_policy

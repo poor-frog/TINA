@@ -34,6 +34,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 import json
+import re
 
 from fastapi import APIRouter, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -52,6 +53,7 @@ from .alignment import BotAligner
 # The two INTENT states the USER owns (pre-FSM). The user dropdown is the source of truth for
 # these; they sit BEFORE `requested` and are NEVER passed to the bot FSM (LifecycleSink.apply_change).
 _INTENT_STATUSES = frozenset({"idle", "scheduled"})
+_PARTICIPANT_EMAIL = re.compile(r'[^\s@<>;,:()\[\]"\\]+@[^\s@<>;,:()\[\]"\\]+')
 # FSM-owned values the intent endpoint MUST reject (422) — the bot lifecycle owns everything from
 # `requested` onward (machine.py); the user cannot set these directly.
 _FSM_OWNED_STATUSES = frozenset({
@@ -127,6 +129,7 @@ def build_router(
     log_event: Callable[..., dict] = _default_log_event,
     calendar_sync_now: Optional[Callable] = None,
     calendar_sync_status: Optional[Callable] = None,
+    attendee_email_lookup: Optional[Callable] = None,
     artifact_object_deleter: Optional[Callable] = None,
     refiner=None,
     diarizer=None,
@@ -1110,39 +1113,18 @@ def build_router(
             )
         return JSONResponse(content={"messages": []})
 
-    # --- GET /meetings/{platform}/{native_meeting_id}/participants → who was in this meeting, as far as
-    # the 0.12 core actually KNOWS. Owner-scoped (404 on someone else's meeting — never an empty roster,
-    # which would confirm the row exists across a tenant boundary).
-    #
-    # The honest shape matters more than the convenient one. Two sources are persisted today and they
-    # answer DIFFERENT questions, so every row says which one it came from:
-    #   `invite`  — the calendar invitation's ATTENDEE lines (meeting.data['attendees']). Who was ASKED.
-    #               Includes people who never spoke — but only when the meeting arrived via a connected
-    #               calendar feed, and an invitee who no-showed still appears.
-    #   `speaker` — DISTINCT transcriptions.speaker. Who was HEARD and named. A silent participant is
-    #               absent by construction; so is a speaker whose platform tile never yielded a name.
-    #
-    # Neither is attendance, and this route does NOT pretend otherwise: `observed_roster` is the flat
-    # statement that nobody recorded who was actually present. The 0.12 platform modules observe only
-    # tiles emitting a SPEAKING signal (msteams-speakers.ts's `hasRequiredSignal` gate; gmeet-speakers'
-    # `t.speaking` filter), and no producer writes a roster to any store — there is no `participants`
-    # table and `lifecycle.v1`'s `speaker_events` has had no writer since the 0.12 cutover
-    # (source issue #861). So an EMPTY `participants` here means "we never recorded this", which is why
-    # the field is present and constant rather than absent: a consumer must be able to tell "nobody
-    # attended" (never true from this data) from "attendance was never captured" (always true today).
-    #
-    # NO identity resolution is done. A person who was both invited and heard appears TWICE, once per
-    # source, because matching a voice label to an invitee is a guess and the wrong guess silently
-    # merges two humans. #861's preparation forbids promoting transcript speakers into a roster; keeping
-    # the sources side by side is how this route obeys that while still answering the question. ---
+    # --- GET /meetings/{platform}/{native_meeting_id}/participants → owner-scoped invite, speaker,
+    # and provider attendance facts. A row-id query pins repeated runs on one native link. Provider
+    # attendance is opt-in at composition and is never inferred from invitees or speaker names. ---
     @router.get("/meetings/{platform}/{native_meeting_id}/participants")
     async def get_meeting_participants(
         platform: str,
         native_meeting_id: str,
+        meeting_id: Optional[int] = Query(default=None, gt=0),
         x_user_id: Optional[str] = Header(default=None),
     ):
         user_id = _resolve_user_id(x_user_id)
-        found = await store.get_meeting_participants(user_id, platform, native_meeting_id)
+        found = await store.get_meeting_participants(user_id, platform, native_meeting_id, meeting_id)
         if found is None:
             log_event(
                 "participants_not_found", audience="system", level="warning",
@@ -1172,11 +1154,31 @@ def build_router(
         for name in found.get("speakers") or []:
             participants.append({"name": name, "email": None, "source": "speaker"})
 
+        observed_roster = "not_recorded"
+        attendance_retryable = False
+        if platform == "google_meet" and attendee_email_lookup is not None:
+            observed_roster = "unavailable"
+            try:
+                emails, attendance_retryable = await attendee_email_lookup(user_id, found)
+            except Exception:
+                emails, attendance_retryable = None, True
+            if isinstance(emails, list):
+                observed_roster = "recorded"
+                seen = set()
+                for value in emails:
+                    email = str(value or "").strip().lower()
+                    if (len(email) <= 254
+                            and _PARTICIPANT_EMAIL.fullmatch(email)
+                            and email not in seen):
+                        seen.add(email)
+                        participants.append({"name": None, "email": email, "source": "attendance"})
+
         sources = sorted({p["source"] for p in participants})
         log_event(
             "participants_served", audience="user", span="meetings.participants",
             user_id=user_id, meeting_id=f"{platform}/{native_meeting_id}",
-            fields={"count": len(participants), "sources": ",".join(sources)},
+            fields={"count": len(participants), "sources": ",".join(sources),
+                    "observed_roster": observed_roster, "attendance_retryable": attendance_retryable},
         )
         return JSONResponse(content={
             "meeting_id": found["meeting_id"],
@@ -1184,8 +1186,8 @@ def build_router(
             "native_meeting_id": native_meeting_id,
             "participants": participants,
             "sources": sources,
-            # Constant on 0.12 — see the block above. Becomes meaningful when a roster producer exists.
-            "observed_roster": "not_recorded",
+            "observed_roster": observed_roster,
+            **({"attendance_retryable": True} if attendance_retryable else {}),
         })
 
     # --- POST /meetings/{platform}/{native_meeting_id}/workspace → BIND the meeting to a shared workspace

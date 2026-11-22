@@ -1,14 +1,18 @@
 # Extension source
 
-- `viewer.ts` — transcript-first panel, source/meeting selection, transcript polling, translation orchestration, settings and destination links. The display-language dropdown defaults to **Song ngữ**; a compact language button reflects the effective display mode and opens/focuses the existing selector, and the translation notice is empty until a meeting is selected. Its state is separate from the retained capture-language setting.
+- `viewer.ts` — transcript-first panel, source/meeting selection, transcript polling, translation orchestration, settings and destination links. The language selector beside **Transcript** defaults to **VI + EN** and controls transcript display and translation. Its state is separate from the retained capture-language setting.
 - `bot-transcript.ts` — authenticated Bot and Desktop transcript list/snapshot readers; exact meeting identity validation, cancellation and retry.
 - `transcript-feed.ts` — transcript turn renderer with scroll/text-selection preservation and one original/English pair per backend phrase in translated modes.
 - `translation.ts` — authenticated `meeting-translation.v2` reads/advances through the Bot gateway, cancellation and retry; projects backend groups only when visible source members and known canonical revisions still match. Honors `can_advance` while continuing GET updates; explicit retry can bypass phrase/service cooldowns. Provider keys never enter the extension.
 - `translation.test.ts` — grouped projection, stale text/revision rejection, authenticated shared-cache reads, independent phrase retry progress, no automatic POST for exhausted phrases or quota cooldowns, and explicit retry.
-- `viewer-background.ts` — opens the Chrome side panel when the toolbar icon is clicked. It has no capture or network handlers.
-- `sidepanel.html` — viewer/settings UI with a native, keyboard-accessible **Review a meeting** disclosure, collapsed by default, containing source, meeting and language selectors. The collapsed summary retains the selected meeting; the Transcript heading, effective-language shortcut, translation status and retry remain outside the expandable controls; compact header/footer and phrase spacing prioritize reading; expanding/collapsing leaves the existing viewer subscriptions and language mode intact.
+- `welcome.ts` / `welcome.html` — toolbar popup with Google sign-in, recent meetings and account settings.
+- `viewer-background.ts` — brokers the authenticated session and resets the old sidebar-on-click behavior.
+- `meet-content.ts` — mounts the movable TINA button and the floating Bot transcript panel on Google Meet.
+- `meet-panel.ts` / `meet-panel.html` — reads the exact Google Meet Bot transcript and translation. Notes displays the saved Flow recap and still offers an on-demand summary with source links. Pins link to confirmed segments and support an optional label. They are stored in this extension profile by gateway, API key and meeting run. Only the segment ID, timestamp and label are stored locally. Footer actions send or stop the Bot and open Terminal.
+  The cleaned transcript appears in Notes after the meeting ends and processed content is available.
+- `sidepanel.html` — viewer/settings UI with one meeting panel for selected transcript meeting and active-tab Bot status/action. Its native **Review a meeting** disclosure retains the selector and refresh control; matching selected and active meeting IDs render once. The Transcript heading owns the language selector, with translation status and retry below it; expanding/collapsing leaves the existing viewer subscriptions and language mode intact.
 
-`build.mjs` bundles only the viewer and its side-panel launcher. The older capture implementation files remain in the checkout for compatibility with existing source-level diagnostics, but the extension build and manifest do not ship or grant access to them.
+`build.mjs` bundles the side-panel viewer, its launcher, and the Meet control/panel. The older audio-capture implementation files remain in the checkout for compatibility with source-level diagnostics, but the extension build does not ship or grant access to them.
 
 Run `pnpm --dir clients/extension typecheck` and `pnpm --dir clients/extension test` from
 the repository root. Build with `pnpm --dir clients/extension build`, then reload the installed

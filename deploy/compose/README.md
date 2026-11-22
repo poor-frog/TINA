@@ -123,8 +123,10 @@ them for chat. `TINA_AGENT_REACH_URL` selects retrieval for voice web queries af
 web permission and explicit public-query checks. Empty retains the provider's web search. No host
 cookies or GitHub tokens are imported. See [Agent Reach](../agent-reach/README.md).
 
-New configurations prepare meeting voice by default (`TINA_MEETING_VOICE=1`); set it to `0` for
-a deliberate transcript-only deployment and clear `LIVEKIT_AGENT_URL` when disabling Agents.
+### Meeting voice
+
+Set `TINA_MEETING_VOICE=1` to enable voice on an instance with trained wake word models and a TTS
+token. To also enable the LiveKit Agents runtime, set `LIVEKIT_AGENT_URL=http://livekit-agent:8080`.
 When the main environment has no TTS token, Stack loads `deploy/tts/.env` with the shared root
 `.env.keys`. An optional local TTS pair can override it; its key is never forwarded to containers.
 Provision the root private key privately before first startup. `make plan` reports
@@ -134,8 +136,8 @@ Provision the root private key privately before first startup. `make plan` repor
 `hey_tina.onnx` and `tina_oi.onnx` using the existing checksum-validated atomic installer from
 `TINA_KWS_MODELS_DIR` (relative paths resolve from the repo root; the default is
 `output/wakeword-training/tina-v1/models`). Missing or invalid artifacts stop before application
-restart. A fresh clone still needs the trained artifact pack; setup does not train or download an
-unapproved wake model. Models remain read-only in inference bots.
+restart. A new install with voice enabled needs the trained artifact pack. Models remain read-only
+in inference bots.
 
 Application readiness authenticates to TTS and checks Agents `/ready`, including cross-service
 TTS credentials/audio format. `make all` does not print the provisioned API key into logs; the
@@ -150,12 +152,13 @@ Existing installations keep using `plan`/`deploy`; setup never replaces their en
 Prerequisites: Python 3, make, Docker engine >=26 and Docker Compose with `up --wait` support.
 When the selected env file is Dotenvx-encrypted, `make`/the TINA CLI also require the Dotenvx CLI and
 the matching private key in `.env.keys` (kept outside Git). Stack commands decrypt into a mode-0600
-temporary env file for Compose; generated credentials in a tracked env file are written encrypted.
+temporary env file for Compose; generated credentials in a Dotenvx-managed file are written encrypted.
 Plain private `ENV_FILE`s remain supported.
 
-To create a new local instance without the repository's private Dotenvx key, use the first-install
-CLI with a private config path outside this checkout. This avoids using the tracked encrypted `.env`
-or accidentally targeting an existing Compose project:
+On a fresh clone, `make all` creates the ignored `deploy/compose/.env` from the template and
+generates the application secrets. Follow the [Google sign-in guide](../../README.md#set-up-google-sign-in)
+to enable Google login. For an isolated checkout or a config path outside the repository, use the
+first-install CLI:
 
 ```bash
 mkdir -p "$HOME/.config/tina"

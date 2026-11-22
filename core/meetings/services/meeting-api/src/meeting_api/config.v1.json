@@ -153,7 +153,8 @@
       "default": "(unset — Speak is unavailable unless an enabled bot request supplies voice)",
       "description": "Optional OpenAI-compatible speech endpoint. Meeting API forwards it only into voice-enabled bot workloads; it is never sent to the Dashboard/browser.",
       "targets": [
-        "compose"
+        "compose",
+        "helm"
       ]
     },
     {
@@ -163,7 +164,8 @@
       "secret": true,
       "description": "Optional bearer token paired with TTS_SERVICE_URL. It is forwarded only into voice-enabled bot workloads and must remain server-side.",
       "targets": [
-        "compose"
+        "compose",
+        "helm"
       ]
     },
     {
@@ -172,7 +174,7 @@
       "secret": true,
       "default": "",
       "description": "Domain-separated speech-profile signing key derived from INTERNAL_API_SECRET by the stack runner; never forwarded to bots",
-      "targets": ["compose"]
+      "targets": ["compose", "helm"]
     },
     {
       "key": "TINA_TTS_PREBUFFER_MS",
@@ -792,7 +794,8 @@
       "default": "0",
       "description": "Opt in to Google Meet bot-hosted KWS and shared TTS; requires speech profile assets and per-meeting owner source approval.",
       "targets": [
-        "compose"
+        "compose",
+        "helm"
       ]
     },
     {
@@ -822,7 +825,8 @@
       "default": "(unset — room voice unavailable)",
       "description": "Internal Agent service for owner-scoped, source-validated meeting voice answers. No owner API key is sent to the bot.",
       "targets": [
-        "compose"
+        "compose",
+        "helm"
       ]
     },
     {
@@ -830,7 +834,8 @@
       "class": "defaulted",
       "default": "",
       "targets": [
-        "compose"
+        "compose",
+        "helm"
       ],
       "description": "Optional internal self-hosted LiveKit Agents pilot. Empty keeps TINA native voice; per-room owner opt-in is required."
     }

@@ -455,10 +455,12 @@ class SqlAlchemyMeetingRepo:
     async def create_meeting(self, *, user_id, platform, native_meeting_id, data) -> dict:
         from ..sessions.models import Meeting
 
+        meeting_data = dict(data or {})
+        meeting_data.setdefault("canonical_notes", {"enabled": True, "windows": {}})
         async with self._session_factory() as db:
             m = Meeting(
                 user_id=user_id, platform=platform, platform_specific_id=native_meeting_id,
-                status="requested", data=dict(data or {}),
+                status="requested", data=meeting_data,
             )
             db.add(m)
             await db.commit()
@@ -549,6 +551,7 @@ class SqlAlchemyMeetingRepo:
             )).scalars().first()
             if claimable is not None:
                 planned = dict(claimable.data) if isinstance(claimable.data, dict) else {}
+                planned.setdefault("canonical_notes", {"enabled": True, "windows": {}})
                 # A THIS-REQUEST dispatch supersedes an earlier stop ON THE PLAN. Legacy zombie rows
                 # exist (a scheduled row a rev-193 DELETE flagged but never terminalized), and
                 # claiming one with the flag still on it would make the spawn fence abort the very
@@ -564,9 +567,11 @@ class SqlAlchemyMeetingRepo:
                 await db.refresh(claimable)
                 return _row_to_dict(claimable)
             # 3. insert — still inside the same txn/lock, so check+insert is atomic.
+            meeting_data = dict(data or {})
+            meeting_data.setdefault("canonical_notes", {"enabled": True, "windows": {}})
             m = Meeting(
                 user_id=user_id, platform=platform, platform_specific_id=native_meeting_id,
-                status="requested", data=dict(data or {}),
+                status="requested", data=meeting_data,
             )
             db.add(m)
             try:

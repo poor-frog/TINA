@@ -738,8 +738,22 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
         if mode in ('voice_plan','voice_source_intent'):
             provider_timeout = min(provider_timeout, voice_deadline-time.monotonic())
             if provider_timeout <= 0: raise TimeoutError('Voice retrieval budget exhausted')
-        provider = completion_from_env(timeout=provider_timeout)
-        if mode == 'voice_summary_select':
+        provider = None if mode == 'meeting_assistant' else completion_from_env(timeout=provider_timeout)
+        if mode == 'meeting_assistant':
+            from worker.voice_sandbox import complete as assistant_complete
+            schema = {
+                'type': 'object', 'additionalProperties': False, 'required': ['claims'],
+                'properties': {'claims': {'type': 'array', 'items': {
+                    'type': 'object', 'additionalProperties': False, 'required': ['text', 'source_ids'],
+                    'properties': {'text': {'type': 'string'}, 'source_ids': {
+                        'type': 'array', 'items': {'type': 'string', 'enum': [s['id'] for s in answer_sources]},
+                    }},
+                }}},
+            }
+            text = assistant_complete(payload['text'], SYSTEM, schema, timeout=40,
+                                      current=check_current, meeting_assistant=True)
+            validate_answer(text, answer_sources)
+        elif mode == 'voice_summary_select':
             text = generate(completion_from_env(timeout=15), payload['text'], SELECT_SYSTEM)
             ids = {i for fact in source['summary_facts'] for i in fact['source_ids']}
             validate_voice_answer(text,[{'id':i} for i in ids])

@@ -223,14 +223,14 @@
       "class": "defaulted",
       "default": "[]",
       "description": "JSON array of tool.v1 names enabled for interactive chat; client bodies cannot add tools",
-      "targets": ["compose"]
+      "targets": ["compose", "helm"]
     },
     {
       "key": "TINA_AGENT_REACH_URL",
       "class": "defaulted",
       "default": "",
       "description": "Private public-only Agent Reach retrieval worker URL, forwarded to dispatched workers; empty retains provider web search",
-      "targets": ["compose"]
+      "targets": ["compose", "helm"]
     },
     {
       "key": "TINA_UNIT_TOOLS",
@@ -337,7 +337,8 @@
       "default": "(unset \u2014 in-memory membership index)",
       "description": "Lane M: identity admin-api base URL for the users.data.memberships[] index mirror; empty = in-memory index (policy/members.json in the workspace git repo stays authoritative)",
       "targets": [
-        "compose"
+        "compose",
+        "helm"
       ]
     },
     {
@@ -355,9 +356,10 @@
       "key": "TINA_INTERNAL_API_SECRET",
       "class": "defaulted",
       "default": "(unset)",
-      "description": "Lane M: X-Internal-Secret for the admin-api membership-index internal edge (same value the gateway uses)",
+      "description": "X-Internal-Secret for the admin-api membership index and authenticated meeting voice requests (same value the gateway uses)",
       "targets": [
-        "compose"
+        "compose",
+        "helm"
       ]
     },
     {

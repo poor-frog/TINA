@@ -159,6 +159,7 @@ async def test_request_bot_eager_creates_session_and_spawns(monkeypatch):
     )
     assert meeting["status"] == "requested"
     assert meeting["bot_container_id"] == runtime.specs[0]["workloadId"]
+    assert repo._meetings[meeting["id"]]["data"]["canonical_notes"]["enabled"] is True
     # The eager MeetingSession is keyed by the bot's connectionId.
     assert len(repo.sessions) == 1
     spawned = json.loads(runtime.specs[0]["env"]["BOT_CONFIG"])
@@ -683,6 +684,33 @@ async def test_continue_meeting_refreezes_provider_for_the_new_session(monkeypat
     )
 
     assert repo._meetings[first["id"]]["data"]["transcription_provider"] == "tina"
+
+
+@pytest.mark.parametrize("notes_state,expected", [
+    (None, True),
+    ({"enabled": False, "windows": {}}, False),
+])
+async def test_continue_meeting_defaults_notes_for_legacy_rows_and_preserves_off(monkeypatch, notes_state, expected):
+    from meeting_api.bot_spawn import service as spawn_service
+
+    async def context(_user_id):
+        return {}
+
+    monkeypatch.setattr(spawn_service, "_fetch_bot_context", context)
+    repo, runtime = InMemoryMeetingRepo(), FakeRuntimeClient()
+    first = await request_bot(repo, runtime, user_id=USER, platform="google_meet",
+                              native_meeting_id="legacy-notes", redis_url="redis://redis:6379/0",
+                              token_secret=SECRET)
+    data = repo._meetings[first["id"]]["data"]
+    if notes_state is None:
+        data.pop("canonical_notes")
+    else:
+        data["canonical_notes"] = notes_state
+    repo.set_status(first["id"], "completed")
+    await request_bot(repo, runtime, user_id=USER, platform="google_meet",
+                      native_meeting_id="legacy-notes", continue_meeting=True,
+                      redis_url="redis://redis:6379/0", token_secret=SECRET)
+    assert repo._meetings[first["id"]]["data"]["canonical_notes"]["enabled"] is expected
 
 
 async def test_continue_meeting_never_reopens_an_artifact_deletion_tombstone(monkeypatch):

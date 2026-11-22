@@ -89,6 +89,8 @@ class InMemoryMeetingRepo:
     async def create_meeting(self, *, user_id, platform, native_meeting_id, data) -> dict:
         mid = self._next_id
         self._next_id += 1
+        meeting_data = dict(data or {})
+        meeting_data.setdefault("canonical_notes", {"enabled": True, "windows": {}})
         row = {
             "id": mid,
             "user_id": user_id,
@@ -99,7 +101,7 @@ class InMemoryMeetingRepo:
             "bot_container_id": None,
             "start_time": None,
             "end_time": None,
-            "data": dict(data or {}),
+            "data": meeting_data,
             "created_at": "2026-06-20T09:00:00Z",
             "updated_at": "2026-06-20T09:00:00Z",
         }
@@ -163,11 +165,14 @@ class InMemoryMeetingRepo:
             # is a new one. (Post-fix, a stop terminalizes the planned row, so it is not claimable
             # at all — this only ever meets rows written by an older build.)
             planned.pop("stop_requested", None)
+            planned.setdefault("canonical_notes", {"enabled": True, "windows": {}})
             row["data"] = {**planned, **dict(data or {})}
             return dict(row)
         # 3. insert — NO await before this point since the dedup read, so the check+insert is atomic.
         mid = self._next_id
         self._next_id += 1
+        meeting_data = dict(data or {})
+        meeting_data.setdefault("canonical_notes", {"enabled": True, "windows": {}})
         row = {
             "id": mid,
             "user_id": user_id,
@@ -178,7 +183,7 @@ class InMemoryMeetingRepo:
             "bot_container_id": None,
             "start_time": None,
             "end_time": None,
-            "data": dict(data or {}),
+            "data": meeting_data,
             "created_at": "2026-06-20T09:00:00Z",
             "updated_at": "2026-06-20T09:00:00Z",
         }

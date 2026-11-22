@@ -384,7 +384,7 @@ export function CalendarConnectionsPanel() {
 
       <div style={{ ...row, borderStyle: "dashed" }}>
         <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--t1)" }}>Google Calendar</div>
-        <div style={meta}>TINA asks for read-only Calendar access. Choose which calendars to sync below; imported events do not auto-join until you enable that per calendar.</div>
+        <div style={meta}>TINA requests read-only Calendar, Google Meet, Google Contacts and Workspace directory access. It uses Meet attendee account IDs to find available emails for follow-up; transcripts and recordings are not sent to Google.</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button disabled={busy !== null} onClick={() => void connectGoogle()}
             style={{ ...primaryBtn, opacity: busy !== null ? 0.5 : 1 }}>

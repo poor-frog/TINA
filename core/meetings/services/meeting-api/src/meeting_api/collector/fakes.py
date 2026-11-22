@@ -225,7 +225,8 @@ class InMemoryTranscriptStore:
         if action == 'configure':
             processing.configure(data, canon, memory, payload['enabled'])
         if action == 'claim':
-            job = processing.claim(data, canon, memory)
+            job = (processing.claim(data, canon, memory)
+                   if row['status'] in processing.FINISHED_MEETING_STATUSES else None)
             processing.refresh_status(data)
             return dict(job, user_id=user_id, native_meeting_id=row['native_meeting_id'], platform=row['platform']) if job else None
         if action == 'result':
@@ -236,8 +237,8 @@ class InMemoryTranscriptStore:
             return {'valid': processing.admit(data, canon, memory, payload)}
         processing.refresh_status(data)
         return {'enabled': bool(data.get('canonical_notes', {}).get('enabled')),
-                'publication_revision': data.get('canonical_notes', {}).get('revision', 0), 'configured': 'canonical_notes' in data, 'finished': row['status'] in ('completed', 'failed'),
-                'windows': [{k: v for k, v in job.items() if k not in ('generation', 'revoked_generation', 'lease_until', 'inflight_until')}
+                'publication_revision': data.get('canonical_notes', {}).get('revision', 0), 'configured': 'canonical_notes' in data, 'finished': row['status'] in processing.FINISHED_MEETING_STATUSES,
+                'windows': [{k: v for k, v in job.items() if k not in ('generation', 'revoked_generation', 'lease_until', 'inflight_until', 'stable_since')}
                             for job in data.get('canonical_notes', {}).get('windows', {}).values()],
                 'view': next((v for v in data.get('processed', {}).get('views', []) if v['id'] == processing.VIEW_ID), None)}
 
@@ -493,13 +494,19 @@ class InMemoryTranscriptStore:
                 return m_id  # (c) redeemed an independent transcript-share link
         return None
 
-    async def get_meeting_participants(self, user_id, platform, native_meeting_id):
+    async def get_meeting_participants(self, user_id, platform, native_meeting_id, meeting_id=None):
         """Mirror of ``SqlAlchemyTranscriptStore.get_meeting_participants``: the owned row's
         ``data['attendees']`` verbatim, plus DISTINCT non-empty segment speakers ordered by first
         utterance. Reads the DURABLE segment dict only — never the live redis hash — because the
         real adapter reads Postgres rows only; a fake that saw more than the adapter would make a
         test pass that production fails."""
-        mid = self._find(user_id, platform, native_meeting_id)
+        if meeting_id is None:
+            mid = self._find(user_id, platform, native_meeting_id)
+        else:
+            m = self._meetings.get(meeting_id)
+            mid = (meeting_id if m and m.get("user_id") == user_id
+                   and m.get("platform") == platform
+                   and m.get("native_meeting_id") == native_meeting_id else None)
         if mid is None:
             return None
         m = self._meetings[mid]
@@ -514,6 +521,11 @@ class InMemoryTranscriptStore:
         attendees = (m.get("data") or {}).get("attendees")
         return {
             "meeting_id": mid,
+            "platform": platform,
+            "native_meeting_id": native_meeting_id,
+            "start_time": m.get("start_time"),
+            "end_time": m.get("end_time"),
+            "calendar_sources": ((m.get("data") or {}).get("calendar_sources") or []),
             "invited": attendees if isinstance(attendees, list) else [],
             "speakers": sorted(first_at, key=lambda n: (first_at[n], n)),
         }

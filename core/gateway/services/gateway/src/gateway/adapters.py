@@ -83,6 +83,12 @@ class AdminApiAuthorizer:
         self._meeting_api_url = meeting_api_url.rstrip("/")
 
     async def resolve(self, api_key: str) -> Optional[dict]:
+        return await self._validate({"token": api_key})
+
+    async def resolve_extension(self, token: str) -> Optional[dict]:
+        return await self._validate({"token": token, "extension": True})
+
+    async def _validate(self, credential: dict) -> Optional[dict]:
         import httpx
 
         headers = {TRACE_HEADER: get_trace_id() or ""}
@@ -92,7 +98,7 @@ class AdminApiAuthorizer:
         try:
             resp = await self._client.post(
                 f"{self._admin_api_url}/internal/validate",
-                json={"token": api_key},
+                json=credential,
                 headers=headers,
                 timeout=5.0,
             )
@@ -230,6 +236,8 @@ def build_production_app(
         admin_api_url=admin_api_url,  # /user/webhook self-serve proxies to identity (admin-api)
         mcp_url=mcp_url,              # #795: the MCP streamable-HTTP front door under /mcp
         rate_limiter=_rate_limiter_from_env(),  # WS-6: per-user DoS guard (generous defaults; env-tunable)
+        extension_origins=tuple(origin.strip() for origin in os.getenv("TINA_GATEWAY_EXTENSION_ORIGINS", "").split(",")
+                                if origin.strip()),
     )
 
     # --- fastapi-guard: per-IP rate limiting, IP allow/deny + auto-ban (edge_guard.py) ---

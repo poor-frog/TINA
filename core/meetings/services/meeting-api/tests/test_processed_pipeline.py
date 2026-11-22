@@ -75,6 +75,38 @@ async def test_claim_retry_after_publisher_crash_and_off_revokes_lease(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_processed_notes_wait_until_the_meeting_finishes(monkeypatch):
+    monkeypatch.setenv('INTERNAL_API_SECRET', 'private-test')
+    client, store, _, _, _ = await fixture(monkeypatch)
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    async with client:
+        path = '/transcripts/by-id/1/processed-notes'
+        row = store._meetings[1]
+        row['status'] = 'active'
+        first = row['segments']['s/1']
+        row['segments']['later'] = dict(first, segment_id='later', start=first['start'] + 75, end=first['end'] + 75)
+        await client.post(path, json={'enabled': True})
+        for status in ('active', 'stopping'):
+            row['status'] = status
+            assert await publish_request(redis, store, 7, 1) is None
+            assert await store.processed_notes(7, 1, action='claim') is None
+        assert await redis.xlen(REQUESTS) == 0
+        row['status'] = 'completed'
+        job = await publish_request(redis, store, 7, 1)
+        assert [e['segment_id'] for e in job['source']['evidence']] == ['s/1']
+        result = reply(job)
+        result['notes'][0]['text'] = 'Câu đã làm sạch.'
+        await redis.xadd(RESULTS, {'payload': json.dumps(result)})
+        await drain_results(redis, store)
+        state = (await client.get(path)).json()
+        assert state['finished'] is True
+        assert state['view']['doc']['notes'][0]['text'] == 'Câu đã làm sạch.'
+        assert row['segments']['s/1']['text'] != 'Câu đã làm sạch.'
+        tail = await publish_request(redis, store, 7, 1)
+        assert [e['segment_id'] for e in tail['source']['evidence']] == ['later']
+
+
+@pytest.mark.asyncio
 async def test_artifact_queue_purge_is_meeting_scoped():
     from meeting_api.collector.processed_notes import purge_queued
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)

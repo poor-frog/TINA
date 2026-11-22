@@ -1,0 +1,121 @@
+{{- $voice := .Values.livekit | default dict }}
+{{- if $voice.enabled }}
+{{- if not (and .Values.tts.enabled .Values.runtime.enabled (eq .Values.runtime.backend "k8s") .Values.meetingApi.enabled .Values.agentApi.enabled .Values.adminApi.enabled) }}
+{{- fail "livekit.enabled requires TTS, Meeting API, Agent API, Admin API and the Kubernetes runtime" }}
+{{- end }}
+{{- $secret := required "livekit.enabled requires livekit.existingSecret" $voice.existingSecret }}
+{{- $models := required "livekit.enabled requires a populated livekit.modelsClaim" $voice.modelsClaim }}
+{{- $server := include "tina.componentName" (list . "livekit") }}
+{{- range $component := list "livekit" "livekit-agent" }}
+{{- $agent := eq $component "livekit-agent" }}
+{{- $name := include "tina.componentName" (list $ $component) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "tina.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "tina.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $component }}
+  template:
+    metadata:
+      labels:
+        {{- include "tina.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $component }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with $.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $component }}
+          image: {{ ternary $voice.agentImage $voice.serverImage $agent | quote }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          securityContext:
+            {{- toYaml $.Values.global.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ ternary 8080 7880 $agent }}
+          env:
+            {{- if $agent }}
+            - name: LIVEKIT_URL
+              value: "ws://{{ $server }}:7880"
+            - name: LIVEKIT_API_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ $secret | quote }}, key: LIVEKIT_API_KEY}
+            - name: LIVEKIT_API_SECRET
+              valueFrom:
+                secretKeyRef: {name: {{ $secret | quote }}, key: LIVEKIT_API_SECRET}
+            - name: MEETING_API_URL
+              value: "http://{{ include "tina.componentName" (list $ "meeting-api") }}:{{ $.Values.meetingApi.service.port }}"
+            - name: TTS_SERVICE_URL
+              value: "http://{{ include "tina.componentName" (list $ "tts") }}:8000"
+            - name: TTS_API_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ $.Values.tts.existingSecret | quote }}, key: TTS_API_TOKEN}
+            {{- else }}
+            - name: LIVEKIT_KEYS
+              valueFrom:
+                secretKeyRef: {name: {{ $secret | quote }}, key: LIVEKIT_KEYS}
+            - name: LIVEKIT_CONFIG
+              value: |
+                port: 7880
+                rtc:
+                  use_external_ip: false
+                  tcp_port: 7881
+                  udp_port: 7882
+                logging:
+                  level: warn
+            {{- end }}
+          readinessProbe:
+            httpGet: {path: {{ ternary "/ready" "/" $agent }}, port: http}
+            timeoutSeconds: 10
+          resources:
+            {{- ternary $voice.agentResources $voice.serverResources $agent | toYaml | nindent 12 }}
+          {{- if $agent }}
+          volumeMounts:
+            - name: models
+              mountPath: /models/meeting-voice
+              readOnly: true
+          {{- end }}
+      {{- if $agent }}
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ $models | quote }}
+            readOnly: true
+      {{- end }}
+      {{- with $.Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "tina.labels" $ | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "tina.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+  ports:
+    - name: http
+      port: {{ ternary 8080 7880 $agent }}
+      targetPort: http
+{{- end }}
+{{- end }}

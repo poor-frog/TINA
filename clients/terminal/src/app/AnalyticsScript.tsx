@@ -20,7 +20,7 @@ export function Analytics() {
   const firstRun = useRef(true);
 
   useEffect(() => {
-    if (!GA_ID) return;
+    if (!GA_ID || pathname === "/connect-extension") return;
     if (firstRun.current) {            // the load's page_view is sent by gtag config below
       firstRun.current = false;
       return;
@@ -28,7 +28,7 @@ export function Analytics() {
     if (pathname) gaPageview(pathname);
   }, [pathname]);
 
-  if (!GA_ID) return null;
+  if (!GA_ID || pathname === "/connect-extension") return null;
   return (
     <>
       <Script src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`} strategy="afterInteractive" />

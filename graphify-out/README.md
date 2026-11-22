@@ -1,33 +1,32 @@
-# TINA code graph
+# TINA knowledge graph
 
-Generated with [Graphify](https://github.com/Graphify-Labs/graphify) 0.9.111 using
-local AST extraction only. Documents, images, and audio are excluded; no LLM or API
-calls are needed.
+Generated with [Graphify](https://github.com/Graphify-Labs/graphify) 0.9.111 from
+code, documents, and images. Code relationships come from local AST extraction;
+document and image relationships come from semantic extraction. Eleven potentially
+sensitive files were excluded. Two WAV files were not transcribed because
+`faster-whisper` is not installed.
 
 - `graph.json`: queryable symbols and relationships.
-- `graph.html`: interactive view aggregated by community for this large graph;
-  its integrity-pinned vis-network dependency loads from the unpkg CDN.
+- `graph.html`: interactive view aggregated to 1,611 community nodes for this
+  large graph; its integrity-pinned vis-network dependency loads from the unpkg CDN.
 - `GRAPH_REPORT.md`: community summaries, inferred connections, and coverage limits.
-- `.graphify_build.json`: preserves the code-only scope for updates.
-- `.graphify_labels.json` and its `.sig` sidecar: community names and membership signatures.
-- `cost.json`: extraction token accounting, excluding the assistant session itself.
+- `.graphify_build.json`: preserves the full-corpus scope for updates.
+- `.graphify_labels.json` and its `.sig` sidecar: curated community names and membership signatures.
+- `.graphify_labels.pending.json`: deterministic fallback names for unlabeled communities.
+- `cost.json`: token totals are incomplete because semantic extraction agent usage was not exposed.
 
 Caches, manifests, analysis intermediates, and machine-specific paths stay local.
 
 ## Regenerate from the repository root
 
-```sh
-uv tool install 'graphifyy==0.9.111' --with tree-sitter-sql
-graphify extract . --code-only
-graphify cluster-only . --no-label --no-viz
-graphify export html
-```
+Use the Graphify skill with `$graphify .` for a full rebuild and `$graphify . --update`
+for incremental changes. A CLI-only `graphify extract . --code-only` run does not
+recreate the document and image relationships in this graph. Query with
+`graphify query "meeting transcript runtime"`, or use `graphify path` and
+`graphify explain` for focused navigation.
 
-For routine code changes, run `graphify update .` as described in `AGENTS.md`.
-Query with `graphify query "meeting transcript runtime"`, or use `graphify path`
-and `graphify explain` for focused navigation.
-
-The initial scan covered 2,499 supported code/configuration files. Graphify could
-not parse 31 Helm Go templates as plain YAML and reported 111 files with no modeled
-symbols. Potentially sensitive files are excluded by the extractor. Inferred links
-and the 50 reported self-links need source verification before relying on them.
+The scan covered 3,404 supported files (about 2.38 million words): 2,545 code files,
+799 documents, 58 images, and 2 audio files. The graph contains 32,835 nodes,
+72,753 edges, and 1,611 communities. The integrity diagnostic found dangling
+endpoints and self-loops; inferred relationships and those edges should be checked
+against their source before relying on them.

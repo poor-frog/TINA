@@ -1,4 +1,8 @@
 {{- if .Values.agentApi.enabled }}
+{{- $extraEnvNames := list }}
+{{- range .Values.agentApi.extraEnv }}
+{{- $extraEnvNames = append $extraEnvNames .name }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -61,6 +65,25 @@ spec:
             # not resolve in-cluster, so set the release-qualified Service DNS (#677, sibling of #634).
             - name: TINA_MEETING_API_URL
               value: "http://{{ include "tina.componentName" (list . "meeting-api") }}:{{ .Values.meetingApi.service.port }}"
+            {{- if (.Values.agentReach | default dict).enabled }}
+            {{- if not (has "TINA_AGENT_REACH_URL" $extraEnvNames) }}
+            - name: TINA_AGENT_REACH_URL
+              value: "http://{{ include "tina.componentName" (list . "agent-reach") }}:8080"
+            {{- end }}
+            {{- if not (has "TINA_CHAT_TOOLBELT" $extraEnvNames) }}
+            - name: TINA_CHAT_TOOLBELT
+              value: '["reach.web.search","reach.web.read","reach.github.search","reach.github.read"]'
+            {{- end }}
+            {{- end }}
+            {{- if (.Values.livekit | default dict).enabled }}
+            - name: TINA_ADMIN_API_URL
+              value: "http://{{ include "tina.componentName" (list . "admin-api") }}:{{ .Values.adminApi.service.port }}"
+            - name: TINA_INTERNAL_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tina.adminTokenSecretName" . }}
+                  key: INTERNAL_API_SECRET
+            {{- end }}
             - name: TINA_AGENT_PROFILE
               value: "agent"
             - name: TINA_WORKSPACES_DIR

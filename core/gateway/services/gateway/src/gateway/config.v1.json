@@ -47,7 +47,7 @@
    "class": "defaulted",
    "default": "http://mcp:8010",
    "description": "MCP service base URL — the streamable-HTTP transport fronted under /mcp (GET streams the SSE leg, POST forwards buffered)",
-   "targets": ["compose"]
+   "targets": ["compose", "helm"]
   },
   {
    "key": "REDIS_URL",
@@ -60,6 +60,13 @@
    "class": "defaulted",
    "default": "info",
    "description": "log verbosity"
+  },
+  {
+   "key": "TINA_GATEWAY_EXTENSION_ORIGINS",
+   "class": "defaulted",
+   "default": "",
+   "description": "Comma-separated exact chrome-extension origins allowed to make browser API requests; empty disables extension CORS. API key and route scopes still apply.",
+   "targets": ["compose"]
   },
   {
    "key": "HOST",

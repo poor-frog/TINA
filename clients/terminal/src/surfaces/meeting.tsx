@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { useService } from "../platform";
 import { LayoutServiceId, type TabDescriptor } from "../workbench/layout";
 import { registerList, registerTab, registerCommand, type TabProps } from "../contributions";
+import { meetingIdFromPath } from "../app/meetingRoute";
 import { Icon } from "../ui-kit";
 import pageStyles from "./meetingPage.module.css";
 import { MeetingKnowledge } from './MeetingKnowledge';
@@ -956,7 +957,22 @@ function MeetingTab({ id, params }: TabProps) {
   const requestedMeetingId = params.meetingId as string;
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [deletingMeeting, setDeletingMeeting] = useState(false);
-  useEffect(() => { setKnowledgeOpen(false); }, [requestedMeetingId]);
+  const knowledgeRouteMeeting = useRef(requestedMeetingId);
+  const consumedAskTinaLink = useRef(false);
+  useEffect(() => {
+    if (knowledgeRouteMeeting.current !== requestedMeetingId) {
+      knowledgeRouteMeeting.current = requestedMeetingId;
+      setKnowledgeOpen(false);
+    }
+    if (consumedAskTinaLink.current) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("askTina") !== "1" || meetingIdFromPath(url.pathname) !== requestedMeetingId) return;
+    consumedAskTinaLink.current = true;
+    setKnowledgeOpen(true);
+    url.searchParams.delete("askTina");
+    try { window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash); }
+    catch { /* the Ask TINA pane is already open; a sandboxed URL may retain its one-shot flag */ }
+  }, [requestedMeetingId]);
   // ONE resolver, shared with the canvas body (useMeeting.resolveMeeting): the real meetings list is the
   // only source of truth — a mock never shadows a real id, and a real id never falls back to a mock. While
   // the async list is still loading the row is simply not-yet-resolved; we render the canvas bound to the

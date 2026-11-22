@@ -6,6 +6,8 @@
   <link rel="stylesheet" href="assets/tina-tokens.css" />
   <title>TINA Transcript Viewer</title>
   <style>
+    /* Hallmark · component: meeting and bot controls · genre: modern-minimal · theme: TINA Graphite Emerald · states: 8 · contrast: pass · v2.0.0 */
+    /* Critique: separate cards repeat the same meeting identity; unify selection and Bot status inside one compact surface. */
     :root {
       color-scheme: light;
       --background: var(--canvas);
@@ -18,9 +20,9 @@
     }
     :root[data-theme="dark"] { color-scheme: dark; }
     * { box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; min-width: 0; margin: 0; overflow-x: hidden; }
+    html, body { width: 100%; height: 100%; min-width: 0; margin: 0; overflow-x: clip; }
     body { display: flex; flex-direction: column; background: var(--background); color: var(--foreground); font: 13px var(--font-body); }
-    .header, #viewer, #settings, .library, .selected, #feed, .footer, .settings-head, .settings-body, .settings-actions, .field, .inactive-group { min-width: 0; width: 100%; }
+    .header, #viewer, #settings, .meeting-panel, .library, .selected, #feed, .footer, .settings-head, .settings-body, .settings-actions { min-width: 0; width: 100%; }
     button, input, select { font: inherit; color: inherit; }
     button, select { cursor: pointer; }
     [hidden] { display: none !important; }
@@ -35,11 +37,12 @@
     .icon-btn { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); font-size: 17px; }
     .icon-btn:hover { color: var(--foreground); background: var(--subtle-bg); }
     #viewer { min-height: 0; flex: 1; display: flex; flex-direction: column; }
-    .library { flex: 0 0 auto; width: calc(100% - 24px); max-height: min(310px, 48%); margin: 8px 12px 2px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); scrollbar-width: thin; scrollbar-color: var(--control-line) transparent; }
-    .library summary { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; min-height: 50px; padding: 8px 10px; background: var(--surface); cursor: pointer; list-style: none; }
+    .meeting-panel { flex: 0 0 auto; width: calc(100% - 24px); margin: var(--space-2) var(--space-3) var(--space-1); border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); color: var(--foreground); }
+    .library { flex: 0 0 auto; width: 100%; margin: 0; border: 0; border-radius: 0; background: transparent; }
+    .library summary { display: flex; align-items: center; gap: var(--space-2); min-height: 50px; padding: var(--space-2); background: var(--surface); cursor: pointer; list-style: none; }
     .library summary::-webkit-details-marker { display: none; }
-    .meeting-context { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
-    .meeting-overline { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--muted-foreground); font-size: 10px; line-height: 1.4; }
+    .meeting-context { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--space-1); }
+    .meeting-overline { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--muted-foreground); font-size: 10px; line-height: 1.4; }
     .review-label { flex-shrink: 0; font-weight: 650; }
     #meetingMeta { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
     #meetingTitle { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 16px/1.2 var(--font-display, Georgia, serif); color: var(--foreground); }
@@ -49,28 +52,28 @@
     .library[open] .disclosure-icon svg { transform: rotate(180deg); }
     .library summary:hover .review-label, .library summary:hover .disclosure-icon { color: var(--brand); }
     .library summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; border-radius: var(--radius-panel); }
-    .library-body { padding: 10px; border-top: 1px solid var(--border); }
-    .source-card { padding: 12px; border: 1px solid color-mix(in srgb, var(--brand) 30%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--brand) 5%, var(--surface)); }
-    .source-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
-    .source-label { margin: 0; color: var(--muted-foreground); font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
-    .source-badge { padding: 3px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--brand); font-size: 10px; font-weight: 650; white-space: nowrap; }
-    .source-name { display: block; color: var(--foreground); font-size: 13px; font-weight: 700; }
-    .source-destination { display: block; margin-top: 1px; color: var(--muted-foreground); font-size: 11px; }
-    .source-description { margin: 9px 0 11px; color: var(--muted-foreground); font-size: 11px; line-height: 1.5; }
-    .source-refresh { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 34px; border: 1px solid var(--control-line); border-radius: var(--radius); background: var(--surface); color: var(--brand); font-size: 11px; font-weight: 650; }
-    .source-refresh:hover:not(:disabled) { border-color: var(--brand); background: var(--subtle-bg); }
-    .source-refresh:disabled { cursor: default; opacity: .6; }
-    .source-refresh-mark { font-size: 15px; line-height: 1; }
-    .send-bot { display: flex; align-items: center; gap: 10px; width: calc(100% - 24px); margin: 8px 12px 2px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--brand) 32%, var(--border)); border-radius: var(--radius-panel); background: color-mix(in srgb, var(--brand) 5%, var(--surface)); }
+    .library summary:active { background: var(--subtle-bg); }
+    .library-body { padding: var(--space-2); border-top: 1px solid var(--border); }
+    .meeting-select-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 var(--space-1); }
+    .meeting-select-head label { margin: 0; }
+    .meeting-refresh { display: grid; flex: 0 0 32px; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--control-line); border-radius: var(--radius); background: var(--background); color: var(--muted-foreground); font-size: 16px; line-height: 1; }
+    .meeting-refresh:hover:not(:disabled), .meeting-refresh.is-hover { border-color: var(--brand); color: var(--brand); }
+    .meeting-refresh:focus-visible, .meeting-refresh.is-focus { outline: 2px solid var(--focus); outline-offset: 1px; }
+    .meeting-refresh:active:not(:disabled), .meeting-refresh.is-active { background: var(--subtle-bg); }
+    .meeting-refresh:disabled, .meeting-refresh.is-disabled { cursor: not-allowed; opacity: .55; }
+    .send-bot { display: flex; align-items: center; gap: var(--space-2); width: 100%; margin: 0; padding: var(--space-2); border: 0; border-top: 1px solid var(--border); background: transparent; }
     .send-bot-copy { flex: 1; min-width: 0; }
-    .send-bot-overline { margin: 0 0 3px; color: var(--brand); font-size: 9px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
-    .send-bot-title { display: block; overflow: hidden; color: var(--foreground); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-    .send-bot-status { margin: 3px 0 0; color: var(--muted-foreground); font-size: 10px; line-height: 1.4; }
-    .send-bot[data-state="error"] { border-color: var(--rejected); }
+    .send-bot-overline { margin: 0 0 var(--space-1); color: var(--muted-foreground); font-size: 10px; font-weight: 600; }
+    .send-bot-title { display: block; overflow: hidden; color: var(--foreground); font-size: 11px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .send-bot-status { margin: var(--space-1) 0 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.35; }
     .send-bot[data-state="error"] .send-bot-status { color: var(--rejected); }
-    .send-bot-button { flex: none; min-height: 34px; padding: 0 11px; border: 1px solid var(--brand); border-radius: var(--radius); background: var(--brand); color: var(--on-brand, #fff); font-size: 11px; font-weight: 650; }
-    .send-bot-button:not(:disabled):hover { background: var(--brand-hover); }
-    .send-bot-button:disabled { cursor: default; opacity: .58; }
+    .send-bot[data-state="sent"] .send-bot-status { color: var(--accepted); }
+    .send-bot-button { flex: none; min-height: 34px; padding: 0 var(--space-3); border: 1px solid var(--brand); border-radius: var(--radius); background: var(--brand); color: var(--on-brand); font-size: 11px; font-weight: 650; cursor: pointer; }
+    .send-bot-button:hover:not(:disabled), .send-bot-button.is-hover { background: var(--brand-hover); }
+    .send-bot-button:focus-visible, .send-bot-button.is-focus, .meeting-select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    .send-bot-button:active:not(:disabled), .send-bot-button.is-active { transform: translateY(1px); }
+    .send-bot-button:disabled, .send-bot-button.is-disabled { cursor: not-allowed; opacity: .55; }
+    .send-bot-button[aria-busy="true"], .send-bot-button.is-loading { cursor: progress; }
     .library-body label { display: block; margin: 9px 0 5px; color: var(--muted-foreground); font-size: 11px; font-weight: 650; }
     .library-body select { font-size: 12px; }
     select, input[type="text"], input[type="url"], input[type="password"] { width: 100%; max-width: 100%; min-width: 0; height: 38px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--foreground); }
@@ -80,8 +83,7 @@
     .transcript-toolbar { flex: 0 0 auto; padding: 7px 14px 6px; }
     .transcript-heading { flex-wrap: wrap; display: flex; align-items: center; gap: 8px; }
     .transcript-heading h1 { margin: 0; font-size: 13px; line-height: 1.4; font-weight: 650; }
-    .language-badge { margin-left: auto; min-height: 28px; padding: 4px 8px; border: 1px solid transparent; cursor: pointer; border-radius: var(--radius-small); background: var(--subtle-bg); color: var(--brand); font-size: 10px; font-weight: 650; line-height: 1.3; }
-    .language-badge::after { content: ' ⌄'; }
+    .language-badge { width: auto; min-width: 82px; height: 28px; min-height: 28px; margin-left: auto; padding: 4px 8px; border: 1px solid transparent; cursor: pointer; border-radius: var(--radius-small); background: var(--subtle-bg); color: var(--brand); font-size: 10px; font-weight: 650; line-height: 1.3; }
     .language-badge:hover:not(:disabled) { border-color: var(--brand); }
     .language-badge:disabled { opacity: .55; cursor: default; }
     .transcript-meta { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; padding: 5px 14px; border-top: 1px solid var(--border); color: var(--muted-foreground); font-size: 10px; line-height: 1.4; }
@@ -115,21 +117,33 @@
     .btn:disabled, input:disabled, select:disabled { cursor: default; opacity: .55; }
     button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
     #settings { position: absolute; z-index: 2; inset: var(--header-height) 0 0; display: flex; flex-direction: column; background: var(--background); }
-    .settings-head { height: 52px; display: flex; align-items: center; gap: 9px; padding: 0 13px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
-    .settings-head h2 { margin: 0; font: 20px var(--font-display, Georgia, serif); }
-    .settings-body { min-height: 0; flex: 1; padding: 14px; overflow-y: auto; }
-    .group-title { margin: 7px 0 9px; color: var(--muted-foreground); font-size: 9px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
-    .field { margin-bottom: 13px; }
-    .field label { display: block; margin-bottom: 5px; font-size: 11px; font-weight: 650; }
-    .field input, .field select { height: 37px; font-size: 11px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important; }
-    .help, .inactive-note { margin: 4px 0 0; color: var(--muted-foreground); font-size: 9px; line-height: 1.5; }
-    .inactive-group { margin: 8px 0 13px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--subtle-bg); }
-    .inactive-group .field:last-of-type { margin-bottom: 0; }
-    .toggle-line { display: flex !important; align-items: center; gap: 7px; font-weight: 500 !important; }
-    .toggle-line input { width: 14px; height: 14px; margin: 0; }
-    .settings-actions { padding: 9px 14px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); flex: 0 0 auto; }
-    .settings-actions .btn { width: 100%; }
+    .settings-head { min-height: 52px; display: flex; align-items: center; gap: var(--space-2); padding-inline: var(--space-3); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+    .settings-head .icon-btn { width: 36px; height: 36px; }
+    .settings-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
+    .settings-body { min-height: 0; flex: 1; padding: var(--space-4); overflow-y: auto; }
+    .settings-groups { display: grid; gap: var(--space-6); max-width: 480px; margin: 0 auto; }
+    .group-title { margin: 0 0 var(--space-2); font-size: 14px; font-weight: 700; }
+    .settings-card { min-width: 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); }
+    .account-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); }
+    .account-avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--subtle-bg); color: var(--brand); font-size: 14px; font-weight: 700; }
+    .account-email { display: block; overflow-wrap: anywhere; font-size: 13px; font-weight: 650; }
+    .account-label, .settings-hint { color: var(--muted-foreground); font-size: 12px; line-height: 1.45; }
+    .account-label { display: block; }
+    .account-email:not([hidden]) + .account-label { margin-top: 2px; }
+    .settings-hint { margin: 0; }
+    .account-card .btn { justify-self: start; min-height: 44px; padding-inline: var(--space-3); font-size: 12px; white-space: normal; }
+    .account-card[data-signed-in="false"] .btn { grid-column: 2 / -1; }
+    .account-status { grid-column: 1 / -1; color: var(--rejected); overflow-wrap: anywhere; }
+    .account-status:empty { display: none; }
+    .connection-card { display: grid; gap: var(--space-3); }
+    .connection-field { display: grid; gap: var(--space-1); min-width: 0; }
+    .connection-field label { color: var(--muted-foreground); font-size: 12px; font-weight: 650; }
+    .connection-field input { min-width: 0; min-height: 40px; background: var(--background); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .settings-actions { display: flex; justify-content: flex-end; padding: var(--space-2) var(--space-4) calc(var(--space-2) + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); flex: 0 0 auto; }
+    .settings-actions .btn { flex: 0 0 auto; min-width: 76px; min-height: 44px; font-size: 12px; }
+    @media (max-width: 360px) {
+      .account-card .btn { grid-column: 2 / -1; }
+    }
     .translation-controls { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-top: 2px; color: var(--muted-foreground); font-size: 10px; line-height: 1.5; }
     .translation-controls:has(#translationStatus:empty):has(#retryTranslation[hidden]) { display: none; }
     .translation-controls[data-state="paused"], .translation-controls[data-state="error"] { color: var(--draft); }
@@ -142,7 +156,7 @@
     .segment-original[hidden] { display: none; }
     .segment-english { margin-top: 5px; padding: 5px 8px; border-left: 2px solid var(--control-line); border-radius: 0 var(--radius-small) var(--radius-small) 0; background: color-mix(in srgb, var(--subtle-bg) 45%, transparent); color: var(--muted-foreground); font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
     @media (max-height: 560px) {
-      .library { margin-top: 8px; }
+      .meeting-panel { margin-top: 8px; }
       .library summary { min-height: 48px; padding: 7px 10px; }
       #meetingTitle { font-size: 16px; }
       .transcript-toolbar { padding-top: 5px; padding-bottom: 5px; }
@@ -188,45 +202,37 @@
   </header>
 
   <main id="viewer">
-    <details class="library" id="meetingControls">
-      <summary>
-        <span class="meeting-context">
-          <span class="meeting-overline"><span class="review-label">Review a meeting</span><span id="meetingMeta"></span></span>
-          <strong id="meetingTitle">Select a meeting</strong>
-        </span>
-        <span class="disclosure-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg></span>
-      </summary>
-      <div class="library-body">
-        <section class="source-card" aria-labelledby="sourceTitle">
-          <div class="source-card-head"><p class="source-label">Transcript source</p><span class="source-badge">Meeting Bot</span></div>
-          <strong id="sourceTitle" class="source-name">TINA Terminal</strong>
-          <span class="source-destination">Bot meetings and saved transcripts</span>
-          <p class="source-description">Choose a Bot meeting below to review its transcript here.</p>
-          <button id="refreshBtn" class="source-refresh" type="button" aria-label="Refresh meetings"><span class="source-refresh-mark" aria-hidden="true">↻</span>Refresh meetings</button>
-        </section>
-        <label for="meetingSelect">Meeting</label>
-        <select id="meetingSelect" class="meeting-select" aria-label="Choose a meeting" disabled></select>
-        <div id="meetingEmpty" class="meeting-empty">Loading meetings…</div>
-        <label for="transcriptLanguage">Transcript language</label>
-        <select id="transcriptLanguage" aria-label="Transcript language">
-          <option value="vi">Tiếng Việt</option>
-          <option value="en">English</option>
-          <option value="bilingual" selected>Song ngữ</option>
-        </select>
-      </div>
-    </details>
+    <section class="meeting-panel" aria-label="Meeting and Bot controls">
+      <details class="library" id="meetingControls">
+        <summary>
+          <span class="meeting-context">
+            <span class="meeting-overline"><span class="review-label">Review a meeting</span><span id="meetingMeta"></span></span>
+            <strong id="meetingTitle">Select a meeting</strong>
+          </span>
+          <span class="disclosure-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg></span>
+        </summary>
+        <div class="library-body">
+          <div class="meeting-select-head">
+            <label for="meetingSelect">Meeting</label>
+            <button id="refreshBtn" class="meeting-refresh" type="button" aria-label="Refresh meetings" title="Refresh meetings">↻</button>
+          </div>
+          <select id="meetingSelect" class="meeting-select" aria-label="Choose a meeting" disabled></select>
+          <div id="meetingEmpty" class="meeting-empty">Loading meetings…</div>
+        </div>
+      </details>
 
-    <section id="sendBotPanel" class="send-bot" hidden aria-labelledby="sendBotHeading">
-      <div class="send-bot-copy">
-        <div id="sendBotHeading" class="send-bot-overline">Meeting link detected</div>
-        <strong id="sendBotTitle" class="send-bot-title"></strong>
-        <p id="sendBotStatus" class="send-bot-status" role="status" aria-live="polite"></p>
-      </div>
-      <button id="sendBotBtn" class="send-bot-button" type="button">Send Bot</button>
+      <section id="sendBotPanel" class="send-bot" hidden aria-labelledby="sendBotHeading">
+        <div class="send-bot-copy">
+          <div id="sendBotHeading" class="send-bot-overline">Bot</div>
+          <strong id="sendBotTitle" class="send-bot-title" hidden></strong>
+          <p id="sendBotStatus" class="send-bot-status" role="status" aria-live="polite"></p>
+        </div>
+        <button id="sendBotBtn" class="send-bot-button" type="button">Send Bot</button>
+      </section>
     </section>
 
     <section class="transcript-toolbar" aria-label="Transcript display">
-      <div class="transcript-heading"><h1>Transcript</h1><button type="button" id="displayLanguage" class="language-badge" aria-label="Change transcript language" aria-controls="meetingControls" title="Change transcript language">VI + EN</button></div>
+      <div class="transcript-heading"><h1>Transcript</h1><select id="transcriptLanguage" class="language-badge" aria-label="Transcript language" title="Transcript language"><option value="vi">Tiếng Việt</option><option value="en">English</option><option value="bilingual" selected>VI + EN</option></select></div>
       <div id="translationControls" class="translation-controls" aria-label="Translation status">
         <span id="translationStatus" role="status"></span>
         <button type="button" id="retryTranslation" hidden>Thử lại</button>
@@ -254,23 +260,36 @@
       <h2>Settings</h2>
     </header>
     <main class="settings-body">
-      <div class="group-title">Account</div>
-      <div class="field"><label for="apiKey">API key</label><input id="apiKey" type="password" autocomplete="off" placeholder="Paste your TINA API key" /><p class="help">Authorizes transcript reads and translation requests. Sent only to your configured TINA gateway in the X-API-Key header.</p></div>
-
-      <div class="group-title">Connections</div>
-      <div class="field"><label for="deployment">Deployment</label><select id="deployment"><option value="desktop">Desktop (127.0.0.1:9099)</option><option value="cloud">Cloud / Compose (127.0.0.1:8092)</option></select><p class="help">Saved deployment profile for legacy capture settings.</p></div>
-      <div class="field"><label for="botGatewayUrl">Meeting Bot API gateway</label><input id="botGatewayUrl" class="mono" type="url" placeholder="https://tinabot.duckdns.org/extension-api" /></div>
-      <div class="field"><label for="terminalUrl">TINA Terminal URL</label><input id="terminalUrl" class="mono" type="url" placeholder="https://tinabot.duckdns.org" /></div>
-
-      <div class="inactive-group">
-        <div class="group-title">Capture settings · inactive in this extension</div>
-        <div class="field"><label for="ingestUrl">Capture server override</label><input id="ingestUrl" class="mono" type="text" disabled /></div>
-        <div class="field"><label for="language">Language</label><select id="language" disabled><option value="vi">Vietnamese</option><option value="vi-en">Vietnamese + English</option><option value="en">English</option><option value="auto">Auto-detect</option></select></div>
-        <div class="field"><label class="toggle-line"><input type="checkbox" disabled />Auto-start in meetings · Off</label></div>
-        <p class="inactive-note">These saved values are kept for compatibility. This extension does not record audio or connect to the capture server.</p>
+      <div class="settings-groups">
+        <section aria-labelledby="accountHeading">
+          <h3 class="group-title" id="accountHeading">Account</h3>
+          <div class="settings-card account-card" id="accountCard" data-signed-in="false">
+            <span class="account-avatar" id="accountAvatar" aria-hidden="true">T</span>
+            <div>
+              <span class="account-email" id="accountEmail" hidden></span>
+              <span class="account-label" id="accountLabel">Signed out</span>
+            </div>
+            <button class="btn primary" id="accountAction" type="button">Sign in with Google</button>
+            <p class="settings-hint account-status" id="accountStatus" role="status"></p>
+          </div>
+        </section>
+        <section aria-labelledby="connectionsHeading">
+          <h3 class="group-title" id="connectionsHeading">Connections</h3>
+          <div class="settings-card connection-card">
+            <div class="connection-field">
+              <label for="terminalUrl">TINA Terminal</label>
+              <input id="terminalUrl" type="url" spellcheck="false" placeholder="https://tinabot.duckdns.org">
+            </div>
+            <div class="connection-field">
+              <label for="botGatewayUrl">Meeting Bot Gateway</label>
+              <input id="botGatewayUrl" type="url" spellcheck="false" placeholder="https://tinabot.duckdns.org/extension-api">
+            </div>
+            <p class="settings-hint" id="connectionHint" hidden>Sign out to change these addresses.</p>
+          </div>
+        </section>
       </div>
     </main>
-    <div class="settings-actions"><button class="btn primary" id="doneBtn" type="button">Done</button></div>
+    <div class="settings-actions"><button class="btn" id="doneBtn" type="button">Done</button></div>
   </section>
   <script src="sidepanel.js"></script>
 </body>

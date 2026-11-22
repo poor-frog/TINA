@@ -62,11 +62,17 @@ Docker to build the images. It proves the control plane stands up and `/health` 
 | `postgres.enabled` / `redis.enabled` | `true` | Flip to `false` to use managed backing; then set `database.*` / `redisConfig.*` and a pre-existing `postgres.credentialsSecretName`. |
 | `pgbouncer.enabled` | `false` | Transaction pooler for managed Postgres with a fixed slot budget. |
 | `terminal.enabled` | `true` | The web UI. Set `terminal.publicUrl` (NEXTAUTH_URL/TERMINAL_URL) when fronted by ingress; set Google OAuth credentials under `secrets.*` to enable sign-in and Calendar linking. |
+| `mcp.enabled` | `false` | Run the MCP server as an internal Service and connect the Gateway's `/mcp` endpoint. Clients use their scoped TINA API key. |
+| `agentReach.enabled` | `false` | Enable public web and GitHub retrieval through an internal Service. Agent API supplies the URL and the default chat tool grants. Existing Agent API `extraEnv` entries take precedence. |
+| `tts.enabled` | `false` | Internal VieNeu TTS. Set `tts.modelsClaim` to a PVC populated by `deploy/tts/install_models.py` and `tts.existingSecret` to a Secret holding `TTS_API_TOKEN` and `TINA_TTS_PROFILE_KEY`. |
+| `livekit.enabled` | `false` | Single-node meeting voice. Enable TTS and the Kubernetes Runtime, provide `livekit.modelsClaim` with the bot's pinned meeting-voice assets, and set `livekit.existingSecret` with `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` and `LIVEKIT_KEYS` (the corresponding `key: secret` mapping). |
 | `ingress.enabled` | `false` | Fronts the **terminal** by default; set `host`/`className`/`tls`. Add a second path to `gateway` to also expose the raw API. |
 
 ## Known boundaries (v0.12)
 
-- Google Calendar linking requests read-only CalendarList and event scopes after TINA sign-in. The OAuth client keys must be set under `secrets.googleClientId` / `secrets.googleClientSecret`; meeting-api uses the same server-side client to refresh grants. `calendar.auto_join` remains an explicit per-calendar setting.
+- The local LiveKit server and agent use one replica each and communicate on the cluster network. For the voice PVC, prepare the Silero and turn models with the bot image's `tina_meeting_voice.bot /models/meeting-voice --vad-only --setup` module and copy the pinned KWS bundle into that directory as described in the [meeting voice guide](../../docs/tina-meeting-voice.md). Runtime mounts these assets read-only for voice-enabled bots. For multiple nodes, use a PVC readable from every eligible bot node. The TTS and Meeting API share the speech-profile key, derived by the Compose runner with HMAC-SHA256 over `tina-tts-profile:v1` using the internal API secret.
+
+- Google Calendar linking requests read-only Calendar, Meet, People contacts and Workspace directory scopes after TINA sign-in. Enable the Google Meet API and People API in the OAuth client's Google Cloud project, then re-link existing Google accounts to grant the added scopes. The OAuth client keys must be set under `secrets.googleClientId` / `secrets.googleClientSecret`; meeting-api uses the same server-side client to refresh grants. `calendar.auto_join` remains an explicit per-calendar setting.
 
 - **Bot spawn** works on k8s (the bot's config arrives as one env var). **Agent-worker** Pods mount
   the workspace store with **per-mount tenant isolation**: one `subPath` + `readOnly` volumeMount per

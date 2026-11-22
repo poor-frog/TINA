@@ -1,6 +1,7 @@
 """Owner-scoped meeting questions and explicitly reviewed, create-only Wiki pages."""
 import json
 import hmac
+import math
 import os
 import re
 import tempfile
@@ -44,6 +45,51 @@ class Question(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     documents: list[str] = Field(default_factory=list, max_length=8)
     meeting_ids: list[PositiveInt] = Field(default_factory=list, max_length=4)
+    catch_up: StrictBool = False
+    notes_preview: StrictBool = False
+    assistant: StrictBool = False
+    reply_to: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+
+
+def meeting_time_ms(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+        return int(parsed.timestamp() * 1000) if parsed.tzinfo is not None else None
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def catch_up_sources(canonical, meeting, requested_at_ms):
+    origin = meeting_time_ms(meeting.get('start_time'))
+    ended = meeting_time_ms(meeting.get('end_time'))
+    if ended is None and meeting.get('status') in ('completed', 'failed'):
+        raise HTTPException(409, {'code': 'catch_up_clock_unavailable'})
+    end_ms = min(requested_at_ms, ended) if ended is not None else requested_at_ms
+    start_ms = end_ms - 60_000
+    confirmed_through_ms = None
+    boundary_omitted = False
+    eligible = []
+    for source in sources_for(canonical, {}):
+        start, end = source['start_ms'], source['end_ms']
+        if any(type(stamp) not in (int, float) or not math.isfinite(stamp) for stamp in (start, end)):
+            continue
+        # Meeting API preserves legacy relative offsets as well as epoch timestamps.
+        if 0 <= start < end < 10**12 and origin is not None:
+            start, end = origin + start, origin + end
+        elif not 10**12 <= start < end:
+            continue
+        if end <= end_ms:
+            confirmed_through_ms = max(confirmed_through_ms or end, end)
+        if start_ms <= start and end <= end_ms:
+            eligible.append((start, source))
+        elif start < end_ms and end > start_ms:
+            # shortcut: skip segments crossing the window edge until word timing is reliable for all sources.
+            boundary_omitted = True
+    window = {'start_ms': start_ms, 'end_ms': end_ms, 'confirmed_through_ms': confirmed_through_ms,
+              'boundary_omitted': boundary_omitted}
+    return [source for _, source in sorted(eligible, key=lambda item: item[0])], window
 
 
 class FactReview(BaseModel):
@@ -238,14 +284,17 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                           'stale': fact_id not in current or bool(review and review['fingerprint'] != fingerprint)})
         return items
 
-    def load(request, meeting_id, slug=None, *, with_canonical=True, preferred=None, profile_documents=(), include_workspace_wiki=False):
+    def load(request, meeting_id, slug=None, *, with_canonical=True, preferred=None, profile_documents=(),
+             include_workspace_wiki=False, meeting_row=None, transcript_only=False):
         voice = preferred is not None
         preferred = set(preferred or ())
         subject = subject_of(request)
-        row = meeting_get(meeting_api_url, subject, meeting_id, f'/meetings/{meeting_id}')
+        row = meeting_row if meeting_row is not None else meeting_get(meeting_api_url, subject, meeting_id, f'/meetings/{meeting_id}')
         canonical = (meeting_get(meeting_api_url, subject, meeting_id, f'/transcripts/by-id/{meeting_id}/canonical')
                      if with_canonical else {'segments': []})
         base = read_target(request, slug)
+        if transcript_only:
+            return base, canonical, {}
         if voice and include_workspace_wiki:
             documents = {}; size = 0
             for path in document_paths(request,base):
@@ -1132,7 +1181,10 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                                 if answer.get('clarification') or answer.get('follow_up') else []}
 
     @app.get('/api/workspace/meeting-knowledge/{meeting_id}')
-    def knowledge(request: Request, meeting_id: int):
+    def knowledge(request: Request, meeting_id: int, facts_only: bool = False):
+        if facts_only:
+            base, _, _ = load(request, meeting_id, with_canonical=False, transcript_only=True)
+            return {'facts': facts(request, meeting_id, base)}
         base, canonical, documents = load(request, meeting_id)
         folder = reader._workspace_child(base, f'.meeting-knowledge/{meeting_id}')
         answers = []
@@ -1148,7 +1200,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
 
     @app.post('/api/workspace/meeting-knowledge/{meeting_id}/facts/review')
     def review_fact(request: Request, meeting_id: int, body: FactReview):
-        base, canonical, _ = load(request, meeting_id)
+        base, canonical, _ = load(request, meeting_id, transcript_only=True)
         if not body.text.strip():
             raise HTTPException(422, 'Review text is empty')
         try:
@@ -1186,30 +1238,130 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
     def ask(request: Request, meeting_id: int, body: Question):
         if not body.question.strip():
             raise HTTPException(422, 'Enter a question')
-        base, canonical, documents = load(request, meeting_id)
+        if body.assistant and (body.notes_preview or body.catch_up or body.meeting_ids):
+            raise HTTPException(422, 'Meeting assistant uses only this meeting and its selected documents')
+        if body.notes_preview:
+            if body.catch_up or body.reply_to or body.documents or body.meeting_ids:
+                raise HTTPException(422, 'Notes preview uses only this meeting transcript')
+            subject = subject_of(request)
+            meeting_get(meeting_api_url, subject, meeting_id, f'/meetings/{meeting_id}')
+            path = f'/transcripts/by-id/{meeting_id}/canonical'
+            canonical = meeting_get(meeting_api_url, subject, meeting_id, path)
+            sources = sources_for(canonical, {})
+            if not sources:
+                raise HTTPException(409, 'No confirmed transcript yet')
+            # Spread the existing per-request budget across the conversation.
+            count = min(40, len(sources))
+            sampled = [sources[i * (len(sources) - 1) // max(1, count - 1)] for i in range(count)]
+            selected = select_sources([source | {'quote': source['quote'][:1200]} for source in sampled], '')
+            prompt = ('Viết ghi chú cuộc họp bằng tiếng Việt. Tổng hợp tối đa 4 ý ngắn theo thứ tự thảo luận. '
+                      'Ưu tiên kết luận, quyết định, việc cần làm và vấn đề còn mở. '
+                      'Gộp các câu cùng ý, bỏ chào hỏi và lặp lại. Chỉ nêu người phụ trách hoặc hạn chót '
+                      'khi nguồn nói rõ. Nếu không có ý đáng ghi, trả về danh sách rỗng.')
+            raw = complete(request, json.dumps({'question': prompt, 'sources': selected}, ensure_ascii=False))
+            try:
+                answer = validate_answer(raw, selected)
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(502, 'The notes had invalid sources. Please retry.') from exc
+            latest = meeting_get(meeting_api_url, subject, meeting_id, path)
+            if stale(answer, sources_for(latest, {})):
+                raise HTTPException(409, 'Transcript changed. Generate notes again.')
+            claims = answer['claims'][:4]
+            used = {source_id for claim in claims for source_id in claim['source_ids']}
+            return {'notes_preview': True, 'meeting_id': meeting_id, 'claims': claims,
+                    'sources': [source for source in answer['sources'] if source['id'] in used],
+                    'coverage': {'selected': len(selected), 'available': len(sources),
+                                 'bounded': len(selected) < len(sources) or any(len(s['quote']) > 1200 for s in sampled)}}
+        if body.reply_to and (body.catch_up or body.documents or body.meeting_ids):
+            raise HTTPException(422, 'Follow-up uses only this meeting transcript')
+        transcript_only = body.catch_up or (body.reply_to is not None and not body.assistant)
+        meeting_row = None
+        if body.catch_up:
+            if body.documents or body.meeting_ids:
+                raise HTTPException(422, 'Catch Up uses only this meeting transcript')
+            requested_at_ms = int(time.time() * 1000)
+            meeting_row = meeting_get(meeting_api_url, subject_of(request), meeting_id, f'/meetings/{meeting_id}')
+        base, canonical, documents = load(request, meeting_id, meeting_row=meeting_row, transcript_only=transcript_only)
         if any(path not in documents for path in body.documents):
             raise HTTPException(422, 'Choose documents linked to this meeting')
         additional = list(dict.fromkeys(mid for mid in body.meeting_ids if mid != meeting_id))
-        candidates = scoped_sources(request, meeting_id,
-                                    sources_for(canonical, {path: documents[path] for path in body.documents}), additional)
-        selected = select_sources(candidates, body.question)
+        question = body.question.strip()
+        prompt = question
+        window = None
+        if body.catch_up:
+            recent, window = catch_up_sources(canonical, meeting_row, requested_at_ms)
+            candidates = scoped_sources(request, meeting_id, recent, [])
+            question = 'Bắt kịp 60 giây'
+            prompt = ('Tóm tắt các ý chính đã nói trong những đoạn transcript được cung cấp, bằng tiếng Việt. '
+                      'Dùng tối đa 4 ý ngắn, theo thứ tự cuộc họp. Chỉ nêu quyết định, việc cần làm '
+                      'và chi tiết được nguồn xác nhận; không suy đoán phần chưa có transcript.')
+        else:
+            candidates = scoped_sources(request, meeting_id,
+                                        sources_for(canonical, {path: documents[path] for path in body.documents}), additional)
+        parent = None
+        previous_turn = None
+        ranking_context = ''
+        if body.reply_to:
+            try:
+                parent = stored(base, meeting_id, body.reply_to)
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+                raise HTTPException(409, {'code': 'reply_to_unavailable'}) from exc
+            if (not parent['claims'] or not parent['sources'] or parent.get('meeting_ids')
+                    or any((s['kind'] != 'transcript' and not (body.assistant and s['kind'] == 'document'))
+                           or s.get('meeting_id', meeting_id) != meeting_id for s in parent['sources'])):
+                raise HTTPException(409, {'code': 'reply_to_unavailable'})
+            if body.assistant:
+                linked = parent.get('assistant_documents', [])
+                if any(path not in documents for path in linked):
+                    raise HTTPException(409, {'code': 'reply_to_stale'})
+                candidates = scoped_sources(request, meeting_id, sources_for(canonical, {p: documents[p] for p in linked}), [])
+            if stale(parent, candidates):
+                raise HTTPException(409, {'code': 'reply_to_stale'})
+            previous_turn = {'question': parent['question'][:500],
+                             'claims': [claim['text'][:400] for claim in parent['claims'][:4]]}
+            ranking_context = ' '.join([previous_turn['question'], *previous_turn['claims']])
+        if body.assistant:
+            from shared.meeting_knowledge import assistant_sources
+            selected, bounded = assistant_sources(candidates, question, ranking_context)
+        else:
+            selected = select_sources(candidates, '' if body.catch_up else question, ranking_context)
+            bounded = len(selected) < len(candidates) or any(len(s['quote']) > 2400 for s in candidates)
         if not selected:
+            if window is not None:
+                raise HTTPException(409, {'code': 'catch_up_no_transcript', 'window': window})
             raise HTTPException(409, 'No confirmed transcript or selected documents yet')
-        raw = complete(request, json.dumps({'question': body.question, 'sources': selected}, ensure_ascii=False))
+        payload = {'question': prompt, 'sources': selected}
+        if body.assistant:
+            payload.update(mode='meeting_assistant', bounded=bounded)
+        if previous_turn is not None:
+            payload['previous_turn'] = previous_turn
+        raw = complete(request, json.dumps(payload, ensure_ascii=False))
         try:
             answer = validate_answer(raw, selected)
         except (ValueError, TypeError) as exc:
             raise HTTPException(502, 'The answer had invalid sources. Please retry.') from exc
-        answer.update(id=uuid.uuid4().hex, question=body.question.strip(),
+        answer.update(id=uuid.uuid4().hex, question=question,
                       meeting_ids=additional,
                       created_at=datetime.now(timezone.utc).isoformat(),
                       coverage={'selected': len(selected), 'available': len(candidates),
-                                'bounded': len(selected) < len(candidates) or any(len(s['quote']) > 2400 for s in candidates)})
+                                'bounded': bounded})
+        if body.assistant:
+            answer['assistant'] = True
+            answer['assistant_documents'] = parent.get('assistant_documents', []) if parent else body.documents
+        if window is not None:
+            answer['catch_up_window'] = window
+        if parent is not None:
+            answer['reply_to'] = body.reply_to
         # Re-read after inference: a delayed answer may already refer to an edited transcript.
-        latest_base, latest, docs = load(request, meeting_id)
+        latest_base, latest, docs = load(request, meeting_id, transcript_only=transcript_only)
         request.state.knowledge_sources = {}
         if latest_base != base:
             raise HTTPException(409, 'Workspace changed. Ask again in the current workspace.')
+        latest_sources = sources_for(latest, docs)
+        if parent is not None and stale(parent, latest_sources):
+            raise HTTPException(409, {'code': 'reply_to_stale'})
         directory = safe_dir(reader, base, f'.meeting-knowledge/{meeting_id}')
         target = directory / f'{answer["id"]}.json'
         with tempfile.NamedTemporaryFile(dir=directory, mode='w', delete=False) as out:
@@ -1219,7 +1371,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
             os.link(temporary, target)
         finally:
             temporary.unlink(missing_ok=True)
-        return view(request, base, meeting_id, answer, sources_for(latest, docs))
+        return view(request, base, meeting_id, answer, latest_sources)
 
     @app.get('/api/workspace/meeting-knowledge/{meeting_id}/answers/{answer_id}')
     def answer_state(request: Request, meeting_id: int, answer_id: str, slug: str | None = None):

@@ -90,6 +90,7 @@ CASES = [
     ("GET", f"/transcripts/by-id/42/replicas/{MEETING_UID}", "/transcripts/by-id/{meeting_id}/replicas/{meeting_uid}"),
     ("PUT", f"/transcripts/by-id/42/replicas/{MEETING_UID}", "/transcripts/by-id/{meeting_id}/replicas/{meeting_uid}"),
     ("GET", "/transcripts/by-id/42/memory", "/transcripts/by-id/{meeting_id}/memory"),
+    ("GET", "/transcripts/by-id/42/processed-notes", "/transcripts/by-id/{meeting_id}/processed-notes"),
     ("GET", "/transcripts/by-id/42", "/transcripts/by-id/{meeting_id}"),
     ("GET", "/transcripts/by-id/42/speakers", "/transcripts/by-id/{meeting_id}/speakers"),
     ("PATCH", "/transcripts/by-id/42/speakers/person", "/transcripts/by-id/{meeting_id}/speakers/{speaker_id}"),

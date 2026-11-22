@@ -47,12 +47,13 @@ export interface VoiceWorker {
   send(message: object): boolean;
   close(): void;
 }
-export type WorkerFactory = (event: (value: Record<string, unknown>) => void, failed: () => void) => VoiceWorker;
+type VoiceWorkerFailure = 'startup_timeout' | 'spawn_error' | 'child_exit' | 'stdin_error' | 'input_backpressure' | 'output_overflow' | 'invalid_output';
+export type WorkerFactory = (event: (value: Record<string, unknown>) => void, failed: (reason?: VoiceWorkerFailure) => void) => VoiceWorker;
 type TimingStage = 'speech_end' | 'vad_detected' | 'asr_started' | 'asr_completed' | 'asr_received'
   | 'wake_confirmed' | 'question_ready' | 'answer_requested' | 'answer_received'
   | `${'ack' | 'notice' | 'answer'}_${'tts_requested' | 'pcm_received' | 'buffer_ready' | 'playback_started'}` | 'turn_finished';
 
-export function nativeVoiceWorker(event: (value: Record<string, unknown>) => void, failed: () => void,
+export function nativeVoiceWorker(event: (value: Record<string, unknown>) => void, failed: (reason: VoiceWorkerFailure) => void,
   env: NodeJS.ProcessEnv = process.env, mode: 'vad' | 'kws' | 'turn' = 'vad'): VoiceWorker {
   const directory = env.TINA_VOICE_MODEL_DIR || '/models/meeting-voice';
   const child: ChildProcessWithoutNullStreams = spawn(env.TINA_VOICE_PYTHON || '/opt/tina-voice/bin/python',
@@ -61,15 +62,17 @@ export function nativeVoiceWorker(event: (value: Record<string, unknown>) => voi
           mode === 'vad' ? '--vad-only' : '--kws'],
     { stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: env.PATH, PYTHONUNBUFFERED: '1' } });
   let buffer = '', closed = false;
-  const readyTimeout = setTimeout(() => fail(), 20_000); readyTimeout.unref();
-  const fail = () => { if (!closed) { closed = true; clearTimeout(readyTimeout); child.kill('SIGKILL'); failed(); } };
-  child.on('error', fail); child.on('exit', fail);
-  child.stdin.on('error', fail);
+  const readyTimeout = setTimeout(() => fail('startup_timeout'), 20_000); readyTimeout.unref();
+  const fail = (reason: VoiceWorkerFailure) => { if (!closed) { closed = true; clearTimeout(readyTimeout); child.kill('SIGKILL'); failed(reason); } };
+  child.on('error', () => fail('spawn_error'));
+  child.on('exit', () => fail('child_exit'));
+  child.stdin.on('error', () => fail('stdin_error'));
   // Native diagnostics may contain audio-dependent values; only a fixed error reaches logs.
   child.stderr.on('data', () => {});
   child.stdout.on('data', (chunk: Buffer) => {
+    if (closed) return;
     buffer += chunk.toString('utf8');
-    if (buffer.length > 1_000_000) { fail(); return; }
+    if (buffer.length > 1_000_000) { fail('output_overflow'); return; }
     let end: number;
     while ((end = buffer.indexOf('\n')) >= 0) {
       const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
@@ -78,12 +81,14 @@ export function nativeVoiceWorker(event: (value: Record<string, unknown>) => voi
             || mode === 'kws' && value.event === 'kws' && value.status === 'ready'
             || mode === 'turn' && value.event === 'turn-ready') clearTimeout(readyTimeout);
         event(value);
-      } catch { fail(); return; }
+      } catch { fail('invalid_output'); return; }
+      if (closed) return;
     }
   });
   return {
     send(message) {
-      if (closed || child.stdin.writableLength > (mode==='turn'?720_000:128_000)) { fail(); return false; }
+      if (closed) return false;
+      if (child.stdin.writableLength > (mode==='turn'?720_000:128_000)) { fail('input_backpressure'); return false; }
       child.stdin.write(JSON.stringify(message) + '\n');
       return true;
     },
@@ -177,6 +182,9 @@ export class MeetingVoice {
   private kws?: VoiceWorker;
   private kwsSerial = 0;
   private kwsStatus: KwsStatus['status'] = 'off';
+  private kwsRetryAt?: number;
+  private kwsRetryDelay = 2000;
+  private kwsReadySince?: number;
   private vadListening = false;
   private inputs = new Map<number, {participant?: string | null; endMs: number; identifiedMs?: number; nextSample?: number}>();
   private recent = new Map<number, VoiceHypothesis[]>();
@@ -240,15 +248,24 @@ export class MeetingVoice {
   private kwsLog(value: object) {
     try { this.log(JSON.stringify({type: 'kws', mode: 'activation', ...value})); } catch { /* Logging cannot affect a turn. */ }
   }
-  private closeKws(failed = false) {
+  private closeKws(failed = false, reason?: VoiceWorkerFailure) {
+    if (failed && this.kwsStatus === 'failed') return;
     this.kwsSerial++;
     this.kws?.close(); this.kws = undefined;
     this.kwsStatus = failed ? 'failed' : 'off';
     if (failed && !this.closed) {
-      this.kwsLog({status: 'failed'});
+      if (this.kwsReadySince !== undefined && Date.now() - this.kwsReadySince >= 30_000) this.kwsRetryDelay = 2000;
+      this.kwsReadySince = undefined;
+      this.kwsLog({status: 'failed', reason: reason ?? 'worker_error'});
       void this.cancel(false, 'kws_unavailable').then(current => {
-        if (current && !this.closed) { this.setState('ERROR'); this.diagnose('kws_unavailable'); }
+        if (!current || this.closed || this.state !== 'QUIET') return;
+        this.kwsRetryAt = Date.now() + this.kwsRetryDelay;
+        this.kwsRetryDelay = Math.min(this.kwsRetryDelay * 2, 30_000);
+        this.setState('ERROR'); this.diagnose('kws_unavailable');
       });
+    } else {
+      this.kwsRetryAt = undefined;
+      this.kwsReadySince = undefined;
     }
   }
   private separateChannel(caller:{channel:number;participant?:string|null},channel:number) {
@@ -289,9 +306,9 @@ export class MeetingVoice {
     if (event.status === 'ready') {
       if (!Array.isArray(event.models) || event.models.length !== KWS_MODELS.length
           || new Set(event.models).size !== KWS_MODELS.length || event.models.some(v => !KWS_MODELS.includes(v))) {
-        this.closeKws(true); return;
+        this.closeKws(true, 'invalid_output'); return;
       }
-      this.kwsStatus = 'ready'; this.kwsLog({status: 'ready', models: KWS_MODELS});
+      this.kwsStatus = 'ready'; this.kwsReadySince = Date.now(); this.kwsLog({status: 'ready', models: KWS_MODELS});
       this.listen(); this.publishState(this.state); return;
     }
     if (event.status !== 'wake' || this.state !== 'LISTENING' || this.kwsStatus !== 'ready' || this.trigger.pending
@@ -510,6 +527,10 @@ export class MeetingVoice {
         if (this.probeRecovery && this.state === 'ERROR' && !this.worker && !this.externalSpeaking) {
           this.probeRecovery = false; this.setState('OFF');
         }
+        if (this.kwsRetryAt !== undefined && Date.now() >= this.kwsRetryAt && !this.externalSpeaking) {
+          if (!await this.cancel(true, 'kws_unavailable') || this.closed) return;
+          this.kwsLog({status: 'retrying'});
+        }
         if (!this.worker && !this.externalSpeaking && this.state !== 'ERROR') {
           this.vadShadow?.start();
           this.turnShadow?.start();
@@ -529,14 +550,14 @@ export class MeetingVoice {
             try {
               this.kws = this.kwsFactory(event => {
                 if (!this.closed && kwsSerial === this.kwsSerial) this.kwsEvent(event);
-              }, () => { if (kwsSerial === this.kwsSerial) this.closeKws(true); });
-            } catch { this.closeKws(true); }
+              }, reason => { if (kwsSerial === this.kwsSerial) this.closeKws(true, reason); });
+            } catch { this.closeKws(true, 'spawn_error'); }
           }
         }
       }
       this.publishState(this.state, this.requestId);
     } catch {
-      const recoverable = probing && (this.state !== 'ERROR' || this.probeRecovery) && !this.externalSpeaking;
+      const recoverable = probing && (this.state !== 'ERROR' || this.probeRecovery || this.kwsRetryAt !== undefined) && !this.externalSpeaking;
       this.ns.setEnabled(false);
       if (!this.closed && await this.cancel(true)) {
         this.probeRecovery = recoverable && this.state === 'OFF';

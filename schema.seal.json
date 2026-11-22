@@ -10,6 +10,20 @@
       "token": "Column(String(255), unique=True, index=True, nullable=False)",
       "user_id": "Column(Integer, ForeignKey('users.id'), nullable=False, index=True)"
     },
+    "extension_sessions": {
+      "access_digest": "Column(String(64), unique=True, nullable=True)",
+      "access_expires_at": "Column(DateTime, nullable=True)",
+      "challenge": "Column(String(43), nullable=True)",
+      "expires_at": "Column(DateTime, nullable=False, index=True)",
+      "extension_id": "Column(String(32), nullable=False)",
+      "id": "Column(String(64), primary_key=True)",
+      "refresh_digest": "Column(String(64), unique=True, nullable=True)",
+      "user_id": "Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)"
+    },
+    "google_logins": {
+      "subject": "Column(String(255), primary_key=True)",
+      "user_id": "Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), unique=True, nullable=False)"
+    },
     "meeting_sessions": {
       "id": "Column(Integer, primary_key=True, index=True)",
       "meeting_id": "Column(Integer, ForeignKey('meetings.id'), nullable=False, index=True)",

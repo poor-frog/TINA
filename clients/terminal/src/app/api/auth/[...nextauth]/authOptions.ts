@@ -23,7 +23,7 @@ const isMicrosoftEnabled = () =>
   !!(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET);
 
 /** Secure cookies behind HTTPS, mirroring the login route's isSecureRequest(). */
-function isSecureRequest(): boolean {
+export function isSecureRequest(): boolean {
   return (
     (process.env.NEXTAUTH_URL || "").startsWith("https://") ||
     (process.env.TERMINAL_URL || "").startsWith("https://") ||
@@ -73,7 +73,7 @@ export const authOptions: AuthOptions = {
   callbacks: {
     /** The load-bearing step: turn a verified OAuth identity into the terminal's `tina-token` +
      *  `tina-user-info` cookies, reusing the admin-api find-or-create+mint flow. Deny on any failure. */
-    async signIn({ user, account }) {
+    async signIn({ user, account, profile }) {
       const provider = account?.provider;
       if (provider === GOOGLE_CALENDAR_PROVIDER && account) {
         const cookieStore = await cookies();
@@ -116,7 +116,12 @@ export const authOptions: AuthOptions = {
       }
       if ((provider !== "google" && provider !== "microsoft") || !user.email) return false;
 
-      const result = await findOrCreateUserToken(user.email.toLowerCase());
+      const google = profile as { sub?: string; email_verified?: boolean } | undefined;
+      if (provider === "google" && (!google?.sub || google.sub !== account?.providerAccountId || google.email_verified !== true)) return false;
+      const email = user.email.toLowerCase();
+      // Existing non-Gmail web sign-in keeps its legacy path. Extension pairing requires a Gmail binding.
+      const googleSubject = provider === "google" && email.endsWith("@gmail.com") ? google!.sub : undefined;
+      const result = await findOrCreateUserToken(email, googleSubject);
       if (!result.ok) {
         // eslint-disable-next-line no-console
         console.error(`[terminal-auth] ${provider} sign-in failed for ${user.email}: ${result.error}`);
@@ -137,11 +142,22 @@ export const authOptions: AuthOptions = {
       cookieStore.set(USER_INFO_COOKIE, JSON.stringify({ email: result.user.email, name: displayName, image }), opts);
       return true;
     },
+    async jwt({ token, account, profile }) {
+      if (account) {
+        const google = profile as { sub?: string; email?: string; email_verified?: boolean } | undefined;
+        delete token.tinaGoogleSubject;
+        if (account.provider === "google" && google?.email_verified === true && google.sub === account.providerAccountId
+            && google.email?.toLowerCase().endsWith("@gmail.com")) token.tinaGoogleSubject = google.sub;
+      }
+      return token;
+    },
     // Land back on the workbench, HONORING a same-origin callbackUrl so an invite link's ?invite=<token>
     // survives the OAuth round-trip (InviteRedeemer then redeems it post-auth). Off-origin URLs → baseUrl.
     async redirect({ url, baseUrl }) {
-      if (url.startsWith("/")) return `${baseUrl}${url}`;
-      if (url.startsWith(baseUrl)) return url;
+      try {
+        const target = new URL(url, baseUrl);
+        if (target.origin === new URL(baseUrl).origin) return target.href;
+      } catch { /* malformed callback returns to Terminal */ }
       return baseUrl;
     },
   },

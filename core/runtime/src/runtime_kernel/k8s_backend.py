@@ -9,8 +9,10 @@ ResourceQuota admits on — WITHOUT a partial ``kubectl run --overrides`` contai
 merge replaces the generated container wholesale and strips its image, env and command."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import subprocess
 from typing import Optional
 
@@ -21,6 +23,8 @@ from .profiles import Runnable
 
 MANAGED_LABEL = "runtime.managed"
 WORKLOAD_ID_LABEL = "runtime.workload_id"
+DNS_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+LABEL_VALUE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,61}[A-Za-z0-9])?")
 
 # The extended-resource name a GPU request carries. Kubernetes requires extended resources on the
 # LIMITS side; the request is set equal to the limit automatically, and a requests-side entry that
@@ -162,6 +166,7 @@ def build_pod(
     namespace: Optional[str],
     resources: Optional[Resources],
     overlay_env: Optional[dict[str, str]] = None,
+    voice_models_claim: str = "",
 ) -> dict:
     """The COMPLETE Pod object a spawn submits — every field the workload needs, in one manifest.
 
@@ -197,8 +202,12 @@ def build_pod(
         "name": name,
         # Adoption labels (the orphaned-live-bot fix): a recreated runtime re-discovers its
         # still-running Pods by this label pair and re-registers them (see the kernel's adopt()).
-        "labels": {MANAGED_LABEL: "true", WORKLOAD_ID_LABEL: workload_id},
+        "labels": {MANAGED_LABEL: "true"},
     }
+    if LABEL_VALUE.fullmatch(workload_id):
+        metadata["labels"][WORKLOAD_ID_LABEL] = workload_id
+    else:
+        metadata["annotations"] = {WORKLOAD_ID_LABEL: workload_id}
     if namespace:
         metadata["namespace"] = namespace
 
@@ -221,6 +230,16 @@ def build_pod(
         for key, value in overlay_container.items():
             if key != "name":
                 container[key] = value
+    if workload_id.startswith("mtg-") and env.get("TINA_VOICE_URL"):
+        if not voice_models_claim:
+            raise ValueError("Meeting voice model volume is not configured")
+        pod["spec"].setdefault("volumes", []).append({
+            "name": "meeting-voice-models",
+            "persistentVolumeClaim": {"claimName": voice_models_claim, "readOnly": True},
+        })
+        container.setdefault("volumeMounts", []).append({
+            "name": "meeting-voice-models", "mountPath": "/models/meeting-voice", "readOnly": True,
+        })
     return pod
 
 
@@ -232,7 +251,12 @@ class K8sBackend:
         self._ns = namespace
 
     def _pname(self, workload_id: str) -> str:
-        return f"{self._prefix}{workload_id}"            # must be DNS-1123 (lowercase alnum + '-')
+        name = f"{self._prefix}{workload_id}"
+        if DNS_LABEL.fullmatch(name):
+            return name
+        # The container shares the name, and its DNS label is limited to 63 characters.
+        stem = re.sub(r"[^a-z0-9-]+", "-", name.lower()).lstrip("-")[:46].rstrip("-") or "tina"
+        return f"{stem}-{hashlib.sha256(name.encode()).hexdigest()[:16]}"
 
     def _ns_args(self) -> list[str]:
         return ["-n", self._ns] if self._ns else []
@@ -263,13 +287,13 @@ class K8sBackend:
             namespace=self._ns,
             resources=resources,
             overlay_env={**env, **_runtime_scheduling_env()},
+            voice_models_claim=os.getenv("TINA_MEETING_VOICE_MODELS_VOLUME", ""),
         )
         _kubectl("create", "-f", "-", *self._ns_args(), stdin=json.dumps(pod))
         return WorkloadHandle(id=workload_id, impl=name)
 
     def find(self, workload_id: str) -> Optional[WorkloadHandle]:
-        """Re-derive a handle for a workload whose in-process handle was lost (restart): the Pod
-        name is deterministic (``prefix + workload_id``); an existing Pod (any phase) is found."""
+        """Recover a handle from the deterministic Pod name, regardless of Pod phase."""
         name = self._pname(workload_id)
         r = _kubectl("get", "pod", name, "-o", "name", *self._ns_args(), check=False)
         if r.returncode != 0:
@@ -291,7 +315,9 @@ class K8sBackend:
             out = []
             for pod in json.loads(r.stdout).get("items", []):
                 meta = pod.get("metadata", {})
-                wid = (meta.get("labels") or {}).get(WORKLOAD_ID_LABEL)
+                wid = (meta.get("annotations") or {}).get(WORKLOAD_ID_LABEL) or (
+                    meta.get("labels") or {}
+                ).get(WORKLOAD_ID_LABEL)
                 if not wid:
                     continue
                 phase = pod.get("status", {}).get("phase")

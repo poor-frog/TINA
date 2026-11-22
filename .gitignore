@@ -20,7 +20,7 @@ tts.env.keys
 # Allow committed encrypted .env and examples
 !.env.example
 !**/.env.example
-!deploy/compose/.env
+/deploy/compose/.env
 !deploy/transcription/.env
 !deploy/transcription/gipformer/.env
 !deploy/transcription/diarization/.env

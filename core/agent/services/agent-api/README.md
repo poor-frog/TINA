@@ -5,9 +5,16 @@
 The existing authenticated workspace proxy exposes these owner-scoped routes:
 
 - `GET /api/workspace/meeting-knowledge/{meeting_id}`: linked private Markdown documents and the latest 20 answers with freshly checked source status.
+- With `?facts_only=true`, the same GET returns only the meeting's current candidates and saved reviews, without loading linked documents or answer history.
 - `POST .../{meeting_id}/ask`: `{question, documents: []}`. Read canonical segments from Meeting API, optionally include explicitly selected linked files, select at most 40 excerpts / 48,000 text characters and dispatch a private, tool-less worker using the owner's model configuration. Partial coverage is explicit.
+- With `catch_up: true` on the same request, Ask TINA uses only confirmed transcript segments fully inside the preceding 60 seconds. The server uses request time for a live meeting and the stored end time for an ended meeting. The answer includes `catch_up_window` with the requested window, the latest confirmed segment end, and whether a boundary segment was omitted. An empty window returns 409 without starting inference.
+- With `reply_to` on the same request, Ask TINA resolves one saved answer in the caller's workspace for this meeting. It accepts parents grounded in the current meeting's transcript and checks their sources before and after inference. The previous turn provides context for retrieval. New claims use fresh transcript citations, and the answer records `reply_to`.
 - `GET .../{meeting_id}/answers/{answer_id}?slug=`: recheck one answer, including from an authorized mounted workspace when opening its Wiki page.
 - `POST .../{meeting_id}/answers/{answer_id}/apply`: explicit approval creates `wiki/meetings/{meeting_id}/{answer_id}.md`. Retries are idempotent; an edited existing page is never replaced.
+
+The same ask route accepts `notes_preview: true` with a question and no document, cross-meeting, catch-up, or follow-up context. It returns up to four cited notes from the owner's confirmed transcript, reports bounded source coverage, and does not save the preview as an Ask answer.
+
+Meet Ask requests with `assistant: true` use the configured Terminal chat harness in a disposable, no-tools worker. The API reloads the selected meeting's confirmed transcript for each turn, uses linked documents selected by the caller, and reports when input was bounded. The existing meeting-scoped history carries follow-up context. Catch Up and Notes preview keep their existing completion paths.
 
 Private immutable answer/source snapshots live under `.meeting-knowledge/{meeting_id}/` in the private primary workspace. The model can reference only supplied source IDs; quotations, identities and timestamps come from the server. This validates source identity, not whether every generated claim follows logically from its citations. Missing evidence produces no savable claims. Source fingerprints include text revision, speaker revision, timing and audio references; selected document edits also invalidate citations. Apply checks freshness immediately before writing, but Meeting API and the filesystem do not share a distributed transaction. Saved Wiki pages recheck their sources when viewed.
 

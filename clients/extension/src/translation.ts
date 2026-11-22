@@ -1,4 +1,4 @@
-import { apiBase } from './bot-transcript';
+import { botFetch, type BotConnection } from './bot-transcript';
 import type { TranscriptSegment } from './transcript-rendering';
 
 export type TranscriptLanguage = 'vi' | 'en' | 'bilingual';
@@ -16,7 +16,7 @@ export interface TranslationSnapshot {
   can_advance?: boolean; service_error?: string;
 }
 
-export interface PhraseTranslation { text: string | null; ready: boolean; sourceParts?:string[]; status?: TranslationGroup['status'] }
+export interface PhraseTranslation { text: string | null; ready: boolean; sourceParts?:string[]; sourceIds?: string[]; status?: TranslationGroup['status'] }
 
 /** Render backend-owned phrase boundaries; reject a stale group if any visible source changed. */
 export function translationSegments<T extends TranscriptSegment & { speaker_id?: string; revision?: number }>(segments: T[], groups: TranslationGroup[]): (T & { translation?: PhraseTranslation })[] {
@@ -42,13 +42,15 @@ export function translationSegments<T extends TranscriptSegment & { speaker_id?:
     result.push({ ...segment, segment_id: group.group_id, text: group.source_text,
       absolute_start_time: group.start_ms > 100_000_000_000 ? new Date(group.start_ms).toISOString() : segment.absolute_start_time,
       absolute_end_time: group.end_ms > 100_000_000_000 ? new Date(group.end_ms).toISOString() : segment.absolute_end_time,
-      translation: { text: group.translated_text, ready: group.ready, status: group.status,sourceParts:group.members.map(m=>m.source_text) } });
+      translation: { text: group.translated_text, ready: group.ready, status: group.status,
+        sourceParts: group.members.map(member => member.source_text),
+        sourceIds: group.members.filter(member => current.has(member.segment_id)).map(member => member.segment_id) } });
   }
   return result;
 }
 
 /** Same authenticated backend cache as Terminal; provider keys never reach the extension. */
-export function watchTranslation(config: { botGatewayUrl: string; apiKey: string }, meetingId: number,
+export function watchTranslation(config: BotConnection, meetingId: number,
   update: (snapshot: TranslationSnapshot) => void, error: () => void, retry = false,
   priority: () => string[] = () => []): () => void {
   const abort = new AbortController();
@@ -56,10 +58,9 @@ export function watchTranslation(config: { botGatewayUrl: string; apiKey: string
   let advancing = false;
   let force = retry;
   const read = async (method = 'GET', retry = false) => {
-    if (!config.apiKey.trim()) throw new Error('TINA API key required');
-    const response = await fetch(`${apiBase(config.botGatewayUrl)}/agent/meeting-translations/${meetingId}`, {
-      method, credentials: 'omit', redirect: 'error', cache: 'no-store',
-      headers: { 'X-API-Key': config.apiKey, ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}) },
+    const response = await botFetch(config, `/agent/meeting-translations/${meetingId}`, {
+      method,
+      headers: method === 'POST' ? { 'Content-Type': 'application/json' } : {},
       ...(method === 'POST' ? { body: JSON.stringify({ retry, segment_ids: priority().slice(0, 128) }) } : {}),
       signal: AbortSignal.any([abort.signal, AbortSignal.timeout(method === 'POST' ? 90000 : 10000)]),
     });

@@ -16,6 +16,7 @@ import transcriptStyles from "./MeetingTranscript.module.css";
 import { MeetingMemory } from "../surfaces/MeetingMemory";
 import { SpeakerRegistry } from "../surfaces/SpeakerRegistry";
 import { TranscriptReview } from "../surfaces/TranscriptReview";
+import { MeetingVoice } from "../surfaces/MeetingVoice";
 import { MeetingAudioPlayer, type MeetingAudioFragment, type MeetingAudioPlayerHandle, type MeetingAudioPosition } from "./MeetingAudioPlayer";
 import { TranslationControls, useMeetingTranslation, type TranscriptLanguage } from "./MeetingTranslation";
 import { projectTranslationGroups, type TranslationGroup } from "./translationGroups";
@@ -366,7 +367,8 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
       : durableTerminal && diagnostics?.processedNotesStatus
         ? {
             message: diagnostics.processedNotesStatus === "pending" ? "Updating AI notes…" : "AI updates enabled.",
-            ...(diagnostics.processedNotesStatus !== "pending" ? { label: "Disable AI updates", onClick: () => void retryProcessing(false) } : {}),
+            label: "Disable AI updates",
+            onClick: () => void retryProcessing(false),
           }
         : undefined;
 
@@ -434,6 +436,9 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
           </div>
 
         </header>
+        {dialogMeetingId && ["google_meet", "Google Meet"].includes(meetingRecord?.platform || "") && <div className={transcriptStyles.voiceRepliesDock}>
+          <MeetingVoice meetingId={dialogMeetingId} nativeId={meetingRecord?.native_id} repliesOnly />
+        </div>}
         <main className={transcriptStyles.body} ref={transcriptScrollRef} onScroll={(event) => {
           const viewport = event.currentTarget;
           const following = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop < 48;

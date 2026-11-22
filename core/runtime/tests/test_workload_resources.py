@@ -18,6 +18,7 @@ separate request/limit semantics and this change does not invent them.
 from __future__ import annotations
 
 import json
+from subprocess import CompletedProcess
 
 import pytest
 
@@ -192,6 +193,27 @@ def test_pod_without_resources_omits_the_field_entirely():
     assert "command" not in pod["spec"]["containers"][0]   # image ENTRYPOINT is authoritative
 
 
+def test_voice_bot_uses_the_operator_claim_for_a_read_only_model_mount():
+    spec = {
+        "name": "tina-mtg-6",
+        "workload_id": "mtg-6",
+        "runnable": Runnable(image="img"),
+        "env": {"TINA_VOICE_URL": "http://meeting-api/voice"},
+        "namespace": "tina",
+        "resources": None,
+    }
+    with pytest.raises(ValueError, match="Meeting voice model volume is not configured"):
+        build_pod(**spec)
+    pod = build_pod(**spec, voice_models_claim="voice-assets")
+    assert pod["spec"]["volumes"] == [{
+        "name": "meeting-voice-models",
+        "persistentVolumeClaim": {"claimName": "voice-assets", "readOnly": True},
+    }]
+    assert pod["spec"]["containers"][0]["volumeMounts"] == [{
+        "name": "meeting-voice-models", "mountPath": "/models/meeting-voice", "readOnly": True,
+    }]
+
+
 def test_runtime_scheduling_env_shapes_the_pod_without_becoming_container_config(monkeypatch):
     """The runtime's OWN scheduling knobs must reach the Pod spec and STOP there — a workload's
     container env is the producer's contract, not a dumping ground for the backend's config."""
@@ -240,6 +262,33 @@ def test_k8s_start_submits_the_pod_via_create_stdin(monkeypatch):
     pod = json.loads(calls[0]["stdin"])
     assert pod["spec"]["containers"][0]["resources"]["requests"] == {"cpu": "2000m", "memory": "4096Mi"}
     assert pod["spec"]["containers"][0]["resources"]["limits"] == {"cpu": "2000m", "memory": "4096Mi"}
+
+
+def test_long_workload_id_can_spawn_and_be_rediscovered(monkeypatch):
+    pods = {}
+
+    def kubectl(*args, check=True, stdin=None):
+        if args[0] == "create":
+            pod = json.loads(stdin)
+            pod["status"] = {"phase": "Running"}
+            pods[pod["metadata"]["name"]] = pod
+            return CompletedProcess(args, 0)
+        if args[:2] == ("get", "pods"):
+            return CompletedProcess(args, 0, stdout=json.dumps({"items": list(pods.values())}))
+        return CompletedProcess(args, int(args[2] not in pods))
+
+    monkeypatch.setattr(k8s_backend, "_kubectl", kubectl)
+    backend = K8sBackend()
+    stem = "agent-7-chat-dictation-translate-" + "a" * 31
+    for workload_id in (stem + "b", stem + "c"):
+        backend.start(workload_id, Runnable(image="img"), env={})
+        assert backend.find(workload_id)
+    assert len(pods) == 2
+    for name, pod in pods.items():
+        assert len(name) <= 63
+        assert pod["spec"]["containers"][0]["name"] == name
+        assert pod["metadata"]["labels"] == {"runtime.managed": "true"}
+    assert {item["workload_id"] for item in backend.list_workload_containers()} == {stem + "b", stem + "c"}
 
 
 # ── C3 · the two profiles are sized independently from the runtime's env ─────────────────────

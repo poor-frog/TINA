@@ -631,7 +631,8 @@ class SqlAlchemyTranscriptStore:
             if action == 'configure':
                 processing.configure(data, canon, memory, payload['enabled'])
             if action == 'claim':
-                result = processing.claim(data, canon, memory)
+                result = (processing.claim(data, canon, memory)
+                          if meeting.status in processing.FINISHED_MEETING_STATUSES else None)
                 if result:
                     result.update(user_id=user_id, native_meeting_id=meeting.platform_specific_id, platform=meeting.platform)
             elif action == 'result':
@@ -640,8 +641,8 @@ class SqlAlchemyTranscriptStore:
                 result = {'valid': processing.admit(data, canon, memory, payload)}
             else:
                 result = {'enabled': bool(data.get('canonical_notes', {}).get('enabled')),
-                          'publication_revision': data.get('canonical_notes', {}).get('revision', 0), 'configured': 'canonical_notes' in data, 'finished': meeting.status in ('completed', 'failed'),
-                          'windows': [{k: v for k, v in job.items() if k not in ('generation', 'revoked_generation', 'lease_until', 'inflight_until')}
+                          'publication_revision': data.get('canonical_notes', {}).get('revision', 0), 'configured': 'canonical_notes' in data, 'finished': meeting.status in processing.FINISHED_MEETING_STATUSES,
+                          'windows': [{k: v for k, v in job.items() if k not in ('generation', 'revoked_generation', 'lease_until', 'inflight_until', 'stable_since')}
                                       for job in data.get('canonical_notes', {}).get('windows', {}).values()],
                           'view': copy.deepcopy(_find_processed_view(data, processing.VIEW_ID))}
             processing.refresh_status(data)
@@ -1117,10 +1118,11 @@ class SqlAlchemyTranscriptStore:
                     return mtg.id  # (c) redeemed an INDEPENDENT transcript-share link for this meeting
             return None
 
-    async def get_meeting_participants(self, user_id, platform, native_meeting_id) -> Optional[dict]:
+    async def get_meeting_participants(self, user_id, platform, native_meeting_id,
+                                       meeting_id=None) -> Optional[dict]:
         """OWNER-scoped (``ports.TranscriptStore.get_meeting_participants``). ONE session, two reads:
-        the newest owned row's ``data['attendees']`` (the calendar invitation's ATTENDEE lines), and
-        DISTINCT ``transcriptions.speaker`` for that row ordered by FIRST utterance.
+        the selected owned row's invitation attendees and DISTINCT transcript speakers. ``meeting_id``
+        pins a reused native link to the exact completed run.
 
         The speaker read is a grouped aggregate, NOT a segment fetch: a long meeting has thousands of
         rows and this endpoint wants at most a few dozen names, so ``GROUP BY speaker`` keeps the
@@ -1131,12 +1133,15 @@ class SqlAlchemyTranscriptStore:
         from .models import Meeting, Transcription
 
         async with self._session_factory() as db:
-            meeting = (await db.execute(
-                select(Meeting).where(
+            statement = select(Meeting).where(
                     Meeting.user_id == user_id,
                     Meeting.platform == platform,
                     Meeting.platform_specific_id == native_meeting_id,
-                ).order_by(Meeting.created_at.desc()).limit(1)
+                )
+            if meeting_id is not None:
+                statement = statement.where(Meeting.id == meeting_id)
+            meeting = (await db.execute(
+                statement.order_by(Meeting.created_at.desc()).limit(1)
             )).scalars().first()
             if meeting is None:
                 return None  # → 404. NOT an empty roster: the caller owns no such meeting.
@@ -1153,6 +1158,11 @@ class SqlAlchemyTranscriptStore:
             attendees = data.get("attendees")
             return {
                 "meeting_id": meeting.id,
+                "platform": meeting.platform,
+                "native_meeting_id": meeting.platform_specific_id,
+                "start_time": meeting.start_time,
+                "end_time": meeting.end_time,
+                "calendar_sources": data.get("calendar_sources") if isinstance(data.get("calendar_sources"), list) else [],
                 "invited": attendees if isinstance(attendees, list) else [],
                 "speakers": [r[0] for r in rows if isinstance(r[0], str) and r[0].strip()],
             }

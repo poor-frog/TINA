@@ -52,7 +52,7 @@ const stateLabel: Record<string, string> = { OFF: 'Đang tắt', LISTENING: 'Đa
   CAPTURING: 'Đang nghe câu hỏi', THINKING: 'Đang tìm câu trả lời', SPEAKING: 'Đang trả lời',
   QUIET: 'Chờ khoảng yên để nghe tiếp', ERROR: 'Đã dừng do lỗi — kiểm tra bot rồi lưu lại cấu hình' };
 
-export function MeetingVoice({ meetingId, nativeId }: { meetingId: string; nativeId?: string }) {
+export function MeetingVoice({ meetingId, nativeId, repliesOnly = false }: { meetingId: string; nativeId?: string; repliesOnly?: boolean }) {
   const [policy, setPolicy] = useState<Policy>(empty);
   const [runtime, setRuntime] = useState<Runtime>({ state: 'OFF' });
   const [sourceReply, setSourceReply] = useState<string | null>(null);
@@ -150,7 +150,7 @@ export function MeetingVoice({ meetingId, nativeId }: { meetingId: string; nativ
     : runtime.session_active === false ? 'Chưa có bot đang hoạt động'
       : runtime.heartbeat_fresh === false ? 'Chưa nhận trạng thái bot'
         : runtime.state === 'OFF' ? (detail?.code === 'starting' ? 'Đang khởi động voice' : 'Chưa sẵn sàng') : stateLabel[runtime.state] || runtime.state;
-  return <><details onToggle={event => setOpen(event.currentTarget.open)} style={{ margin: '0 24px 10px', padding: '9px 12px', border: '1px solid var(--line2)', borderRadius: 8 }}>
+  return <>{!repliesOnly && <details onToggle={event => setOpen(event.currentTarget.open)} style={{ margin: '0 24px 10px', padding: '9px 12px', border: '1px solid var(--line2)', borderRadius: 8 }}>
     <summary style={{ cursor: 'pointer', fontSize: 13 }}>Voice assistant · {summary}</summary>
     <div style={{ display: 'grid', gridTemplateColumns:'minmax(0, 1fr)', minWidth:0, gap: 10, paddingTop: 12, maxWidth: 600, fontSize: 13 }}>
       <p style={{ margin: 0, color: 'var(--t3)', lineHeight: 1.5 }}>Tên gọi có sẵn: TINA, TINA ơi, tin ơi, ti na ơi, tiên na ơi, tinh anh ơi, tin anh ơi — ở đầu câu, không phân biệt hoa/thường. Meeting Google Meet mới mặc định bật Voice assistant và lọc tạp âm, dùng transcript của chính meeting; bạn có thể tắt hoặc đổi nguồn bên dưới.</p>
@@ -214,8 +214,9 @@ export function MeetingVoice({ meetingId, nativeId }: { meetingId: string; nativ
       </div>
       {error && <p role="alert" style={{ margin: 0, color: 'var(--warn)' }}>{error}</p>}
     </div>
-  </details>
-    {replies.length > 0 && <section aria-label="TINA trả lời" style={{ margin: '0 24px 16px', display: 'grid', gap: 8, maxHeight: '30vh', overflowY: 'auto', flexShrink: 0 }}>
+  </details>}
+    {repliesOnly && error && <p role="alert" style={{ margin: '0 0 8px', color: 'var(--warn)', fontSize: 12 }}>Không tải được câu trả lời của TINA.</p>}
+    {replies.length > 0 && <section aria-label="TINA trả lời" style={{ margin: repliesOnly ? 0 : '0 24px 16px', display: 'grid', gap: 8, maxHeight: repliesOnly ? undefined : '30vh', overflowY: repliesOnly ? 'visible' : 'auto', flexShrink: 0 }}>
       {[...replies].reverse().map(reply => <article key={reply.request_id} style={{ padding: 12, border: '1px solid var(--line2)', borderRadius: 8, background: 'var(--panel2)' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 12 }}>
           <strong>TINA trả lời</strong><span role="status" style={{ color: 'var(--t2)' }}>{replyLabel[reply.state] || 'Chưa xác nhận'}</span>

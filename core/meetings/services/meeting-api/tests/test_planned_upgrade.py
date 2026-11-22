@@ -60,6 +60,15 @@ async def test_claim_preserves_planned_keys_and_merges_spawn_keys():
     assert data["calendar_uid"] == "uid-1"
     # spawn keys merged over
     assert data["constructed_meeting_url"] == f"https://meet.google.com/{NID}"
+    assert data["canonical_notes"]["enabled"] is True
+
+
+async def test_claim_preserves_explicitly_disabled_notes():
+    repo, runtime = InMemoryMeetingRepo(), FakeRuntimeClient()
+    mid = _seed_planned(repo)
+    repo._meetings[mid]["data"]["canonical_notes"] = {"enabled": False, "windows": {}}
+    await request_bot(repo, runtime, **_KW)
+    assert repo._meetings[mid]["data"]["canonical_notes"]["enabled"] is False
 
 
 async def test_claim_works_from_idle_too():

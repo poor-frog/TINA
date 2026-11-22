@@ -1,0 +1,84 @@
+{{- $mcp := .Values.mcp | default dict }}
+{{- if $mcp.enabled }}
+{{- if not (and .Values.gateway.enabled .Values.adminApi.enabled) }}
+{{- fail "mcp.enabled requires gateway.enabled and adminApi.enabled" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tina.componentName" (list . "mcp") }}
+  labels:
+    {{- include "tina.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # MCP sessions are held in the server process, so old and new Pods must not share a Service.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "tina.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mcp
+  template:
+    metadata:
+      labels:
+        {{- include "tina.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mcp
+      annotations:
+        {{- toYaml .Values.global.podAnnotations | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: mcp
+          securityContext:
+            {{- toYaml .Values.global.securityContext | nindent 12 }}
+          image: "{{ $mcp.image.repository }}:{{ .Values.global.imageTag | default $mcp.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8010
+          env:
+            - name: GATEWAY_URL
+              value: "http://{{ include "tina.componentName" (list . "gateway") }}:{{ .Values.gateway.service.port }}"
+            - name: ADMIN_API_URL
+              value: "http://{{ include "tina.componentName" (list . "admin-api") }}:{{ .Values.adminApi.service.port }}"
+            {{- if .Values.meetingApi.enabled }}
+            - name: MEETING_API_URL
+              value: "http://{{ include "tina.componentName" (list . "meeting-api") }}:{{ .Values.meetingApi.service.port }}"
+            {{- end }}
+            {{- if .Values.flows.enabled }}
+            - name: FLOWS_API_URL
+              value: "http://{{ include "tina.componentName" (list . "flows-api") }}:18200"
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          resources:
+            {{- toYaml $mcp.resources | nindent 12 }}
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (include "tina.topologySpreadConstraints" (list . $mcp "mcp")) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+{{- end }}

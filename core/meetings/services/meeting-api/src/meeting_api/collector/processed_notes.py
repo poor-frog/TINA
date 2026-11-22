@@ -14,6 +14,7 @@ REQUESTS = 'canonical_notes_requests'
 RESULTS = 'canonical_notes_results'
 LEASE_SECONDS = 180
 MAX_ATTEMPTS = 3
+FINISHED_MEETING_STATUSES = ('completed', 'failed')
 
 
 def notify(data, meeting_id, note_ids=None, card_ids=None):
@@ -325,7 +326,7 @@ async def publish_request(redis, store, user_id, meeting_id):
     # Migrate existing opt-in flags once. An explicit OFF always creates durable configuration.
     if state and not state.get('configured') and await redis.get(f'proc:meeting:{meeting_id}:on'):
         state = await store.processed_notes(user_id, meeting_id, action='configure', payload={'enabled': True})
-    if not state or not state.get('enabled'):
+    if not state or not state.get('enabled') or not state.get('finished'):
         return None
     secret = os.environ.get('INTERNAL_API_SECRET', '')
     if not secret:

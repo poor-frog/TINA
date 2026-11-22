@@ -132,6 +132,32 @@ async function outcomeOf(run: Promise<unknown>, watchdogMs = 10_000): Promise<st
 (async () => {
   console.log('\n=== Google Meet rejection detector — #471 + #444 fixes ===');
 
+  const joinCta = 'button:enabled:has-text("Ask to join")';
+  const originalNow = Date.now;
+  try {
+    let now = originalNow();
+    Date.now = () => now;
+    const stuck = mockPage([joinCta]);
+    const start = now;
+    stuck.waitForTimeout = async (ms: number) => { now += ms; };
+    const reason = await waitForGoogleMeetingAdmission(stuck, 900_000, {} as any)
+      .catch((error: unknown) => error);
+    await check('an enabled Ask to join button after a click fails within ten seconds',
+      reason instanceof AdmissionError && reason.outcome === 'join_failure'
+        && reason.message.includes('no admission request was confirmed') && now - start === 10_000, true);
+
+    const visible = [joinCta];
+    const delayed = mockPage(visible);
+    delayed.waitForTimeout = async (ms: number) => {
+      now += ms;
+      visible.splice(0, visible.length, '[data-self-name]');
+    };
+    await check('admission confirmed after a short prejoin delay succeeds',
+      await waitForGoogleMeetingAdmission(delayed, 900_000, {} as any), true);
+  } finally {
+    Date.now = originalNow;
+  }
+
   const redirected = mockPage(['text=Asking to be let in']);
   redirected.url = () => 'https://workspace.google.com/products/meet/?hl=en';
   await check(

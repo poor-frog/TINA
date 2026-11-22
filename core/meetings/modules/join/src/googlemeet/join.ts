@@ -398,7 +398,7 @@ export async function joinGoogleMeeting(
 
   // Click a resolved element handle via humanized motion, falling back to a
   // synthetic handle click if humanized interaction is off or errors.
-  const clickHandle = async (handle: ElementHandle<Element>, label: string): Promise<void> => {
+  const clickHandle = async (handle: ElementHandle<Element>, label: string, timeout?: number): Promise<void> => {
     if (humanizer) {
       try {
         await humanizer.navigateAndClick(page, handle);
@@ -407,7 +407,7 @@ export async function joinGoogleMeeting(
         log(`Humanized click failed for '${label}' (${e}); falling back to synthetic click.`);
       }
     }
-    await handle.click();
+    await handle.click({ timeout });
   };
 
   // Fill a text field via humanized click+paste, falling back to page.fill.
@@ -443,14 +443,14 @@ export async function joinGoogleMeeting(
     // Mute mic and camera if visible
     try {
       const micHandle = await page.waitForSelector(googleMicrophoneButtonSelectors[0], { timeout: 3000 });
-      if (micHandle) { await clickHandle(micHandle, "microphone"); log("Microphone muted."); }
+      if (micHandle) { await clickHandle(micHandle, "microphone", 1500); log("Microphone muted."); }
     } catch (e) {
       log("Microphone already muted or not found.");
     }
 
     try {
       const cameraHandle = await page.waitForSelector(googleCameraButtonSelectors[0], { timeout: 3000 });
-      if (cameraHandle) { await clickHandle(cameraHandle, "camera"); log("Camera turned off."); }
+      if (cameraHandle) { await clickHandle(cameraHandle, "camera", 1500); log("Camera turned off."); }
     } catch (e) {
       log("Camera already off or not found.");
     }
@@ -505,14 +505,14 @@ export async function joinGoogleMeeting(
     // Mute mic and camera if available
     try {
       const micHandle = await page.waitForSelector(googleMicrophoneButtonSelectors[0], { timeout: 1000 });
-      if (micHandle) await clickHandle(micHandle, "microphone");
+      if (micHandle) await clickHandle(micHandle, "microphone", 1500);
     } catch (e) {
       log("Microphone already muted or not found.");
     }
 
     try {
       const cameraHandle = await page.waitForSelector(googleCameraButtonSelectors[0], { timeout: 1000 });
-      if (cameraHandle) await clickHandle(cameraHandle, "camera");
+      if (cameraHandle) await clickHandle(cameraHandle, "camera", 1500);
     } catch (e) {
       log("Camera already off or not found.");
     }
@@ -524,7 +524,7 @@ export async function joinGoogleMeeting(
       "join button"
     );
     await clickHandle(joinHandle!, "ask_to_join");
-    log(`${botName} joined the Google Meet Meeting.`);
+    log("Bot clicked Ask to join. Waiting for Google Meet to confirm the request.");
 
     await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-0-after-ask-to-join.png', fullPage: true });
     log("📸 Screenshot taken: After clicking 'Ask to join'");

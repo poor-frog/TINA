@@ -47,6 +47,10 @@ flowchart LR
   agent_worker ==>|"transcript -> external-saas"| completion_provider
   completion_provider["configured completion provider"]
   agent_worker ==>|"transcript -> external-saas"| completion_provider
+  google_meet_api["Google Meet REST API"]
+  meeting_api ==>|"participant-identifiers -> owner-authorized Google Workspace APIs"| google_meet_api
+  google_people_api["Google People API"]
+  meeting_api ==>|"participant-identifiers -> owner-authorized Google Workspace APIs"| google_people_api
   transcription["transcription"]
   discord_connector ==>|"audio -> tenant-hosted"| transcription
   mail_relay["configured SMTP relay"]

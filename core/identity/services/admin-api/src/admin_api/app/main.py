@@ -33,11 +33,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..schema.models import APIToken, PlatformSetting, User
+from ..schema.models import APIToken, ExtensionSession, PlatformSetting, User
 from ..token_scope import VALID_SCOPES, generate_prefixed_token
 from .db import get_db
 from . import events as events_mod
 from . import person_settings as person_settings_mod
+from . import extension_sessions
 
 ADMIN_KEY_HEADER = APIKeyHeader(name="X-Admin-API-Key", auto_error=False)
 USER_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -1308,24 +1309,34 @@ def create_app() -> FastAPI:
                 raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Invalid internal secret")
 
         token = payload.get("token", "")
-        if not token:
+        if not isinstance(token, str) or not token:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Missing token")
 
-        row = (await db.execute(
-            select(APIToken, User).join(User, APIToken.user_id == User.id)
-            .where(APIToken.token == token)
-        )).first()
-        if not row:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-        api_token, user = row
-
-        if api_token.expires_at is not None and api_token.expires_at < datetime.utcnow():
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Token expired")
-
-        api_token.last_used_at = datetime.utcnow()
-        await db.commit()
-
-        scopes = list(api_token.scopes) if api_token.scopes else ["legacy"]
+        extension = payload.get("extension") is True
+        if extension:
+            _check_internal_no_dev_bypass(request)
+            now = datetime.utcnow()
+            user = (await db.execute(select(User).join(ExtensionSession).where(
+                ExtensionSession.access_digest == extension_sessions.digest(token),
+                ExtensionSession.access_expires_at > now,
+                ExtensionSession.expires_at > now,
+            ))).scalar_one_or_none()
+            if user is None:
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Extension session expired")
+            scopes = ["bot", "tx"]
+        else:
+            row = (await db.execute(
+                select(APIToken, User).join(User, APIToken.user_id == User.id)
+                .where(APIToken.token == token)
+            )).first()
+            if not row:
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+            api_token, user = row
+            if api_token.expires_at is not None and api_token.expires_at < datetime.utcnow():
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Token expired")
+            api_token.last_used_at = datetime.utcnow()
+            await db.commit()
+            scopes = list(api_token.scopes) if api_token.scopes else ["legacy"]
         resp = {
             "user_id": user.id,
             "scopes": scopes,
@@ -1333,7 +1344,7 @@ def create_app() -> FastAPI:
             "email": user.email,
             # DB-backed admin role (bootstrap-claimed on a fresh instance) — the terminal's
             # admin gate reads THIS, with its TINA_ADMIN_EMAILS allowlist kept as an override.
-            "is_admin": (user.data or {}).get("is_admin") is True if isinstance(user.data, dict) else False,
+            "is_admin": not extension and isinstance(user.data, dict) and user.data.get("is_admin") is True,
         }
         data_blob = user.data if isinstance(user.data, dict) else {}
         if data_blob.get("webhook_url"):
@@ -1387,6 +1398,8 @@ def create_app() -> FastAPI:
         provided = request.headers.get("X-Internal-Secret", "")
         if not hmac.compare_digest(provided, secret):
             raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Invalid internal secret")
+
+    extension_sessions.register(app, _check_internal_no_dev_bypass)
 
     async def _load_user(
         user_id: str,

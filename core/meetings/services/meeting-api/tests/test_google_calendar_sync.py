@@ -78,6 +78,7 @@ async def test_all_day_import_never_overrides_a_manual_schedule_or_its_link():
     store=InMemoryTranscriptStore()
     manual=await store.create_planned_meeting(7,platform='google_meet',native_meeting_id='abc-defg-hij',
         meeting_url=LINK,scheduled_at='2026-11-17T05:00:00+00:00',auto_join=True)
+    assert 'canonical_notes' not in manual['data']
     await sync(store,event(all_day=True));await sync(store,event(link=None,all_day=True))
     row=(await store.list_meetings(7))[0]
     assert row['id']==manual['id'] and row['data']['scheduled_at']=='2026-11-17T05:00:00+00:00'

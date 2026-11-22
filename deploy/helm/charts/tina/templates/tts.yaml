@@ -1,0 +1,87 @@
+{{- $tts := .Values.tts | default dict }}
+{{- if $tts.enabled }}
+{{- $name := include "tina.componentName" (list . "tts") }}
+{{- $secret := required "tts.enabled requires tts.existingSecret" $tts.existingSecret }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "tina.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "tina.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: tts
+  template:
+    metadata:
+      labels:
+        {{- include "tina.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: tts
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: tts
+          image: "{{ $tts.image.repository }}:{{ $tts.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.global.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: TTS_API_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ $secret | quote }}, key: TTS_API_TOKEN}
+            - name: TINA_TTS_PROFILE_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ $secret | quote }}, key: TINA_TTS_PROFILE_KEY}
+          volumeMounts:
+            - name: models
+              mountPath: /models
+              readOnly: true
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+          resources:
+            {{- toYaml $tts.resources | nindent 12 }}
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ required "tts.enabled requires a populated tts.modelsClaim" $tts.modelsClaim | quote }}
+            readOnly: true
+      {{- with .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tina.componentName" (list . "tts") }}
+  labels:
+    {{- include "tina.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "tina.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: tts
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+{{- end }}

@@ -7,6 +7,30 @@ import pytest
 from worker import voice_sandbox
 
 
+def test_meeting_assistant_uses_the_chat_harness_and_checks_citations(monkeypatch):
+    from shared.meeting_knowledge import PREFIX
+    from worker import engine
+
+    monkeypatch.setenv('TINA_CHAT_SESSION', 'meeting-knowledge-test')
+    monkeypatch.setattr(engine, 'completion_from_env', lambda **_: pytest.fail('Expected the chat harness'))
+    calls, events = [], []
+
+    def complete(prompt, system, schema, **options):
+        calls.append(options)
+        assert options['current']()
+        assert json.loads(prompt)['question'] == 'Who owns the demo?'
+        return '{"claims":[{"text":"Lan owns it.","source_ids":["s0"]}]}'
+
+    monkeypatch.setattr(voice_sandbox, 'complete', complete)
+    stream = SimpleNamespace(xadd=lambda _, frame: events.append(json.loads(frame['event'])), expire=lambda *_: None)
+    text = json.dumps({'mode': 'meeting_assistant', 'question': 'Who owns the demo?',
+                       'sources': [{'id': 's0', 'quote': 'Lan owns the demo.'}]})
+    engine._run_meeting_knowledge(stream, 'out', {'entrypoint': {'inline': PREFIX + json.dumps({'request_id': 'test', 'text': text})}})
+    assert calls[0]['meeting_assistant'] is True
+    assert json.loads(events[0]['text'])['claims'][0]['source_ids'] == ['s0']
+    assert events[-1]['type'] == 'turn-complete'
+
+
 def test_runner_has_no_native_tools_mcp_writes_or_cli_resume(tmp_path):
     calls=[]
     class Harness:

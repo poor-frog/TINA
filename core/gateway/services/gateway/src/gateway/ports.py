@@ -53,6 +53,9 @@ class Authorizer(Protocol):
     async def resolve(self, api_key: str) -> Optional[dict]:
         ...
 
+    async def resolve_extension(self, token: str) -> Optional[dict]:
+        ...
+
     async def authorize_subscribe(self, api_key: str, meetings: list) -> dict:
         ...
 

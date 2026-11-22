@@ -191,6 +191,61 @@ else
   echo "  OK: dashboard image ignores global.imageTag (own pinned tag)"
 fi
 
+if grep -qE 'name: tina-tina-mcp$|name: MCP_URL$' <<< "$RENDER"; then
+  echo "  FAIL: MCP rendered in the default disabled state"; fail=1
+fi
+RENDER_MCP="$(helm template tina "$CHART" -n tina -f "$CHART/values-test.yaml" \
+  --set mcp.enabled=true --set global.imageTag=vPIN \
+  --show-only templates/deployment-mcp.yaml --show-only templates/service-mcp.yaml \
+  --show-only templates/deployment-gateway.yaml)"
+if grep -q 'image: "tina/v012-mcp:vPIN"' <<< "$RENDER_MCP" \
+  && grep -q 'type: ClusterIP' <<< "$RENDER_MCP" \
+  && grep -A1 'name: MCP_URL$' <<< "$RENDER_MCP" | grep -q 'http://tina-tina-mcp:8010' \
+  && ! grep -q 'name: FLOWS_API_URL$' <<< "$RENDER_MCP"; then
+  echo "  OK: opt-in MCP is internal, pinned and wired to Gateway with Flows disabled"
+else
+  echo "  FAIL: MCP image, Service or Gateway wiring is incorrect"; fail=1
+fi
+MCP_FLOWS="$(helm template tina "$CHART" -n tina -f "$CHART/values-test.yaml" \
+  --set mcp.enabled=true --set flows.enabled=true --show-only templates/deployment-mcp.yaml)"
+if ! grep -A1 'name: FLOWS_API_URL$' <<< "$MCP_FLOWS" | grep -q 'http://tina-tina-flows-api:18200'; then
+  echo "  FAIL: MCP must discover Flows on its Helm Service port when enabled"; fail=1
+fi
+
+if grep -qE 'name: tina-tina-agent-reach$|name: TINA_AGENT_REACH_URL$' <<< "$RENDER"; then
+  echo "  FAIL: Agent Reach rendered in the default disabled state"; fail=1
+fi
+RENDER_REACH="$(helm template tina "$CHART" -n tina -f "$CHART/values-test.yaml" \
+  --set agentReach.enabled=true,global.imageTag=vPIN \
+  --show-only templates/agent-reach.yaml --show-only templates/deployment-agent-api.yaml)"
+if grep -q 'type: ClusterIP' <<< "$RENDER_REACH" \
+  && grep -q 'image: "tina/agent-reach:vPIN"' <<< "$RENDER_REACH" \
+  && grep -A1 'name: TINA_AGENT_REACH_URL$' <<< "$RENDER_REACH" | grep -q 'http://tina-tina-agent-reach:8080' \
+  && grep -A1 'name: TINA_CHAT_TOOLBELT$' <<< "$RENDER_REACH" | grep -q 'reach.github.read'; then
+  echo "  OK: opt-in Agent Reach is internal and wired to Agent API"
+else
+  echo "  FAIL: Agent Reach image, Service or Agent API wiring is incorrect"; fail=1
+fi
+
+if grep -qE 'name: tina-tina-(tts|livekit|livekit-agent)$|name: (TTS_SERVICE_URL|LIVEKIT_AGENT_URL)$' <<< "$RENDER"; then
+  echo "  FAIL: meeting voice rendered in the default disabled state"; fail=1
+fi
+RENDER_VOICE="$(helm template tina "$CHART" -n tina -f "$CHART/values-test.yaml" \
+  --set tts.enabled=true,tts.modelsClaim=tts-assets,tts.existingSecret=tts-credentials \
+  --set livekit.enabled=true,livekit.modelsClaim=voice-assets,livekit.existingSecret=livekit-credentials \
+  --show-only templates/tts.yaml --show-only templates/livekit.yaml \
+  --show-only templates/deployment-runtime.yaml --show-only templates/deployment-meeting-api.yaml \
+  --show-only templates/deployment-agent-api.yaml)"
+if grep -q 'http://tina-tina-livekit-agent:8080' <<< "$RENDER_VOICE" \
+  && grep -q 'ws://tina-tina-livekit:7880' <<< "$RENDER_VOICE" \
+  && grep -q 'http://tina-tina-tts:8000' <<< "$RENDER_VOICE" \
+  && grep -A4 'name: TINA_INTERNAL_API_SECRET$' <<< "$RENDER_VOICE" | grep -q 'key: INTERNAL_API_SECRET' \
+  && grep -A1 'name: TINA_MEETING_VOICE_MODELS_VOLUME$' <<< "$RENDER_VOICE" | grep -q '"voice-assets"'; then
+  echo "  OK: opt-in TTS and LiveKit are wired to the meeting services and voice model claim"
+else
+  echo "  FAIL: meeting voice Service or model claim wiring is incorrect"; fail=1
+fi
+
 # #900 — the migrations Job must follow global.imageTag (it runs release code against the
 # schema; a rolling-v012 image on a pinned deploy is a schema/code skew). Opposite of the
 # dashboard: here global.imageTag MUST win over the meetingApi/migrations fallback tag.

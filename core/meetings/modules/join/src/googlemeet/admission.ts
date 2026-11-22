@@ -24,6 +24,8 @@ import { checkForGoogleJoinRefused, throwIfGoogleJoinRefused } from "./refusal";
 // over CDP — after which the normal admission poll proceeds into the meeting.
 const CAPTCHA_MIN_WIDTH = 120;
 const CAPTCHA_MIN_HEIGHT = 40;
+const JOIN_CTA_CONFIRMATION_MS = 10_000;
+const ASK_TO_JOIN = 'button:enabled:has-text("Ask to join")';
 export async function hasRecaptchaChallenge(page: Page): Promise<boolean> {
   try {
     const frames = page.frames().filter(f => (f.url() || "").includes("/recaptcha/"));
@@ -481,6 +483,7 @@ export async function waitForGoogleMeetingAdmission(
       const checkInterval = 2000;
       const startTime = Date.now();
       let unknownStateDuration2 = 0;
+      let joinCtaSince: number | undefined;
       const effectiveTimeout2 = () => timeout + getEscalationExtensionMs();
       while (Date.now() - startTime < effectiveTimeout2()) {
         // #444 — the `blocked` state is wired (callBlockedCallback), but NOT emitted yet.
@@ -518,7 +521,21 @@ export async function waitForGoogleMeetingAdmission(
           break;
         }
 
+        // An enabled join button still visible after the click is evidence that we never reached admission.
+        if (await page.locator(ASK_TO_JOIN).first().isVisible() && !await hasConsentPrompt(page) && !await hasRecaptchaChallenge(page)) {
+          joinCtaSince ??= Date.now();
+          if (Date.now() - joinCtaSince >= JOIN_CTA_CONFIRMATION_MS) {
+            throw new AdmissionError("join_failure", "Google Meet kept the join button visible after the click; no admission request was confirmed.");
+          }
+        } else {
+          joinCtaSince = undefined;
+        }
+
         // Track unknown state for escalation
+        if (joinCtaSince !== undefined) {
+          await page.waitForTimeout(checkInterval);
+          continue;
+        }
         unknownStateDuration2 += checkInterval;
         const elapsedMs = Date.now() - startTime;
         const escalation = checkEscalation(elapsedMs, timeout, unknownStateDuration2);

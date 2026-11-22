@@ -51,10 +51,25 @@ class Workers:
         self.identity_env = selected.services["admin-api"]["environment"]
     def endpoint(self, backend):
         if backend == "viegem" and self.selected.viegem_device == "mps":
-            if self.selected.context == "kiri":
-                return "http://127.0.0.1:18005"
-            return self.selected.native_viegem_access()[1]
+            host, _ = self.selected.native_viegem_access()
+            if self.selected.context == "orbstack" and self._owns_loopback_viegem():
+                host = "127.0.0.1"
+            return f"http://{host}:18005"
         return self.selected.endpoint(backend, 8000)
+
+    def _owns_loopback_viegem(self):
+        from native_viegem import LABEL, ROOT
+        agent = Path.home() / "Library/LaunchAgents" / (LABEL + ".plist")
+        try:
+            config = plistlib.loads(agent.read_bytes())
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            return False
+        if not isinstance(config, dict) or config.get("WorkingDirectory") != str(ROOT):
+            return False
+        env = config.get("EnvironmentVariables")
+        return (isinstance(env, dict) and env.get("TINA_VIEGEM_HOST") == "127.0.0.1"
+                and env.get("TINA_VIEGEM_ENV_FILE") == str(self.selected.env_file.resolve()))
+
     def credential(self, backend):
         if backend == "viegem":
             return self.identity_env.get("TINA_VIEGEM_TOKEN", "")
@@ -327,11 +342,13 @@ def install(selected):
     import stack
     state = Path.home() / ".config/tina/asr-control" / instance_of(selected)
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
-    revision = hashlib.sha256(Path(__file__).read_bytes() + Path(__file__).with_name("stack.py").read_bytes()).hexdigest()
-    config = {"instance": instance_of(selected), "revision": revision, "env": {k: selected.env[k] for k in
+    config = {"instance": instance_of(selected), "env": {k: selected.env[k] for k in
               ("DOCKER_CONTEXT", "PROJECT", "COMPOSE_PROJECT", "COMPOSE_PROJECT_NAME", "COMPOSE_PROFILES", "DOTENVX_BIN", "DOTENVX_KEY_FILE") if k in selected.env}}
     config["env"].update(ENV_FILE=str(selected.env_file.resolve()),
                          COMPOSE_FILE=os.pathsep.join(f for f in selected.files if f != stack.CUDA_OVERLAY))
+    revision = hashlib.sha256(Path(__file__).read_bytes() + Path(__file__).with_name("stack.py").read_bytes()
+                              + json.dumps(config["env"], sort_keys=True).encode()).hexdigest()
+    config["revision"] = revision
     config_path = state / "config.json"
     config_path.write_text(json.dumps(config)); config_path.chmod(0o600)
     port = selected.control_port

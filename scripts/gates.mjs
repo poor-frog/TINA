@@ -1057,14 +1057,11 @@ const CONFIG_ADOPTED = [
     // PRD decision 40 — the MCP surface a person's own agent connects to. Adopted late: it shipped
     // with ELEVEN env keys and no declaration and no preflight, so the one service whose whole job
     // is to be the product's front door was the one service nothing checked.
-    // helm/lite are EMPTY because it has no template and no supervisord program — every key it does
-    // plumb is declared for compose, and the ones it does not are `targets: []` rather than a
-    // pretence that a surface carries them.
     service: "mcp",
     decl: "core/meetings/services/mcp/src/tina_mcp/config.v1.json",
     preflight: "core/meetings/services/mcp/src/tina_mcp/config_preflight.py",
     scan: ["core/meetings/services/mcp/src"],
-    compose: "mcp", helm: [], lite: null,
+    compose: "mcp", helm: ["deployment-mcp.yaml"], lite: null,
   },
   {
     // #1453 + the compose-service branch: flows is a DEPLOYABLE DOMAIN now, not a pair of host

@@ -2,9 +2,10 @@ import { createVoiceActivity } from './voice-activity-view';
 import { createTranscriptFeed } from './transcript-feed';
 import { detectMeeting, type MeetingRef } from './meeting';
 import {
-  botBase, listBotMeetings, watchBotTranscript, readBotVoiceSources,
-  type BotMeeting,
+  botFetch, listBotMeetings, watchBotTranscript, readBotVoiceSources,
+  type BotConnection, type BotMeeting,
 } from './bot-transcript';
+import { ACCOUNT_KEY, DEFAULT_GATEWAY, DEFAULT_TERMINAL, sessionCommand, storedAccount } from './extension-session';
 import type { TranscriptSegment } from './transcript-rendering';
 import type { VoiceReply } from './voice-replies';
 import { watchTranslation, type TranscriptLanguage, type TranslationSnapshot } from './translation';
@@ -14,14 +15,12 @@ const BOT_PLATFORM_NAMES: Record<BotTarget['platform'], string> = {
   google_meet: 'Google Meet', zoom: 'Zoom', teams: 'Microsoft Teams',
 };
 const TERMINAL_MEETING_STATUSES = new Set(['completed', 'failed', 'stopped', 'ended', 'past']);
-type Config = Record<'apiKey' | 'deployment' | 'ingestUrl' | 'botGatewayUrl' | 'terminalUrl' | 'language', string>;
+type Config = BotConnection & { terminalUrl: string };
 const $ = (id: string) => document.getElementById(id)!;
-const fields = ['apiKey', 'deployment', 'ingestUrl', 'botGatewayUrl', 'terminalUrl', 'language'] as const;
+const fields = ['botGatewayUrl', 'terminalUrl'] as const;
 const defaults: Config = {
-  apiKey: '', deployment: 'desktop', ingestUrl: 'ws://127.0.0.1:9099/ingest',
-  botGatewayUrl: 'https://tinabot.duckdns.org/extension-api',
-  terminalUrl: 'https://tinabot.duckdns.org',
-  language: 'vi',
+  botGatewayUrl: DEFAULT_GATEWAY,
+  terminalUrl: DEFAULT_TERMINAL,
 };
 const voiceActivityView = createVoiceActivity($('voiceActivity'));
 const feed = createTranscriptFeed($('feed'), $('transcriptTurns'), $('latestBtn') as HTMLButtonElement, {
@@ -51,7 +50,6 @@ function renderTranslationControls(): void {
   const selector = $('transcriptLanguage') as HTMLSelectElement;
   selector.disabled = !supported;
   selector.value = language;
-  const displayLanguage = language;
   const retrying = translation?.groups.filter(g => g.status === 'retrying').length ?? 0;
   const failed = translation?.groups.filter(g => g.status === 'failed').length ?? 0;
   const serviceMessages: Record<string, string> = {
@@ -67,8 +65,8 @@ function renderTranslationControls(): void {
     failed ? `${failed} cụm cần thử lại` : '',
     translation.groups.some(g => !g.ready) ? 'Đang gom câu…' : '',
   ].filter(Boolean).join(' · ') : 'Đang tải bản dịch…';
-  ($('displayLanguage') as HTMLButtonElement).disabled = !supported;
-  $('displayLanguage').textContent = { vi: 'Tiếng Việt', en: 'English', bilingual: 'VI + EN' }[displayLanguage];
+  selector.disabled = !supported;
+  selector.value = language;
   $('translationControls').dataset.state = translationError ? 'error' : translation?.status || 'pending';
   $('translationStatus').textContent = !selected || language === 'vi' ? ''
     : translationError ? 'Dịch chưa khả dụng · transcript tiếng Việt vẫn hoạt động'
@@ -96,12 +94,6 @@ $('transcriptLanguage').addEventListener('change', () => {
   renderTranscript(); startTranslation();
 });
 $('retryTranslation').addEventListener('click', () => startTranslation(true));
-$('displayLanguage').addEventListener('click', () => {
-  const selector = $('transcriptLanguage') as HTMLSelectElement;
-  if (selector.disabled) return;
-  ($('meetingControls') as HTMLDetailsElement).open = true;
-  selector.focus();
-});
 
 function currentKey(meeting: BotMeeting): string {
   return `${meeting.id}|${meeting.platform}|${meeting.nativeMeetingId}`;
@@ -160,9 +152,9 @@ function scheduleAutoRetryPoll(key: string): void {
     autoRetryPoll = null;
     if (!activeMeeting || botTargetKey(activeMeeting) !== key || sendBotState?.phase !== 'retrying') return;
     try {
-      const current = sendBotState, gateway = config.botGatewayUrl, apiKey = config.apiKey;
-      const rows = await listBotMeetings({ botGatewayUrl: gateway, apiKey });
-      if (sendBotState !== current || config.botGatewayUrl !== gateway || config.apiKey !== apiKey
+      const current = sendBotState, connection = { ...config };
+      const rows = await listBotMeetings(connection);
+      if (sendBotState !== current || config.botGatewayUrl !== connection.botGatewayUrl || config.account?.key !== connection.account?.key
           || !activeMeeting || botTargetKey(activeMeeting) !== key) return;
       meetings = rows;
       syncFailedBotState();
@@ -180,11 +172,17 @@ function renderSendBot(): void {
   const key = botTargetKey(activeMeeting);
   const state = sendBotState?.key === key ? sendBotState : null;
   const platform = BOT_PLATFORM_NAMES[activeMeeting.platform];
-  $('sendBotTitle').textContent = `${platform} · ${activeMeeting.nativeMeetingId}`;
+  const selectedIsActive = selected?.platform === activeMeeting.platform
+    && selected.nativeMeetingId === activeMeeting.nativeMeetingId;
+  const title = $('sendBotTitle');
+  title.textContent = selectedIsActive ? '' : `Active tab: ${platform}, ${activeMeeting.nativeMeetingId}`;
+  title.hidden = selectedIsActive;
   $('sendBotStatus').textContent = state?.message
-    ?? (config.apiKey.trim() ? 'The bot may wait for host admission.' : 'Add your TINA API key in Settings.');
+    ?? (config.account ? 'The bot may wait for host admission.' : 'Sign in with Google in Settings.');
   panel.dataset.state = state?.phase ?? 'ready';
-  button.disabled = !config.apiKey.trim() || state?.phase === 'sending' || state?.phase === 'cancelling' || state?.phase === 'sent';
+  button.hidden = state?.phase === 'sent';
+  button.disabled = !config.account || state?.phase === 'sending' || state?.phase === 'cancelling' || state?.phase === 'sent';
+  button.setAttribute('aria-busy', state?.phase === 'sending' || state?.phase === 'cancelling' ? 'true' : 'false');
   button.textContent = state?.phase === 'sending' ? 'Sending…' : state?.phase === 'cancelling' ? 'Cancelling…' : state?.phase === 'retrying' ? 'Cancel retry' : state?.phase === 'sent' ? 'Bot sent' : state?.phase === 'error' ? 'Send Bot Again' : 'Send Bot';
   button.title = `Send a TINA bot to this ${platform} meeting`;
 }
@@ -218,19 +216,19 @@ async function cancelBotRetry(): Promise<void> {
   const meeting = activeMeeting;
   if (!meeting) return;
   const key = botTargetKey(meeting);
+  const session = config.account?.key;
   sendBotState = { key, phase: 'cancelling', message: 'Cancelling automatic retry…' };
   clearAutoRetryPoll();
   renderSendBot();
   try {
-    const response = await fetch(`${botBase(config.botGatewayUrl)}/bots/${meeting.platform}/${encodeURIComponent(meeting.nativeMeetingId)}`, {
-      method: 'DELETE', headers: { 'X-API-Key': config.apiKey }, credentials: 'omit',
-      redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15000),
+    const response = await botFetch(config, `/bots/${meeting.platform}/${encodeURIComponent(meeting.nativeMeetingId)}`, {
+      method: 'DELETE', signal: AbortSignal.timeout(15000),
     });
     if (!response.ok) throw new Error('Could not confirm cancellation. Refresh the meeting status and try again.');
-    if (!activeMeeting || botTargetKey(activeMeeting) !== key) return;
+    if (session !== config.account?.key || !activeMeeting || botTargetKey(activeMeeting) !== key) return;
     sendBotState = { key, phase: 'error', message: 'Automatic retry cancelled.' };
   } catch (error) {
-    if (!activeMeeting || botTargetKey(activeMeeting) !== key) return;
+    if (session !== config.account?.key || !activeMeeting || botTargetKey(activeMeeting) !== key) return;
     sendBotState = { key, phase: 'retrying', message: error instanceof Error ? error.message : 'Could not cancel retry.' };
     scheduleAutoRetryPoll(key);
   }
@@ -239,42 +237,46 @@ async function cancelBotRetry(): Promise<void> {
 
 async function sendBotToActiveMeeting(): Promise<void> {
   const meeting = activeMeeting;
-  if (!meeting || !config.apiKey.trim()) return;
+  if (!meeting || !config.account) return;
+  const session = config.account.key;
   const key = botTargetKey(meeting);
   if (sendBotState?.key === key && sendBotState.phase !== 'error') return;
   sendBotState = { key, phase: 'sending', message: 'Sending bot request…' };
   renderSendBot();
   try {
-    const response = await fetch(`${botBase(config.botGatewayUrl)}/bots`, {
+    const response = await botFetch(config, '/bots', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-API-Key': config.apiKey },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         platform: meeting.platform,
         native_meeting_id: meeting.nativeMeetingId,
         meeting_url: meeting.platform === 'google_meet' ? `https://meet.google.com/${meeting.nativeMeetingId}` : meeting.url,
       }),
-      credentials: 'omit', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(15000),
     });
     const body = await response.json().catch(() => ({})) as { detail?: unknown };
+    if (session !== config.account?.key) return;
     if (response.status === 409) {
       sendBotState = { key, phase: 'sent', message: 'A bot is already active for this meeting.' };
     } else if (response.status === 429) {
       throw new Error('Your active bot limit is reached. Stop another bot and try again.');
     } else if (response.status === 401) {
-      throw new Error('The TINA API key was rejected. Check it in Settings.');
+      throw new Error('Sign in again to send the bot.');
     } else if (response.status === 403) {
-      throw new Error('This API key needs the “Join meetings” (bot) scope.');
+      throw new Error('This account cannot manage bots in this meeting.');
     } else if (!response.ok) {
       throw new Error(typeof body.detail === 'string' ? body.detail : `Could not send bot (${response.status}).`);
     } else {
       sendBotState = { key, phase: 'sent', message: 'Bot sent. Admit it in the meeting if prompted.' };
       setTimeout(() => {
+        if (session !== config.account?.key) return;
         void refreshMeetings(true).then(() => {
-          if (activeMeeting && botTargetKey(activeMeeting) === key) selectBotTranscript(meeting);
+          if (session === config.account?.key && activeMeeting && botTargetKey(activeMeeting) === key) selectBotTranscript(meeting);
         });
       }, 1200);
     }
   } catch (error) {
+    if (session !== config.account?.key) return;
     failBot(key, error instanceof Error ? error.message : 'Could not send the bot.');
   }
   if (activeMeeting && botTargetKey(activeMeeting) === key) renderSendBot();
@@ -320,7 +322,7 @@ function renderMeetings(): void {
     const option = document.createElement('option');
     option.value = currentKey(meeting);
     const when = Number.isFinite(meeting.startMs) ? new Date(meeting.startMs).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Date unavailable';
-    option.textContent = `${meeting.title} · ${meeting.platform.replace(/_/g, ' ')} · ${when}`;
+    option.textContent = `${meeting.title} — ${meeting.platform.replace(/_/g, ' ')} — ${when}`;
     return option;
   });
   select.replaceChildren(...options);
@@ -330,6 +332,7 @@ function renderMeetings(): void {
   $('meetingEmpty').textContent = meetings.length ? '' : 'No Bot meetings yet. Open a supported meeting tab and use Send Bot here.';
   updateDestinations();
   renderTranslationControls();
+  renderSendBot();
 }
 
 function updateDestinations(): void {
@@ -351,7 +354,8 @@ function watchMeeting(meeting: BotMeeting, token: number): void {
   startTranslation();
   updateDestinations();
   $('meetingTitle').textContent = meeting.title;
-  $('meetingMeta').textContent = `${meeting.platform.replace(/_/g, ' ')} · ${meeting.status}`;
+  $('meetingMeta').textContent = `${meeting.platform.replace(/_/g, ' ')}, ${meeting.status}`;
+  renderSendBot();
   $('emptyStateText').textContent = 'Waiting for transcript text…';
   const onUpdate = (rows: TranscriptSegment[], status: string, voice: VoiceReply[] = [], activity?: unknown) => {
     if (token !== scope || !selected || currentKey(selected) !== currentKey(meeting)) return;
@@ -380,15 +384,14 @@ function watchMeeting(meeting: BotMeeting, token: number): void {
     setStatus(denied ? 'Access unavailable' : 'Reconnecting…', denied ? 'error' : 'loading');
     $('transcriptStatus').textContent = message;
   };
-  stopWatching = watchBotTranscript({ botGatewayUrl: config.botGatewayUrl, apiKey: config.apiKey }, meeting, onUpdate, onError);
+  stopWatching = watchBotTranscript({ ...config }, meeting, onUpdate, onError);
 }
 
 async function refreshMeetings(preserve = true): Promise<void> {
   listRequest?.abort();
   const controller = new AbortController(); listRequest = controller;
   const token = stopCurrentWatch(false);
-  const endpointAtRequest = config.botGatewayUrl;
-  const keyAtRequest = config.apiKey;
+  const connection = { ...config };
   const oldKey = preserve && selected ? currentKey(selected) : '';
   if (!preserve) { selected = null; meetings = []; clearTranscript(); }
   $('meetingTitle').textContent = selected?.title || 'Select a meeting';
@@ -396,9 +399,13 @@ async function refreshMeetings(preserve = true): Promise<void> {
   setStatus('Loading meetings…', 'loading');
   renderMeetings();
   try {
-    const rows = await listBotMeetings({ botGatewayUrl: endpointAtRequest, apiKey: keyAtRequest }, controller.signal);
-    if (controller.signal.aborted || token !== scope || config.apiKey !== keyAtRequest
-        || config.botGatewayUrl !== endpointAtRequest) return;
+    if (!connection.account) {
+      $('meetingEmpty').textContent = 'Sign in with Google to view meetings.';
+      setStatus('Signed out');
+      return;
+    }
+    const rows = await listBotMeetings(connection, controller.signal);
+    if (controller.signal.aborted || token !== scope || config.account?.key !== connection.account.key) return;
     meetings = rows;
     syncFailedBotState();
     selected = rows.find(row => currentKey(row) === oldKey)
@@ -408,7 +415,7 @@ async function refreshMeetings(preserve = true): Promise<void> {
     if (selected) {
       ($('meetingSelect') as HTMLSelectElement).value = currentKey(selected);
       $('meetingTitle').textContent = selected.title;
-      $('meetingMeta').textContent = `${selected.platform.replace(/_/g, ' ')} · ${selected.status}`;
+      $('meetingMeta').textContent = `${selected.platform.replace(/_/g, ' ')}, ${selected.status}`;
       watchMeeting(selected, token);
     } else {
       $('meetingTitle').textContent = 'Select a meeting';
@@ -429,6 +436,7 @@ function selectMeeting(): void {
   selected = meetings.find(row => currentKey(row) === ($('meetingSelect') as HTMLSelectElement).value) || null;
   renderMeetings();
   if (!selected) { $('meetingTitle').textContent = 'Select a meeting'; $('meetingMeta').textContent = ''; $('transcriptStatus').textContent = 'Choose a Bot meeting to view its transcript.'; return; }
+  ($('meetingControls') as HTMLDetailsElement).open = false;
   const token = scope;
   watchMeeting(selected, token);
   setStatus('Connecting…', 'loading');
@@ -492,23 +500,48 @@ function showSettings(show: boolean): void {
   }
 }
 
+function renderSettings(): void {
+  const account = config.account;
+  const email = account?.email ?? '';
+  const separator = email.lastIndexOf('@');
+  $('accountCard').dataset.signedIn = String(!!account);
+  $('accountAvatar').textContent = Array.from(email || 'T')[0].toUpperCase();
+  if (separator > 0) {
+    $('accountEmail').replaceChildren(email.slice(0, separator), document.createElement('wbr'), email.slice(separator));
+  } else {
+    $('accountEmail').textContent = email;
+  }
+  $('accountEmail').hidden = !account;
+  $('accountLabel').textContent = account ? 'Signed in with Google' : 'Signed out';
+  const action = $('accountAction');
+  action.textContent = account ? 'Sign out' : 'Sign in with Google';
+  action.classList.toggle('primary', !account);
+  $('connectionHint').hidden = !account;
+  for (const field of fields) {
+    const input = $(field) as HTMLInputElement;
+    input.value = config[field];
+    input.readOnly = !!account;
+  }
+}
+
 async function init(): Promise<void> {
-  const stored = await chrome.storage.local.get([...fields, 'theme', 'transcriptSource']);
+  const stored = await chrome.storage.local.get([...fields, ACCOUNT_KEY, 'theme', 'transcriptSource']);
+  config.account = storedAccount(stored[ACCOUNT_KEY]);
   for (const field of fields) {
     const value = stored[field];
     config[field] = typeof value === 'string' ? value : defaults[field];
-    ($(field) as HTMLInputElement).value = config[field];
+    if (config.account && field === 'terminalUrl') config[field] = config.account.terminal;
+    if (config.account && field === 'botGatewayUrl') config[field] = config.account.gateway;
   }
-  if (!['desktop', 'cloud'].includes(config.deployment)) config.deployment = 'desktop';
-  ($('deployment') as HTMLSelectElement).value = config.deployment;
   if (stored.transcriptSource !== 'bot') void chrome.storage.local.set({ transcriptSource: 'bot' });
   theme = stored.theme === 'light' || stored.theme === 'dark' ? stored.theme : 'system';
   applyTheme();
   renderTranscript();
+  renderSettings();
   bindSettings();
   void refreshActiveMeeting();
   void refreshMeetings(false);
-  if (!config.apiKey) showSettings(true);
+  if (!config.account) showSettings(true);
 }
 
 function bindSettings(): void {
@@ -516,8 +549,38 @@ function bindSettings(): void {
     config[field] = ($(field) as HTMLInputElement).value.trim();
     void chrome.storage.local.set({ [field]: config[field] });
     renderSendBot();
-    if (field === 'apiKey' || field === 'botGatewayUrl') void refreshMeetings(false);
-    else setStatus('Settings saved', 'ready');
+    setStatus('Settings saved', 'ready');
+  });
+  const button = $('accountAction') as HTMLButtonElement;
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    $('accountStatus').textContent = '';
+    try {
+      if (config.account) await sessionCommand({ action: 'logout', key: config.account.key });
+      else await sessionCommand({ action: 'login', terminal: config.terminalUrl, gateway: config.botGatewayUrl });
+    } catch (error) {
+      $('accountStatus').textContent = error instanceof Error ? error.message : 'Unable to connect to TINA.';
+    } finally { button.disabled = false; }
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes.theme) {
+      const saved = changes.theme.newValue;
+      theme = saved === 'light' || saved === 'dark' ? saved : 'system';
+      applyTheme();
+    }
+    if (!changes[ACCOUNT_KEY]) return;
+    config.account = storedAccount(changes[ACCOUNT_KEY].newValue);
+    if (config.account) {
+      config.botGatewayUrl = config.account.gateway;
+      config.terminalUrl = config.account.terminal;
+    }
+    sendBotState = null;
+    clearAutoRetryPoll();
+    renderSettings();
+    renderSendBot();
+    void refreshMeetings(false);
+    showSettings(!config.account);
   });
   $('meetingSelect').addEventListener('change', selectMeeting);
   $('refreshBtn').addEventListener('click', () => void refreshMeetings(true));

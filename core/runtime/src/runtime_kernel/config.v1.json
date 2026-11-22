@@ -381,9 +381,10 @@
    "key": "TINA_MEETING_VOICE_MODELS_VOLUME",
    "class": "defaulted",
    "default": "(unset — no bot-hosted voice model mount)",
-   "description": "Operator-selected Docker named volume containing pinned KWS/Silero assets; mounted read-only only in voice-capable meeting bot workloads.",
+   "description": "Operator-selected Docker named volume or Kubernetes PVC containing pinned KWS/Silero assets; mounted read-only only in voice-capable meeting bot workloads.",
    "targets": [
-    "compose"
+    "compose",
+    "helm"
    ]
   }
  ],

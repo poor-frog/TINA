@@ -8,7 +8,8 @@
       "default": "http://gateway:8000",
       "description": "The PUBLIC API this service forwards every built-in tool to, with the caller's own key. It never reaches past the gateway.",
       "targets": [
-        "compose"
+        "compose",
+        "helm"
       ]
     },
     {
@@ -60,7 +61,8 @@
       "capability": "assembly",
       "description": "identity's base URL. A domain whose URL is set is ASKED for its tool manifest; one whose URL is unset is never asked and its tools are absent. Identity is the one domain everyone may depend on.",
       "targets": [
-        "compose"
+        "compose",
+        "helm"
       ]
     },
     {
@@ -69,7 +71,8 @@
       "capability": "assembly",
       "description": "meetings' base URL, on the same terms.",
       "targets": [
-        "compose"
+        "compose",
+        "helm"
       ]
     },
     {
@@ -78,7 +81,8 @@
       "capability": "assembly",
       "description": "flows' base URL, on the same terms.",
       "targets": [
-        "compose"
+        "compose",
+        "helm"
       ]
     },
     {

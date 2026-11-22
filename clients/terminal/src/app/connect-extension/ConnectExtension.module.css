@@ -1,0 +1,115 @@
+.stage {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6) var(--space-4);
+  background: var(--bg);
+}
+
+.card {
+  width: min(100%, 420px);
+  padding: var(--space-8);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--subtle);
+  color: var(--t1);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+  font-size: var(--ui-type-label);
+  font-weight: 650;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--ui-type-title);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.description {
+  margin: var(--space-2) 0 0;
+  color: var(--t2);
+  font-size: var(--ui-type-label);
+  line-height: 1.6;
+}
+
+.actions {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.account {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--t2);
+  font-size: var(--ui-type-meta);
+  overflow-wrap: anywhere;
+}
+
+.account[role="status"] { margin-top: var(--space-6); }
+.account strong { color: var(--t1); font-size: var(--ui-type-label); }
+
+.primary,
+.secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 48px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-size: var(--ui-type-label);
+  font-weight: 650;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.primary { background: var(--brand); color: var(--on-brand); }
+.primary:hover:not(:disabled) { background: var(--brand-hover); }
+.secondary { border-color: var(--control-line); color: var(--t1); }
+.secondary:hover:not(:disabled) { background: var(--surface); }
+
+.primary:focus-visible,
+.secondary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.primary:disabled,
+.secondary:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.providerMark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--terminal-paper);
+}
+
+.error {
+  margin: var(--space-4) 0 0;
+  color: var(--danger);
+  font-size: var(--ui-type-label);
+  line-height: 1.5;
+}
+
+@media (max-width: 440px) {
+  .card { padding: var(--space-6); }
+}

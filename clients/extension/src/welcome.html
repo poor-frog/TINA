@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Sign in to TINA to follow transcripts and notes from your Google Meet calls.">
+  <title>TINA</title>
+  <link rel="stylesheet" href="assets/tina-tokens.css">
+  <link rel="stylesheet" href="welcome.css">
+  <script src="welcome.js" defer></script>
+</head>
+<body>
+  <main id="welcome" class="welcome">
+    <header class="brand">
+      <img src="assets/tina-light.svg" width="27" height="29" alt="">
+      <span>TINA</span>
+    </header>
+    <section class="intro" aria-labelledby="title">
+      <h1 id="title">Follow your meetings</h1>
+      <p>Read transcripts, revisit notes, and ask TINA in Google Meet.</p>
+    </section>
+    <figure class="hero">
+      <img src="assets/welcome-meeting.webp" width="720" height="360" alt="">
+    </figure>
+    <footer class="actions">
+      <button id="signIn" class="primary" type="button" disabled>
+        <span class="google-mark" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 48 48" focusable="false">
+            <path class="google-red" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l6.78 5.26C11.03 13.33 17.02 9.5 24 9.5z"/>
+            <path class="google-blue" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l6.84 5.31c5-4.62 7.98-11.43 7.98-16.96z"/>
+            <path class="google-yellow" d="M9.34 28.51a14.37 14.37 0 0 1 0-9.02l-6.78-5.26a24 24 0 0 0 0 19.54z"/>
+            <path class="google-green" d="M24 48c6.48 0 11.92-2.14 15.9-5.8l-6.85-5.31a14.46 14.46 0 0 1-23.71-8.38l-6.78 5.26C6.51 42.62 14.62 48 24 48z"/>
+          </svg>
+        </span>
+        <span id="signInLabel">Sign in with Google</span>
+      </button>
+      <p id="signInNote">Use the same Gmail account as in TINA Terminal.</p>
+      <p id="status" role="status" hidden></p>
+      <details id="apiKeyOption" class="api-key-option">
+        <summary>Use an API key</summary>
+        <form id="apiKeyForm" method="post">
+          <label for="tinaApiKey">TINA API key</label>
+          <input id="tinaApiKey" type="password" autocomplete="off" spellcheck="false" required maxlength="255">
+          <button id="connectApiKey" class="primary" type="submit" disabled>Connect</button>
+        </form>
+      </details>
+    </footer>
+  </main>
+  <main id="workspace" class="workspace" hidden>
+    <section id="home" aria-labelledby="homeTitle" hidden>
+      <header class="workspace-bar">
+        <div class="workspace-brand"><img src="assets/tina-dark.svg" width="27" height="29" alt="">TINA</div>
+        <button type="button" id="openSettings" class="workspace-icon" aria-label="Settings" title="Settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 3v4m0 4v10M12 3v10m0 4v4M19 3v6m0 4v8"/>
+            <circle cx="5" cy="9" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="19" cy="11" r="2"/>
+          </svg>
+        </button>
+      </header>
+      <div class="workspace-intro">
+        <h1 id="homeTitle">Meeting workspace</h1>
+        <p>Open recent meetings and revisit your notes in Terminal.</p>
+      </div>
+      <nav class="workspace-shortcuts" aria-label="Meeting shortcuts">
+        <button type="button" id="openMeetings" class="workspace-shortcut" aria-label="My meetings">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4m8-4v4M4 10h16"/></svg>
+          <span><strong>My meetings</strong><small>Recent activity and status</small></span>
+          <svg class="workspace-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4"/></svg>
+        </button>
+        <button type="button" id="openTerminal" class="workspace-shortcut">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 8 4 4-4 4m7 0h3"/></svg>
+          <strong>Open Terminal</strong><svg class="workspace-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12 12 4M6 4h6v6"/></svg>
+        </button>
+      </nav>
+    </section>
+    <section id="meetings" aria-labelledby="meetingsTitle" hidden>
+      <header class="workspace-bar">
+        <div class="workspace-bar-title">
+          <button type="button" class="workspace-icon back" aria-label="Back">←</button>
+          <h2 id="meetingsTitle" tabindex="-1">My meetings</h2>
+        </div>
+        <button type="button" id="viewAll" class="workspace-link">View all <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12 12 4M6 4h6v6"/></svg></button>
+      </header>
+      <div class="meeting-columns" aria-hidden="true"><span>Recent</span><span>Status</span></div>
+      <ul id="meetingList" class="meeting-list" aria-label="Recent meetings" tabindex="0"></ul>
+      <div id="meetingNotice" class="meeting-notice">
+        <p id="meetingStatus" role="status"></p>
+        <button type="button" id="retryMeetings" class="workspace-link" hidden>Try again</button>
+      </div>
+      <template id="meetingRow">
+        <li><button type="button" class="meeting-row">
+          <span><strong></strong><time></time></span>
+          <span class="status-chip"></span>
+        </button></li>
+      </template>
+    </section>
+    <section id="settings" aria-labelledby="settingsTitle" hidden>
+      <header class="workspace-bar">
+        <div class="workspace-bar-title">
+          <button type="button" class="workspace-icon back" aria-label="Back">←</button>
+          <h2 id="settingsTitle" tabindex="-1">Settings</h2>
+        </div>
+      </header>
+      <div class="workspace-account"><p>Signed in as</p><strong id="accountEmail"></strong></div>
+      <section class="workspace-connections" aria-labelledby="connectionsTitle">
+        <h3 id="connectionsTitle">Connections</h3>
+        <label for="terminalUrl">TINA Terminal</label>
+        <input id="terminalUrl" type="url" readonly spellcheck="false" aria-describedby="connectionHint">
+        <label for="botGatewayUrl">Meeting Bot Gateway</label>
+        <input id="botGatewayUrl" type="url" readonly spellcheck="false" aria-describedby="connectionHint">
+        <p id="connectionHint">To edit these addresses, sign out and open Options.</p>
+      </section>
+      <button type="button" id="signOut" class="workspace-sign-out">Sign out</button>
+    </section>
+    <p id="workspaceError" class="workspace-error" role="alert" hidden></p>
+  </main>
+</body>
+</html>

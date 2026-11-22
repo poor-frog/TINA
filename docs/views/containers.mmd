@@ -56,6 +56,8 @@ flowchart LR
   livekit_server["Self-hosted LiveKit server"]
   agent_reach["Public Agent Reach retrieval worker"]
   public_content_providers["Public content providers"]
+  google_meet_api["Google Meet REST API"]
+  google_people_api["Google People API"]
   mail_relay["configured SMTP relay"]
   meeting_api -->|"write"| segments_table
   bot -->|"HTTPS"| transcription
@@ -63,6 +65,8 @@ flowchart LR
   meeting_api -->|"HTTPS"| object_store
   meeting_api -->|"HTTPS"| runtime
   meeting_api -->|"HTTPS"| admin_api
+  meeting_api -->|"HTTPS"| google_meet_api
+  meeting_api -->|"HTTPS"| google_people_api
   meeting_api -->|"HTTPS"| service_authority
   meeting_api -->|"HTTP(S)"| system_webhook
   agent_api -->|"HTTPS"| runtime

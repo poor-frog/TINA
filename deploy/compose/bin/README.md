@@ -62,9 +62,9 @@ tina setup --dry-run                # inspect the new install; creates no config
 tina setup                          # create the private config and a separate tina-local deployment
 ```
 
-Use the private path above for a fresh install: this checkout already contains an encrypted
-`deploy/compose/.env`, so the default setup path exists and is intentionally not overwritten. Setup
-uses the local Docker context (or explicit DOCKER_CONTEXT), the base `docker-compose.yml`,
+Use an explicit private path to keep this instance separate from a regular `make all` deployment.
+Setup refuses to overwrite an existing config and uses the local Docker context (or explicit
+DOCKER_CONTEXT), the base `docker-compose.yml`,
 project/image tag `tina-local`, default loopback ports and new Compose-managed volumes. It does not
 inherit another deployment's shell settings, profiles, credentials or migration overlay. Optional
 Dashboard, Discord and mailbox profiles stay off. Base Compose includes MCP and flows; native
@@ -80,8 +80,9 @@ unchanged. Image tags are scoped to the new project; the shared bot build-base t
 After deployment, an interactive terminal can run the existing global ASR configuration wizard
 and host/container status verification. The endpoint/token remain your explicit choice. No ASR
 model is installed or started. Skipping ASR returns `setup=platform_ready, asr_ready=false` with
-next commands, not a claim that transcription works. Open the printed Terminal URL, create a local
-account and configure agent model/subscription credentials in Settings → Models.
+next commands. Configure [Google sign-in](../../../README.md#set-up-google-sign-in) in the selected
+`ENV_FILE`, run `tina deploy`, then sign in to Terminal and configure agent model or subscription
+credentials in Settings → Models.
 
 For scripts, `tina setup --yes --json` builds/starts the platform without prompts and returns the
 ASR commands as next steps. It does not auto-configure ASR or open a browser. A failed ASR probe

@@ -35,6 +35,30 @@ def _client(authorizer=None, downstream=None):
     return TestClient(app), downstream
 
 
+def test_extension_cors_only_allows_configured_origin_and_preserves_authentication():
+    origin = "chrome-extension://" + "a" * 32
+    path = "/transcripts/by-id/42"
+    downstream = FakeDownstream(status_code=200, body={"segments": []})
+    client = TestClient(create_app(FakeAuthorizer(), downstream, FakeRedis(), extension_origins=(origin,)))
+    preflight = {"Origin": origin, "Access-Control-Request-Method": "GET",
+                 "Access-Control-Request-Headers": "x-api-key", "Access-Control-Request-Private-Network": "true"}
+    result = client.options(path, headers=preflight)
+    assert result.status_code == 200
+    assert result.headers["access-control-allow-origin"] == origin
+    assert result.headers["access-control-allow-private-network"] == "true"
+    assert downstream.last is None
+    denied = client.options(path, headers={**preflight, "Origin": "https://example.com"})
+    assert "access-control-allow-origin" not in denied.headers
+    assert client.get(path, headers={"Origin": origin}).status_code == 401
+    assert downstream.last is None
+    authenticated = client.get(path, headers=AUTH | {"Origin": origin})
+    assert authenticated.status_code == 200
+    assert authenticated.headers["access-control-allow-origin"] == origin
+    assert downstream.last["headers"]["x-user-id"] == "7"
+    with pytest.raises(ValueError, match="exact Chrome extension origins"):
+        create_app(FakeAuthorizer(), downstream, FakeRedis(), extension_origins=("*",))
+
+
 @pytest.mark.parametrize('method,kind',[('POST','navigation'),('POST','handoff'),('GET','handoff')])
 def test_owner_voice_transfer_forwards_with_required_scopes(method,kind):
     path=f'/meetings/1/voice-assistant/{kind}/00000000-0000-4000-8000-000000000123'
@@ -567,7 +591,7 @@ def test_speaker_registry_routes_forward_identity_and_revision_payload():
 
 def test_memory_views_forward_identity_with_tx_scope():
     client, downstream = _client()
-    for view in ('canonical', 'memory'):
+    for view in ('canonical', 'memory', 'processed-notes'):
         path = f'/transcripts/by-id/42/{view}'
         response = client.get(path, headers=AUTH)
         assert response.status_code == 200
@@ -583,3 +607,29 @@ def test_alignment_routes_forward_identity_and_guard_actions():
         assert downstream.last['url'].endswith(path)
         assert downstream.last['headers'].get('x-user-id')
     assert client.post('/transcripts/by-id/42/alignment/apply',headers=AUTH).status_code == 404
+
+
+def test_extension_bearer_does_not_cross_route_or_credential_boundaries():
+    token = "a" * 43
+
+    class ExtensionAuthorizer(FakeAuthorizer):
+        async def resolve_extension(self, supplied):
+            if supplied == token:
+                return {"user_id": 71, "email": "user@example.test", "scopes": ["tx", "bot"]}
+
+    origin = "chrome-extension://" + "a" * 32
+    upstream = FakeDownstream(status_code=200, body={"segments": []})
+    client = TestClient(create_app(ExtensionAuthorizer(), upstream, FakeRedis(), extension_origins=(origin,)))
+    headers = {"Authorization": "Bearer " + token, "Origin": origin, "X-User-Id": "72"}
+    path = "/transcripts/by-id/42"
+    preflight = client.options(path, headers={"Origin": origin, "Access-Control-Request-Method": "GET",
+                                              "Access-Control-Request-Headers": "Authorization"})
+    assert preflight.status_code == 200
+    assert client.get(path, headers=headers).status_code == 200
+    sent = upstream.last["headers"]
+    assert sent["x-user-id"] == "71"
+    assert "authorization" not in sent and "x-api-key" not in sent
+    assert client.get("/agent/workspace/files", headers=headers).status_code == 403
+    assert client.delete("/meetings/42", headers=headers).status_code == 403
+    assert client.get(path, headers={"X-API-Key": token}).status_code == 401
+    assert client.get(path, headers=AUTH).status_code == 200

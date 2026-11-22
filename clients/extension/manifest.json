@@ -2,25 +2,45 @@
   "manifest_version": 3,
   "name": "TINA Transcript Viewer",
   "version": "0.1.0",
-  "description": "Send TINA Bot to supported meeting tabs and read authorized transcripts. This extension does not capture audio.",
+  "description": "Send TINA Bot to supported meeting tabs and read authorized transcripts in TINA Viewer and Google Meet. This extension does not capture audio.",
   "permissions": [
     "storage",
+    "identity",
     "tabs",
     "sidePanel"
   ],
   "side_panel": {
     "default_path": "sidepanel.html"
   },
+  "options_ui": {
+    "page": "sidepanel.html",
+    "open_in_tab": true
+  },
   "host_permissions": [
     "http://localhost/*",
     "http://127.0.0.1/*",
-    "https://tinabot.duckdns.org/*"
+    "https://tinabot.duckdns.org/*",
+    "https://meet.google.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["meet-content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["meet-panel.html", "assets/tina-dark.svg", "assets/tina-light.svg"],
+      "matches": ["https://meet.google.com/*"]
+    }
   ],
   "background": {
     "service_worker": "viewer-background.js"
   },
   "action": {
     "default_title": "Open TINA Transcript Viewer",
+    "default_popup": "welcome.html",
     "default_icon": {
       "16": "assets/icons/icon16.png",
       "32": "assets/icons/icon32.png",

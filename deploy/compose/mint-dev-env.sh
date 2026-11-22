@@ -57,7 +57,7 @@ case "$admin" in
     exit 1;;
 esac
 mint() { openssl rand -hex 32; }
-for key in ADMIN_TOKEN INTERNAL_API_SECRET TINA_FLOWS_API_KEY TINA_FLOWS_TIMELINE_KEY; do
+for key in ADMIN_TOKEN INTERNAL_API_SECRET TINA_FLOWS_API_KEY TINA_FLOWS_TIMELINE_KEY NEXTAUTH_SECRET; do
   if grep -qE "^${key}=[[:space:]]*(\"\"|'')?[[:space:]]*$" "$check_file"; then
     v="$(mint)"
     if [ "$protect_env" -eq 1 ]; then

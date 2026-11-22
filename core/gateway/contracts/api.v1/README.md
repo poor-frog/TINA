@@ -56,6 +56,13 @@ This report field is separate from arbitrary `metadata`, whose merged 16 KiB lim
 Artifact deletion clears the summary and rejects subsequent summary writes. See
 [`meeting-annotation.schema.json`](meeting-annotation.schema.json) for this additive request shape.
 
+The owner-scoped participants read accepts optional `meeting_id` to pin a reused native meeting link
+to one row. Its additive response extension labels provider attendance as `source: "attendance"` and
+reports `observed_roster` as `not_recorded`, `unavailable` or `recorded`. Google Meet attendance
+emails are verified against signed-in account IDs. An incomplete lookup can return verified emails
+with `attendance_retryable: true`. See
+[`meeting-attendance.schema.json`](meeting-attendance.schema.json).
+
 ## Re-verify / re-capture
 
 Compare the frozen document with the local self-hosted gateway to check for drift:

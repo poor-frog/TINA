@@ -165,15 +165,19 @@ class TranscriptStore(Protocol):
         ...
 
     async def get_meeting_participants(
-        self, user_id: int, platform: str, native_meeting_id: str
+        self, user_id: int, platform: str, native_meeting_id: str,
+        meeting_id: Optional[int] = None,
     ) -> Optional[dict]:
-        """OWNER-scoped read of everything 0.12 actually PERSISTS about who was in a meeting.
+        """OWNER-scoped read of the meeting row, invitees and heard speakers.
 
-        Returns ``{"meeting_id": int, "invited": [{email, name?, response_status?}], "speakers": [str]}``,
-        or ``None`` when the caller owns no such meeting (the route maps ``None`` → 404 — never an
-        empty roster, which would leak "this meeting exists but is empty" across a tenant boundary).
+        ``meeting_id`` pins a specific run when a native meeting link has been reused. The returned
+        calendar source IDs and actual start/end times let the route ask the provider for attendance;
+        this port itself never infers attendance from invites or transcript speech.
 
-        Two sources, and they are NOT the same thing:
+        Returns ``None`` when the caller owns no such meeting (the route maps ``None`` → 404 — never
+        an empty roster, which would leak "this meeting exists but is empty" across a tenant boundary).
+
+        Two persisted sources, and they are NOT the same thing:
 
         * ``invited`` — ``meeting.data['attendees']``, the ATTENDEE lines of the calendar invitation
           the meeting was imported from (``calendar_sync.service._attendees``). Real people, silent
@@ -183,10 +187,8 @@ class TranscriptStore(Protocol):
           were heard AND whose name resolved. Not an attendance list: a participant who never spoke,
           or whose platform tile never yielded a name, is absent by construction.
 
-        There is deliberately NO third source, because the 0.12 core captures none: the platform
-        modules observe only tiles that emit a SPEAKING signal, and no producer writes an observed
-        roster to any store (source issue #861). This port must never synthesize one from the two
-        above — inventing attendance from speech is the exact failure #861's preparation forbids."""
+        Provider attendance is resolved separately by an owner-scoped adapter and remains labelled
+        ``attendance``; it is never synthesized from these two sources."""
         ...
 
     async def append_segment(self, meeting_id: int, segment: dict) -> None:

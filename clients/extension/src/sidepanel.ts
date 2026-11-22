@@ -102,7 +102,7 @@ async function refreshBotMeetings(): Promise<void> {
   const scope = `${cfg.botGatewayUrl}|${cfg.apiKey}`;
   $('botNotice').textContent = 'Đang tải cuộc họp…';
   try {
-    const meetings = await listBotMeetings({ botGatewayUrl: cfg.botGatewayUrl, apiKey: cfg.apiKey }, request.signal);
+    const meetings = await listBotMeetings({ botGatewayUrl: cfg.botGatewayUrl, legacyKey: cfg.apiKey }, request.signal);
     if (request.signal.aborted || scope !== `${cfg.botGatewayUrl}|${cfg.apiKey}` || transcriptSource !== 'bot') return;
     botMeetings = meetings;
     if (botMeeting && !meetings.some(meeting => meeting.id === botMeeting!.id)) { resetBot(true); botMeeting = null; }
@@ -142,7 +142,7 @@ function watchSelectedBot(): void {
   resetBot(true); botWatching = true;
   const meeting = botMeeting;
   $('botNotice').textContent = 'Đang kết nối transcript…';
-  botStop = watchBotTranscript({ botGatewayUrl: cfg.botGatewayUrl, apiKey: cfg.apiKey }, meeting,
+  botStop = watchBotTranscript({ botGatewayUrl: cfg.botGatewayUrl, legacyKey: cfg.apiKey }, meeting,
     (rows, status, replies = []) => {
       txSegs = rows; botReplies = replies; $('botNotice').textContent = `#${meeting.id} · ${status} · Đang xem; không thu audio tại máy.`;
       renderBot();
@@ -219,7 +219,7 @@ function gatewayBase(): string {
 let displaySessionId: string | null = null;
 let displayMeetingId: number | null = null;
 const transcriptFeed = createTranscriptFeed($('feed'), $('transcriptTurns'), $('latestBtn') as HTMLButtonElement, {
-  load: (id, signal) => { if (!botMeeting) throw new Error('No Bot meeting'); return readBotVoiceSources({ botGatewayUrl: cfg.botGatewayUrl, apiKey: cfg.apiKey }, botMeeting.id, id, signal); },
+  load: (id, signal) => { if (!botMeeting) throw new Error('No Bot meeting'); return readBotVoiceSources({ botGatewayUrl: cfg.botGatewayUrl, legacyKey: cfg.apiKey }, botMeeting.id, id, signal); },
   url: (id, index) => botBase(cfg.terminalUrl) + `/meetings/${botMeeting!.id}?voiceSource=${encodeURIComponent(id)}#voice-source-${id}-${index}`,
 });
 let feedKey = '';

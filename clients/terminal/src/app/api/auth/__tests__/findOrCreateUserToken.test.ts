@@ -33,6 +33,8 @@ function jsonRes(body: unknown, status = 200): Response {
 
 class FakeAdminApi {
   users = new Map<string, { id: number; email: string }>();
+  googleBindings = new Map<string, number>();
+  googleStatus = 200;
   tokens = new Map<number, FakeTokenInfo[]>();
   calls: Recorded[] = [];
   private nextUserId = 100;
@@ -73,6 +75,15 @@ class FakeAdminApi {
     const method = (init?.method || "GET").toUpperCase();
     const path = u.pathname;
     this.calls.push({ method, path });
+
+    if (path === "/internal/google-login" && method === "POST") {
+      if (this.googleStatus !== 200) return jsonRes({ detail: "Identity unavailable" }, this.googleStatus);
+      const { subject, user_id: userId } = JSON.parse(String(init?.body));
+      if (userId !== undefined) this.googleBindings.set(subject, userId);
+      const boundId = this.googleBindings.get(subject);
+      const user = [...this.users.values()].find(item => item.id === boundId);
+      return user ? jsonRes(user) : jsonRes({ detail: "Google account not linked" }, 404);
+    }
 
     // GET /admin/users/email/{email}
     let m = path.match(/^\/admin\/users\/email\/(.+)$/);
@@ -144,6 +155,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(fake.fetch));
   process.env.TINA_ADMIN_API_URL = "http://admin.test";
   process.env.TINA_ADMIN_API_KEY = "test-admin-key";
+  process.env.TINA_INTERNAL_API_SECRET = "test-internal-key";
   // allowlist configured → the bootstrap-admin internal call short-circuits (no /internal hit)
   process.env.TINA_ADMIN_EMAILS = "owner@example.test";
   process.env.TINA_TERMINAL_LOGIN_TOKEN_CAP = "3";
@@ -153,6 +165,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.TINA_ADMIN_API_URL;
   delete process.env.TINA_ADMIN_API_KEY;
+  delete process.env.TINA_INTERNAL_API_SECRET;
   delete process.env.TINA_ADMIN_EMAILS;
   delete process.env.TINA_TERMINAL_LOGIN_TOKEN_CAP;
 });
@@ -251,5 +264,26 @@ describe("findOrCreateUserToken — bounded login-token minting (#638)", () => {
     const tok = fake.liveTokens(created.id)[0];
     expect(tok.name).toBe("terminal-login");
     expect(tok.scopes).toEqual(["bot", "tx", "browser"]);
+  });
+});
+
+describe("Google sign-in account binding", () => {
+  it("links an unbound Gmail to its existing TINA user without creating a new account", async () => {
+    const user = fake.seedUser("existing@gmail.com");
+    const first = await findOrCreateUserToken(user.email, "verified-subject");
+    expect(first).toMatchObject({ ok: true, user });
+    expect(fake.googleBindings.get("verified-subject")).toBe(user.id);
+    expect(fake.users.size).toBe(1);
+
+    const returning = await findOrCreateUserToken("updated@gmail.com", "verified-subject");
+    expect(returning).toMatchObject({ ok: true, user });
+    expect(fake.users.size).toBe(1);
+  });
+
+  it("stops before looking up an email or minting a token if Google binding validation is unavailable", async () => {
+    fake.seedUser("existing@gmail.com");
+    fake.googleStatus = 503;
+    expect(await findOrCreateUserToken("existing@gmail.com", "verified-subject")).toMatchObject({ ok: false, status: 503 });
+    expect(fake.calls).toEqual([{ method: "POST", path: "/internal/google-login" }]);
   });
 });

@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -41,6 +42,141 @@ def setup(tmp_path, monkeypatch):
 
 
 ROOT = '/api/workspace/meeting-knowledge/1'
+
+def test_meeting_assistant_receives_full_confirmed_context_and_keeps_follow_up_scoped(setup):
+    client, canonical, _, calls = setup
+    first = canonical['segments'][0]
+    canonical['segments'] = [dict(first, segment_id=f'seg-{i}', start_ms=i*1000, end_ms=i*1000+500)
+                             for i in range(70)]
+    payload = {'question': 'Ai gửi demo?', 'assistant': True}
+    assert client.post(ROOT + '/ask', json=payload, headers={'x-user-id': 'stranger'}).status_code == 404
+    assert client.post(ROOT + '/ask', json=payload | {'meeting_ids': [2]}).status_code == 422
+    result = client.post(ROOT + '/ask', json=payload)
+    assert result.status_code == 200, result.text
+    answer = result.json()
+    assert answer['assistant'] is True
+    assert answer['coverage'] == {'selected': 70, 'available': 70, 'bounded': False}
+    assert calls[-1]['mode'] == 'meeting_assistant'
+    assert calls[-1]['sources'][-1]['segment_id'] == 'seg-69'
+    canonical['segments'].append(dict(first, segment_id='fresh', start_ms=71_000, end_ms=72_000))
+    result = client.post(ROOT + '/ask', json=payload | {'question': 'Khi nào?', 'reply_to': answer['id']})
+    assert result.status_code == 200
+    assert calls[-1]['previous_turn']['question'] == 'Ai gửi demo?'
+    assert calls[-1]['sources'][-1]['segment_id'] == 'fresh'
+
+
+def test_notes_preview_uses_only_confirmed_sources_and_does_not_store_an_answer(setup):
+    client, canonical, base, calls = setup
+    source = canonical['segments'][0]
+    canonical['segments'] = [
+        dict(source, segment_id=f'seg-{i}', start_ms=i * 1000, end_ms=i * 1000 + 500)
+        for i in range(45)
+    ]
+    payload = {'question': 'Tóm tắt cuộc họp', 'notes_preview': True}
+    assert client.post(ROOT + '/ask', json=payload, headers={'x-user-id': 'stranger'}).status_code == 404
+    assert client.post(ROOT + '/ask', json=payload | {'documents': ['kg/entities/meeting/abc.md']}).status_code == 422
+    assert not calls
+    result = client.post(ROOT + '/ask', json=payload)
+    assert result.status_code == 200, result.text
+    data = result.json()
+    assert data['notes_preview'] and data['meeting_id'] == 1
+    assert data['coverage'] == {'selected': 40, 'available': 45, 'bounded': True}
+    assert calls[-1]['sources'][-1]['segment_id'] == 'seg-44'
+    assert data['sources'][0]['segment_id'] == 'seg-0'
+    assert not (base / '.meeting-knowledge').exists()
+    canonical['segments'].clear()
+    assert client.post(ROOT + '/ask', json=payload).status_code == 409
+
+
+def test_follow_up_ranks_current_transcript_with_verified_parent_context(setup):
+    client, canonical, _, calls = setup
+    parent = client.post(ROOT + '/ask', json={'question': 'Ai gửi demo?'}).json()
+    canonical['segments'].insert(0, dict(canonical['segments'][0], segment_id='other', text='Chốt ngân sách.'))
+    payload = {'question': 'Người đó là ai?', 'reply_to': parent['id']}
+    assert client.post(ROOT + '/ask', json=payload, headers={'x-user-id': 'stranger'}).status_code == 404
+    assert client.post(ROOT + '/ask', json=payload | {'reply_to': 'a' * 32}).json()['detail']['code'] == 'reply_to_unavailable'
+    assert client.post(ROOT + '/ask', json=payload | {'documents': ['kg/entities/meeting/abc.md']}).status_code == 422
+    assert client.post(ROOT + '/ask', json=payload | {'catch_up': True}).status_code == 422
+    assert len(calls) == 1
+
+    result = client.post(ROOT + '/ask', json=payload)
+    assert result.status_code == 200, result.text
+    answer = result.json()
+    assert answer['question'] == payload['question'] and answer['reply_to'] == parent['id']
+    assert calls[-1]['previous_turn'] == {'question': 'Ai gửi demo?', 'claims': ['Minh gửi demo.']}
+    assert [source['segment_id'] for source in calls[-1]['sources']] == ['seg-1', 'other']
+    assert answer['sources'][0]['segment_id'] == 'seg-1'
+    assert client.get(ROOT + f'/answers/{answer["id"]}').json()['reply_to'] == parent['id']
+
+    canonical['segments'][1]['revision'] = 1
+    assert client.post(ROOT + '/ask', json=payload).json()['detail']['code'] == 'reply_to_stale'
+    assert len(calls) == 2
+
+
+def test_follow_up_refuses_to_save_if_parent_changes_during_inference(setup, monkeypatch):
+    client, canonical, base, _ = setup
+    parent = client.post(ROOT + '/ask', json={'question': 'Ai gửi demo?'}).json()
+    validate = api.validate_answer
+
+    def validate_after_edit(raw, sources):
+        canonical['segments'][0]['revision'] += 1
+        return validate(raw, sources)
+
+    monkeypatch.setattr(api, 'validate_answer', validate_after_edit)
+    failed = client.post(ROOT + '/ask', json={'question': 'Người đó là ai?', 'reply_to': parent['id']})
+    assert failed.status_code == 409 and failed.json()['detail']['code'] == 'reply_to_stale'
+    assert len(list((base / '.meeting-knowledge/1').glob('*.json'))) == 1
+
+
+@pytest.mark.parametrize('ended', [False, True])
+def test_catch_up_uses_only_confirmed_segments_inside_the_requested_minute(setup, monkeypatch, ended):
+    client, canonical, _, calls = setup
+    start = 1_800_000_000_000
+    cutoff = start + 120_000
+    original = api.meeting_get
+
+    def fetch(base, subject, mid, path):
+        row = original(base, subject, mid, path)
+        if path == '/meetings/1':
+            row.update(start_time='2027-01-15T08:00:00Z', status='active')
+            if ended:
+                row.update(end_time='2027-01-15T08:02:00Z', status='completed')
+        return row
+
+    monkeypatch.setattr(api, 'meeting_get', fetch)
+    monkeypatch.setattr(api, 'time', SimpleNamespace(time=lambda: (cutoff + 300_000 * ended) / 1000))
+    canonical['segments'] = [
+        dict(canonical['segments'][0], segment_id=sid, text=sid, start_ms=left, end_ms=right)
+        for sid, left, right in [
+            ('old', 10_000, 20_000),
+            ('crosses-start', 59_000, 61_000),
+            ('latest', cutoff - 9_000, cutoff - 4_000),
+            ('at-start', 60_000, 61_000),
+            ('crosses-end', cutoff - 500, cutoff + 500),
+        ]
+    ]
+    body = {'question': 'Bắt kịp 60 giây', 'catch_up': True}
+    assert client.post(ROOT + '/ask', json=body | {'meeting_ids': [2]}).status_code == 422
+    assert client.post(ROOT + '/ask', json=body, headers={'x-user-id': 'stranger'}).status_code == 404
+    result = client.post(ROOT + '/ask', json=body)
+    assert result.status_code == 200, result.text
+    answer = result.json()
+    assert len(calls) == 1
+    assert [source['segment_id'] for source in calls[0]['sources']] == ['at-start', 'latest']
+    assert answer['sources'][0]['segment_id'] == 'at-start'
+    assert answer['catch_up_window'] == {
+        'start_ms': cutoff - 60_000, 'end_ms': cutoff, 'confirmed_through_ms': cutoff - 4_000,
+        'boundary_omitted': True,
+    }
+    assert client.get(ROOT).json()['answers'][0]['catch_up_window'] == answer['catch_up_window']
+    canonical['segments'][3]['revision'] = 1
+    assert client.post(ROOT + f'/answers/{answer["id"]}/apply').status_code == 409
+
+    canonical['segments'] = canonical['segments'][:1]
+    empty = client.post(ROOT + '/ask', json=body)
+    assert empty.status_code == 409
+    assert empty.json()['detail']['window']['confirmed_through_ms'] == start + 20_000
+    assert len(calls) == 1
 
 
 def document_client(base):
@@ -315,3 +451,21 @@ def test_review_is_explicit_revision_safe_and_invalidated_by_evidence(setup):
     canonical['segments'][0]['speaker_name'] = 'Changed'
     assert client.get(ROOT).json()['facts'][0]['stale'] is True
     assert client.post(ROOT + '/facts/review', json=body | {'expected_revision': 2}).status_code == 409
+
+
+def test_live_notes_projection_only_returns_owner_scoped_facts(setup):
+    client, canonical, _, calls = setup
+    path = ROOT + '?facts_only=true'
+    assert client.get(path, headers={'x-user-id': 'stranger'}).status_code == 404
+    result = client.get(path)
+    assert result.status_code == 200
+    assert set(result.json()) == {'facts'}
+    item = result.json()['facts'][0]
+    body = {'fact_id': item['fact']['id'], 'expected_fingerprint': item['fingerprint'],
+            'expected_revision': 0, 'status': 'discarded', 'text': item['fact']['text']}
+    assert client.post(ROOT + '/facts/review', json=body).status_code == 200
+    assert client.get(path).json()['facts'][0]['review']['status'] == 'discarded'
+    assert client.post(ROOT + '/facts/review', json=body | {'expected_revision': 1, 'status': 'pending'}).status_code == 200
+    assert client.get(path).json()['facts'][0]['review']['status'] == 'pending'
+    assert canonical['segments'][0]['text'] == body['text']
+    assert calls == []

@@ -119,6 +119,10 @@ spec:
               value: {{ .Values.runtime.tolerations | default .Values.global.tolerations | toJson | quote }}
             - name: RUNTIME_K8S_NODE_SELECTOR
               value: {{ .Values.runtime.nodeSelector | default .Values.global.nodeSelector | toJson | quote }}
+            {{- if (.Values.livekit | default dict).enabled }}
+            - name: TINA_MEETING_VOICE_MODELS_VOLUME
+              value: {{ .Values.livekit.modelsClaim | quote }}
+            {{- end }}
             # Per-class sizing for SPAWNED Pods (#1005). A namespace whose policy requires every
             # container to declare CPU/memory requests AND limits rejects an unsized Pod at admission,
             # so both shipped workload classes carry their own — sized independently, since a Chromium

@@ -2,6 +2,7 @@ tinabot.duckdns.org {
     encode zstd gzip
 
     @extension {
+        path /extension-api/auth/me
         path /extension-api/meetings
         path /extension-api/meetings/*
         path /extension-api/bots
@@ -11,6 +12,12 @@ tinabot.duckdns.org {
     }
 
     handle @extension {
+        uri strip_prefix /extension-api
+        reverse_proxy 127.0.0.1:18056
+    }
+
+    @extensionKnowledge path_regexp extensionKnowledge "^/extension-api/agent/workspace/meeting-knowledge/[1-9][0-9]*(/ask|/facts/review|/answers/[a-f0-9]{32}/apply)?$"
+    handle @extensionKnowledge {
         uri strip_prefix /extension-api
         reverse_proxy 127.0.0.1:18056
     }

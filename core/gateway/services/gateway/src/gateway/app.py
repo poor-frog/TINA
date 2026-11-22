@@ -38,6 +38,7 @@ from urllib.parse import quote
 import httpx  # the downstream adapter's transport errors are mapped to 502/504 (not leaked as a 500)
 
 from fastapi import HTTPException, FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
 from . import routes_manifest
 from fastapi.responses import StreamingResponse
@@ -222,6 +223,19 @@ def _required_scopes(request: Request, table=None) -> Optional[FrozenSet[str]]:
 _AUTHORITY_HEADER_PREFIXES = ("x-user-", "x-internal-", "x-tina-internal-")
 _AUTHORITY_HEADER_EXACT = frozenset({"x-admin-api-key", "x-gateway-verified"})
 
+_EXTENSION_ROUTES = {
+    "GET": re.compile(
+        r"/(?:meetings(?:/[1-9]\d*(?:/voice-assistant(?:/sources/[^/]+)?)?)?"
+        r"|transcripts/by-id/[1-9]\d*(?:/processed-notes|/speakers)?"
+        r"|agent/(?:meeting-translations/[1-9]\d*|workspace/meeting-knowledge/[1-9]\d*))"
+    ),
+    "POST": re.compile(
+        r"/(?:bots|agent/(?:meeting-translations/[1-9]\d*|workspace/meeting-knowledge/[1-9]\d*"
+        r"/(?:ask|facts/review|answers/[a-f0-9]{32}/apply)))"
+    ),
+    "DELETE": re.compile(r"/bots/(?:google_meet|teams|zoom)/[^/]+"),
+}
+
 
 def _is_authority_header(name: str) -> bool:
     """True for any header a downstream service reads as AUTHORITY — never forwarded from a client."""
@@ -247,6 +261,7 @@ def create_app(
     admin_api_url: str = _DEFAULT_ADMIN_API_URL,
     mcp_url: str = _DEFAULT_MCP_URL,
     rate_limiter=None,
+    extension_origins: tuple[str, ...] = (),
 ) -> FastAPI:
     """Build the gateway FastAPI app over the injected ports.
 
@@ -283,6 +298,16 @@ def create_app(
     _unscoped = _assembly.unscoped
 
     app = FastAPI(title="TINA API Gateway (v0.12)")
+    if extension_origins:
+        if any(not re.fullmatch(r"chrome-extension://[a-p]{32}", origin) for origin in extension_origins):
+            raise ValueError("TINA_GATEWAY_EXTENSION_ORIGINS requires exact Chrome extension origins.")
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=extension_origins,
+            allow_methods=["GET", "POST", "DELETE"],
+            allow_headers=["X-API-Key", "Content-Type", "Authorization"],
+            allow_private_network=True,
+        )
     # The edge: mint/read X-Trace-Id and bind it for the request (logevent.v1 trace_id).
     app.add_middleware(TraceMiddleware)
 
@@ -325,6 +350,15 @@ def create_app(
         # somewhere else (the MCP transport uses ``Authorization: Bearer``). The resolution, the
         # scope check and the identity injection below are the same for every route.
         client_key = api_key if api_key is not None else request.headers.get("x-api-key")
+        extension = False
+        if not client_key and api_key is None:
+            auth = request.headers.get("authorization", "")
+            match = re.fullmatch(r"Bearer ([A-Za-z0-9_-]{43})", auth, flags=re.IGNORECASE)
+            if match:
+                route = _EXTENSION_ROUTES.get(method)
+                if route is None or not route.fullmatch(request.url.path):
+                    return None, _insufficient_scope_response()
+                client_key, extension = match[1], True
         # Fail-closed: a client route with no key is rejected before any downstream call.
         if not client_key:
             return None, Response(
@@ -334,7 +368,7 @@ def create_app(
             )
 
         try:
-            user_data = await authorizer.resolve(client_key)
+            user_data = await (authorizer.resolve_extension(client_key) if extension else authorizer.resolve(client_key))
         except AuthUnavailable as e:
             # #495: the validation hop is unreachable/faulted — tell the caller the truth (503,
             # retry), never 401. A valid key must not be reported as invalid because we are slow.
@@ -409,7 +443,11 @@ def create_app(
         for h in list(headers):
             if _is_authority_header(h):
                 headers.pop(h, None)
-        headers["x-api-key"] = client_key
+        if extension:
+            headers.pop("authorization", None)
+            headers.pop("x-api-key", None)
+        else:
+            headers["x-api-key"] = client_key
         headers["x-user-id"] = str(user_id)
         # The RESOLVED verified email (never client-declared; /internal/validate returns it). agent-api's
         # membership redeem (Lane M) checks it for RESTRICTED invites (allowed_emails).
@@ -568,6 +606,10 @@ def create_app(
     @app.get("/transcripts/by-id/{meeting_id}/memory")
     async def transcript_memory(meeting_id: int, request: Request):
         return await _forward("GET", _meeting(f"/transcripts/by-id/{meeting_id}/memory"), request)
+
+    @app.get("/transcripts/by-id/{meeting_id}/processed-notes")
+    async def transcript_processed_notes(meeting_id: int, request: Request):
+        return await _forward("GET", _meeting(f"/transcripts/by-id/{meeting_id}/processed-notes"), request)
 
     @app.get("/transcripts/by-id/{meeting_id}/speakers")
     async def speaker_registry(meeting_id: int, request: Request):

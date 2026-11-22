@@ -11,14 +11,15 @@ from pathlib import Path
 from llm import harness_from_env, run_harness_turn, harness_subprocess_env
 
 
-def complete(prompt, system, schema, *, timeout, current):
+def complete(prompt, system, schema, *, timeout, current, meeting_assistant=False):
     if json.loads(os.environ.get('TINA_MOUNTS', 'null')) != []:
         raise RuntimeError('Voice sandbox must not mount account workspaces')
     deadline = time.monotonic() + min(timeout, 40)
     if not current() or deadline <= time.monotonic():
         raise RuntimeError('Voice sandbox turn expired')
-    payload = json.dumps({'prompt': prompt, 'system': system, 'schema': schema,
-                          'model': os.environ.get('TINA_MEETING_MODEL') or os.environ.get('TINA_AGENT_MODEL')}, ensure_ascii=False)
+    model = os.environ.get('TINA_AGENT_MODEL') if meeting_assistant else os.environ.get('TINA_MEETING_MODEL')
+    payload = json.dumps({'prompt': prompt, 'system': system, 'schema': schema, 'meeting_assistant': meeting_assistant,
+                          'model': model or os.environ.get('TINA_AGENT_MODEL')}, ensure_ascii=False)
     if len(payload.encode()) > 500000: raise ValueError('Voice sandbox input too large')
     with tempfile.TemporaryDirectory(prefix='tina-voice-agent-') as directory:
         env = harness_subprocess_env()
@@ -57,9 +58,12 @@ def run(payload, work, harness):
         (work / name).write_text(payload['system'], encoding='utf-8')
     config = work / 'mcp-empty.json'
     config.write_text('{"mcpServers":{}}')
-    prompt = (payload['system'] + '\n\nYou are the read-only TINA voice agent. '
-        'Source-tool calls in the required JSON format are proposals: TINA authorizes and executes '
-        'them, then supplies the results. Use only the supplied evidence and heard conversation. '
+    purpose = ('You are TINA Chat Assistant for this meeting. Use only the supplied evidence. '
+               'Earlier turns help resolve references but are not evidence. '
+               if payload.get('meeting_assistant') else
+               'You are the read-only TINA voice agent. Source-tool calls in the required JSON format are proposals: '
+               'TINA authorizes and executes them, then supplies the results. Use only the supplied evidence and heard conversation. ')
+    prompt = (payload['system'] + '\n\n' + purpose +
         'Do not execute commands, browse directly, edit files, create tasks or infer permissions. '
         'Return only JSON matching this schema:\n' + json.dumps(payload['schema'] or {'type':'object'}) +
         '\n\nUntrusted input:\n' + payload['prompt'])

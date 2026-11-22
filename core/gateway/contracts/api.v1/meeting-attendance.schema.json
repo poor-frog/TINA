@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:api.v1:meeting-attendance",
+  "title": "Meeting participants attendance extension",
+  "description": "Additive response shape for owner-scoped GET /meetings/{platform}/{native_meeting_id}/participants. The optional meeting_id query pins a repeated native link to one meeting row.",
+  "type": "object",
+  "required": [
+    "meeting_id",
+    "platform",
+    "native_meeting_id",
+    "participants",
+    "sources",
+    "observed_roster"
+  ],
+  "properties": {
+    "meeting_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "platform": {
+      "type": "string"
+    },
+    "native_meeting_id": {
+      "type": "string"
+    },
+    "participants": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Participant"
+      }
+    },
+    "sources": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": ["invite", "speaker", "attendance"]
+      }
+    },
+    "observed_roster": {
+      "enum": ["not_recorded", "unavailable", "recorded"]
+    },
+    "attendance_retryable": {
+      "const": true,
+      "description": "An incomplete lookup can be retried. Attendance emails present in this response were verified."
+    }
+  },
+  "$defs": {
+    "Participant": {
+      "type": "object",
+      "required": ["name", "email", "source"],
+      "properties": {
+        "name": {
+          "type": ["string", "null"]
+        },
+        "email": {
+          "type": ["string", "null"],
+          "format": "email"
+        },
+        "source": {
+          "enum": ["invite", "speaker", "attendance"]
+        },
+        "response_status": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "meeting_id": 42,
+      "platform": "google_meet",
+      "native_meeting_id": "abc-defg-hij",
+      "participants": [
+        {"name": "Anna Example", "email": "anna@example.test", "source": "invite"},
+        {"name": null, "email": "ben@example.test", "source": "attendance"},
+        {"name": "Speaker 1", "email": null, "source": "speaker"}
+      ],
+      "sources": ["attendance", "invite", "speaker"],
+      "observed_roster": "recorded"
+    }
+  ]
+}

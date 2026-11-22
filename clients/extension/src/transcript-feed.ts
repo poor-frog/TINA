@@ -4,6 +4,12 @@ import { replyLabel, type VoiceReply, type VoiceSources } from './voice-replies'
 import {formatTranscript} from '../../../packages/transcript-rendering/src/format';
 
 type Segment = TranscriptSegment & { speaker_key?: string; translation?: PhraseTranslation };
+interface PinControls {
+  available: (source: Segment) => boolean;
+  pinned: (id: string) => boolean;
+  busy: (id: string) => boolean;
+  toggle: (source: Segment) => void;
+}
 const identity = (s: Segment): string => s.segment_id || `${s.speaker_key || s.speaker || ''}:${s.absolute_start_time}`;
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag); el.className = className; return el;
@@ -21,10 +27,12 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
 }) {
   const rows = new Map<string, ReturnType<typeof createTurn>>();
   const spans = new Map<string, HTMLSpanElement>();
+  const pinRows = new Map<string, { row: HTMLSpanElement; button: HTMLButtonElement; source: Segment }>();
   const translations = new Map<string, HTMLSpanElement>();
   const originals = new Map<string, HTMLSpanElement>();
   const replyRows = new Map<string, { row: HTMLElement; time: HTMLTimeElement; state: HTMLElement; copy: HTMLElement; note: HTMLElement; sources:HTMLElement }>();
   let following = true;
+  let highlighted: HTMLSpanElement | undefined;
   let sourceAbort: AbortController | undefined, sourceTimer: ReturnType<typeof setTimeout> | undefined;
   let openSources: HTMLDetailsElement | undefined;
   function clearSources() { sourceAbort?.abort(); clearTimeout(sourceTimer); }
@@ -67,11 +75,12 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
     const row = element('article', 'transcript-turn'); row.setAttribute('role', 'listitem');
     const header = element('header', 'turn-header');
     const avatar = element('span', 'speaker-avatar'); avatar.setAttribute('aria-hidden', 'true');
+    const initial = element('span', 'speaker-initial'); avatar.append(initial);
     const name = element('strong', 'speaker-name'), time = element('time', 'turn-time');
     const confirmed = element('p', 'turn-copy'), draft = element('div', 'turn-draft');
     const label = element('span', 'draft-label'), pending = element('p', 'turn-copy');
     header.append(avatar, name, time); draft.append(label, pending); row.append(header, confirmed, draft);
-    return { row, avatar, name, time, confirmed, draft, label, pending };
+    return { row, avatar, initial, photo: undefined as HTMLImageElement | undefined, name, time, confirmed, draft, label, pending };
   }
   function updateLatest() { latest.hidden = following || !root.children.length; }
   function scrollToLatest() { following = true; latest.hidden = true; feed.scrollTop = feed.scrollHeight; }
@@ -81,9 +90,23 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
   }, { passive: true });
   latest.addEventListener('click', scrollToLatest);
   return {
-    reset() { clearSources(); openSources = undefined; rows.clear(); spans.clear(); translations.clear(); originals.clear(); replyRows.clear(); root.replaceChildren(); following = true; latest.hidden = true; feed.scrollTop = 0; },
+    reset() { clearSources(); openSources = undefined; highlighted = undefined; rows.clear(); spans.clear(); pinRows.clear(); translations.clear(); originals.clear(); replyRows.clear(); root.replaceChildren(); following = true; latest.hidden = true; feed.scrollTop = 0; },
     reveal() { if (following) scrollToLatest(); },
-    render(segments: Segment[], draftLabel: string, language: TranscriptLanguage = 'vi', translationGroups: TranslationGroup[] = [], paused = false, replies: VoiceReply[] = []) {
+    focusSegment(id: string): boolean {
+      const span = spans.get(id);
+      if (!span?.isConnected) return false;
+      highlighted?.classList.remove('transcript-source-target');
+      highlighted = span;
+      following = false;
+      span.classList.add('transcript-source-target');
+      span.tabIndex = -1;
+      span.focus({ preventScroll: true });
+      const rect = span.getBoundingClientRect();
+      feed.scrollTop += rect.top - feed.getBoundingClientRect().top - (feed.clientHeight - rect.height) / 2;
+      updateLatest();
+      return true;
+    },
+    render(segments: Segment[], draftLabel: string, language: TranscriptLanguage = 'vi', translationGroups: TranslationGroup[] = [], paused = false, replies: VoiceReply[] = [], pins?: PinControls, photoFor?: (segment: TranscriptSegment) => string | undefined) {
       const selection = document.getSelection?.();
       const selected = selection?.rangeCount && feed.contains(selection.anchorNode) && feed.contains(selection.focusNode)
         ? { anchor: selection.anchorNode!, anchorOffset: selection.anchorOffset, focus: selection.focusNode!, focusOffset: selection.focusOffset } : null;
@@ -91,13 +114,31 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
       const anchor = !following && feed.clientHeight ? Array.from(root.children).find(row => row.getBoundingClientRect().bottom > feed.getBoundingClientRect().top) : undefined;
       const anchorTop = anchor?.getBoundingClientRect().top;
       const displayed = language === 'vi' ? segments : translationSegments(segments, translationGroups);
-      const groups = groupSegments(displayed, { getGroupKey: s => (s as Segment).speaker_key || s.speaker || 'unknown' });
+      const pinSources = pins ? new Map(segments.filter(pins.available).map(segment => [segment.segment_id, segment])) : undefined;
+      const groups = groupSegments(displayed, { getGroupKey: s => (photoFor && s.speaker_id) || (s as Segment).speaker_key || s.speaker || 'unknown' });
       const activeRows = new Set<string>(), activeSpans = new Set<string>();
       const ordered = groups.map(group => {
         const key = identity(group.segments[0]); activeRows.add(key);
         let turn = rows.get(key); if (!turn) { turn = createTurn(); rows.set(key, turn); }
-        const name = group.segments[0].speaker || 'Unknown speaker';
-        text(turn.name, name); text(turn.avatar, group.segments[0].speaker ? Array.from(name)[0].toUpperCase() : '?');
+        const speaker = group.segments[0];
+        const name = speaker.speaker || 'Unknown speaker';
+        text(turn.name, name);
+        text(turn.initial, name === 'Unknown speaker' ? '?' : Array.from(name)[0].toUpperCase());
+        const url = photoFor?.(speaker);
+        if (turn.photo?.src !== url) {
+          turn.photo?.remove();
+          turn.photo = undefined;
+          if (url) {
+            const image = element('img', 'speaker-photo');
+            image.alt = '';
+            image.referrerPolicy = 'no-referrer';
+            image.hidden = true;
+            image.addEventListener('load', () => { image.hidden = false; }, { once: true });
+            image.src = url;
+            turn.photo = image;
+            turn.avatar.append(image);
+          }
+        }
         const date = new Date(group.startTime);
         text(turn.time, Number.isFinite(date.getTime()) ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '');
         if (turn.time.dateTime !== group.startTime) turn.time.dateTime = group.startTime;
@@ -128,7 +169,40 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
             text(original, display.text.trim()); original.hidden = language === 'en' && !!result;
             text(english, `EN  ${result || pendingTranslation}`);
           }
-          (segment.completed === false ? pending : confirmed).push(span);
+          const sourceId = segment.translation?.sourceIds?.find(sourceId => pinSources?.has(sourceId)) ?? segment.segment_id;
+          const source = pinSources?.get(sourceId);
+          let content: HTMLElement = span;
+          if (pins && source?.segment_id) {
+            let item = pinRows.get(id);
+            if (!item) {
+              const row = element('span', 'pinnable-segment');
+              const button = element('button', 'note-pin-toggle');
+              button.type = 'button';
+              button.setAttribute('aria-label', 'Ghim đoạn transcript');
+              const svgNamespace = 'http://www.w3.org/2000/svg';
+              const icon = document.createElementNS(svgNamespace, 'svg');
+              icon.setAttribute('viewBox', '0 0 24 24');
+              icon.setAttribute('aria-hidden', 'true');
+              const head = document.createElementNS(svgNamespace, 'path');
+              head.setAttribute('d', 'M9 3h6v2l-1 1v4l3 3v2H7v-2l3-3V6L9 5z');
+              const point = document.createElementNS(svgNamespace, 'path');
+              point.setAttribute('d', 'M12 15v6');
+              icon.append(head, point);
+              button.append(icon);
+              item = { row, button, source };
+              const action = item;
+              button.addEventListener('click', () => pins.toggle(action.source));
+              pinRows.set(id, item);
+            }
+            item.source = source;
+            if (span.parentElement !== item.row) item.row.replaceChildren(span, item.button);
+            const pinned = pins.pinned(source.segment_id);
+            item.button.setAttribute('aria-pressed', String(pinned));
+            item.button.title = pinned ? 'Bỏ ghim' : 'Ghim';
+            item.button.disabled = pins.busy(source.segment_id);
+            content = item.row;
+          }
+          (segment.completed === false ? pending : confirmed).push(content);
         }
         reconcile(turn.confirmed, confirmed); reconcile(turn.pending, pending);
         turn.confirmed.hidden = !confirmed.length; turn.draft.hidden = !pending.length;
@@ -171,6 +245,7 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
       reconcile(root, ordered);
       for (const key of rows.keys()) if (!activeRows.has(key)) rows.delete(key);
       for (const key of spans.keys()) if (!activeSpans.has(key)) { spans.delete(key); originals.delete(key); translations.delete(key); }
+      for (const key of pinRows.keys()) if (!activeSpans.has(key)) pinRows.delete(key);
       updateLatest();
       const anchoredTop = anchor?.isConnected && anchorTop !== undefined ? oldTop + anchor.getBoundingClientRect().top - anchorTop : oldTop;
       // Moving an unchanged span between paragraph groups clears Chrome's selection.

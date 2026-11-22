@@ -164,7 +164,9 @@ edges:
   meeting-api -write-> postgres  # Persist transient pre-admission retry state atomically with lifecycle status; the single-flight auto-join loop polls due rows. Owner cancellation and retry reopen share the row lock; cancelled, deleted and superseded rows cannot trigger a fresh automatic spawn.
   meeting-api -write-> object-store
   meeting-api -req-> runtime  # POST /workloads spawn bot
-  meeting-api -req-> admin-api  # GET /internal/calendar-configs discovers secret-gated ICS/Google calendar connections; decrypts Google refresh tokens only for Meeting API sync and sends tombstones for cleanup
+  meeting-api -req-> admin-api  # GET /internal/calendar-configs discovers secret-gated ICS/Google calendar connections; decrypts Google refresh tokens for Meeting API calendar sync and owner-scoped Meet attendance lookup; sends tombstones for cleanup
+  meeting-api -call-> google-meet-api  # Use the owner's Google OAuth grant to read signed-in participant IDs for the single conference matching the room code and bot admission time.
+  meeting-api -call-> google-people-api  # Resolve Meet account IDs to verified emails from the corresponding Google account or profile. Meeting API can return a partial set of verified addresses and signal Flows to retry.
   meeting-api -req-> service-authority  # optional signed service-authority.v1 admit/continue decision; unset is explicit OSS allow-all, configured failure is closed
   meeting-api -req-> system-webhook  # optional signed terminal webhook.v1 delivery to a boot-frozen operator destination; customer webhook SSRF policy remains separate
   agent-api -read-> segments-stream  # XREADGROUP agent_copilot (proactive watcher)
@@ -189,7 +191,7 @@ edges:
   dashboard -req-> gateway  # dashboard → gateway REST (hosted-compat aliases; the hosted-proven wiring)
   dashboard -req-> gateway  # dashboard → gateway /ws (live transcript view)
   slim -req-> gateway  # Python client; REST via gateway
-  extension -req-> gateway  # read-only authenticated Bot transcript list and exact-row snapshots
+  extension -req-> gateway  # The signed-in extension uses a TINA bearer session or an API key validated by Gateway GET /auth/me; credentials are held in extension-owned IndexedDB, and signing out of the API key clears the local credential. Authenticated Bot list and exact-row transcript reads, explicit Bot stop, and owner-scoped Meeting Knowledge in the Google Meet panel. Ask TINA reads history, submits questions and applies Wiki changes explicitly. Notes reads live transcript candidates and records explicit reviews through the same Gateway.
   extension -req-> desktop  # read-only Desktop archive listing and exact transcript snapshots; opens the saved review page
   flows-worker -write-> flows-rows
   flows-api -write-> flows-rows  # the second writer, recorded because it is real: POST /events admits a fact in the API process (flows_integrations/flows_api.py → flows.admit → INSERT INTO reaction) and the registry writes flow_version there too. The chart carried only flows-worker, so the one shared carrier in this domain read as single-writer
@@ -238,7 +240,7 @@ edges:
   meeting-api -write-> speech-playback  # Meeting API alone owns the ephemeral Redis playback state.
   agent-api -write-> meeting-translation-cache  # Owner-scoped SQLite phrase cache, revision-bound attempts, live-tail observations, atomic job leases and owner service cooldown generations. HTTP access reauthorizes canonical transcript and meeting status; completion reloads source/access before publishing a result.
   terminal-app -call-> agent-api  # Authenticated English/bilingual view reads and advances the shared translation overlay; original ASR remains independent.
-  extension -call-> agent-api  # Meeting Bot viewer requests the same gateway-authorized translation cache; provider secrets remain server-side.
+  extension -call-> agent-api  # TINA Viewer and the Google Meet in-call panel share the same gateway-authorized translation cache; provider secrets remain server-side.
   terminal-app -call-> asr-control  # Authenticated account-only ASR start/stop and safe resource status through Terminal proxy; private derived host key.
   asr-control -call-> admin-api  # Internal account preference CAS and aggregate enabled demand; no user list or credential projection.
   asr-control -call-> transcription  # Authenticated real audio readiness and derived-key drain fencing before owned process/container stop.
@@ -260,7 +262,7 @@ edges:
   agent-worker -call-> agent-reach  # Explicit voice public query or granted interactive read-only MCP tool; no room transcript/history/model keys are sent.
   agent-reach -call-> public-content-providers  # Public requests to fixed hosted Exa/Jina or anonymous GitHub REST endpoints; no private credentials or workspace access.
   livekit-agent -call-> transcription  # Signed session-bound audio capability pins the existing selected ASR endpoint/model/token. Standalone SDK STT forwards bounded WAV windows and original response offsets/timings for both transcript and voice. No LLM invocation or canonical writes on continuous audio.
-  flows-worker -call-> mail-relay  # Individual post-meeting thank-you emails via the notify port, selecting the mailbox SMTP adapter or Resend SMTPS adapter.
+  flows-worker -call-> mail-relay  # Individual post-meeting thank-you emails via the notify port; Google Meet recipients are resolved actual attendees, while other providers retain invite-based recipients.
   bot, agent-worker deployed-in runtime
   gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription, asr-control deployed-in deploy
   flows-api, flows-worker deployed-in deploy

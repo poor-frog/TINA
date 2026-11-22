@@ -40,77 +40,66 @@ See the [extension guide](clients/extension/README.md),
 
 ## ⚡ Quickstart
 
-This checkout starts the configured `tina-production` deployment with automatic GPU selection for VieGem: native MPS on Apple Silicon, or Docker CUDA on Windows/WSL2 with NVIDIA GPU support. Gipformer stays in Docker on CPU. On macOS,
-start OrbStack or Docker Desktop first. You need Docker Engine 26+, Compose with `up --wait`, Python
-3.10+, `make`, and the private Dotenvx key that matches this repository's encrypted config.
-
-### 1. Clone the repository
+Start Docker Engine 26+ with a Compose version that supports `up --wait`. You also need
+Python 3.10+, Git, Bash, Make, and OpenSSL. On macOS, start OrbStack or Docker Desktop first.
+On Windows, run the commands in WSL2 with Docker integration enabled.
 
 ```bash
 git clone https://github.com/poor-frog/TINA.git
 cd TINA
 ```
 
-### 2. Install Dotenvx
+### Set up Google sign-in
 
-On macOS, use the official Homebrew tap:
+In [Google Auth Platform](https://console.cloud.google.com/auth/clients), create a **Web application**
+OAuth client. Add `http://127.0.0.1:13000/api/auth/callback/google` as an authorized redirect URI.
+If you change the port or hostname, use the same origin in the browser, in `NEXTAUTH_URL`, and in the
+Google redirect URI. Basic Google sign-in works for external apps in **Testing** with the standard
+identity scopes. For optional Google Calendar and Meet access in Testing, add the account under
+**Audience → Test users**. A friend running their own instance can create their own OAuth client.
+[Google OAuth setup](https://developers.google.com/identity/protocols/oauth2/web-server)
+· [Google app audience](https://support.google.com/cloud/answer/15549945)
 
-```bash
-brew tap dotenvx/brew
-brew trust dotenvx/brew
-brew install dotenvx
-```
-
-Or install the CLI with npm: `npm install --global @dotenvx/dotenvx`.
-
-### 3. Add the matching private key
-
-Get the existing `.env.keys` file from your private password manager or secure backup and place it at
-the repository root. It must contain the `DOTENV_PRIVATE_KEY` matching `deploy/compose/.env`. The
-file is ignored by Git and must never be committed or pasted into documentation, shell commands, or
-chat. A newly generated key will not decrypt this repository's config.
-
-Optional speech/TTS has its own encrypted env, protected by that same root key; see
-[`deploy/tts/README.md`](deploy/tts/README.md#setup-on-another-machine-ubuntuwsl-or-linux).
-
-### 4. Preview and start TINA
+Create the local configuration if it is missing, then use your editor to fill in `GOOGLE_CLIENT_ID`
+and `GOOGLE_CLIENT_SECRET`.
 
 ```bash
-chmod 600 .env.keys
-make plan     # read-only: check project, profiles and native_viegem
-make all      # install models, build services, start and verify ASR
+(umask 077; test -e deploy/compose/.env || cp deploy/compose/.env.example deploy/compose/.env)
 ```
 
-`TINA_VIEGEM_DEVICE=auto` is the default. `make plan` shows the proposed `viegem_device` without starting workers; `make all` verifies the actual GPU before changing running services:
+To encrypt this configuration at rest, install [dotenvx](https://dotenvx.com/docs/install) and run
+these commands from the repository root:
 
-| Host | VieGem acoustic model | KenLM / FSMN-VAD |
-|---|---|---|
-| Mac Apple Silicon | Native PyTorch MPS, managed LaunchAgent | CPU |
-| Windows through WSL2 / Linux with NVIDIA | Docker CUDA, pinned CUDA 13.0 PyTorch wheels | CPU |
-
-Windows commands must run inside WSL2 with Docker Desktop's Linux/WSL integration and the NVIDIA Windows driver configured. A native Windows Python/PowerShell deployment is not supported. Driver installation remains an operator prerequisite. A failed GPU/driver/kernel check stops deployment; there is no automatic CPU fallback. `TINA_VIEGEM_DEVICE=cpu make all` is an explicit optional CPU deployment.
-
-On Mac, `make all` installs missing uv/cmake through Homebrew, creates native Python 3.11, checks MPS computation and downloads/verifies the pinned assets. It stops this project's old VieGem CPU container before starting the owned MPS LaunchAgent on port 18005. Other checkouts' workers are preserved. On WSL2, it verifies NVIDIA access, builds the CUDA image, tests an actual CUDA operation and prepares cached model assets before application activation. Both paths require an authenticated audio probe before access is provisioned.
-
-The `asr` profile independently prepares Gipformer assets and starts its CPU container on 18002. Model weights and private dotenvx keys stay outside Git; keys are not mounted into inference containers. `make all` retains database, recordings and workspaces. A fresh transcription registry gets VieGem as its default; existing global and personal preferences remain unchanged.
-
-The shared config enables `automation,asr,dashboard,viegem`. The entrypoint resolves that feature to the appropriate runtime; Mac's active Docker profiles exclude the VieGem container when MPS is selected. Terminal stays on 23000 and the API gateway on 28056. `make down` also stops/removes the owned native MPS LaunchAgent, retaining model files. Terminal retires the unneeded ASR worker only after all enabled accounts and active local sessions release it; see account-scoped control below.
-
-Open Terminal after the command reports ready:
-
-```text
-  Terminal UI : http://127.0.0.1:23000
-  API gateway : http://127.0.0.1:28056
+```bash
+dotenvx encrypt -f deploy/compose/.env
+chmod 600 deploy/compose/.env deploy/compose/.env.keys
 ```
 
-Google OAuth credentials are already in the encrypted deployment config; on an empty database, the
-first successful sign-in becomes administrator. Keep the API key printed by `make all` private.
+Keep the generated `deploy/compose/.env.keys` in your private backup. Each install has its own OAuth
+configuration and stack secrets. Both local files are ignored by Git.
 
-This is the existing `tina-production` deployment, not a clean-install recipe. If you do not have
-its matching private key, ask the owner for it through a secure channel. To create a separate local
-instance with new volumes instead, follow the [fresh-install guide](deploy/compose/bin/README.md#first-installation-cli-040).
-See the [VieGem guide](deploy/transcription/viegem/README.md) for the native worker and the [Gipformer guide](deploy/transcription/gipformer/README.md) for its Docker service. MPS is verified on this Apple Silicon Mac. CUDA configuration and failure paths are tested; a real NVIDIA/WSL2 run is still required for hardware validation.
+### Start TINA
 
+```bash
+make all
+```
+
+If OrbStack is running and Docker points at another context, use `DOCKER_CONTEXT=orbstack make all`.
+On a fresh checkout, `make all` creates the local env from the template if needed, generates stack
+secrets including `NEXTAUTH_SECRET`, builds the images, and starts the services. Open
+[Terminal](http://127.0.0.1:13000) and choose **Sign in with Google**. The first successful sign-in
+on a new instance becomes administrator. To connect the browser extension,
+follow the [local extension setup](clients/extension/README.md#connect-to-local-compose).
+
+Set up a transcription backend and Agent model in **Settings → Models** to use live transcription
+and Ask TINA. For a local CPU backend, see [Gipformer](deploy/transcription/gipformer/README.md).
+For native Apple Silicon MPS or Docker CUDA on Linux/WSL2, see
+[VieGem](deploy/transcription/viegem/README.md). Wake word and spoken replies require a TTS token and
+trained artifacts. See [meeting voice setup](deploy/compose/README.md#meeting-voice).
+
+If you already run TINA from a checkout that tracks `deploy/compose/.env`, back up that file and
+its matching `.env.keys` before pulling the update. Restore the env file at the same path to keep
+your deployment settings and volumes.
 
 ## ASR start/stop by account
 

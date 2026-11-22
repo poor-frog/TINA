@@ -18,8 +18,10 @@ import { authOptions } from "../[...nextauth]/authOptions";
 
 const callback = authOptions.callbacks!.signIn!;
 function signIn(provider = GOOGLE_CALENDAR_PROVIDER) {
+  const profile = { sub: "google-id", email: "linked@example.test", email_verified: true };
   return callback({
     user: { id: "other-google-user", email: "linked@example.test" },
+    profile,
     account: { provider, type: "oauth", providerAccountId: "google-id",
       scope: GOOGLE_CALENDAR_SCOPES.join(" "), access_token: "synthetic-access", refresh_token: "synthetic-refresh" },
   });

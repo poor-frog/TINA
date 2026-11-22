@@ -239,6 +239,19 @@ def build_production_app():
         from .calendar_sync import read_stamp
         return await read_stamp(redis_client, user_id, calendar_id)
 
+    async def _attendee_email_lookup(user_id: int, meeting: dict):
+        admin_api_url = (os.getenv("ADMIN_API_URL") or "").rstrip("/")
+        internal_secret = os.getenv("INTERNAL_API_SECRET") or ""
+        if not (admin_api_url and internal_secret):
+            return None, False
+        from .calendar_sync.adapters import fetch_configs
+        from .calendar_sync.attendance import lookup_google_meet_attendees
+
+        configs = await fetch_configs(admin_api_url, internal_secret, timeout_s=5.0)
+        if configs is None:
+            return None, True
+        return await lookup_google_meet_attendees(user_id, meeting, configs)
+
     app = create_app(
         transcript_store=transcript_store,
         redis=segment_bus,
@@ -257,6 +270,7 @@ def build_production_app():
         transcript_finalizer=_transcript_finalizer,
         calendar_sync_now=_calendar_sync_now,
         calendar_sync_status=_calendar_sync_status,
+        attendee_email_lookup=_attendee_email_lookup,
     )
 
     _attach_background_loops(

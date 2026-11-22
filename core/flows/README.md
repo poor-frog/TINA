@@ -4,10 +4,13 @@
 
 New `meeting.completed` events use `post_meeting` version 5. Once the existing summary job succeeds,
 `email_meeting_followup` saves its report as the bounded meeting annotation `data.summary`, then
-sends a Vietnamese thank-you email with separate summary and recording links. Each calendar/invite
-email is notified individually, including other domains. Duplicates, declined invitations, invalid
-addresses and the service mailbox are excluded. No participant emails are inferred from speaker
-names; an ad hoc meeting without stored invite emails can notify only its owner.
+sends a Vietnamese thank-you email with separate summary and recording links. Non-Google-Meet
+meetings keep invite-based recipients. Google Meet uses the provider's attended roster and resolves
+signed-in participants by Google account ID and verified provider email. Anonymous, phone and
+unresolved accounts are omitted. If Meet attendance is unavailable, only the owner may receive the
+report. Temporary lookup failures use the existing bounded flow retry after sending to any verified
+recipients. Confirmed sends are kept across retries. Duplicates, invalid addresses and the service
+mailbox are excluded.
 
 The report has a separate 6000-character field so a Vietnamese summary cannot consume the existing
 16 KiB metadata budget. Meeting lookup uses the row-id detail endpoint rather than the first list
@@ -52,11 +55,9 @@ Legacy notices remain plain text.
 The default `TINA_NOTIFY_CHANNEL=smtp` uses `smtp.gmail.com:465` with SSL and authenticates with
 `TINA_MAIL_ADDR` plus `TINA_MAIL_APP_PASSWORD`. Enable Google 2-Step Verification and create a
 [Gmail App Password](https://support.google.com/accounts/answer/185833); the regular account
-password is not the SMTP credential. The shared MVP mailbox values in `deploy/compose/.env` are
-encrypted with the deployment's existing dotenvx public key. Authorized team members need the
-matching `.env.keys`, distributed privately, to decrypt them; `git pull` does not supply that key.
-The SMTP update reuses the existing key pair. Never commit plaintext credentials or `.env.keys`,
-and keep `.env.example` free of real credentials.
+password is not the SMTP credential. Set the mailbox values in your instance's private
+`deploy/compose/.env`. Encrypt it with dotenvx if you use that workflow, and keep the matching
+`.env.keys` in your private backup. Keep `.env.example` free of real credentials.
 
 Leave `TINA_MAIL_SMTP_HOST` empty for Gmail. Setting that key selects the existing plain,
 unauthenticated relay transport; `TINA_MAIL_SMTP_PORT` only applies to that relay. Recreate the

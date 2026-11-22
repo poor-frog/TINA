@@ -403,6 +403,52 @@ terminal:
   # do not add duplicate GOOGLE_CLIENT_* entries here.
   extraEnv: []
 
+# Optional meeting tools through the Gateway's /mcp endpoint.
+mcp:
+  enabled: false
+  image:
+    repository: tina/v012-mcp
+    tag: v012
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+
+# Public web and GitHub retrieval on the cluster network.
+agentReach:
+  enabled: false
+  image:
+    repository: tina/agent-reach
+    tag: dev
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+
+# Private Vietnamese speech synthesis. Prepare the model PVC and credentials before enabling.
+tts:
+  enabled: false
+  image:
+    repository: tina/tts
+    tag: dev
+  modelsClaim: ""
+  existingSecret: "" # TTS_API_TOKEN and TINA_TTS_PROFILE_KEY
+  resources:
+    requests: { cpu: 250m, memory: 1Gi }
+    limits:   { cpu: 2, memory: 3Gi }
+
+# Local meeting voice. The server and agent communicate on the cluster network.
+livekit:
+  enabled: false
+  serverImage: livekit/livekit-server:v1.13.11
+  agentImage: tina/livekit-agent:dev
+  modelsClaim: ""
+  existingSecret: "" # LIVEKIT_KEYS, LIVEKIT_API_KEY and LIVEKIT_API_SECRET
+  serverResources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 1, memory: 512Mi }
+  agentResources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 2, memory: 1Gi }
+
 # DEPRECATED, OFF BY DEFAULT — the 0.10 dashboard as an opt-in component (#813). Hosted production
 # still runs this UI against the 0.12 core, and the authenticated-session / browser-session flows
 # are only walkable through it today; shipping it pinned here puts the UI users actually see back

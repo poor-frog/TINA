@@ -12,7 +12,7 @@
   "core/agent/contracts/unit.v1": "21728526bd5b7a5732e9681e4dd66252d1731cdf31523b4bc6fbd7d546414dc3",
   "core/agent/contracts/workspace.v1": "f5c9a7630e03a69b6b7265e66f9d84e4fec4e25f92830a9d0d3071be65ba4e7d",
   "core/flows/contracts/flows.v1": "31b59e4ee11729c65313e1fb440a1472e969f2030bfadeb5a59143f0c2d86522",
-  "core/gateway/contracts/api.v1": "61e2becaaa0c0aca1642a8aa8643342f806828cae69431c1d22c8f68cf858e16",
+  "core/gateway/contracts/api.v1": "1bb39352b4b6f4cb1f4dd5a270a0e5b05fd310e24c46d919dda3764ed3039513",
   "core/gateway/contracts/logevent.v1": "ab4b65305aa58f9e385998439062b5145b353ad6918783f168d54fa74c992cea",
   "core/gateway/contracts/ws.v1": "9fd89f5fe27e2d8ca7d7a11e6d3ab0d9c94d3bd37bda61866d91530a3b9e6e4c",
   "core/identity/contracts/identity.v1": "bff18beb068e7a23a568bab0d157df89f78d4deda0f5e432c8c0b0f2024b4276",
