@@ -54,8 +54,8 @@ def send(ctx):
                         rows = roster.get("participants")
                         attendees = [p.get("email") for p in rows if isinstance(p, dict)
                                      and p.get("source") == "attendance"] if isinstance(rows, list) else []
-            except StepError:
-                attendance_retryable = True
+            except StepError as error:
+                attendance_retryable = error.retryable
             for attendee in attendees:
                 address = _address(attendee)
                 if address and address not in participants:
@@ -73,7 +73,9 @@ def send(ctx):
             if address and address not in declined and address not in participants:
                 participants.append(address)
     mailbox = _address(mailtext.mailbox_address())
-    participants = [a for a in participants if a != mailbox]
+    allowed_domains = common.attendee_domains(ctx, organizer)
+    participants = [a for a in participants if a != mailbox
+                    and (a == organizer or a.rsplit("@", 1)[-1] in allowed_domains)]
     recipients = [organizer] if organizer in participants and common.setting(uid, "mail_minutes") else []
     if attendee_followup_on:
         recipients.extend(a for a in participants if a != organizer)

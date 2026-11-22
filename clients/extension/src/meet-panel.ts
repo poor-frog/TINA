@@ -5,7 +5,7 @@ import { meetAvatarUrl } from './meet-avatars';
 import type { TranscriptSegment } from './transcript-rendering';
 import type { VoiceReply } from './voice-replies';
 import { watchTranslation, type TranscriptLanguage, type TranslationSnapshot } from './translation';
-import { currentGoogleMeetBot, isTerminalBotStatus } from './meet-panel-state';
+import { currentGoogleMeetBot, isOwnedActiveBot, isTerminalBotStatus } from './meet-panel-state';
 import { createVoiceActivity } from './voice-activity-view';
 import { createMeetAsk, requestNotesPreview } from './meet-ask';
 import { createMeetFacts } from './meet-facts';
@@ -69,13 +69,16 @@ function setBotStatus(message: string, state: 'loading' | 'active' | 'joining' |
   status.dataset.state = state;
 }
 
+function hasStoppableBot(): boolean {
+  return isOwnedActiveBot(selected) || sendBotState === 'sent';
+}
+
 function renderFooterActions(): void {
   const send = $('sendBot') as HTMLButtonElement;
   const stop = $('stopBot') as HTMLButtonElement;
-  const active = !!selected && !isTerminalBotStatus(selected.status);
   const sending = sendBotState === 'sending';
-  const canStop = active || sendBotState === 'sent' || stopping;
-  const stopPending = stopping || selected?.status.toLowerCase() === 'stopping';
+  const canStop = !!config.account && (hasStoppableBot() || stopping);
+  const stopPending = stopping || (isOwnedActiveBot(selected) && selected?.status.toLowerCase() === 'stopping');
   send.hidden = canStop || !config.account;
   $('signIn').hidden = !!config.account;
   $('signOut').hidden = !config.account;
@@ -87,6 +90,7 @@ function renderFooterActions(): void {
   send.setAttribute('aria-busy', String(sending));
   send.title = !config.account ? 'Đăng nhập TINA để gửi Bot.' : 'Gửi TINA Bot vào Google Meet hiện tại.';
   stop.hidden = !canStop;
+  if (!canStop) $('stopConfirm').hidden = true;
   stop.disabled = !config.account || stopPending;
   stop.textContent = stopPending ? 'Đang dừng…' : 'Stop TINA Bot';
   stop.title = 'Stop TINA Bot in this meeting.';
@@ -113,7 +117,7 @@ function safeTerminalUrl(path: string): string {
 }
 
 async function sendBot(): Promise<void> {
-  if (!validMeetId || !config.account || sendBotState === 'sending' || selected && !isTerminalBotStatus(selected.status)) return;
+  if (!validMeetId || !config.account || sendBotState === 'sending' || stopping || hasStoppableBot()) return;
   if (sendBotResetTimer) clearTimeout(sendBotResetTimer);
   const account = config.account;
   sendBotState = 'sending';
@@ -141,7 +145,7 @@ async function sendBot(): Promise<void> {
     }
     void connect();
     sendBotResetTimer = setTimeout(() => {
-      if (sendBotState === 'sent' && (!selected || isTerminalBotStatus(selected.status))) {
+      if (sendBotState === 'sent' && !isOwnedActiveBot(selected)) {
         sendBotState = 'idle';
         setFooterStatus('');
         renderFooterActions();
@@ -366,19 +370,19 @@ function watch(meeting: BotMeeting, token: number): void {
     segments = rows; replies = nextReplies;
     void syncSpeakerLinks(meeting.id, rows);
     voiceActivityView.update(voiceStatus, isTerminalBotStatus(nextStatus));
-    if (!isTerminalBotStatus(nextStatus) && sendBotState === 'sent') {
+    if (isOwnedActiveBot(selected) && sendBotState === 'sent' && !stopping) {
       sendBotState = 'idle';
       sendBotMessage = '';
       if (sendBotResetTimer) clearTimeout(sendBotResetTimer);
     }
-    if (isTerminalBotStatus(nextStatus) && stopping) {
+    if (!meeting.shared && isTerminalBotStatus(nextStatus) && stopping) {
       sendBotState = 'idle';
       sendBotMessage = '';
       stopping = false;
     }
     const current = statusForMeeting(nextStatus);
-    setBotStatus(stopping && !isTerminalBotStatus(nextStatus) ? 'Đang dừng Bot' : current.label,
-      stopping && !isTerminalBotStatus(nextStatus) ? 'stopping' : current.state);
+    const ownedStopping = stopping && isOwnedActiveBot(selected);
+    setBotStatus(ownedStopping ? 'Đang dừng Bot' : current.label, ownedStopping ? 'stopping' : current.state);
     if (isTerminalBotStatus(nextStatus)) { stopWatching(); stopWatching = () => {}; }
     render();
     if (activePanelView === 'notes') {
@@ -832,6 +836,9 @@ async function connect(): Promise<void> {
       return;
     }
     watch(meeting, token);
+    if (sendBotState === 'sent' && !isOwnedActiveBot(meeting)) {
+      retryTimer = setTimeout(() => { if (sendBotState === 'sent' && !stopping) void connect(); }, 5000);
+    }
   } catch (error) {
     if (controller.signal.aborted || token !== scope) return;
     voiceActivityView.update(null);
@@ -844,21 +851,19 @@ async function connect(): Promise<void> {
 }
 
 async function requestStop(): Promise<void> {
-  if (stopping || (!selected && sendBotState !== 'sent')
-      || selected && isTerminalBotStatus(selected.status) && sendBotState !== 'sent') return;
-  const meeting = selected ?? { platform: 'google_meet', nativeMeetingId: meetId };
+  if (!config.account || stopping || !hasStoppableBot()) return;
   const account = config.account;
   stopping = true; render();
   try {
-    await stopBotMeeting(config, meeting);
+    await stopBotMeeting(config, { platform: 'google_meet', nativeMeetingId: meetId });
     if (config.account?.key !== account?.key) return;
-    if (selected && !isTerminalBotStatus(selected.status)) selected = { ...selected, status: 'stopping' };
+    if (selected && isOwnedActiveBot(selected)) selected = { ...selected, status: 'stopping' };
     else {
       sendBotState = 'idle';
       stopping = false;
       setFooterStatus('Đã gửi yêu cầu dừng TINA Bot.');
     }
-    setBotStatus(stopping ? 'Bot đang dừng' : 'Bot đã dừng', stopping ? 'stopping' : 'ended');
+    if (!selected?.shared) setBotStatus(stopping ? 'Bot đang dừng' : 'Bot đã dừng', stopping ? 'stopping' : 'ended');
   } catch (error) {
     if (config.account?.key !== account?.key) return;
     stopping = false;

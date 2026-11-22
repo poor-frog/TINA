@@ -1029,13 +1029,9 @@ def build(reg: Registry, db) -> None:
     def _attendees(ctx) -> list:
         """Inside-domain attendees, minus the organizer. PRD §16.2: outside the domain, NEVER —
         so an unset allow-list means the organizer's own domain, not everyone."""
-        import os
         org = (ctx.refs.get("organizer") or "").lower()
         raw = ctx.refs.get("participants") or []
-        allow = (ctx.flow.param("attendee_domains") if ctx.flow else None) or \
-            [d for d in os.environ.get("TINA_FLOWS_ATTENDEE_DOMAINS", "").split(",") if d] or \
-            ([org.split("@")[-1]] if "@" in org else [])
-        allow = {d.strip().lower().lstrip("@") for d in allow if d}
+        allow = _common.attendee_domains(ctx, org)
         out = []
         for a in raw:
             a = str(a).strip().lower()

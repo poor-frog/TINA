@@ -111,7 +111,7 @@ function failBot(key: string, message = 'Bot failed. You can send it again.'): v
 function syncFailedBotState(): void {
   if (!activeMeeting || (sendBotState?.phase === 'sending' || sendBotState?.phase === 'cancelling')) return;
   const key = botTargetKey(activeMeeting);
-  const latest = meetings.filter(row => row.platform === activeMeeting!.platform
+  const latest = meetings.filter(row => !row.shared && row.platform === activeMeeting!.platform
     && row.nativeMeetingId === activeMeeting!.nativeMeetingId).sort((a, b) => b.startMs - a.startMs)[0];
   const retry = latest?.autoRetry;
   if (retry && (retry.state === 'scheduled' || retry.state === 'in_progress' && retry.attempt > 1)) {
@@ -362,7 +362,7 @@ function watchMeeting(meeting: BotMeeting, token: number): void {
     if (!TERMINAL_MEETING_STATUSES.has(meeting.status) && TERMINAL_MEETING_STATUSES.has(status)) {
       meetings = meetings.map(row => currentKey(row) === currentKey(meeting) ? { ...row, status } : row);
       const key = `${meeting.platform}|${meeting.nativeMeetingId}`;
-      if (status === 'failed') failBot(key);
+      if (status === 'failed' && !meeting.shared) failBot(key);
       returnToMeetingHome(status === 'failed'
         ? 'The bot failed. Select the meeting from the list to inspect its saved transcript.'
         : 'Meeting ended. Select it from the list to review the saved transcript.');
@@ -443,7 +443,7 @@ function selectMeeting(): void {
 }
 
 function selectBotTranscript(target: BotTarget): void {
-  const meeting = meetings.filter(row => row.platform === target.platform && row.nativeMeetingId === target.nativeMeetingId)
+  const meeting = meetings.filter(row => !row.shared && row.platform === target.platform && row.nativeMeetingId === target.nativeMeetingId)
     .sort((a, b) => b.startMs - a.startMs)[0];
   if (!meeting) return;
   if (TERMINAL_MEETING_STATUSES.has(meeting.status)) {

@@ -18,6 +18,20 @@ import flows_config
 # out of this module's import graph for every caller that only wants `http` or a door.
 from flows import StepError
 
+
+def attendee_domains(ctx, organizer: str) -> set[str]:
+    """Resolve the outbound domain policy for both follow-up flow versions."""
+    configured = ctx.flow.param("attendee_domains") if ctx.flow else None
+    if not configured:
+        return flows_config.domains("TINA_FLOWS_ATTENDEE_DOMAINS", organizer if "@" in organizer else "")
+    if isinstance(configured, str):
+        configured = configured.split(",")
+    if not isinstance(configured, (list, tuple)):
+        return set()
+    return {domain.strip().lower().lstrip("@") for domain in configured
+            if isinstance(domain, str) and domain.strip().lstrip("@")}
+
+
 #: The agent domain's door, or "" when the agent domain is not deployed (PRD decision 40.7). Read
 #: through the contract, which declares it a CAPABILITY rather than a defaulted URL — see
 #: `flows_config`'s DOORS block for why a host-port default is a correctness bug and not a

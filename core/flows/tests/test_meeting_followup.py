@@ -1,3 +1,4 @@
+from dataclasses import replace
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -23,6 +24,7 @@ def world(registry, monkeypatch):
     monkeypatch.setattr(common, "user_api_key", lambda *_: "test-key")
     monkeypatch.setenv("TINA_MAIL_ADDR", "tina@bank.test")
     monkeypatch.setenv("TINA_UI_URL", "https://app.test")
+    monkeypatch.setenv("TINA_FLOWS_ATTENDEE_DOMAINS", "outside.test")
     monkeypatch.setattr(mailtext, "ws_file", lambda *_: None)
 
     def http(method, url, headers, body=None):
@@ -44,7 +46,7 @@ def world(registry, monkeypatch):
     return reg, channel, ctx, writes, shares
 
 
-def test_all_known_emails_get_thanks_and_two_working_meeting_links(world):
+def test_allowed_emails_get_thanks_and_two_working_meeting_links(world):
     reg, channel, ctx, writes, shares = world
     result = reg.steps["email_meeting_followup"](ctx)
     assert isinstance(result, Done) and result.result["sent"] == 2
@@ -71,6 +73,18 @@ def test_all_known_emails_get_thanks_and_two_working_meeting_links(world):
                                "attempted_at": 1700000000, "result": result.result}, ctx.refs)
     assert event.kind == "report.delivered"
     assert event.produced["message_id"].startswith("<fake-")
+
+
+@pytest.mark.parametrize("flow_override", [False, True])
+def test_attendee_domain_policy_blocks_mail_and_share_minting(world, monkeypatch, flow_override):
+    reg, channel, ctx, _, shares = world
+    if flow_override:
+        ctx.flow = replace(reg.flows[("post_meeting", 5)], params=(("attendee_domains", '["BANK.TEST"]'),))
+    else:
+        monkeypatch.delenv("TINA_FLOWS_ATTENDEE_DOMAINS")
+    assert reg.steps["email_meeting_followup"](ctx).result["sent"] == 1
+    assert [message["to"] for message in channel.sent] == ["anna@bank.test"]
+    assert not shares
 
 
 def test_retry_keeps_successes_and_minted_links_after_a_partial_failure(world, monkeypatch):
@@ -172,6 +186,7 @@ def test_meet_sends_verified_partial_roster_and_retries_without_duplicate_mail(w
         participants = [
             {"email": "ben@outside.test", "source": "invite"},
             {"email": "joined-via-link@outside.test", "source": "attendance"},
+            {"email": "not-allowed@other.test", "source": "attendance"},
         ]
         if completed:
             participants.append({"email": "recovered@outside.test", "source": "attendance"})

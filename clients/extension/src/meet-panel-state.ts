@@ -6,10 +6,16 @@ export function isTerminalBotStatus(status: string): boolean {
   return TERMINAL_BOT_STATUSES.has(status.toLowerCase());
 }
 
-/** Prefer the newest non-terminal Bot run for the exact Google Meet room. */
+export function isOwnedActiveBot(meeting: BotMeeting | null): boolean {
+  return !!meeting && !meeting.shared && !isTerminalBotStatus(meeting.status);
+}
+
+/** Prefer an active owned run, while still supporting shared and saved transcripts. */
 export function currentGoogleMeetBot(meetings: BotMeeting[], nativeMeetingId: string): BotMeeting | null {
   const matching = meetings
     .filter(meeting => meeting.platform === 'google_meet' && meeting.nativeMeetingId.toLowerCase() === nativeMeetingId.toLowerCase())
     .sort((a, b) => b.startMs - a.startMs);
-  return matching.find(meeting => !isTerminalBotStatus(meeting.status)) ?? matching[0] ?? null;
+  return matching.find(isOwnedActiveBot)
+    ?? matching.find(meeting => !isTerminalBotStatus(meeting.status))
+    ?? matching[0] ?? null;
 }

@@ -4,7 +4,7 @@ import { voiceReplies, voiceSources, type VoiceReply } from './voice-replies';
 
 export interface BotConnection { botGatewayUrl: string; account?: ExtensionAccount; legacyKey?: string }
 export interface DesktopConnection { gatewayUrl: string; apiKey: string }
-export interface BotMeeting { id: number; platform: string; nativeMeetingId: string; title: string; status: string; startMs: number; joinFailureSummary?: string; autoRetry?: { state: string; attempt: number; max_attempts: number } }
+export interface BotMeeting { id: number; platform: string; nativeMeetingId: string; title: string; status: string; startMs: number; shared?: boolean; joinFailureSummary?: string; autoRetry?: { state: string; attempt: number; max_attempts: number } }
 export interface BotSpeakerLink { participantId: string; revision: number }
 export interface BotProcessedNote {
   id: string;
@@ -116,6 +116,7 @@ export async function listBotMeetings(config: BotConnection, signal?: AbortSigna
       id: row.id, platform: row.platform, nativeMeetingId: row.native_meeting_id,
       title: typeof row.data?.title === 'string' ? row.data.title : row.native_meeting_id,
       status: typeof row.status === 'string' ? row.status : 'unknown', startMs: epoch(row.start_time),
+      shared: row.shared === true,
       autoRetry: row.data?.auto_retry && typeof row.data.auto_retry === 'object' ? row.data.auto_retry : undefined,
       joinFailureSummary: typeof row.data?.join_failure_summary === 'string' ? row.data.join_failure_summary.slice(0,300) : undefined,
     }));

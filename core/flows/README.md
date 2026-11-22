@@ -24,7 +24,9 @@ permission. No meeting content or recording attachment is put in the email. A me
 still has a meeting page, which states that no recording is available.
 
 The existing `mail_minutes` owner preference, per-meeting `share: false` and flow-level
-`attendee_followup: off` remain effective. Version-5 legacy mail steps relay the new delivery receipt,
+`attendee_followup: off` remain effective. Attendee links are issued only to email domains allowed by
+`attendee_domains` or `TINA_FLOWS_ATTENDEE_DOMAINS`. If neither is set, only the owner's domain is allowed.
+Version-5 legacy mail steps relay the new delivery receipt,
 so they do not send a second email. In-flight older flow versions keep their original behavior.
 Per-recipient checkpoints preserve confirmed sends and restricted links across retry. SMTP cannot
 guarantee exactly-once delivery if a worker crashes after server acceptance but before checkpointing.

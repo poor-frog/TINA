@@ -94,32 +94,33 @@ async def fetch_configs(admin_api_url: str, internal_secret: str,
         return None
 
 
-async def _google_access_token(config: dict, client) -> tuple[Optional[str], Optional[str]]:
-    """Refresh an offline Calendar grant; credentials and provider errors never enter logs."""
+async def _google_access_token(config: dict, client) -> tuple[str | None, str | None, bool]:
+    """Return the access token, a sanitized error, and whether the error can be retried."""
     refresh_token = config.get("google_refresh_token")
     client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
     if not all(isinstance(value, str) and value for value in (refresh_token, client_id, client_secret)):
-        return None, "Google Calendar is not configured; reconnect the calendar or configure OAuth."
+        return None, "Google Calendar is not configured; reconnect the calendar or configure OAuth.", False
     cache_key = hashlib.sha256(refresh_token.encode()).hexdigest()
     cached = _GOOGLE_ACCESS_TOKENS.get(cache_key)
     if cached and cached[0] > time.monotonic() + 60:
-        return cached[1], None
+        return cached[1], None, False
     try:
         response = await client.post(
             "https://oauth2.googleapis.com/token",
             data={"client_id": client_id, "client_secret": client_secret,
                   "refresh_token": refresh_token, "grant_type": "refresh_token"},
         )
-        if response.status_code != 200:
-            return None, ("Google Calendar permission expired; reconnect the Google account."
-                          if response.status_code in (400, 401, 403)
-                          else f"Google token refresh returned HTTP {response.status_code}.")
+        status = response.status_code
+        if status in (400, 401, 403):
+            return None, "Google Calendar permission expired; reconnect the Google account.", False
+        if status != 200:
+            return None, f"Google token refresh returned HTTP {status}.", status in (408, 429) or status >= 500
         payload = response.json()
         token = payload.get("access_token") if isinstance(payload, dict) else None
         expires_in = payload.get("expires_in", 3600) if isinstance(payload, dict) else 3600
         if not isinstance(token, str) or not token or type(expires_in) not in (int, float):
-            return None, "Google token refresh returned an invalid response."
+            return None, "Google token refresh returned an invalid response.", True
         _GOOGLE_ACCESS_TOKENS[cache_key] = (time.monotonic() + max(60, float(expires_in)), token)
         if len(_GOOGLE_ACCESS_TOKENS) > 1024:
             expired = [key for key, (expiry, _) in _GOOGLE_ACCESS_TOKENS.items()
@@ -128,9 +129,9 @@ async def _google_access_token(config: dict, client) -> tuple[Optional[str], Opt
                 _GOOGLE_ACCESS_TOKENS.pop(key, None)
             while len(_GOOGLE_ACCESS_TOKENS) > 1024:
                 _GOOGLE_ACCESS_TOKENS.pop(next(iter(_GOOGLE_ACCESS_TOKENS)))
-        return token, None
+        return token, None, False
     except Exception:
-        return None, "Could not refresh Google Calendar access; reconnect the account if this continues."
+        return None, "Could not refresh Google Calendar access; reconnect the account if this continues.", True
 
 
 async def fetch_google_events(config: dict, *, now: datetime, client=None):
@@ -149,7 +150,7 @@ async def fetch_google_events(config: dict, *, now: datetime, client=None):
     calendar_id = config.get("google_calendar_id")
     if not isinstance(calendar_id, str) or not calendar_id or len(calendar_id) > 512:
         return None, "Google Calendar connection is missing its calendar id."
-    token, error = await _google_access_token(config, client)
+    token, error, _ = await _google_access_token(config, client)
     if error:
         return None, error
 

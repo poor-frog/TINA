@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from meeting_api import create_app
-from meeting_api.calendar_sync import attendance
+from meeting_api.calendar_sync import adapters, attendance
 from meeting_api.collector.fakes import InMemoryTranscriptStore
 
 
@@ -18,15 +18,34 @@ MATCH = {
 }
 
 
-def _google(monkeypatch, handler):
+def _google(monkeypatch, handler, refresh_status=200):
     real_client = httpx.AsyncClient
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "fake-client")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "fake-secret")
+    monkeypatch.setattr(adapters, "_GOOGLE_ACCESS_TOKENS", {})
 
-    async def access_token(*_):
-        return "test-token", None
+    def dispatch(request):
+        if request.url.host == "oauth2.googleapis.com":
+            if refresh_status is None:
+                raise httpx.ReadTimeout("temporary network failure", request=request)
+            return httpx.Response(refresh_status, json={"access_token": "test-token"})
+        return handler(request)
 
-    monkeypatch.setattr(attendance, "_google_access_token", access_token)
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(
-        transport=httpx.MockTransport(handler), **kwargs))
+        transport=httpx.MockTransport(dispatch), **kwargs))
+
+
+@pytest.mark.parametrize("status, retryable", [(400, False), (429, True), (503, True), (None, True)])
+async def test_attendance_preserves_refresh_retryability(monkeypatch, status, retryable):
+    requests = []
+
+    def unexpected_roster_request(request):
+        requests.append(request)
+        return httpx.Response(404)
+
+    _google(monkeypatch, unexpected_roster_request, refresh_status=status)
+    assert await attendance.lookup_google_meet_attendees(7, MEETING, CONFIGS) == (None, retryable)
+    assert not requests
 
 
 @pytest.mark.parametrize("other, retryable", [

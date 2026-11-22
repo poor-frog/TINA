@@ -76,10 +76,11 @@ globalThis.setTimeout = ((fn: () => void) => { timers.push(fn); return timers.le
 globalThis.clearTimeout = (() => {}) as any;
 const turn = () => new Promise<void>(resolve => setImmediate(resolve));
 try {
-  respond = async () => Response.json({ meetings: [{ id: 12, platform: 'teams', native_meeting_id: 'same-room', status: 'active',
+  respond = async () => Response.json({ meetings: [{ id: 12, platform: 'teams', native_meeting_id: 'same-room', status: 'active', shared: true,
     data:{join_failure_summary:'Platform refused the bot.'} }, { id: 13, platform: 'note', native_meeting_id: 'note' }] });
   const listed=await listBotMeetings(config);
   assert.equal(listed.length, 1);
+  assert.equal(listed[0].shared, true);
   assert.equal(listed[0].joinFailureSummary,'Platform refused the bot.');
   assert.equal(calls[0].options.headers!['Authorization' as keyof HeadersInit], 'Bearer fixture-secret');
   assert.equal(calls[0].options.redirect, 'error');

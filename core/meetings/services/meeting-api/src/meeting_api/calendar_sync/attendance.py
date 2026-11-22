@@ -200,8 +200,9 @@ async def lookup_google_meet_attendees(user_id: int, meeting: dict,
         # Leave time for Identity discovery and the gateway's 30-second request deadline.
         async with asyncio.timeout(20), httpx.AsyncClient(timeout=8.0) as client:
             for config in unique:
-                token, _ = await _google_access_token(config, client)
+                token, _, refresh_retryable = await _google_access_token(config, client)
                 if not token:
+                    retryable |= refresh_retryable
                     continue
                 try:
                     record_name = await _conference(client, token, code, start)

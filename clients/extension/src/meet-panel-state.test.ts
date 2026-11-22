@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { currentGoogleMeetBot, isTerminalBotStatus } from './meet-panel-state';
+import { currentGoogleMeetBot, isOwnedActiveBot, isTerminalBotStatus } from './meet-panel-state';
 import type { BotMeeting } from './bot-transcript';
 import { pinScope, pinSource, pinsFromStorage } from './meet-pins';
 
@@ -19,6 +19,14 @@ assert.equal(currentGoogleMeetBot([
   meeting(2, 'abc-defg-hij', 'stopped', 300),
 ], 'abc-defg-hij')?.id, 2, 'latest saved run is available when no Bot is active');
 assert.equal(currentGoogleMeetBot([meeting(1, 'other-room', 'active', 300)], 'abc-defg-hij'), null);
+
+const owned = meeting(4, 'abc-defg-hij', 'active', 200);
+const shared = { ...meeting(5, 'abc-defg-hij', 'active', 300), shared: true };
+assert.equal(currentGoogleMeetBot([shared, owned], 'abc-defg-hij'), owned);
+assert.equal(currentGoogleMeetBot([shared], 'abc-defg-hij'), shared);
+assert.equal(isOwnedActiveBot(owned), true);
+assert.equal(isOwnedActiveBot(shared), false);
+assert.equal(isOwnedActiveBot({ ...owned, status: 'completed' }), false);
 
 const gateway = 'http://127.0.0.1:28056';
 const cfg = { botGatewayUrl: gateway, account: { id: '7', email: 'fixture@example.test',
