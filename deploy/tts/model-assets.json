@@ -1,15 +1,15 @@
 {
-  "model": "VieNeu-TTS-v3-Turbo ONNX fp32",
+  "model": "Blaze VieNeu-TTS-v3-Turbo Enhanced (Trộn 0.7) ONNX fp32",
   "runtime": "vieneu==3.8.3",
   "license": "Apache-2.0 (upstream model cards)",
   "repos": [
     {
-      "repo": "pnnbao-ump/VieNeu-TTS-v3-Turbo",
-      "revision": "61b85e3d937fbbacb387714180e8182823512523",
+      "repo": "blaze-voice-ai/vienue-v3-turbo-enhanced",
+      "revision": "9ab89d0ab80c1a6bda2082682c5009346dbd7e9a",
       "files": [
         {
           "path": "README.md",
-          "git_blob": "97c9821851a48a5a2b20625315bf9bcdfb7f1981"
+          "git_blob": "f5f6fd226d75f1cac1141c7157b8c27d45b6638d"
         },
         {
           "path": "onnx_update/config.json",
@@ -21,11 +21,11 @@
         },
         {
           "path": "onnx_update/vieneu_acoustic_cached.onnx",
-          "sha256": "f631e3387c788c3d8b9a5ac5df94952af5bc4c4d1049ff8a751e76a246fff2d4"
+          "sha256": "8bff76a4f35ebd70db8015a604261854bc9f2358283bb008d9e804231a8aa831"
         },
         {
           "path": "onnx_update/vieneu_backbone_shared.data",
-          "sha256": "c7c072193db33d0542457e2612c7272c44c4279d1cafaf0aa4c379964911db2f"
+          "sha256": "c5358c86d8a503fa5f934738c518536755b00821dad604504902d0a896ea1863"
         },
         {
           "path": "onnx_update/vieneu_decode_step.onnx",

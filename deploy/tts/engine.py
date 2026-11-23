@@ -1,11 +1,11 @@
 """One preset VieNeu ONNX CPU voice, exposed in the bot's PCM format."""
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from functools import lru_cache
 from pathlib import Path
+from install_models import verify_file
 from speech_text import spoken_text, default_pronunciations
 
 MODEL = "vieneu-v3-turbo"
@@ -39,30 +39,24 @@ def selected_voice(voice='auto'):
     return value
 
 
-def verify_assets(directory: Path) -> None:
+def verify_assets(directory: Path) -> Path:
     """Check pinned snapshots before the offline SDK is allowed to load them."""
     from huggingface_hub import snapshot_download
 
     manifest = json.loads(Path(__file__).with_name("model-assets.json").read_text())
+    snapshots = []
     for repo in manifest["repos"]:
         snapshot = Path(snapshot_download(repo["repo"], revision=repo["revision"],
                                          allow_patterns=[f["path"] for f in repo["files"]],
                                          cache_dir=str(directory / "hub"), local_files_only=True))
         for entry in repo["files"]:
-            path = snapshot / entry["path"]
-            data = path.read_bytes()
-            if "sha256" in entry:
-                actual = hashlib.sha256(data).hexdigest()
-                expected = entry["sha256"]
-            else:
-                actual = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
-                expected = entry["git_blob"]
-            if actual != expected:
-                raise RuntimeError("TTS asset verification failed: " + entry["path"])
-        # SDK requests main; the isolated offline cache must resolve only this pinned snapshot.
+            verify_file(snapshot / entry["path"], entry)
+        # SDK resolves the codec via the pinned offline cache ref.
         ref = directory / "hub" / ("models--" + repo["repo"].replace("/", "--")) / "refs/main"
         if ref.read_text().strip() != repo["revision"]:
             raise RuntimeError("TTS offline cache reference does not match the manifest")
+        snapshots.append(snapshot)
+    return snapshots[0]  # The manifest lists the TTS model first, then its codec.
 
 
 def pcm24(samples, rate: int) -> bytes:
@@ -83,7 +77,7 @@ def pcm24(samples, rate: int) -> bytes:
 class Engine:
     def __init__(self, directory: Path):
         self.pronunciations = default_pronunciations()
-        verify_assets(directory)
+        backbone = verify_assets(directory)
         import onnxruntime
         onnxruntime.disable_telemetry_events()
         from vieneu import Vieneu
@@ -91,7 +85,7 @@ class Engine:
         threads=int(os.environ.get('TINA_TTS_THREADS','2'))
         if not 1<=threads<=8:raise ValueError('TINA_TTS_THREADS must be between 1 and 8')
         self.tts = Vieneu(mode="v3turbo", backend="onnx", device="cpu", threads=threads,
-                          backbone_repo="pnnbao-ump/VieNeu-TTS-v3-Turbo")
+                          backbone_repo=str(backbone), onnx_dir=str(backbone / "onnx_update"))
 
     def cached_public(self, text: str,voice='auto') -> bytes | None:
         return getattr(self, '_fixed_pcm', {}).get((selected_voice(voice),text)) if text in FIXED_TEXTS else None

@@ -64,7 +64,7 @@ Docker to build the images. It proves the control plane stands up and `/health` 
 | `terminal.enabled` | `true` | The web UI. Set `terminal.publicUrl` (NEXTAUTH_URL/TERMINAL_URL) when fronted by ingress; set Google OAuth credentials under `secrets.*` to enable sign-in and Calendar linking. |
 | `mcp.enabled` | `false` | Run the MCP server as an internal Service and connect the Gateway's `/mcp` endpoint. Clients use their scoped TINA API key. |
 | `agentReach.enabled` | `false` | Enable public web and GitHub retrieval through an internal Service. Agent API supplies the URL and the default chat tool grants. Existing Agent API `extraEnv` entries take precedence. |
-| `tts.enabled` | `false` | Internal VieNeu TTS. Set `tts.modelsClaim` to a PVC populated by `deploy/tts/install_models.py` and `tts.existingSecret` to a Secret holding `TTS_API_TOKEN` and `TINA_TTS_PROFILE_KEY`. |
+| `tts.enabled` | `false` | Internal VieNeu TTS. Set `tts.modelsClaim` to a PVC populated by [the authenticated Enhanced model installer](../tts/README.md#setup-on-another-machine-ubuntuwsl-or-linux) and `tts.existingSecret` to a Secret holding `TTS_API_TOKEN` and `TINA_TTS_PROFILE_KEY`. |
 | `livekit.enabled` | `false` | Single-node meeting voice. Enable TTS and the Kubernetes Runtime, provide `livekit.modelsClaim` with the bot's pinned meeting-voice assets, and set `livekit.existingSecret` with `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` and `LIVEKIT_KEYS` (the corresponding `key: secret` mapping). |
 | `ingress.enabled` | `false` | Fronts the **terminal** by default; set `host`/`className`/`tls`. Add a second path to `gateway` to also expose the raw API. |
 

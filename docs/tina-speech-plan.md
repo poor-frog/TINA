@@ -50,7 +50,7 @@ to execute an action.
 - Wake-word: `sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01`, INT8,
   with the English keyword `HEY TINA` tokenized using that model's BPE files. Run on each
   participant's CPU. Evaluate Vietnamese-accented pronunciation before accepting it.
-- TTS implemented: VieNeu-TTS v3 Turbo, ONNX CPU, SDK 3.8.3, female Trúc Ly preset
+- TTS implemented: Blaze VieNeu-TTS v3 Turbo Enhanced, ONNX CPU, SDK 3.8.3, female Trúc Ly preset
   (Northern Vietnamese, natural style). Standalone TINA is normalized to "ti na" only for
   synthesis. The optional service resamples 48 kHz output to the bot's 24 kHz PCM contract.
   Piper was dropped because eSpeak introduces GPL, conflicting with ADR-0004. The selected
@@ -60,7 +60,7 @@ to execute an action.
   [`model-assets.json`](../deploy/tts/model-assets.json), with hash-locked Python dependencies.
   Wake-word assets will be pinned in phase 2. No voice cloning or model training is enabled.
 - Sources: [Sherpa KWS models](https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html),
-  [VieNeu model card](https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Turbo),
+  [Enhanced model card](https://huggingface.co/blaze-voice-ai/vienue-v3-turbo-enhanced),
   [OpenMOSS codec card](https://huggingface.co/OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX).
 
 ## Verified starting points
