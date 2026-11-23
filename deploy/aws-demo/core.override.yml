@@ -32,3 +32,7 @@ services:
     image: ghcr.io/poor-frog/tina-terminal:demo
   dashboard:
     image: ghcr.io/poor-frog/tina-dashboard:demo
+  tts-models:
+    image: ghcr.io/poor-frog/tina-tts:demo
+  tts:
+    image: ghcr.io/poor-frog/tina-tts:demo

@@ -9,6 +9,9 @@ on:
       build-asr:
         default: true
         type: boolean
+      build-gipformer:
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -52,17 +55,9 @@ jobs:
             -t ghcr.io/poor-frog/tina-bot:"$BUILD_SHA" .
           docker push ghcr.io/poor-frog/tina-bot:"$BUILD_SHA"
 
-  asr:
+  viegem:
     if: inputs.build-asr
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: gipformer
-            dockerfile: deploy/transcription/gipformer/Dockerfile
-          - name: viegem
-            dockerfile: deploy/transcription/viegem/Dockerfile
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,10 +78,46 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: ${{ runner.temp }}/tina-source
-          file: ${{ runner.temp }}/tina-source/${{ matrix.dockerfile }}
+          file: ${{ runner.temp }}/tina-source/deploy/transcription/viegem/Dockerfile
           platforms: linux/amd64
           push: true
+          build-args: TORCH_VARIANT=cpu
+          cache-from: type=gha,scope=viegem
+          cache-to: type=gha,mode=max,scope=viegem
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ inputs.revision }}
-          tags: ghcr.io/poor-frog/tina-${{ matrix.name }}:${{ inputs.revision }}
+          tags: ghcr.io/poor-frog/tina-viegem:${{ inputs.revision }}
+
+  gipformer:
+    if: inputs.build-asr && inputs.build-gipformer
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - name: Prepare source without env secrets
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tina-source"
+          git archive --format=tar HEAD | tar --extract --directory="$RUNNER_TEMP/tina-source" \
+            --exclude='.env' --exclude='.env.*' --exclude='.env.keys'
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ runner.temp }}/tina-source
+          file: ${{ runner.temp }}/tina-source/deploy/transcription/gipformer/Dockerfile
+          platforms: linux/amd64
+          push: true
+          cache-from: type=gha,scope=gipformer
+          cache-to: type=gha,mode=max,scope=gipformer
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ inputs.revision }}
+          tags: ghcr.io/poor-frog/tina-gipformer:${{ inputs.revision }}

@@ -5,32 +5,45 @@ on:
     workflows: [gates]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      include_gipformer:
+        description: Also build and promote legacy Gipformer ASR image
+        type: boolean
+        default: false
 
 permissions: {}
 
 jobs:
   revision:
     if: >-
-      github.repository == 'poor-frog/TINA' &&
-      github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.conclusion == 'success'
+      github.repository == 'poor-frog/TINA' && (
+        github.event_name == 'workflow_dispatch' || (
+          github.event.workflow_run.head_repository.full_name == github.repository &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.conclusion == 'success'
+        )
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       sha: ${{ steps.main.outputs.sha }}
+      include_gipformer: ${{ steps.main.outputs.include_gipformer }}
     steps:
       - name: Select tested main commit
         id: main
         env:
-          BUILD_SHA: ${{ github.event.workflow_run.head_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          BUILD_SHA: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+          INCLUDE_GIPFORMER: ${{ github.event_name == 'workflow_dispatch' && inputs.include_gipformer || false }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
-          if [[ "$BUILD_SHA" == "$main_sha" ]]; then
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || "$BUILD_SHA" == "$main_sha" ]]; then
             echo "sha=$BUILD_SHA" >> "$GITHUB_OUTPUT"
+            echo "include_gipformer=$INCLUDE_GIPFORMER" >> "$GITHUB_OUTPUT"
           else
             echo "Skipping $BUILD_SHA because main is at $main_sha."
           fi
@@ -92,6 +105,10 @@ jobs:
             context: deploy/agent-reach
             dockerfile: deploy/agent-reach/Dockerfile
 
+          - name: tts
+            context: deploy/tts
+            dockerfile: deploy/tts/Dockerfile
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -106,7 +123,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$BUILD_SOURCE"
           git archive --format=tar HEAD |
-            tar --extract --directory="$BUILD_SOURCE" --exclude='.env' --exclude='.env.*'
+            tar --extract --directory="$BUILD_SOURCE" --exclude='.env' --exclude='.env.*' --exclude='.env.keys'
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -126,6 +143,8 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: ${{ matrix.build_args }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ needs.revision.outputs.sha }}
@@ -140,6 +159,7 @@ jobs:
     uses: ./.github/workflows/ghcr-publish-extras.yml
     with:
       revision: ${{ needs.revision.outputs.sha }}
+      build-gipformer: ${{ needs.revision.outputs.include_gipformer == 'true' }}
 
   promote:
     name: Update GHCR demo tags
@@ -150,7 +170,7 @@ jobs:
       packages: write
     concurrency:
       group: tina-ghcr-demo
-      queue: max
+      cancel-in-progress: false
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -165,13 +185,17 @@ jobs:
       - name: Tag the complete image set
         env:
           BUILD_SHA: ${{ needs.revision.outputs.sha }}
+          INCLUDE_GIPFORMER: ${{ needs.revision.outputs.include_gipformer }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           services=(
             terminal gateway meeting-api agent-api admin-api runtime agent-worker
-            mcp flows dashboard agent-reach bot gipformer viegem
+            mcp flows dashboard agent-reach tts bot viegem
           )
+          if [[ "$INCLUDE_GIPFORMER" == "true" ]]; then
+            services+=(gipformer)
+          fi
           sources=()
           for service in "${services[@]}"; do
             image="ghcr.io/poor-frog/tina-$service"
