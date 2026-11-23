@@ -1,4 +1,4 @@
-# TINA AWS demo deployment kit
+# TINA AWS deployment kit
 
 Core uses the base Compose file with `core.override.yml` and Caddy. Speech uses
 `speech.compose.yml` with Gipformer and a one-time model download. VieGem is
@@ -26,7 +26,7 @@ The controller requires `TINA_INTERNAL_API_SECRET`, a persistent `/state` direct
 and access to Identity at `ADMIN_API_URL` (default `http://admin-api:8001`). Keep
 port 18007 private to the Compose network.
 
-The `TINA - AWS demo Terminal and Bot` workflow publishes these two application
+The `TINA - AWS Terminal and Bot` workflow publishes these two application
 images from `demo/aws` after relevant source changes. Both builds must pass before
 their existing `:demo` tags are updated. The main-branch release workflow continues
 to publish the complete image set.

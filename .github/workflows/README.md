@@ -16,16 +16,19 @@ Blocked tests print a stack after 120 seconds. The Python gate step fails after
 count as passing checks. The separate TTS test step retains its Python 3.11 runtime.
 
 Once `ghcr-publish.yml` is on `main`, a successful `gates` run for a push to
-`main` triggers publishing to the existing `ghcr.io/poor-frog/tina-<service>`
-packages. The workflow builds the exact tested commit for Linux x86-64 and
-publishes each image under its full commit SHA. It calls
-`ghcr-publish-extras.yml` to build the meeting bot, Gipformer and VieGem.
+`main` (or a manual `workflow_dispatch` run) triggers publishing to the
+`ghcr.io/poor-frog/tina-<service>` packages. The workflow builds the exact
+tested commit for Linux x86-64 (with `provenance: false` and `sbom: false` for
+clean AWS ECR/ECS manifests) and publishes each image under its full commit SHA,
+including `tina-tts` (VieNeu CPU). It calls `ghcr-publish-extras.yml` to build
+the meeting bot, LiveKit voice agent, VieGem (CPU), and optional Gipformer
+(`include_gipformer: true`).
 
-After all 14 images build successfully, **Update GHCR demo tags** retags the
-images one at a time. It skips commits that have been superseded on `main`.
-Re-run failed jobs in GitHub Actions to retry a build or tag update. AWS keeps
-using the existing `:demo` references and pulls the new images on the next
-deployment after the tag job succeeds.
+After all images build successfully, **Update GHCR demo and latest tags**
+retags the complete set to `:demo` and `:latest` (skipping commits superseded on
+`main`). Re-run failed jobs in GitHub Actions to retry a build or tag update.
+AWS deployments and ECR mirrors pull the promoted `:demo` or `:latest` tags
+after that job succeeds.
 
 The build uses a tracked source export that excludes dotenv files. The dashboard
 uses the Compose gateway address `http://gateway:8000` as its build argument.

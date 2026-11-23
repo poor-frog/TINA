@@ -39,18 +39,18 @@ Production Terminal sign-in requires configured Google or Microsoft OAuth; see
 [Terminal login](#terminal-login-google-or-microsoft). The deployment mints and prints an API key
 when it is ready; treat it as a secret.
 
-## AWS EC2 demo
+## AWS deployment
 
-The [AWS demo kit](https://github.com/poor-frog/TINA/blob/main/deploy/aws-demo/README.md)
-uses two EC2 instances. Core runs the application services and Caddy. Speech runs
-Gipformer and downloads its model assets on first deployment. Prepare the SSM Parameter
-Store settings and confirm that Speech can reach GHCR and the model repository before
+The [AWS deployment kit](https://github.com/poor-frog/TINA/blob/main/deploy/aws/README.md)
+uses two EC2 instances or ECS/ECR mirrors. Core runs the application services and Caddy. Speech runs
+VieGem (or optional Gipformer) and downloads its model assets on first deployment. Prepare the SSM
+Parameter Store settings and confirm that Speech can reach GHCR and the model repository before
 running the deployment scripts.
 
-The GHCR workflows build the 14 Linux amd64 demo images from the tested `main` commit
-after `gates` succeeds. Each image is published under the full commit SHA. The workflow
-updates the `:demo` tags once all 14 images are available. Run the EC2 deployment scripts
-after that job succeeds to pull the new images.
+The GHCR workflows build the 15 Linux amd64 images (including `tina-tts` and `tina-livekit-agent`)
+from the tested `main` commit after `gates` succeeds. Each image is published under the full commit
+SHA. The workflow updates the `:demo` and `:latest` tags once all images are available. Mirror to
+AWS ECR or run the deployment scripts after that job succeeds to pull the new images.
 
 ### Connect the Chrome extension
 

@@ -1,10 +1,10 @@
-name: TINA - AWS demo Terminal and Bot
+name: TINA - AWS Terminal and Bot
 
 on:
   push:
     branches: [demo/aws]
     paths:
-      - .github/workflows/aws-demo-images.yml
+      - .github/workflows/aws-images.yml
       - .github/workflows/ghcr-publish-extras.yml
       - clients/terminal/**
       - core/meetings/services/bot/**

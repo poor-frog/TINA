@@ -5,8 +5,8 @@ SOURCE=/opt/tina/source
 SECRETS=/opt/tina/secrets
 ENV_FILE="$SECRETS/core.env"
 BASE="$SOURCE/deploy/compose/docker-compose.yml"
-OVERLAY="$SOURCE/deploy/aws-demo/core.override.yml"
-CADDY="$SOURCE/deploy/aws-demo/caddy.compose.yml"
+OVERLAY="$SOURCE/deploy/aws/core.override.yml"
+CADDY="$SOURCE/deploy/aws/caddy.compose.yml"
 mkdir -p "$SECRETS"
 chmod 0700 "$SECRETS"
 umask 077
