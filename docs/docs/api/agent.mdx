@@ -51,6 +51,19 @@ or an external provider.
 { "text": "So um, I need to, actually let's email the client first." }
 ```
 
+## Live meeting translation (`meeting-translation.v2`)
+
+`GET /api/meeting-translations/{meeting_id}` (gateway `/agent/meeting-translations/{meeting_id}`) returns
+the owner-authorized English phrase overlay snapshot (`meeting-translation.v2`) without invoking inference.
+Consecutive finalized transcript segments of the same speaker are grouped into phrase boundaries (flushing
+on sentence endings of at least three words, a 1.8s pause, speaker change, or a two-second live-tail quiet
+window).
+
+`POST /api/meeting-translations/{meeting_id}` `{ "retry": false, "segment_ids": [] }` claims and translates
+one or a bounded batch of ready phrases using the owner's configured Meeting model, supplying recent
+speaker and phrase context for pronoun/terminology consistency, and persists results in the shared private
+SQLite cache. Optional `segment_ids` (up to 128) prioritize the active live tail before historical backfill.
+
 ## Post-meeting discussion review
 
 `GET /api/discussion-reviews/{meeting_id}` returns `{report, stale, can_generate}` for an owned meeting.
