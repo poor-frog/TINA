@@ -1417,9 +1417,11 @@ def create_app(
         return {"translated_text": translated}
 
     from control_plane.meeting_translation import register as register_meeting_translation
+    def _translate_meeting_phrase(request: Request, text: str) -> str:
+        return _transcript_completion(request, text=text, task='translate', target_language='en')
+    _translate_meeting_phrase.supports_batch = True  # type: ignore[attr-defined]
     register_meeting_translation(app, subject_of, wsr.root, settings.meeting_api_url if settings else '',
-                                 lambda request, text: _transcript_completion(
-                                     request, text=text, task='translate', target_language='en'))
+                                 _translate_meeting_phrase)
 
     @app.get("/api/models/openai/catalog")
     def openai_model_catalog(request: Request):

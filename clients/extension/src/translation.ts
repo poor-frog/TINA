@@ -50,12 +50,18 @@ export function translationSegments<T extends TranscriptSegment & { speaker_id?:
 }
 
 /** Same authenticated backend cache as Terminal; provider keys never reach the extension. */
+export const LIVE_POLL_DELAY_MS = 1200;
+export const ERROR_POLL_DELAY_MS = 10000;
+export type TranslationHandle = (() => void) & { nudge: () => void };
+
 export function watchTranslation(config: BotConnection, meetingId: number,
   update: (snapshot: TranslationSnapshot) => void, error: () => void, retry = false,
-  priority: () => string[] = () => []): () => void {
+  priority: () => string[] = () => []): TranslationHandle {
   const abort = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let advancing = false;
+  let polling = false;
+  let queuedNudge = false;
   let force = retry;
   const read = async (method = 'GET', retry = false) => {
     const response = await botFetch(config, `/agent/meeting-translations/${meetingId}`, {
@@ -70,17 +76,66 @@ export function watchTranslation(config: BotConnection, meetingId: number,
     if (!abort.signal.aborted) update(snapshot);
     return snapshot;
   };
+  const schedule = (delay: number) => {
+    if (abort.signal.aborted) return;
+    clearTimeout(timer);
+    timer = setTimeout(poll, delay);
+  };
+  const advanceLoop = async (initialForce: boolean, initialCompleted: number) => {
+    if (advancing || abort.signal.aborted) return;
+    advancing = true;
+    let retryNow = initialForce;
+    let lastCompleted = initialCompleted;
+    try {
+      while (!abort.signal.aborted) {
+        const next = await read('POST', retryNow);
+        retryNow = false;
+        const currentCompleted = next.completed ?? 0;
+        if (next.status === 'complete' || next.can_advance === false || next.retry_after > 0 || currentCompleted <= lastCompleted) break;
+        lastCompleted = currentCompleted;
+      }
+    } catch {
+      if (!abort.signal.aborted) error();
+    } finally {
+      advancing = false;
+      if (queuedNudge && !abort.signal.aborted) {
+        queuedNudge = false;
+        schedule(0);
+      }
+    }
+  };
   const poll = async () => {
-    let delay = 3000;
+    if (polling || abort.signal.aborted) {
+      queuedNudge = true;
+      return;
+    }
+    polling = true;
+    let delay = LIVE_POLL_DELAY_MS;
     try {
       const state = await read();
       if (!advancing && state.status !== 'complete' && (state.can_advance !== false || force) && (state.retry_after === 0 || force)) {
-        const retryNow = force; force = false; advancing = true;
-        void read('POST', retryNow).catch(() => { if (!abort.signal.aborted) error(); }).finally(() => { advancing = false; });
+        const retryNow = force; force = false;
+        void advanceLoop(retryNow, state.completed ?? 0);
       }
-    } catch { if (!abort.signal.aborted) error(); delay = 15000; }
-    if (!abort.signal.aborted) timer = setTimeout(poll, delay);
+    } catch {
+      if (!abort.signal.aborted) error();
+      delay = ERROR_POLL_DELAY_MS;
+    } finally {
+      polling = false;
+    }
+    if (queuedNudge && !abort.signal.aborted) {
+      queuedNudge = false;
+      schedule(0);
+    } else {
+      schedule(delay);
+    }
   };
   void poll();
-  return () => { abort.abort(); clearTimeout(timer); };
+  const stop = (() => { abort.abort(); clearTimeout(timer); }) as TranslationHandle;
+  stop.nudge = () => {
+    if (abort.signal.aborted) return;
+    if (polling || advancing) { queuedNudge = true; return; }
+    schedule(0);
+  };
+  return stop;
 }

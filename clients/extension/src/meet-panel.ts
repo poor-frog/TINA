@@ -4,7 +4,7 @@ import { ACCOUNT_KEY, DEFAULT_GATEWAY, DEFAULT_TERMINAL, sessionCommand, storedA
 import { meetAvatarUrl } from './meet-avatars';
 import type { TranscriptSegment } from './transcript-rendering';
 import type { VoiceReply } from './voice-replies';
-import { watchTranslation, type TranscriptLanguage, type TranslationSnapshot } from './translation';
+import { watchTranslation, type TranscriptLanguage, type TranslationHandle, type TranslationSnapshot } from './translation';
 import { currentGoogleMeetBot, isOwnedActiveBot, isTerminalBotStatus } from './meet-panel-state';
 import { createVoiceActivity } from './voice-activity-view';
 import { createMeetAsk, requestNotesPreview } from './meet-ask';
@@ -37,7 +37,8 @@ let translation: TranslationSnapshot | null = null;
 let translationError = false;
 let language: TranscriptLanguage = 'bilingual';
 let stopWatching = () => {};
-let stopTranslation = () => {};
+let stopTranslation: TranslationHandle = Object.assign(() => {}, { nudge: () => {} });
+let lastConfirmedDigest = '';
 let listRequest: AbortController | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
 let scope = 0;
@@ -334,7 +335,8 @@ function clearWatchers(): void {
   if (retryTimer) clearTimeout(retryTimer);
   retryTimer = undefined;
   stopWatching(); stopWatching = () => {};
-  stopTranslation(); stopTranslation = () => {};
+  stopTranslation(); stopTranslation = Object.assign(() => {}, { nudge: () => {} });
+  lastConfirmedDigest = '';
   speakerLinkRequest?.abort(); speakerLinkRequest = null;
   speakerLinkKey = ''; speakerLinks.clear(); avatarUrls.clear(); lastAvatarRequest = -Infinity;
   selected = null; segments = []; replies = []; translation = null; translationError = false; stopping = false;
@@ -345,7 +347,7 @@ function clearWatchers(): void {
 }
 
 function startTranslation(retry = false): void {
-  stopTranslation(); stopTranslation = () => {};
+  stopTranslation(); stopTranslation = Object.assign(() => {}, { nudge: () => {} });
   translation = null; translationError = false;
   if (!selected || language === 'vi') { render(); return; }
   const token = scope, meetingId = selected.id;
@@ -375,6 +377,11 @@ function watch(meeting: BotMeeting, token: number): void {
     const hadConfirmed = hasConfirmedTranscript();
     selected = { ...meeting, status: nextStatus };
     segments = rows; replies = nextReplies;
+    const confirmedDigest = rows.filter(r => r.completed !== false && r.segment_id).map(r => `${r.segment_id}:${r.text}`).join('|');
+    if (confirmedDigest !== lastConfirmedDigest) {
+      lastConfirmedDigest = confirmedDigest;
+      stopTranslation.nudge();
+    }
     void syncSpeakerLinks(meeting.id, rows);
     voiceActivityView.update(voiceStatus, isTerminalBotStatus(nextStatus));
     if (isOwnedActiveBot(selected) && sendBotState === 'sent' && !stopping) {

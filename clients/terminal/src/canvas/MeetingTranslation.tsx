@@ -20,15 +20,23 @@ export function useMeetingTranslation(meetingId: string, language: TranscriptLan
   const retryRequested = useRef(false);
   const priority = useRef(segmentIds);
   priority.current = segmentIds;
+  const nudgeRef = useRef<() => void>(() => {});
+  const segmentDigest = segmentIds.join("|");
   const valid = /^[1-9]\d*$/.test(meetingId);
   useEffect(() => {
     setSnapshot(null); setError(""); retryRequested.current = false;
   }, [meetingId]);
   useEffect(() => {
     if (!valid || language === "vi") return;
+    nudgeRef.current();
+  }, [segmentDigest, valid, language]);
+  useEffect(() => {
+    if (!valid || language === "vi") return;
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     let advancing = false;
+    let polling = false;
+    let queuedNudge = false;
     const url = `/api/meeting-translations/${meetingId}`;
     const read = async (method = "GET", force = false): Promise<TranslationSnapshot> => {
       const response = await fetch(url, { method, cache: "no-store", signal: abort.signal,
@@ -39,27 +47,69 @@ export function useMeetingTranslation(meetingId: string, language: TranscriptLan
       if (!abort.signal.aborted) { setSnapshot(state); setError(""); }
       return state;
     };
+    const schedule = (delay: number) => {
+      if (abort.signal.aborted) return;
+      clearTimeout(timer);
+      timer = setTimeout(poll, delay);
+    };
+    const advanceLoop = async (initialForce: boolean, initialCompleted: number) => {
+      if (advancing || abort.signal.aborted) return;
+      advancing = true;
+      let force = initialForce;
+      let lastCompleted = initialCompleted;
+      try {
+        while (!abort.signal.aborted) {
+          const next = await read("POST", force);
+          force = false;
+          const currentCompleted = next.completed ?? 0;
+          if (next.status === "complete" || next.can_advance === false || next.retry_after > 0 || currentCompleted <= lastCompleted) break;
+          lastCompleted = currentCompleted;
+        }
+      } catch {
+        if (!abort.signal.aborted) setError("Translation unavailable. Vietnamese transcript is still available.");
+      } finally {
+        advancing = false;
+        if (queuedNudge && !abort.signal.aborted) {
+          queuedNudge = false;
+          schedule(0);
+        }
+      }
+    };
     const poll = async () => {
-      let delay = 3000;
+      if (polling || abort.signal.aborted) {
+        queuedNudge = true;
+        return;
+      }
+      polling = true;
+      let delay = 1200;
       try {
         const state = await read();
         const force = retryRequested.current;
         if (!advancing && state.status !== "complete" && (state.can_advance !== false || force) && (state.retry_after === 0 || force)) {
           retryRequested.current = false;
-          advancing = true;
           // Do not block GET polling while another client is waiting for the provider.
-          void read("POST", force).catch(() => {
-            if (!abort.signal.aborted) setError("Translation unavailable. Vietnamese transcript is still available.");
-          }).finally(() => { advancing = false; });
+          void advanceLoop(force, state.completed ?? 0);
         }
       } catch {
         if (!abort.signal.aborted) setError("Translation unavailable. Vietnamese transcript is still available.");
-        delay = 15000;
+        delay = 10000;
+      } finally {
+        polling = false;
       }
-      if (!abort.signal.aborted) timer = setTimeout(poll, delay);
+      if (queuedNudge && !abort.signal.aborted) {
+        queuedNudge = false;
+        schedule(0);
+      } else {
+        schedule(delay);
+      }
+    };
+    nudgeRef.current = () => {
+      if (abort.signal.aborted) return;
+      if (polling || advancing) { queuedNudge = true; return; }
+      schedule(0);
     };
     void poll();
-    return () => { abort.abort(); clearTimeout(timer); };
+    return () => { nudgeRef.current = () => {}; abort.abort(); clearTimeout(timer); };
   }, [meetingId, language, valid, retry]);
   return { snapshot: snapshot?.meeting_id === Number(meetingId) ? snapshot : null, error,
     retry: () => { retryRequested.current = true; setRetry(n => n + 1); }, valid };

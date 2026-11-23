@@ -226,10 +226,10 @@ def test_live_tail_waits_for_observed_quiet_and_resets_when_new_words_arrive(set
     canonical['status'] = 'active'
     assert not client.post(URL, json={}).json()['groups'][0]['ready']
     assert not calls
-    clock[0] += 4
+    clock[0] += 1
     canonical['segments'].append({'segment_id': 's2', 'text': 'mọi người', 'speaker_id': 'original'})
     client.get(URL)
-    clock[0] += 4
+    clock[0] += 1
     client.post(URL, json={})
     assert not calls
     clock[0] += 1
@@ -494,3 +494,51 @@ def test_phrase_backoff_is_revision_bound_and_resumes_after_process_recreation(s
     canonical['segments'][0]['revision'] = 1
     state = reopened.post(URL,json={}).json()
     assert state['status'] == 'complete' and state['groups'][0]['attempts'] == 1
+
+
+def test_batch_capable_provider_translates_multiple_ready_phrases_in_one_dispatch(setup):
+    _, canonical, calls, _ = setup
+    canonical['segments'] = [
+        {'segment_id': 'p1', 'text': 'Câu thứ nhất đã xong.', 'speaker_id': 'a', 'start_ms': 0, 'end_ms': 1000},
+        {'segment_id': 'p2', 'text': 'Câu thứ hai cũng xong.', 'speaker_id': 'b', 'start_ms': 1100, 'end_ms': 2000},
+        {'segment_id': 'p3', 'text': 'Câu thứ ba tiếp theo.', 'speaker_id': 'c', 'start_ms': 2100, 'end_ms': 3000},
+    ]
+    def batch_complete(request, text):
+        calls.append(text)
+        parts = text.split(api.BATCH_SEPARATOR)
+        return api.BATCH_SEPARATOR.join(f'EN:{part}' for part in parts)
+    batch_complete.supports_batch = True
+    client = use_provider(setup, batch_complete)
+    state = client.post(URL, json={}).json()
+    assert state['status'] == 'complete' and state['completed'] == 3
+    assert len(calls) == 1
+    assert [g['translated_text'] for g in state['groups']] == [
+        'EN:Câu thứ nhất đã xong.',
+        'EN:Câu thứ hai cũng xong.',
+        'EN:Câu thứ ba tiếp theo.',
+    ]
+
+
+def test_translation_worker_translates_phrase_batch_with_fallback(monkeypatch):
+    from types import SimpleNamespace
+    from worker import engine
+    calls, events = [], []
+    class Completion:
+        def complete(self, prompt, **kwargs):
+            calls.append((prompt, kwargs))
+            return SimpleNamespace(text='["Hello.", "Goodbye."]')
+    class Stream:
+        def xadd(self, topic, fields): events.append(json.loads(fields['event']))
+        def expire(self, topic, ttl): pass
+    monkeypatch.setenv('TINA_CHAT_SESSION', 'dictation-translate-request2')
+    monkeypatch.setenv('TINA_MEETING_MODEL', 'meeting-selected-model')
+    monkeypatch.setattr(engine, 'completion_from_env', lambda **kwargs: Completion())
+    joined = f'Xin chào.{engine._TRANSLATION_BATCH_SEPARATOR}Tạm biệt.'
+    raw = engine.DICTATION_TRANSLATE_PREFIX + json.dumps({'request_id': 'request2', 'text': joined, 'target_language': 'en'})
+    monkeypatch.setattr(engine, 'start_prompt', lambda start: raw)
+    engine._run_dictation_translate(Stream(), 'test-output', {})
+    assert len(calls) == 1
+    assert events == [
+        {'type': 'message-delta', 'text': f'Hello.{engine._TRANSLATION_BATCH_SEPARATOR}Goodbye.'},
+        {'type': 'turn-complete'},
+    ]

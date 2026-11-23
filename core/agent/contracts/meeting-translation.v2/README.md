@@ -21,15 +21,15 @@ polling GET when it is false, and may POST on explicit retry. Top-level `service
 an owner-wide auth/configuration/rate-limit/unavailable cooldown; it never includes provider text.
 
 Consecutive finalized segments of the same speaker join until a sentence ending (at least
-six words), speaker change, a three-second source pause, or a size/time bound (40 words,
+three words), speaker change, a 1.8-second source pause, or a size/time bound (40 words,
 360 characters or 12 seconds). Oversized individual ASR segments remain intact. A live tail
-waits five seconds without a newly observed finalized tail; stable capture timestamps alone
+waits two seconds without a newly observed finalized tail; stable capture timestamps alone
 do not bypass this wait because ASR delivery may be delayed. Completed/stopped/failed
 meetings flush their tail immediately. Empty/draft segments never enter translation.
 
 GET authorizes the canonical transcript and meeting status, observes tail stability, and reads
 cached results without inference. POST `{"retry": false, "segment_ids": []}` advances
-at most one ready group. Optional source IDs (max 128) prioritize the currently rendered
+one or a bounded batch of ready groups. Optional source IDs (max 128) prioritize the currently rendered
 live turns before historical backfill; callers cannot supply transcript bytes. `retry: true`
 bypasses phrase/service backoff and exhausted automatic attempts, never an active lease or the
 live grouping wait. It prioritizes errored phrases while preserving visible-ID priority within

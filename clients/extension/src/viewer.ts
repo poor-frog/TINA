@@ -8,7 +8,7 @@ import {
 import { ACCOUNT_KEY, DEFAULT_GATEWAY, DEFAULT_TERMINAL, sessionCommand, storedAccount } from './extension-session';
 import type { TranscriptSegment } from './transcript-rendering';
 import type { VoiceReply } from './voice-replies';
-import { watchTranslation, type TranscriptLanguage, type TranslationSnapshot } from './translation';
+import { watchTranslation, type TranscriptLanguage, type TranslationHandle, type TranslationSnapshot } from './translation';
 
 type BotTarget = { platform: Exclude<MeetingRef['platform'], 'youtube'>; nativeMeetingId: string; url: string };
 const BOT_PLATFORM_NAMES: Record<BotTarget['platform'], string> = {
@@ -39,7 +39,8 @@ let theme: 'system' | 'light' | 'dark' = 'system';
 let language: TranscriptLanguage = 'bilingual';
 let translation: TranslationSnapshot | null = null;
 let translationError = false;
-let stopTranslation = () => {};
+let stopTranslation: TranslationHandle = Object.assign(() => {}, { nudge: () => {} });
+let lastConfirmedDigest = '';
 let activeMeeting: BotTarget | null = null;
 let sendBotState: { key: string; phase: 'sending' | 'sent' | 'retrying' | 'cancelling' | 'error'; message: string } | null = null;
 let autoRetryPoll: ReturnType<typeof setTimeout> | null = null;
@@ -76,7 +77,7 @@ function renderTranslationControls(): void {
 }
 
 function startTranslation(retry = false): void {
-  stopTranslation(); stopTranslation = () => {};
+  stopTranslation(); stopTranslation = Object.assign(() => {}, { nudge: () => {} });
   renderTranslationControls();
   if (!selected || language === 'vi') return;
   const token = scope, id = selected.id;
@@ -351,7 +352,8 @@ function updateDestinations(): void {
 
 function stopCurrentWatch(clear = false): number {
   scope++;
-  stopTranslation(); stopTranslation = () => {}; translation = null; translationError = false;
+  stopTranslation(); stopTranslation = Object.assign(() => {}, { nudge: () => {} }); translation = null; translationError = false;
+  lastConfirmedDigest = '';
   stopWatching(); stopWatching = () => {}; voiceActivityView.reset();
   if (clear) clearTranscript();
   return scope;
@@ -379,6 +381,11 @@ function watchMeeting(meeting: BotMeeting, token: number): void {
     }
     segments = rows;
     replies = voice;
+    const confirmedDigest = rows.filter(r => r.completed !== false && r.segment_id).map(r => `${r.segment_id}:${r.text}`).join('|');
+    if (confirmedDigest !== lastConfirmedDigest) {
+      lastConfirmedDigest = confirmedDigest;
+      stopTranslation.nudge();
+    }
     if (meeting.platform === 'google_meet') {
       voiceActivityView.update(activity, ['completed','failed','stopped','ended','past'].includes(status));
     }

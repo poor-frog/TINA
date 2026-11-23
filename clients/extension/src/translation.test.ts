@@ -77,4 +77,31 @@ for (const [state, retry, posts] of [
     if (posts) assert.equal(JSON.parse(String(sent[0].body)).retry, retry);
   } finally { stop(); globalThis.fetch = original; }
 }
+
+// Verify continuous drain loop and reactive nudge on new finalized STT segments.
+{
+  let count = 0;
+  globalThis.fetch = async (_input, init = {}) => {
+    if (init.method === 'POST') count++;
+    return Response.json({
+      version: 'meeting-translation.v2', meeting_id: 6,
+      status: count >= 2 ? 'complete' : 'pending',
+      total: 2, completed: count, retry_after: 0, can_advance: count < 2,
+      groups: [
+        { ...phrase, status: count >= 1 ? 'complete' : 'pending', translated_text: count >= 1 ? phrase.translated_text : null },
+        { ...phrase, group_id: 'phrase:b', status: count >= 2 ? 'complete' : 'pending', translated_text: count >= 2 ? 'Second.' : null },
+      ],
+    });
+  };
+  try {
+    let done!: () => void;
+    const finished = new Promise<void>(resolve => { done = resolve; });
+    const stop = watchTranslation(connection, 6,
+      state => { if (state.completed === 2) done(); }, () => assert.fail('Unexpected drain error'));
+    stop.nudge();
+    await finished;
+    stop();
+    assert.equal(count, 2);
+  } finally { globalThis.fetch = original; }
+}
 console.log('translation isolated retries and revision checks passed');
