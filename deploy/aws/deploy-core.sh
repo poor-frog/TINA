@@ -5,8 +5,8 @@ SOURCE=/opt/tina/source
 SECRETS=/opt/tina/secrets
 ENV_FILE="$SECRETS/core.env"
 BASE="$SOURCE/deploy/compose/docker-compose.yml"
-OVERLAY="$SOURCE/deploy/aws-demo/core.override.yml"
-CADDY="$SOURCE/deploy/aws-demo/caddy.compose.yml"
+OVERLAY="$SOURCE/deploy/aws/core.override.yml"
+CADDY="$SOURCE/deploy/aws/caddy.compose.yml"
 mkdir -p "$SECRETS"
 chmod 0700 "$SECRETS"
 umask 077
@@ -31,8 +31,8 @@ if aws ssm get-parameter --region us-east-1 --name /tina/demo/ghcr-token \
   unset GHCR_PAT
 fi
 # Runtime starts these containers on demand; pre-pull so runtime needn't authenticate.
-docker pull ghcr.io/poor-frog/tina-bot:demo
-docker pull ghcr.io/poor-frog/tina-agent-worker:demo
+docker pull ghcr.io/poor-frog/tina-bot:prod
+docker pull ghcr.io/poor-frog/tina-agent-worker:prod
 # Validate before launching anything. Do not output config (contains passwords).
 docker compose --env-file "$ENV_FILE" -f "$BASE" -f "$OVERLAY" config --quiet
 # Compose original has build: definitions. --no-build is essential on small EC2.

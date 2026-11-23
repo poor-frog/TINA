@@ -21,7 +21,7 @@ if aws ssm get-parameter --region us-east-1 --name /tina/demo/ghcr-token \
   printf '%s' "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
   unset GHCR_PAT
 fi
-COMPOSE="$SOURCE/deploy/aws-demo/speech.compose.yml"
+COMPOSE="$SOURCE/deploy/aws/speech.compose.yml"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE" config --quiet
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE" up -d --no-build --pull always --wait gipformer
 printf '\nASR STATUS\n'; docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'

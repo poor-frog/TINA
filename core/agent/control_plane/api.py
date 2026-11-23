@@ -73,7 +73,14 @@ from control_plane import workspace_membership as membership_mod
 from control_plane import git_credentials as git_creds
 from control_plane import system_mounts
 from control_plane.workspace_membership import MembershipError, MembershipIndex, InMemoryMembershipIndex
-from control_plane.dispatch import Dispatcher, ModelConfigRefreshError, build_mount_set, worker_cwd
+from control_plane.dispatch import (
+    Dispatcher,
+    MODEL_AUTH_ENV_ALLOWLIST,
+    ModelConfigRefreshError,
+    build_mount_set,
+    overlay_model_config,
+    worker_cwd,
+)
 from control_plane.events import event_to_invocation
 from shared.ports import SchedulerPort, StreamReader
 from control_plane.workspace_reader import WorkspaceReader
@@ -989,6 +996,170 @@ def _require_owned_meeting(
     return row
 
 
+_DIRECT_TRANSLATE_HTTP_CLIENT = None
+
+
+def _pooled_translate_http_client():
+    """Shared keep-alive httpx.Client for live translation (avoids per-phrase TCP/TLS handshakes)."""
+    global _DIRECT_TRANSLATE_HTTP_CLIENT
+    if _DIRECT_TRANSLATE_HTTP_CLIENT is None:
+        import httpx
+        _DIRECT_TRANSLATE_HTTP_CLIENT = httpx.Client(
+            timeout=30.0,
+            limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
+        )
+    return _DIRECT_TRANSLATE_HTTP_CLIENT
+
+
+def _direct_translate_completion(
+    dispatcher: Dispatcher,
+    subject: str,
+    *,
+    text: str,
+    target_language: str | None,
+    context: list[dict] | None = None,
+    speaker: str | None = None,
+) -> str | None:
+    """Fast-path live translation directly over HTTP CompletionPort (no worker container cold-start).
+
+    Returns ``None`` when the subject's effective provider is CLI-backed (e.g. ``claude-cli``) or
+    lacks direct HTTP endpoint/credentials in ``agent-api``, allowing the caller to fall back
+    cleanly to the isolated worker path.
+    """
+    from llm.anthropic_api import AnthropicCompletion
+    from llm.errors import completion_failure_code
+    from llm.openai_compat import OpenAICompatCompletion
+    from llm.openai_responses import OpenAIResponsesCompletion
+    from shared.translation_prompt import (
+        TRANSLATION_BATCH_SEPARATOR,
+        TRANSLATION_LANGUAGES,
+        translate_phrase_batch,
+        translate_single_phrase,
+    )
+    from shared.translation_text import TRANSLATION_FAILURE_STATUS
+
+    language_name = TRANSLATION_LANGUAGES.get(target_language) if isinstance(target_language, str) else None
+    if not language_name or not isinstance(text, str) or not text.strip() or len(text) > 10000:
+        raise HTTPException(status_code=400, detail="Invalid translation input")
+
+    settings = dispatcher.settings
+    env: dict[str, str] = {}
+    if settings is not None:
+        if settings.agent_model:
+            env["TINA_AGENT_MODEL"] = settings.agent_model
+        if settings.meeting_model:
+            env["TINA_MEETING_MODEL"] = settings.meeting_model
+        if settings.llm_provider:
+            env["TINA_LLM_PROVIDER"] = settings.llm_provider
+        if settings.llm_model:
+            env["TINA_LLM_MODEL"] = settings.llm_model
+    model_config = dispatcher.resolve_model_config(subject)
+    if model_config:
+        overlay_model_config(
+            env,
+            model_config,
+            allowlist=settings.model_allowlist if settings is not None else "",
+            subject=subject,
+        )
+    for key in MODEL_AUTH_ENV_ALLOWLIST:
+        val = (os.environ.get(key) or "").strip()
+        if val and key not in env:
+            env[key] = val
+
+    provider = (env.get("TINA_LLM_PROVIDER") or "").strip() or "openai-compat"
+    model = (env.get("TINA_MEETING_MODEL") or env.get("TINA_LLM_MODEL") or "").strip() or None
+    comp = None
+    if provider == "openai-compat":
+        base_url = (env.get("TINA_LLM_BASE_URL") or env.get("ANTHROPIC_BASE_URL") or "").strip()
+        api_key = (
+            env.get("TINA_LLM_API_KEY")
+            or env.get("ANTHROPIC_AUTH_TOKEN")
+            or env.get("ANTHROPIC_API_KEY")
+            or ""
+        ).strip()
+        if not base_url:
+            return None
+        # Groq reasoning models (e.g. openai/gpt-oss-120b) default to medium reasoning (~2-4s);
+        # setting reasoning_effort="low" keeps translation fluent while cutting latency to <0.5s.
+        extra_kwargs: dict = {}
+        if "api.groq.com" in base_url.lower() and model and "gpt-oss" in model.lower():
+            extra_kwargs["reasoning_effort"] = "low"
+        try:
+            comp = OpenAICompatCompletion(
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                timeout=30.0,
+                client=_pooled_translate_http_client(),
+                temperature=0.2,
+                max_tokens=768,
+                **extra_kwargs,
+            )
+        except TypeError:
+            comp = OpenAICompatCompletion(base_url=base_url, api_key=api_key, model=model, timeout=30.0)
+    elif provider == "openai-responses":
+        base_url = (env.get("TINA_LLM_BASE_URL") or "https://api.openai.com/v1").strip()
+        api_key = (
+            env.get("TINA_LLM_API_KEY")
+            or env.get("OPENAI_API_KEY")
+            or env.get("ACCESS_TOKEN")
+            or ""
+        ).strip()
+        if not api_key:
+            return None
+        comp = OpenAIResponsesCompletion(base_url=base_url, api_key=api_key, model=model, timeout=30.0)
+    elif provider == "anthropic":
+        base_url = (env.get("TINA_LLM_BASE_URL") or "https://api.anthropic.com").strip()
+        api_key = (
+            env.get("TINA_LLM_API_KEY")
+            or env.get("ANTHROPIC_AUTH_TOKEN")
+            or env.get("ANTHROPIC_API_KEY")
+            or ""
+        ).strip()
+        if not api_key:
+            return None
+        comp = AnthropicCompletion(base_url=base_url, api_key=api_key, model=model, timeout=30.0)
+    else:
+        return None
+
+    clean_context = [
+        {
+            "speaker": str(item.get("speaker") or "")[:120],
+            "source": str(item.get("source") or "")[:1000],
+            "translated": str(item.get("translated") or "")[:1000],
+        }
+        for item in (context if isinstance(context, list) else [])[:2]
+        if isinstance(item, dict) and item.get("source") and item.get("translated")
+    ] or None
+    clean_speaker = str(speaker).strip()[:120] if isinstance(speaker, str) and speaker.strip() else None
+
+    try:
+        if TRANSLATION_BATCH_SEPARATOR in text:
+            parts = text.split(TRANSLATION_BATCH_SEPARATOR)
+            if not parts or any(not p.strip() for p in parts) or len(parts) > 8:
+                raise ValueError("invalid batch translation payload")
+            translated_parts = translate_phrase_batch(
+                comp, parts, language_name, model, context=clean_context, speaker=clean_speaker,
+            )
+            return TRANSLATION_BATCH_SEPARATOR.join(translated_parts)
+        return translate_single_phrase(
+            comp, text, language_name, model, context=clean_context, speaker=clean_speaker,
+        )
+    except Exception as exc:  # noqa: BLE001 — do not expose transcript or provider response text
+        logger.warning("direct live translation failed provider=%s error=%s", provider, type(exc).__name__)
+        code = completion_failure_code(exc)
+        status = TRANSLATION_FAILURE_STATUS.get(code, 503) if isinstance(code, str) else 503
+        raise HTTPException(status_code=status, detail="Live translation could not complete") from exc
+    finally:
+        if getattr(comp, "_owns_client", True):
+            client = getattr(comp, "_client", None)
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+
 def create_app(
     dispatcher: Dispatcher,
     *,
@@ -1001,6 +1172,7 @@ def create_app(
     membership_index: Optional[MembershipIndex] = None,
     meeting_owner_lookup: "Optional[object]" = None,
     schedule_source: "Optional[Callable[[str], list]]" = None,
+    direct_translate: bool = False,
 ) -> FastAPI:
     if sessions is not None:
         sess = sessions
@@ -1195,11 +1367,24 @@ def create_app(
         text: str,
         task: Literal["polish", "translate", "knowledge", "discussion"],
         target_language: str | None = None,
+        context: list[dict] | None = None,
+        speaker: str | None = None,
     ) -> str:
         label = {'polish': 'Text polish', 'translate': 'Live translation', 'knowledge': 'Meeting answer', 'discussion': 'Discussion review'}[task]
         if dispatcher is None or stream_reader is None:
             raise HTTPException(status_code=503, detail=f"{label} is not configured")
         subject = subject_of(request)
+        if task == "translate" and direct_translate:
+            direct = _direct_translate_completion(
+                dispatcher,
+                subject,
+                text=text,
+                target_language=target_language,
+                context=context,
+                speaker=speaker,
+            )
+            if direct is not None:
+                return direct
         request_id = uuid.uuid4().hex
         if task == "polish":
             prefix, session = units.DICTATION_POLISH_PREFIX, "dictation-polish"
@@ -1240,6 +1425,10 @@ def create_app(
                 raise HTTPException(409, 'Current voice turn required for sandbox')
         if target_language is not None:
             payload["target_language"] = target_language
+        if context:
+            payload["context"] = context[:2]
+        if speaker:
+            payload["speaker"] = speaker[:120]
         inline = prefix + json.dumps(payload, ensure_ascii=False)
         invocation = units.make_dispatch(
             subject=subject,
@@ -1334,6 +1523,7 @@ def create_app(
                         client.close()
                 except Exception:  # noqa: BLE001 — TTL is the fallback if cleanup fails
                     logger.warning("transcript completion output cleanup failed task=%s", task)
+            dispatcher.destroy_workload(unit_id)
         output = "".join(output_parts).strip()
         if task == 'translate' and not translation_complete:
             raise HTTPException(status_code=503, detail='Live translation stream was interrupted')
@@ -1417,9 +1607,13 @@ def create_app(
         return {"translated_text": translated}
 
     from control_plane.meeting_translation import register as register_meeting_translation
+    def _translate_meeting_phrase(request: Request, text: str, *, context: list[dict] | None = None, speaker: str = '') -> str:
+        return _transcript_completion(request, text=text, task='translate', target_language='en',
+                                      context=context, speaker=speaker)
+    _translate_meeting_phrase.supports_batch = True  # type: ignore[attr-defined]
+    _translate_meeting_phrase.supports_context = True  # type: ignore[attr-defined]
     register_meeting_translation(app, subject_of, wsr.root, settings.meeting_api_url if settings else '',
-                                 lambda request, text: _transcript_completion(
-                                     request, text=text, task='translate', target_language='en'))
+                                 _translate_meeting_phrase)
 
     @app.get("/api/models/openai/catalog")
     def openai_model_catalog(request: Request):
@@ -3052,6 +3246,7 @@ def _build_production_app() -> FastAPI:
         invocations_url=invocations_url,
         redis_url=settings.redis_url,
         membership_index=membership_index,
+        direct_translate=os.environ.get("TINA_DIRECT_TRANSLATE", "1").strip().lower() not in ("0", "false", "no"),
     )
     app.state.workspace_routine_reconciler = start_workspace_routine_reconciler(
         scheduler=scheduler,

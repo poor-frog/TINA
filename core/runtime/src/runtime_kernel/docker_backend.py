@@ -72,6 +72,25 @@ def _workload_id_from_leaf(leaf: str) -> str:
     return leaf
 
 
+_EPHEMERAL_ONESHOT_ENV_FLAGS = (
+    "TINA_DICTATION_TRANSLATE",
+    "TINA_DICTATION_POLISH",
+    "TINA_MEETING_KNOWLEDGE",
+    "TINA_DISCUSSION_REVIEW",
+    "TINA_CANONICAL_NOTES_TRUSTED",
+)
+
+
+def _is_ephemeral_oneshot_worker(workload_id: str, env: dict[str, str]) -> bool:
+    """True for single-turn transcript/translation/notes workers that exit immediately after
+    publishing their result. Setting Docker ``HostConfig.AutoRemove`` prevents dozens of exited
+    one-shot ``tina-worker-*`` containers from accumulating during a meeting, while leaving
+    meeting bots and long-lived chat/meeting workers untouched for exit-code inspection."""
+    return workload_id.startswith("agent-") and any(
+        env.get(flag) == "1" for flag in _EPHEMERAL_ONESHOT_ENV_FLAGS
+    )
+
+
 def _stack_network() -> Optional[str]:
     """The stack-unique compose network every workload this runtime spawns joins (``start()`` sets
     ``HostConfig.NetworkMode`` from the same env). On a SHARED daemon (two tina stacks on one host —
@@ -278,6 +297,9 @@ class DockerBackend:
         if workload_id.startswith("agent-") and (spawn_env.get("TINA_RUNNER") or "").strip() == "codex":
             host_config["CapDrop"] = ["SYS_ADMIN"]
             host_config["SecurityOpt"] = ["seccomp=unconfined", "no-new-privileges:true"]
+
+        if _is_ephemeral_oneshot_worker(workload_id, spawn_env):
+            host_config["AutoRemove"] = True
 
         payload: dict[str, Any] = {
             "Image": runnable.image,

@@ -4,8 +4,11 @@ import { ACCOUNT_KEY, DEFAULT_GATEWAY, DEFAULT_TERMINAL, sessionCommand, storedA
 import { meetAvatarUrl } from './meet-avatars';
 import type { TranscriptSegment } from './transcript-rendering';
 import type { VoiceReply } from './voice-replies';
-import { watchTranslation, type TranscriptLanguage, type TranslationSnapshot } from './translation';
-import { currentGoogleMeetBot, isOwnedActiveBot, isTerminalBotStatus } from './meet-panel-state';
+import {
+  watchTranslation, LANGUAGE_STORAGE_KEY, parseTranscriptLanguage, prioritizeSegmentIds,
+  type TranscriptLanguage, type TranslationHandle, type TranslationSnapshot,
+} from './translation';
+import { currentGoogleMeetBot, isOwnedActiveBot, isTerminalBotStatus, latestMiniCaption } from './meet-panel-state';
 import { createVoiceActivity } from './voice-activity-view';
 import { createMeetAsk, requestNotesPreview } from './meet-ask';
 import { createMeetFacts } from './meet-facts';
@@ -37,7 +40,8 @@ let translation: TranslationSnapshot | null = null;
 let translationError = false;
 let language: TranscriptLanguage = 'bilingual';
 let stopWatching = () => {};
-let stopTranslation = () => {};
+let stopTranslation: TranslationHandle = Object.assign(() => {}, { nudge: () => {} });
+let lastConfirmedDigest = '';
 let listRequest: AbortController | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
 let scope = 0;
@@ -62,6 +66,17 @@ let notesScope = 0;
 let sendBotState: 'idle' | 'sending' | 'sent' | 'error' = 'idle';
 let sendBotMessage = '';
 let sendBotResetTimer: ReturnType<typeof setTimeout> | undefined;
+let lastMiniCaptionPayload = '';
+
+function emitMiniCaption(): void {
+  const caption = selected && !isTerminalBotStatus(selected.status)
+    ? latestMiniCaption(segments, translation?.groups ?? [])
+    : null;
+  const serialized = JSON.stringify(caption);
+  if (serialized === lastMiniCaptionPayload) return;
+  lastMiniCaptionPayload = serialized;
+  postPanelMessage('live-caption', { meet: meetId, caption });
+}
 
 function setBotStatus(message: string, state: 'loading' | 'active' | 'joining' | 'stopping' | 'ended' | 'error'): void {
   const status = $('botStatus');
@@ -320,6 +335,7 @@ function render(): void {
   }, speakerPhoto);
   if (activePanelView === 'notes') renderPins();
   renderTranslationStatus();
+  emitMiniCaption();
   if (hasText) $('emptyMessage').textContent = '';
   else if (selected) $('emptyMessage').textContent = 'Đang chờ transcript từ TINA Bot…';
   renderFooterActions();
@@ -334,7 +350,8 @@ function clearWatchers(): void {
   if (retryTimer) clearTimeout(retryTimer);
   retryTimer = undefined;
   stopWatching(); stopWatching = () => {};
-  stopTranslation(); stopTranslation = () => {};
+  stopTranslation(); stopTranslation = Object.assign(() => {}, { nudge: () => {} });
+  lastConfirmedDigest = '';
   speakerLinkRequest?.abort(); speakerLinkRequest = null;
   speakerLinkKey = ''; speakerLinks.clear(); avatarUrls.clear(); lastAvatarRequest = -Infinity;
   selected = null; segments = []; replies = []; translation = null; translationError = false; stopping = false;
@@ -342,10 +359,11 @@ function clearWatchers(): void {
   voiceActivityView.reset();
   renderNotes();
   renderFooterActions();
+  emitMiniCaption();
 }
 
 function startTranslation(retry = false): void {
-  stopTranslation(); stopTranslation = () => {};
+  stopTranslation(); stopTranslation = Object.assign(() => {}, { nudge: () => {} });
   translation = null; translationError = false;
   if (!selected || language === 'vi') { render(); return; }
   const token = scope, meetingId = selected.id;
@@ -355,7 +373,7 @@ function startTranslation(retry = false): void {
   }, () => {
     if (disposed || token !== scope || selected?.id !== meetingId) return;
     translationError = true; render();
-  }, retry, () => segments.filter(segment => segment.completed !== false && !!segment.segment_id).map(segment => segment.segment_id!));
+  }, retry, () => prioritizeSegmentIds(segments));
   render();
 }
 
@@ -375,6 +393,11 @@ function watch(meeting: BotMeeting, token: number): void {
     const hadConfirmed = hasConfirmedTranscript();
     selected = { ...meeting, status: nextStatus };
     segments = rows; replies = nextReplies;
+    const confirmedDigest = rows.filter(r => r.completed !== false && r.segment_id).map(r => `${r.segment_id}:${r.text}`).join('|');
+    if (confirmedDigest !== lastConfirmedDigest) {
+      lastConfirmedDigest = confirmedDigest;
+      stopTranslation.nudge();
+    }
     void syncSpeakerLinks(meeting.id, rows);
     voiceActivityView.update(voiceStatus, isTerminalBotStatus(nextStatus));
     if (isOwnedActiveBot(selected) && sendBotState === 'sent' && !stopping) {
@@ -814,8 +837,10 @@ async function connect(): Promise<void> {
   $('emptyMessage').textContent = 'TINA đang kiểm tra Bot trong phòng Meet này.';
   setBotStatus('Kiểm tra Bot', 'loading'); render();
   try {
-    const stored = await chrome.storage.local.get([ACCOUNT_KEY, 'botGatewayUrl', 'terminalUrl', 'theme']);
+    const stored = await chrome.storage.local.get([ACCOUNT_KEY, 'botGatewayUrl', 'terminalUrl', 'theme', LANGUAGE_STORAGE_KEY]);
     if (controller.signal.aborted || token !== scope) return;
+    language = parseTranscriptLanguage(stored[LANGUAGE_STORAGE_KEY], language);
+    ($('language') as HTMLSelectElement).value = language;
     const account = storedAccount(stored[ACCOUNT_KEY]);
     config = { account, botGatewayUrl: account?.gateway || stored.botGatewayUrl || DEFAULT_GATEWAY };
     terminalUrl = account?.terminal || stored.terminalUrl || DEFAULT_TERMINAL;
@@ -942,7 +967,8 @@ $('panelHeader').addEventListener('pointerdown', event => {
   beginPanelGesture('move', $('panelHeader'), event);
 });
 ($('language') as HTMLSelectElement).addEventListener('change', () => {
-  language = ($('language') as HTMLSelectElement).value as TranscriptLanguage;
+  language = parseTranscriptLanguage(($('language') as HTMLSelectElement).value);
+  void chrome.storage.local.set({ [LANGUAGE_STORAGE_KEY]: language });
   render(); startTranslation();
 });
 ($('refreshBot') as HTMLButtonElement).addEventListener('click', () => void connect());
@@ -956,6 +982,15 @@ $('panelHeader').addEventListener('pointerdown', event => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.theme) applyPanelTheme(changes.theme.newValue);
+  if (changes[LANGUAGE_STORAGE_KEY]) {
+    const nextLang = parseTranscriptLanguage(changes[LANGUAGE_STORAGE_KEY].newValue);
+    if (nextLang !== language) {
+      language = nextLang;
+      ($('language') as HTMLSelectElement).value = language;
+      render();
+      startTranslation();
+    }
+  }
   if (changes[ACCOUNT_KEY] || changes.terminalUrl || changes.botGatewayUrl) {
     if (changes[ACCOUNT_KEY]) {
       config = { ...config, account: undefined };

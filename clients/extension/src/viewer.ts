@@ -8,7 +8,10 @@ import {
 import { ACCOUNT_KEY, DEFAULT_GATEWAY, DEFAULT_TERMINAL, sessionCommand, storedAccount } from './extension-session';
 import type { TranscriptSegment } from './transcript-rendering';
 import type { VoiceReply } from './voice-replies';
-import { watchTranslation, type TranscriptLanguage, type TranslationSnapshot } from './translation';
+import {
+  watchTranslation, LANGUAGE_STORAGE_KEY, parseTranscriptLanguage, prioritizeSegmentIds,
+  type TranscriptLanguage, type TranslationHandle, type TranslationSnapshot,
+} from './translation';
 
 type BotTarget = { platform: Exclude<MeetingRef['platform'], 'youtube'>; nativeMeetingId: string; url: string };
 const BOT_PLATFORM_NAMES: Record<BotTarget['platform'], string> = {
@@ -39,7 +42,8 @@ let theme: 'system' | 'light' | 'dark' = 'system';
 let language: TranscriptLanguage = 'bilingual';
 let translation: TranslationSnapshot | null = null;
 let translationError = false;
-let stopTranslation = () => {};
+let stopTranslation: TranslationHandle = Object.assign(() => {}, { nudge: () => {} });
+let lastConfirmedDigest = '';
 let activeMeeting: BotTarget | null = null;
 let sendBotState: { key: string; phase: 'sending' | 'sent' | 'retrying' | 'cancelling' | 'error'; message: string } | null = null;
 let autoRetryPoll: ReturnType<typeof setTimeout> | null = null;
@@ -76,7 +80,7 @@ function renderTranslationControls(): void {
 }
 
 function startTranslation(retry = false): void {
-  stopTranslation(); stopTranslation = () => {};
+  stopTranslation(); stopTranslation = Object.assign(() => {}, { nudge: () => {} });
   renderTranslationControls();
   if (!selected || language === 'vi') return;
   const token = scope, id = selected.id;
@@ -86,11 +90,12 @@ function startTranslation(retry = false): void {
   }, () => {
     if (scope !== token || selected?.id !== id) return;
     translationError = true; renderTranscript();
-  }, retry, () => segments.filter(segment => segment.completed !== false && !!segment.segment_id).map(segment => segment.segment_id!));
+  }, retry, () => prioritizeSegmentIds(segments));
 }
 
 $('transcriptLanguage').addEventListener('change', () => {
-  language = ($('transcriptLanguage') as HTMLSelectElement).value as TranscriptLanguage;
+  language = parseTranscriptLanguage(($('transcriptLanguage') as HTMLSelectElement).value);
+  void chrome.storage.local.set({ [LANGUAGE_STORAGE_KEY]: language });
   renderTranscript(); startTranslation();
 });
 $('retryTranslation').addEventListener('click', () => startTranslation(true));
@@ -351,7 +356,8 @@ function updateDestinations(): void {
 
 function stopCurrentWatch(clear = false): number {
   scope++;
-  stopTranslation(); stopTranslation = () => {}; translation = null; translationError = false;
+  stopTranslation(); stopTranslation = Object.assign(() => {}, { nudge: () => {} }); translation = null; translationError = false;
+  lastConfirmedDigest = '';
   stopWatching(); stopWatching = () => {}; voiceActivityView.reset();
   if (clear) clearTranscript();
   return scope;
@@ -379,6 +385,11 @@ function watchMeeting(meeting: BotMeeting, token: number): void {
     }
     segments = rows;
     replies = voice;
+    const confirmedDigest = rows.filter(r => r.completed !== false && r.segment_id).map(r => `${r.segment_id}:${r.text}`).join('|');
+    if (confirmedDigest !== lastConfirmedDigest) {
+      lastConfirmedDigest = confirmedDigest;
+      stopTranslation.nudge();
+    }
     if (meeting.platform === 'google_meet') {
       voiceActivityView.update(activity, ['completed','failed','stopped','ended','past'].includes(status));
     }
@@ -533,7 +544,7 @@ function renderSettings(): void {
 }
 
 async function init(): Promise<void> {
-  const stored = await chrome.storage.local.get([...fields, ACCOUNT_KEY, 'theme', 'transcriptSource']);
+  const stored = await chrome.storage.local.get([...fields, ACCOUNT_KEY, 'theme', 'transcriptSource', LANGUAGE_STORAGE_KEY]);
   config.account = storedAccount(stored[ACCOUNT_KEY]);
   for (const field of fields) {
     const value = stored[field];
@@ -542,6 +553,8 @@ async function init(): Promise<void> {
     if (config.account && field === 'botGatewayUrl') config[field] = config.account.gateway;
   }
   if (stored.transcriptSource !== 'bot') void chrome.storage.local.set({ transcriptSource: 'bot' });
+  language = parseTranscriptLanguage(stored[LANGUAGE_STORAGE_KEY]);
+  ($('transcriptLanguage') as HTMLSelectElement).value = language;
   theme = stored.theme === 'light' || stored.theme === 'dark' ? stored.theme : 'system';
   applyTheme();
   renderTranscript();
@@ -576,6 +589,15 @@ function bindSettings(): void {
       const saved = changes.theme.newValue;
       theme = saved === 'light' || saved === 'dark' ? saved : 'system';
       applyTheme();
+    }
+    if (changes[LANGUAGE_STORAGE_KEY]) {
+      const nextLang = parseTranscriptLanguage(changes[LANGUAGE_STORAGE_KEY].newValue);
+      if (nextLang !== language) {
+        language = nextLang;
+        ($('transcriptLanguage') as HTMLSelectElement).value = language;
+        renderTranscript();
+        startTranslation();
+      }
     }
     if (!changes[ACCOUNT_KEY]) return;
     config.account = storedAccount(changes[ACCOUNT_KEY].newValue);

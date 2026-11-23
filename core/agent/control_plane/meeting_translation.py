@@ -1,6 +1,6 @@
 """Owner-authorized, durable English translations; raw/canonical transcripts are read-only.
 
-Clients advance one ready phrase per POST while a translated view is open. SQLite
+Clients advance ready phrases per POST while a translated view is open. SQLite
 leases deduplicate concurrent web/extension requests, including separate API processes.
 Phrase failures back off independently; service failures cool down the owner's translations.
 GET never invokes inference.
@@ -8,6 +8,7 @@ GET never invokes inference.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import json
 import sqlite3
 import time
 import uuid
@@ -28,6 +29,8 @@ class Advance(BaseModel):
 
 
 MAX_PHRASE_FAILURES = 3
+MAX_BATCH_PHRASES = 4
+BATCH_SEPARATOR = '\n<<<TINA_PHRASE_BOUNDARY>>>\n'
 SERVICE_FAILURES = {'auth', 'configuration', 'rate_limit', 'unavailable'}
 
 
@@ -137,6 +140,16 @@ class TranslationStore:
                                       and now - tail['observed_at'] >= TAIL_QUIET_SECONDS)
         rows = []
         running = bool(job and job['lease'] > now)
+        running_phrases = set()
+        if running and job['phrase']:
+            try:
+                parsed_running = json.loads(job['phrase']) if job['phrase'].startswith('{') else None
+            except ValueError:
+                parsed_running = None
+            if isinstance(parsed_running, dict):
+                running_phrases = {(pid, shash) for pid, shash in parsed_running.items()}
+            else:
+                running_phrases = {(job['phrase'], job['source_hash'])}
         for group in phrases(segments, tail_ready=tail_ready):
             digest = source_fingerprint(group)
             attempt = attempts.get(group['group_id'])
@@ -148,7 +161,7 @@ class TranslationStore:
                 status = 'complete'
             elif not group['ready']:
                 status = 'waiting'
-            elif running and job['phrase'] == group['group_id'] and job['source_hash'] == digest:
+            elif (group['group_id'], digest) in running_phrases:
                 status = 'running'
             elif attempt and attempt['failures'] >= MAX_PHRASE_FAILURES:
                 status = 'failed'
@@ -174,7 +187,7 @@ class TranslationStore:
                 **({'service_error': service['error_code']} if service_paused and pending else {}),
                 'total': len(rows), 'completed': len(rows) - pending, 'groups': rows}
 
-    def claim(self, owner, meeting, groups, retry=False):
+    def claim_batch(self, owner, meeting, groups, retry=False, limit=MAX_BATCH_PHRASES):
         now, token = time.time(), uuid.uuid4().hex
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -202,51 +215,97 @@ class TranslationStore:
             if not candidates:
                 db.commit()
                 return None
-            _, _, group, attempt = min(candidates, key=lambda item: item[:2])
-            digest = source_fingerprint(group)
-            db.execute('INSERT OR REPLACE INTO translation_phrase_attempts VALUES (?,?,?,?,?,?,?,?)',
-                       (owner, meeting, group['group_id'], digest, (attempt['attempts'] if attempt else 0) + 1,
-                        attempt['failures'] if attempt else 0, 0, 'interrupted'))
+            candidates.sort(key=lambda item: item[:2])
+            selected = candidates[:max(1, limit)]
+            # If the top candidate previously had an error (e.g., retry or recovering from failure),
+            # isolate it in a single-phrase claim so a poison phrase cannot fail healthy siblings.
+            if len(selected) > 1 and any(item[3] and item[3]['error_code'] for item in selected):
+                if selected[0][3] and selected[0][3]['error_code']:
+                    selected = [selected[0]]
+                else:
+                    selected = [item for item in selected if not (item[3] and item[3]['error_code'])]
+            claimed_groups = []
+            phrase_map = {}
+            for _, _, group, attempt in selected:
+                digest = source_fingerprint(group)
+                claimed_groups.append(group)
+                phrase_map[group['group_id']] = digest
+                db.execute('INSERT OR REPLACE INTO translation_phrase_attempts VALUES (?,?,?,?,?,?,?,?)',
+                           (owner, meeting, group['group_id'], digest, (attempt['attempts'] if attempt else 0) + 1,
+                            attempt['failures'] if attempt else 0, 0, 'interrupted'))
+            if len(claimed_groups) == 1:
+                job_phrase = claimed_groups[0]['group_id']
+                job_hash = phrase_map[job_phrase]
+            else:
+                job_phrase = json.dumps(phrase_map, sort_keys=True)
+                job_hash = 'batch'
             db.execute('UPDATE translation_jobs SET token=?, lease=?, phrase=?, source_hash=?, service_generation=? WHERE owner=? AND meeting=?',
-                       (token, now + 120, group['group_id'], digest, service['generation'], owner, meeting))
+                       (token, now + 120, job_phrase, job_hash, service['generation'], owner, meeting))
             db.commit()
-        return token, group
+        return token, claimed_groups
 
-    def finish(self, owner, meeting, token, group, translated, error_code=None, *, current=True):
+    def claim(self, owner, meeting, groups, retry=False):
+        claimed = self.claim_batch(owner, meeting, groups, retry=retry, limit=1)
+        if not claimed:
+            return None
+        token, claimed_groups = claimed
+        return token, claimed_groups[0]
+
+    def finish_batch(self, owner, meeting, token, results):
+        """Finalize a single-phrase or multi-phrase translation lease atomically.
+        `results` is a list of `(group, translated, error_code, current)` tuples.
+        """
         with self.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             job = db.execute('SELECT * FROM translation_jobs WHERE owner=? AND meeting=?', (owner, meeting)).fetchone()
             if not job or job['token'] != token or job['lease'] <= time.time():
                 db.commit()
                 return
-            attempt = db.execute('SELECT * FROM translation_phrase_attempts WHERE owner=? AND meeting=? AND phrase=?',
-                                 (owner, meeting, group['group_id'])).fetchone()
-            if job['phrase'] != group['group_id'] or job['source_hash'] != source_fingerprint(group):
-                db.commit()
-                return
+            if job['phrase'].startswith('{'):
+                try:
+                    leased_map = json.loads(job['phrase'])
+                except ValueError:
+                    leased_map = {}
+            else:
+                leased_map = {job['phrase']: job['source_hash']}
             service = db.execute('SELECT * FROM translation_services WHERE owner=?', (owner,)).fetchone()
-            if error_code in SERVICE_FAILURES:
-                failures = service['failures'] + 1
-                db.execute('UPDATE translation_services SET failures=?, retry_at=?, error_code=?, generation=generation+1 WHERE owner=?',
-                           (failures, time.time() + retry_delay(failures), error_code, owner))
-                db.execute('UPDATE translation_phrase_attempts SET error_code=? WHERE owner=? AND meeting=? AND phrase=?',
-                           (error_code, owner, meeting, group['group_id']))
-            elif current and translated:
-                db.execute('INSERT OR REPLACE INTO phrase_translations VALUES (?,?,?,?,?)',
-                           (owner, meeting, group['group_id'], source_fingerprint(group), translated))
-                db.execute('UPDATE translation_phrase_attempts SET failures=0, retry_at=0, error_code=? WHERE owner=? AND meeting=? AND phrase=?',
-                           ('', owner, meeting, group['group_id']))
+            service_failed = False
+            any_succeeded = False
+            for group, translated, error_code, current in results:
+                digest = source_fingerprint(group)
+                if leased_map.get(group['group_id']) != digest:
+                    continue
+                attempt = db.execute('SELECT * FROM translation_phrase_attempts WHERE owner=? AND meeting=? AND phrase=?',
+                                     (owner, meeting, group['group_id'])).fetchone()
+                if error_code in SERVICE_FAILURES:
+                    if not service_failed:
+                        service_failed = True
+                        failures = service['failures'] + 1
+                        db.execute('UPDATE translation_services SET failures=?, retry_at=?, error_code=?, generation=generation+1 WHERE owner=?',
+                                   (failures, time.time() + retry_delay(failures), error_code, owner))
+                    db.execute('UPDATE translation_phrase_attempts SET error_code=? WHERE owner=? AND meeting=? AND phrase=?',
+                               (error_code, owner, meeting, group['group_id']))
+                elif current and translated:
+                    any_succeeded = True
+                    db.execute('INSERT OR REPLACE INTO phrase_translations VALUES (?,?,?,?,?)',
+                               (owner, meeting, group['group_id'], digest, translated))
+                    db.execute('UPDATE translation_phrase_attempts SET failures=0, retry_at=0, error_code=? WHERE owner=? AND meeting=? AND phrase=?',
+                               ('', owner, meeting, group['group_id']))
+                elif current:
+                    failures = (attempt['failures'] if attempt else 0) + 1
+                    code = error_code if error_code in TRANSLATION_FAILURE_STATUS else 'invalid_translation'
+                    db.execute('UPDATE translation_phrase_attempts SET failures=?, retry_at=?, error_code=? WHERE owner=? AND meeting=? AND phrase=?',
+                               (failures, time.time() + retry_delay(failures), code, owner, meeting, group['group_id']))
+            if any_succeeded and not service_failed:
                 # An older in-flight success must not undo a newer failure from another meeting.
                 db.execute('UPDATE translation_services SET failures=0, retry_at=0, error_code=? WHERE owner=? AND generation=?',
                            ('', owner, job['service_generation']))
-            elif current:
-                failures = attempt['failures'] + 1
-                code = error_code if error_code in TRANSLATION_FAILURE_STATUS else 'invalid_translation'
-                db.execute('UPDATE translation_phrase_attempts SET failures=?, retry_at=?, error_code=? WHERE owner=? AND meeting=? AND phrase=?',
-                           (failures, time.time() + retry_delay(failures), code, owner, meeting, group['group_id']))
             db.execute('UPDATE translation_jobs SET token=?, lease=0, phrase=?, source_hash=? WHERE owner=? AND meeting=?',
                        ('', '', '', owner, meeting))
             db.commit()
+
+    def finish(self, owner, meeting, token, group, translated, error_code=None, *, current=True):
+        self.finish_batch(owner, meeting, token, [(group, translated, error_code, current)])
 
 
 def register(app, subject_of, root: Path, meeting_api_url: str, complete):
@@ -283,27 +342,100 @@ def register(app, subject_of, root: Path, meeting_api_url: str, complete):
         if not pending:
             return state
         # Rendered live turns may be a tail of the archive. Show their translations before backfill.
+        # Keep batch claims to 1 when the caller supplies visible priority segment_ids or when
+        # multiple phrases are already pending in an unprioritized call? Actually, if priority is
+        # supplied, only batch phrases that share the highest priority tier, or claim 1 per POST!
+        has_priority = bool(priority) and any(
+            any(member['segment_id'] in priority for member in row['members']) for row in pending
+        )
         pending.sort(key=lambda row: min((priority.get(member['segment_id'], len(priority)) for member in row['members']), default=len(priority)))
-        claimed = store.claim(subject, meeting_id, pending, body.retry)
+        if getattr(complete, 'supports_batch', False):
+            if has_priority:
+                in_view = sum(1 for row in pending if any(member['segment_id'] in priority for member in row['members']))
+                batch_limit = min(MAX_BATCH_PHRASES, max(1, in_view))
+            else:
+                batch_limit = MAX_BATCH_PHRASES
+        else:
+            batch_limit = 1
+        claimed = store.claim_batch(subject, meeting_id, pending, body.retry, limit=batch_limit)
         if not claimed:
             return store.snapshot(subject, meeting_id, segments, live)
-        token, missing = claimed
-        translated, error = None, None
-        try:
-            candidate = complete(request, missing['source_text'])
-            if not isinstance(candidate, str):
-                raise ValueError('Invalid translation')
-            translated = visible_translation(candidate)
-        except Exception as exc:  # Provider details, credentials and transcript stay private.
-            error = failure_code(exc)
-        current = False
+        token, claimed_groups = claimed
+        results_by_id = {}
+        group_index_by_id = {row['group_id']: idx for idx, row in enumerate(state['groups'])}
+        def _context_for(target_group):
+            idx = group_index_by_id.get(target_group['group_id'], 0)
+            ctx = []
+            for prev in state['groups'][max(0, idx - 2):idx]:
+                if prev.get('translated_text'):
+                    ctx.append({
+                        'speaker': prev.get('speaker_name') or prev.get('speaker_id') or '',
+                        'source': prev['source_text'],
+                        'translated': prev['translated_text'],
+                    })
+            return ctx
+        def _call_complete(text_payload, *, context=None, speaker=''):
+            if getattr(complete, 'supports_context', False):
+                return complete(request, text_payload, context=context, speaker=speaker)
+            return complete(request, text_payload)
+        can_join_batch = (
+            getattr(complete, 'supports_batch', False)
+            and len(claimed_groups) > 1
+            and all(BATCH_SEPARATOR not in row['source_text'] for row in claimed_groups)
+        )
+        if can_join_batch:
+            joined_source = BATCH_SEPARATOR.join(row['source_text'] for row in claimed_groups)
+            try:
+                candidate = _call_complete(
+                    joined_source,
+                    context=_context_for(claimed_groups[0]),
+                    speaker=claimed_groups[0].get('speaker_name') or claimed_groups[0].get('speaker_id') or '',
+                )
+                if not isinstance(candidate, str):
+                    raise ValueError('Invalid translation')
+                parts = candidate.split(BATCH_SEPARATOR)
+                if len(parts) != len(claimed_groups):
+                    raise ValueError('Invalid batch translation count')
+                for missing, part in zip(claimed_groups, parts):
+                    results_by_id[missing['group_id']] = (visible_translation(part), None)
+            except Exception as exc:
+                code = failure_code(exc)
+                if code in SERVICE_FAILURES:
+                    results_by_id[claimed_groups[0]['group_id']] = (None, code)
+                else:
+                    can_join_batch = False
+                    results_by_id.clear()
+        if not can_join_batch:
+            for missing in claimed_groups:
+                translated, error = None, None
+                try:
+                    candidate = _call_complete(
+                        missing['source_text'],
+                        context=_context_for(missing),
+                        speaker=missing.get('speaker_name') or missing.get('speaker_id') or '',
+                    )
+                    if not isinstance(candidate, str):
+                        raise ValueError('Invalid translation')
+                    translated = visible_translation(candidate)
+                except Exception as exc:  # Provider details, credentials and transcript stay private.
+                    error = failure_code(exc)
+                results_by_id[missing['group_id']] = (translated, error)
+                if error in SERVICE_FAILURES:
+                    break
+        current_by_id = {}
         try:
             # Reauthorize and reread after inference: edits, deletion or regrouping
             # while a model was running must not publish an old response.
             _, segments, live = load(request, meeting_id)
             latest = store.snapshot(subject, meeting_id, segments, live)
-            current = any(row['ready'] and row['group_id'] == missing['group_id']
-                          and source_fingerprint(row) == source_fingerprint(missing) for row in latest['groups'])
+            latest_ready = {row['group_id']: source_fingerprint(row) for row in latest['groups'] if row['ready']}
+            for missing in claimed_groups:
+                if missing['group_id'] in results_by_id:
+                    current_by_id[missing['group_id']] = latest_ready.get(missing['group_id']) == source_fingerprint(missing)
         finally:
-            store.finish(subject, meeting_id, token, missing, translated, error, current=current)
+            batch_outcomes = [
+                (missing, *results_by_id[missing['group_id']], current_by_id.get(missing['group_id'], False))
+                for missing in claimed_groups if missing['group_id'] in results_by_id
+            ]
+            store.finish_batch(subject, meeting_id, token, batch_outcomes)
         return store.snapshot(subject, meeting_id, segments, live)

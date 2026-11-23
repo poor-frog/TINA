@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { currentGoogleMeetBot, isOwnedActiveBot, isTerminalBotStatus } from './meet-panel-state';
+import { currentGoogleMeetBot, isOwnedActiveBot, isTerminalBotStatus, latestMiniCaption } from './meet-panel-state';
 import type { BotMeeting } from './bot-transcript';
 import { pinScope, pinSource, pinsFromStorage } from './meet-pins';
 
@@ -53,3 +53,31 @@ assert.deepEqual(pinsFromStorage(prefix, {
 console.log('Meet panel: exact Bot/room matching and lifecycle status passed');
 
 assert.equal(prefix, await pinScope({ ...cfg, account: { ...cfg.account, key: 'b'.repeat(43) } }, run));
+
+assert.equal(latestMiniCaption([], []), null);
+const liveSegs = [
+  { segment_id: 's1', text: 'Xin chào mọi người.', absolute_start_time: '2026-11-23T10:00:00Z', completed: true },
+  { segment_id: 's2', text: 'Hôm nay chúng ta họp nhanh', absolute_start_time: '2026-11-23T10:00:04Z', completed: false },
+];
+const liveGroups = [
+  {
+    group_id: 'g1',
+    members: [{ segment_id: 's1', source_text: 'Xin chào mọi người.' }],
+    source_text: 'Xin chào mọi người.',
+    translated_text: 'Hello everyone.',
+    ready: true,
+    speaker_id: 'p1',
+    speaker_name: 'Nam',
+    start_ms: 0,
+    end_ms: 1000,
+    status: 'complete' as const,
+  },
+];
+assert.deepEqual(
+  latestMiniCaption(liveSegs.slice(0, 1), liveGroups),
+  { stt: 'Xin chào mọi người.' },
+);
+assert.deepEqual(
+  latestMiniCaption(liveSegs, liveGroups),
+  { stt: 'Xin chào mọi người. Hôm nay chúng ta họp nhanh' },
+);

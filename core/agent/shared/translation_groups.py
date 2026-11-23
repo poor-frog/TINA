@@ -1,18 +1,19 @@
 """Backend-owned phrase boundaries over finalized canonical transcript segments.
 
 No model calls or transcript edits. Clients render these groups rather than inventing
-their own boundaries. A live tail waits for five seconds without a new finalized
+their own boundaries. A live tail waits for two seconds without a new finalized
 segment; completed meetings flush it immediately.
 """
 import hashlib
 import json
 import re
 
-TAIL_QUIET_SECONDS = 5
-PAUSE_MS = 3000
-MAX_SPAN_MS = 12000
-MAX_WORDS = 40
-MAX_CHARACTERS = 360
+TAIL_QUIET_SECONDS = 2
+PAUSE_MS = 1800
+MAX_SPAN_MS = 8500
+MAX_WORDS = 28
+MAX_CHARACTERS = 240
+MIN_SENTENCE_WORDS = 3
 SENTENCE_END = re.compile(r'[.!?。！？][\"\u201d\u2019\)\]]*$')
 
 
@@ -62,7 +63,7 @@ def phrases(segments: list[dict], *, tail_ready: bool) -> list[dict]:
         text = joined(current)
         span = row.get('end_ms', row.get('start_ms', 0)) - current[0].get('start_ms', 0)
         words = len(text.split())
-        if ((words >= 6 and SENTENCE_END.search(text)) or words >= MAX_WORDS
+        if ((words >= MIN_SENTENCE_WORDS and SENTENCE_END.search(text)) or words >= MAX_WORDS
                 or len(text) >= MAX_CHARACTERS or span >= MAX_SPAN_MS):
             finish(True)
     finish(tail_ready)
