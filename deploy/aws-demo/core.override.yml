@@ -36,3 +36,5 @@ services:
     image: ghcr.io/poor-frog/tina-tts:demo
   tts:
     image: ghcr.io/poor-frog/tina-tts:demo
+  livekit-agent:
+    image: ghcr.io/poor-frog/tina-livekit-agent:demo

@@ -9,6 +9,9 @@ on:
       build-asr:
         default: true
         type: boolean
+      build-livekit:
+        default: true
+        type: boolean
       build-gipformer:
         default: false
         type: boolean
@@ -40,20 +43,29 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build base and Meeting Bot (same local Docker daemon)
+      - name: Build base, Meeting Bot, and LiveKit Voice Agent (same local Docker daemon)
         env:
           BUILD_SHA: ${{ inputs.revision }}
+          BUILD_LIVEKIT: ${{ inputs.build-livekit }}
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/tina-source"
-          docker build -f core/meetings/modules/join/Dockerfile.env \
+          docker build --platform linux/amd64 -f core/meetings/modules/join/Dockerfile.env \
             -t tina/meet-join-env:dev core/meetings/modules/join
-          docker build -f core/meetings/services/bot/Dockerfile \
+          docker build --platform linux/amd64 -f core/meetings/services/bot/Dockerfile \
             --build-arg TINA_IMAGE_VERSION="$BUILD_SHA" \
             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.revision=$BUILD_SHA" \
             -t ghcr.io/poor-frog/tina-bot:"$BUILD_SHA" .
           docker push ghcr.io/poor-frog/tina-bot:"$BUILD_SHA"
+          if [[ "$BUILD_LIVEKIT" == "true" ]]; then
+            docker build --platform linux/amd64 -f deploy/livekit/Dockerfile \
+              --build-arg TINA_BOT_IMAGE="ghcr.io/poor-frog/tina-bot:$BUILD_SHA" \
+              --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+              --label "org.opencontainers.image.revision=$BUILD_SHA" \
+              -t ghcr.io/poor-frog/tina-livekit-agent:"$BUILD_SHA" .
+            docker push ghcr.io/poor-frog/tina-livekit-agent:"$BUILD_SHA"
+          fi
 
   viegem:
     if: inputs.build-asr
@@ -81,6 +93,8 @@ jobs:
           file: ${{ runner.temp }}/tina-source/deploy/transcription/viegem/Dockerfile
           platforms: linux/amd64
           push: true
+          provenance: false
+          sbom: false
           build-args: TORCH_VARIANT=cpu
           cache-from: type=gha,scope=viegem
           cache-to: type=gha,mode=max,scope=viegem
@@ -115,6 +129,8 @@ jobs:
           file: ${{ runner.temp }}/tina-source/deploy/transcription/gipformer/Dockerfile
           platforms: linux/amd64
           push: true
+          provenance: false
+          sbom: false
           cache-from: type=gha,scope=gipformer
           cache-to: type=gha,mode=max,scope=gipformer
           labels: |

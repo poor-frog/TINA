@@ -55,6 +55,7 @@ jobs:
     with:
       revision: ${{ github.sha }}
       build-asr: false
+      build-livekit: false
 
   promote:
     needs: [terminal, bot]

@@ -142,6 +142,8 @@ jobs:
           file: ${{ runner.temp }}/tina-build/${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
+          provenance: false
+          sbom: false
           build-args: ${{ matrix.build_args }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
@@ -159,10 +161,12 @@ jobs:
     uses: ./.github/workflows/ghcr-publish-extras.yml
     with:
       revision: ${{ needs.revision.outputs.sha }}
+      build-asr: true
+      build-livekit: true
       build-gipformer: ${{ needs.revision.outputs.include_gipformer == 'true' }}
 
   promote:
-    name: Update GHCR demo tags
+    name: Update GHCR demo and latest tags
     needs: [revision, build, extras]
     runs-on: ubuntu-latest
     permissions:
@@ -191,12 +195,18 @@ jobs:
           set -euo pipefail
           services=(
             terminal gateway meeting-api agent-api admin-api runtime agent-worker
-            mcp flows dashboard agent-reach tts bot viegem
+            mcp flows dashboard agent-reach tts bot livekit-agent viegem
           )
           if [[ "$INCLUDE_GIPFORMER" == "true" ]]; then
             services+=(gipformer)
           fi
           sources=()
+          {
+            echo "### Published GHCR images (\`$BUILD_SHA\`)"
+            echo ""
+            echo "| Service | Image digest (linux/amd64) |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
           for service in "${services[@]}"; do
             image="ghcr.io/poor-frog/tina-$service"
             digest=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$image:$BUILD_SHA")
@@ -205,14 +215,19 @@ jobs:
               exit 1
             fi
             sources+=("$image@$digest")
+            echo "| \`$service\` | \`$image@$digest\` |" >> "$GITHUB_STEP_SUMMARY"
           done
 
           main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
           if [[ "$BUILD_SHA" != "$main_sha" ]]; then
-            echo "Skipping demo tags for $BUILD_SHA because main is at $main_sha."
+            echo "Skipping demo/latest tags for $BUILD_SHA because main is at $main_sha."
             exit 0
           fi
 
           for source in "${sources[@]}"; do
-            docker buildx imagetools create --prefer-index=false --tag "${source%@*}:demo" "$source"
+            base="${source%@*}"
+            docker buildx imagetools create --prefer-index=false \
+              --tag "${base}:demo" \
+              --tag "${base}:latest" \
+              "$source"
           done
