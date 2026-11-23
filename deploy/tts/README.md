@@ -61,6 +61,13 @@ participants receive neither the service token nor its decryption key.
 
 ## Setup on another machine (Ubuntu/WSL or Linux)
 
+For a fresh TINA checkout, copy the release `.env.keys` to the repo root and run
+`make all`. It provisions the encrypted GitHub release bundle on a cache miss.
+The private key stays on the host. The installer receives only the unwrapped
+bundle passphrase through stdin. Existing verified snapshots are reused.
+
+The manual steps below cover standalone or separately provisioned deployments.
+
 `deploy/tts/.env` encrypts its TTS token with the same root `.env.keys` used for
 `deploy/compose/.env`. Provision that private root key once through a secure channel; never commit
 or paste it. No separate `tts.env.keys` is needed. An optional `~/.config/tina/tts-local/` pair

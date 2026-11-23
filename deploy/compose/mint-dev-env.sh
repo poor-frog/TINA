@@ -8,7 +8,16 @@ set -euo pipefail
 umask 077
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 env_file="${1:-$here/.env}"
-[ -f "$env_file" ] || cp "$here/.env.example" "$env_file"
+if [ ! -f "$env_file" ]; then
+  if [ "${2:-}" = "--voice-release" ]; then
+    sed -e 's/^TINA_MEETING_VOICE=0$/TINA_MEETING_VOICE=1/' \
+        -e 's/^COMPOSE_PROFILES=$/COMPOSE_PROFILES=asr/' \
+        -e 's|^TRANSCRIPTION_SERVICE_URL=$|TRANSCRIPTION_SERVICE_URL=http://gipformer:8000|' \
+        "$here/.env.example" > "$env_file"
+  else
+    cp "$here/.env.example" "$env_file"
+  fi
+fi
 repo_root="$(cd "$here/../.." && pwd)"
 if [[ "$env_file" == /* ]]; then env_abs="$env_file"; else env_abs="$(pwd)/$env_file"; fi
 tracked=0
@@ -57,7 +66,11 @@ case "$admin" in
     exit 1;;
 esac
 mint() { openssl rand -hex 32; }
-for key in ADMIN_TOKEN INTERNAL_API_SECRET TINA_FLOWS_API_KEY TINA_FLOWS_TIMELINE_KEY NEXTAUTH_SECRET; do
+keys=(ADMIN_TOKEN INTERNAL_API_SECRET TINA_FLOWS_API_KEY TINA_FLOWS_TIMELINE_KEY NEXTAUTH_SECRET)
+if [ "${2:-}" = "--voice-release" ] && grep -qx 'TRANSCRIPTION_SERVICE_URL=http://gipformer:8000' "$check_file"; then
+  keys+=(TRANSCRIPTION_SERVICE_TOKEN)
+fi
+for key in "${keys[@]}"; do
   if grep -qE "^${key}=[[:space:]]*(\"\"|'')?[[:space:]]*$" "$check_file"; then
     v="$(mint)"
     if [ "$protect_env" -eq 1 ]; then
