@@ -22,7 +22,7 @@ Weights and generated SAPI audio fixtures are not committed or baked into TINA i
 ## Optional speech sidecar
 
 `deploy/tts` installs VieNeu 3.8.3 and sea-g2p (Apache-2.0) in a separate, optional image.
-Its operator-downloaded VieNeu-TTS-v3-Turbo and OpenMOSS MOSS-Audio-Tokenizer-Nano-ONNX
+Its operator-downloaded Blaze VieNeu-TTS-v3-Turbo Enhanced and OpenMOSS MOSS-Audio-Tokenizer-Nano-ONNX
 assets declare Apache-2.0 in their upstream model cards. Exact revisions/checksums are in
 [`deploy/tts/model-assets.json`](deploy/tts/model-assets.json); cards travel with the private
 read-only model cache. No weights, reference voices or eSpeak data are baked into TINA images.
