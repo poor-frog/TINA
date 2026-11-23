@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
       - name: Free disk space for Playwright bot
         run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc || true
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/share/swift || true
           df -h .
       - name: Prepare source without env secrets
         run: |
