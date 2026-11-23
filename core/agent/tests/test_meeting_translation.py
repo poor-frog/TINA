@@ -565,3 +565,66 @@ def test_context_capable_provider_receives_speaker_and_recent_translations(setup
         'Nam',
         [{'speaker': 'Lan', 'source': 'Anh Nam sẽ phụ trách phần này.', 'translated': 'Nam will lead this part.'}],
     )
+
+
+def test_direct_translate_fast_path_bypasses_worker_for_http_provider(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from control_plane.api import create_app
+    from control_plane.dispatch import Dispatcher
+    from control_plane.workspace_reader import WorkspaceReader
+    from shared.config import load_settings
+    import llm.openai_compat as openai_compat
+
+    dispatched = []
+    class FakeRuntime:
+        def spawn(self, *args, **kwargs):
+            dispatched.append((args, kwargs))
+            return {'workload_id': 'w1'}
+    class FakeIdentity:
+        def mint(self, *args, **kwargs): return 'tok'
+    class FakeStreamReader:
+        def read(self, unit_id, *, resume=None):
+            yield {'type': 'message-delta', 'text': 'Fallback worker'}
+            yield {'type': 'turn-complete'}
+
+    captured = []
+    class FakeComp:
+        def __init__(self, *, base_url=None, api_key=None, model=None, timeout=120.0, transport=None):
+            captured.append((base_url, api_key, model))
+            self._client = SimpleNamespace(close=lambda: None)
+        def complete(self, prompt, *, system=None, model=None, response_schema=None):
+            return SimpleNamespace(text='Hello everyone.')
+
+    monkeypatch.setattr(openai_compat, 'OpenAICompatCompletion', FakeComp)
+    monkeypatch.setenv('TINA_LLM_BASE_URL', 'https://example.test/v1')
+    monkeypatch.setenv('TINA_LLM_API_KEY', 'sk-test')
+
+    dispatcher = Dispatcher(
+        load_settings(llm_provider='openai-compat', meeting_model='fast-model'),
+        FakeRuntime(), FakeIdentity(),
+    )
+    client = TestClient(create_app(
+        dispatcher, reader=WorkspaceReader(str(tmp_path)),
+        stream_reader=FakeStreamReader(), direct_translate=True,
+    ))
+    resp = client.post('/api/dictation/translate', headers={'X-User-Id': 'u_jane'},
+                       json={'text': 'xin chào mọi người', 'target_language': 'en'})
+    assert resp.status_code == 200
+    assert resp.json() == {'translated_text': 'Hello everyone.'}
+    assert dispatched == []
+    assert captured == [('https://example.test/v1', 'sk-test', 'fast-model')]
+
+    # CLI-backed providers fall back cleanly to the worker container path.
+    cli_dispatcher = Dispatcher(
+        load_settings(llm_provider='claude-cli', meeting_model='claude-sonnet'),
+        FakeRuntime(), FakeIdentity(),
+    )
+    cli_client = TestClient(create_app(
+        cli_dispatcher, reader=WorkspaceReader(str(tmp_path)),
+        stream_reader=FakeStreamReader(), direct_translate=True,
+    ))
+    cli_resp = cli_client.post('/api/dictation/translate', headers={'X-User-Id': 'u_jane'},
+                               json={'text': 'xin chào', 'target_language': 'en'})
+    assert cli_resp.status_code == 200
+    assert cli_resp.json() == {'translated_text': 'Fallback worker'}
+    assert len(dispatched) == 1

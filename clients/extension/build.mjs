@@ -6,7 +6,11 @@ import { dirname, resolve } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WATCH = process.argv.includes('--watch');
 const outdir = 'dist';
-rmSync(outdir, { recursive: true, force: true });
+try {
+  rmSync(outdir, { recursive: true, force: true });
+} catch (error) {
+  if (!['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error?.code)) throw error;
+}
 mkdirSync(outdir, { recursive: true });
 
 const postBuild = {

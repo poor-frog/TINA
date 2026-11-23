@@ -8,7 +8,7 @@ import {
   watchTranslation, LANGUAGE_STORAGE_KEY, parseTranscriptLanguage, prioritizeSegmentIds,
   type TranscriptLanguage, type TranslationHandle, type TranslationSnapshot,
 } from './translation';
-import { currentGoogleMeetBot, isOwnedActiveBot, isTerminalBotStatus } from './meet-panel-state';
+import { currentGoogleMeetBot, isOwnedActiveBot, isTerminalBotStatus, latestMiniCaption } from './meet-panel-state';
 import { createVoiceActivity } from './voice-activity-view';
 import { createMeetAsk, requestNotesPreview } from './meet-ask';
 import { createMeetFacts } from './meet-facts';
@@ -66,6 +66,17 @@ let notesScope = 0;
 let sendBotState: 'idle' | 'sending' | 'sent' | 'error' = 'idle';
 let sendBotMessage = '';
 let sendBotResetTimer: ReturnType<typeof setTimeout> | undefined;
+let lastMiniCaptionPayload = '';
+
+function emitMiniCaption(): void {
+  const caption = selected && !isTerminalBotStatus(selected.status)
+    ? latestMiniCaption(segments, translation?.groups ?? [])
+    : null;
+  const serialized = JSON.stringify(caption);
+  if (serialized === lastMiniCaptionPayload) return;
+  lastMiniCaptionPayload = serialized;
+  postPanelMessage('live-caption', { meet: meetId, caption });
+}
 
 function setBotStatus(message: string, state: 'loading' | 'active' | 'joining' | 'stopping' | 'ended' | 'error'): void {
   const status = $('botStatus');
@@ -324,6 +335,7 @@ function render(): void {
   }, speakerPhoto);
   if (activePanelView === 'notes') renderPins();
   renderTranslationStatus();
+  emitMiniCaption();
   if (hasText) $('emptyMessage').textContent = '';
   else if (selected) $('emptyMessage').textContent = 'Đang chờ transcript từ TINA Bot…';
   renderFooterActions();
@@ -347,6 +359,7 @@ function clearWatchers(): void {
   voiceActivityView.reset();
   renderNotes();
   renderFooterActions();
+  emitMiniCaption();
 }
 
 function startTranslation(retry = false): void {

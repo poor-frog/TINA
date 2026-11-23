@@ -28,14 +28,22 @@ class OpenAICompatCompletion:
 
     def __init__(self, *, base_url: Optional[str] = None, api_key: Optional[str] = None,
                  model: Optional[str] = None, timeout: float = 120.0,
-                 transport: Optional[httpx.BaseTransport] = None) -> None:
+                 transport: Optional[httpx.BaseTransport] = None,
+                 client: Optional[httpx.Client] = None,
+                 temperature: Optional[float] = None,
+                 max_tokens: Optional[int] = None,
+                 reasoning_effort: Optional[str] = None) -> None:
         self._base = (base_url or os.environ.get("TINA_LLM_BASE_URL")
                       or os.environ.get("ANTHROPIC_BASE_URL") or "").rstrip("/")
         self._key = (api_key or os.environ.get("TINA_LLM_API_KEY")
                      or os.environ.get("ANTHROPIC_AUTH_TOKEN")
                      or os.environ.get("ANTHROPIC_API_KEY") or "")
         self._model = model or os.environ.get("TINA_LLM_MODEL") or ""
-        self._client = httpx.Client(timeout=timeout, transport=transport)
+        self._owns_client = client is None
+        self._client = client if client is not None else httpx.Client(timeout=timeout, transport=transport)
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+        self._reasoning_effort = reasoning_effort
 
     def complete(self, prompt: str, *, system: Optional[str] = None,
                  model: Optional[str] = None, response_schema: Optional[dict] = None) -> CompletionResult:
@@ -61,11 +69,18 @@ class OpenAICompatCompletion:
         messages = ([{"role": "system", "content": system}] if system else [])
         messages.append({"role": "user", "content": prompt})
         headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
-        try:
-            max_tokens = int(os.environ.get("TINA_LLM_MAX_TOKENS", "4096"))
-        except ValueError:
-            max_tokens = 4096
-        payload = {"model": target, "messages": messages, "max_tokens": max_tokens}
+        if self._max_tokens is not None:
+            max_tokens = self._max_tokens
+        else:
+            try:
+                max_tokens = int(os.environ.get("TINA_LLM_MAX_TOKENS", "4096"))
+            except ValueError:
+                max_tokens = 4096
+        payload: dict = {"model": target, "messages": messages, "max_tokens": max_tokens}
+        if self._temperature is not None:
+            payload["temperature"] = self._temperature
+        if self._reasoning_effort:
+            payload["reasoning_effort"] = self._reasoning_effort
         if schema is not None:
             payload['response_format'] = {'type': 'json_schema', 'json_schema': {
                 'name': schema_name, 'strict': True, 'schema': schema}}

@@ -59,7 +59,7 @@ export function translationSegments<T extends TranscriptSegment & { speaker_id?:
 }
 
 /** Same authenticated backend cache as Terminal; provider keys never reach the extension. */
-export const LIVE_POLL_DELAY_MS = 1200;
+export const LIVE_POLL_DELAY_MS = 600;
 export const ERROR_POLL_DELAY_MS = 10000;
 export type TranslationHandle = (() => void) & { nudge: () => void };
 

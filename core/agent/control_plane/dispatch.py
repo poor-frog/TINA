@@ -595,6 +595,16 @@ class Dispatcher:
         """Stop one isolated dispatch workload after its live voice lease is revoked."""
         self._runtime.stop(workload_id)
 
+    def destroy_workload(self, workload_id: str) -> None:
+        """Best-effort reclaim of a finished ephemeral one-shot worker container/pod."""
+        destroy_fn = getattr(self._runtime, "destroy", None)
+        if not callable(destroy_fn):
+            return
+        try:
+            destroy_fn(workload_id)
+        except Exception:  # noqa: BLE001 — cleanup must never mask a completed turn
+            logger.debug("ephemeral workload destroy failed workload=%s", workload_id)
+
     def resolve_model_config(self, subject: str) -> Optional[dict]:
         """The subject's effective Settings → Models config (user pref > platform setting).
         ``{}`` = resolved empty / no resolver wired; ``None`` = the lookup FAILED — callers fail
