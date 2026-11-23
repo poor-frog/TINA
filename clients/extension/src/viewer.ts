@@ -8,7 +8,10 @@ import {
 import { ACCOUNT_KEY, DEFAULT_GATEWAY, DEFAULT_TERMINAL, sessionCommand, storedAccount } from './extension-session';
 import type { TranscriptSegment } from './transcript-rendering';
 import type { VoiceReply } from './voice-replies';
-import { watchTranslation, type TranscriptLanguage, type TranslationHandle, type TranslationSnapshot } from './translation';
+import {
+  watchTranslation, LANGUAGE_STORAGE_KEY, parseTranscriptLanguage, prioritizeSegmentIds,
+  type TranscriptLanguage, type TranslationHandle, type TranslationSnapshot,
+} from './translation';
 
 type BotTarget = { platform: Exclude<MeetingRef['platform'], 'youtube'>; nativeMeetingId: string; url: string };
 const BOT_PLATFORM_NAMES: Record<BotTarget['platform'], string> = {
@@ -87,11 +90,12 @@ function startTranslation(retry = false): void {
   }, () => {
     if (scope !== token || selected?.id !== id) return;
     translationError = true; renderTranscript();
-  }, retry, () => segments.filter(segment => segment.completed !== false && !!segment.segment_id).map(segment => segment.segment_id!));
+  }, retry, () => prioritizeSegmentIds(segments));
 }
 
 $('transcriptLanguage').addEventListener('change', () => {
-  language = ($('transcriptLanguage') as HTMLSelectElement).value as TranscriptLanguage;
+  language = parseTranscriptLanguage(($('transcriptLanguage') as HTMLSelectElement).value);
+  void chrome.storage.local.set({ [LANGUAGE_STORAGE_KEY]: language });
   renderTranscript(); startTranslation();
 });
 $('retryTranslation').addEventListener('click', () => startTranslation(true));
@@ -540,7 +544,7 @@ function renderSettings(): void {
 }
 
 async function init(): Promise<void> {
-  const stored = await chrome.storage.local.get([...fields, ACCOUNT_KEY, 'theme', 'transcriptSource']);
+  const stored = await chrome.storage.local.get([...fields, ACCOUNT_KEY, 'theme', 'transcriptSource', LANGUAGE_STORAGE_KEY]);
   config.account = storedAccount(stored[ACCOUNT_KEY]);
   for (const field of fields) {
     const value = stored[field];
@@ -549,6 +553,8 @@ async function init(): Promise<void> {
     if (config.account && field === 'botGatewayUrl') config[field] = config.account.gateway;
   }
   if (stored.transcriptSource !== 'bot') void chrome.storage.local.set({ transcriptSource: 'bot' });
+  language = parseTranscriptLanguage(stored[LANGUAGE_STORAGE_KEY]);
+  ($('transcriptLanguage') as HTMLSelectElement).value = language;
   theme = stored.theme === 'light' || stored.theme === 'dark' ? stored.theme : 'system';
   applyTheme();
   renderTranscript();
@@ -583,6 +589,15 @@ function bindSettings(): void {
       const saved = changes.theme.newValue;
       theme = saved === 'light' || saved === 'dark' ? saved : 'system';
       applyTheme();
+    }
+    if (changes[LANGUAGE_STORAGE_KEY]) {
+      const nextLang = parseTranscriptLanguage(changes[LANGUAGE_STORAGE_KEY].newValue);
+      if (nextLang !== language) {
+        language = nextLang;
+        ($('transcriptLanguage') as HTMLSelectElement).value = language;
+        renderTranscript();
+        startTranslation();
+      }
     }
     if (!changes[ACCOUNT_KEY]) return;
     config.account = storedAccount(changes[ACCOUNT_KEY].newValue);

@@ -90,7 +90,10 @@
     .note-pin-toggle[aria-pressed="true"] { border-color: var(--control-line); background: var(--subtle-bg); color: var(--brand); }
     .note-pin-toggle[aria-pressed="true"] svg path:first-child { fill: currentColor; }
     .transcript-source-target { background: var(--subtle-bg); outline: 2px solid var(--brand); outline-offset: 2px; border-radius: var(--radius-small); }
-    .segment-english { margin-top: 4px; padding: 5px 8px; border-left: 2px solid var(--control-line); border-radius: 0 var(--radius-small) var(--radius-small) 0; background: var(--subtle-bg); color: var(--muted-foreground); font-size: 12px; white-space: pre-wrap; }
+    .segment-english { margin-top: 4px; padding: 5px 8px; border-left: 2px solid var(--control-line); border-radius: 0 var(--radius-small) var(--radius-small) 0; background: var(--subtle-bg); color: var(--muted-foreground); font-size: 12px; white-space: pre-wrap; transition: border-color 0.2s ease, color 0.2s ease; }
+    .segment-english[data-ready="true"] { border-left-color: var(--brand); color: var(--foreground); }
+    .segment-english[data-ready="false"] .segment-english-text { font-style: italic; font-size: 11px; }
+    .segment-lang-badge { display: inline-block; margin-right: 6px; color: var(--brand); font-size: 10px; font-weight: 700; letter-spacing: 0.03em; user-select: none; -webkit-user-select: none; }
     #latestBtn { position: sticky; bottom: 4px; display: block; margin: 0 auto; min-height: 32px; padding: 0 12px; border: 1px solid var(--control-line); border-radius: 999px; background: var(--surface); color: var(--brand); }
     .notes-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); }
     .notes-toolbar h2 { margin: 0; font-size: 14px; font-weight: 650; }

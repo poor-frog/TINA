@@ -18,10 +18,11 @@ export function useMeetingTranslation(meetingId: string, language: TranscriptLan
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const retryRequested = useRef(false);
-  const priority = useRef(segmentIds);
-  priority.current = segmentIds;
+  const recentIds = segmentIds.length > 128 ? segmentIds.slice(-128) : segmentIds;
+  const priority = useRef(recentIds);
+  priority.current = recentIds;
   const nudgeRef = useRef<() => void>(() => {});
-  const segmentDigest = segmentIds.join("|");
+  const segmentDigest = recentIds.join("|");
   const valid = /^[1-9]\d*$/.test(meetingId);
   useEffect(() => {
     setSnapshot(null); setError(""); retryRequested.current = false;

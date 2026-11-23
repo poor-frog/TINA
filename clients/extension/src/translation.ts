@@ -2,6 +2,15 @@ import { botFetch, type BotConnection } from './bot-transcript';
 import type { TranscriptSegment } from './transcript-rendering';
 
 export type TranscriptLanguage = 'vi' | 'en' | 'bilingual';
+export const LANGUAGE_STORAGE_KEY = 'transcriptLanguage';
+export function parseTranscriptLanguage(value: unknown, fallback: TranscriptLanguage = 'bilingual'): TranscriptLanguage {
+  return value === 'vi' || value === 'en' || value === 'bilingual' ? value : fallback;
+}
+/** Prioritize the most recent finalized live turns in chronological order when the transcript exceeds 128 turns. */
+export function prioritizeSegmentIds(segments: { completed?: boolean; segment_id?: string }[]): string[] {
+  const confirmed = segments.filter(s => s.completed !== false && !!s.segment_id).map(s => s.segment_id!);
+  return confirmed.length > 128 ? confirmed.slice(-128) : confirmed;
+}
 export interface TranslationGroup {
   group_id: string; members: { segment_id: string; source_text: string; revision?: number }[];
   source_text: string; translated_text: string | null; ready: boolean;

@@ -542,3 +542,26 @@ def test_translation_worker_translates_phrase_batch_with_fallback(monkeypatch):
         {'type': 'message-delta', 'text': f'Hello.{engine._TRANSLATION_BATCH_SEPARATOR}Goodbye.'},
         {'type': 'turn-complete'},
     ]
+
+
+def test_context_capable_provider_receives_speaker_and_recent_translations(setup):
+    _, canonical, _, _ = setup
+    canonical['segments'] = [
+        {'segment_id': 'c1', 'text': 'Anh Nam sẽ phụ trách phần này.', 'speaker_id': 'p1', 'speaker_name': 'Lan', 'start_ms': 0, 'end_ms': 1000},
+        {'segment_id': 'c2', 'text': 'Tôi đồng ý với phương án đó.', 'speaker_id': 'p2', 'speaker_name': 'Nam', 'start_ms': 1100, 'end_ms': 2000},
+    ]
+    recorded = []
+    def context_complete(request, text, *, context=None, speaker=''):
+        recorded.append((text, speaker, context))
+        return 'Nam will lead this part.' if 'Anh Nam' in text else 'I agree with that option.'
+    context_complete.supports_context = True
+    client = use_provider(setup, context_complete)
+    client.post(URL, json={})
+    state = client.post(URL, json={}).json()
+    assert state['status'] == 'complete' and state['completed'] == 2
+    assert recorded[0] == ('Anh Nam sẽ phụ trách phần này.', 'Lan', [])
+    assert recorded[1] == (
+        'Tôi đồng ý với phương án đó.',
+        'Nam',
+        [{'speaker': 'Lan', 'source': 'Anh Nam sẽ phụ trách phần này.', 'translated': 'Nam will lead this part.'}],
+    )

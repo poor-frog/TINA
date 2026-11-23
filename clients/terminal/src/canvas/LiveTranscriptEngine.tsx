@@ -229,9 +229,9 @@ export function LiveTranscriptEngine({
             {playable ? <button type="button" onClick={() => onSegmentClick?.(segment.id!)} aria-label="Play transcript segment"
               className={styles.play} aria-current={segment.id === activeSegmentId ? "true" : undefined}>{segment.display.text}</button> : segment.display.text}
           </div>}
-          <div lang="en" className={styles.english}>
-            <span className={styles.languageLabel}>EN</span>
-            {translated || pendingTranslation}
+          <div lang="en" className={styles.english} data-ready={String(!!translated)}>
+            <span className={styles.languageLabel} aria-hidden="true">EN</span>
+            <span className={styles.englishText}>{translated || pendingTranslation}</span>
           </div>
         </article>;
       })}

@@ -1195,6 +1195,8 @@ def create_app(
         text: str,
         task: Literal["polish", "translate", "knowledge", "discussion"],
         target_language: str | None = None,
+        context: list[dict] | None = None,
+        speaker: str | None = None,
     ) -> str:
         label = {'polish': 'Text polish', 'translate': 'Live translation', 'knowledge': 'Meeting answer', 'discussion': 'Discussion review'}[task]
         if dispatcher is None or stream_reader is None:
@@ -1240,6 +1242,10 @@ def create_app(
                 raise HTTPException(409, 'Current voice turn required for sandbox')
         if target_language is not None:
             payload["target_language"] = target_language
+        if context:
+            payload["context"] = context[:2]
+        if speaker:
+            payload["speaker"] = speaker[:120]
         inline = prefix + json.dumps(payload, ensure_ascii=False)
         invocation = units.make_dispatch(
             subject=subject,
@@ -1417,9 +1423,11 @@ def create_app(
         return {"translated_text": translated}
 
     from control_plane.meeting_translation import register as register_meeting_translation
-    def _translate_meeting_phrase(request: Request, text: str) -> str:
-        return _transcript_completion(request, text=text, task='translate', target_language='en')
+    def _translate_meeting_phrase(request: Request, text: str, *, context: list[dict] | None = None, speaker: str = '') -> str:
+        return _transcript_completion(request, text=text, task='translate', target_language='en',
+                                      context=context, speaker=speaker)
     _translate_meeting_phrase.supports_batch = True  # type: ignore[attr-defined]
+    _translate_meeting_phrase.supports_context = True  # type: ignore[attr-defined]
     register_meeting_translation(app, subject_of, wsr.root, settings.meeting_api_url if settings else '',
                                  _translate_meeting_phrase)
 

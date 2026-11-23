@@ -4,7 +4,10 @@ import { ACCOUNT_KEY, DEFAULT_GATEWAY, DEFAULT_TERMINAL, sessionCommand, storedA
 import { meetAvatarUrl } from './meet-avatars';
 import type { TranscriptSegment } from './transcript-rendering';
 import type { VoiceReply } from './voice-replies';
-import { watchTranslation, type TranscriptLanguage, type TranslationHandle, type TranslationSnapshot } from './translation';
+import {
+  watchTranslation, LANGUAGE_STORAGE_KEY, parseTranscriptLanguage, prioritizeSegmentIds,
+  type TranscriptLanguage, type TranslationHandle, type TranslationSnapshot,
+} from './translation';
 import { currentGoogleMeetBot, isOwnedActiveBot, isTerminalBotStatus } from './meet-panel-state';
 import { createVoiceActivity } from './voice-activity-view';
 import { createMeetAsk, requestNotesPreview } from './meet-ask';
@@ -357,7 +360,7 @@ function startTranslation(retry = false): void {
   }, () => {
     if (disposed || token !== scope || selected?.id !== meetingId) return;
     translationError = true; render();
-  }, retry, () => segments.filter(segment => segment.completed !== false && !!segment.segment_id).map(segment => segment.segment_id!));
+  }, retry, () => prioritizeSegmentIds(segments));
   render();
 }
 
@@ -821,8 +824,10 @@ async function connect(): Promise<void> {
   $('emptyMessage').textContent = 'TINA đang kiểm tra Bot trong phòng Meet này.';
   setBotStatus('Kiểm tra Bot', 'loading'); render();
   try {
-    const stored = await chrome.storage.local.get([ACCOUNT_KEY, 'botGatewayUrl', 'terminalUrl', 'theme']);
+    const stored = await chrome.storage.local.get([ACCOUNT_KEY, 'botGatewayUrl', 'terminalUrl', 'theme', LANGUAGE_STORAGE_KEY]);
     if (controller.signal.aborted || token !== scope) return;
+    language = parseTranscriptLanguage(stored[LANGUAGE_STORAGE_KEY], language);
+    ($('language') as HTMLSelectElement).value = language;
     const account = storedAccount(stored[ACCOUNT_KEY]);
     config = { account, botGatewayUrl: account?.gateway || stored.botGatewayUrl || DEFAULT_GATEWAY };
     terminalUrl = account?.terminal || stored.terminalUrl || DEFAULT_TERMINAL;
@@ -949,7 +954,8 @@ $('panelHeader').addEventListener('pointerdown', event => {
   beginPanelGesture('move', $('panelHeader'), event);
 });
 ($('language') as HTMLSelectElement).addEventListener('change', () => {
-  language = ($('language') as HTMLSelectElement).value as TranscriptLanguage;
+  language = parseTranscriptLanguage(($('language') as HTMLSelectElement).value);
+  void chrome.storage.local.set({ [LANGUAGE_STORAGE_KEY]: language });
   render(); startTranslation();
 });
 ($('refreshBot') as HTMLButtonElement).addEventListener('click', () => void connect());
@@ -963,6 +969,15 @@ $('panelHeader').addEventListener('pointerdown', event => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.theme) applyPanelTheme(changes.theme.newValue);
+  if (changes[LANGUAGE_STORAGE_KEY]) {
+    const nextLang = parseTranscriptLanguage(changes[LANGUAGE_STORAGE_KEY].newValue);
+    if (nextLang !== language) {
+      language = nextLang;
+      ($('language') as HTMLSelectElement).value = language;
+      render();
+      startTranslation();
+    }
+  }
   if (changes[ACCOUNT_KEY] || changes.terminalUrl || changes.botGatewayUrl) {
     if (changes[ACCOUNT_KEY]) {
       config = { ...config, account: undefined };

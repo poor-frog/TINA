@@ -349,12 +349,35 @@ def register(app, subject_of, root: Path, meeting_api_url: str, complete):
             any(member['segment_id'] in priority for member in row['members']) for row in pending
         )
         pending.sort(key=lambda row: min((priority.get(member['segment_id'], len(priority)) for member in row['members']), default=len(priority)))
-        batch_limit = MAX_BATCH_PHRASES if (getattr(complete, 'supports_batch', False) and not has_priority) else 1
+        if getattr(complete, 'supports_batch', False):
+            if has_priority:
+                in_view = sum(1 for row in pending if any(member['segment_id'] in priority for member in row['members']))
+                batch_limit = min(MAX_BATCH_PHRASES, max(1, in_view))
+            else:
+                batch_limit = MAX_BATCH_PHRASES
+        else:
+            batch_limit = 1
         claimed = store.claim_batch(subject, meeting_id, pending, body.retry, limit=batch_limit)
         if not claimed:
             return store.snapshot(subject, meeting_id, segments, live)
         token, claimed_groups = claimed
         results_by_id = {}
+        group_index_by_id = {row['group_id']: idx for idx, row in enumerate(state['groups'])}
+        def _context_for(target_group):
+            idx = group_index_by_id.get(target_group['group_id'], 0)
+            ctx = []
+            for prev in state['groups'][max(0, idx - 2):idx]:
+                if prev.get('translated_text'):
+                    ctx.append({
+                        'speaker': prev.get('speaker_name') or prev.get('speaker_id') or '',
+                        'source': prev['source_text'],
+                        'translated': prev['translated_text'],
+                    })
+            return ctx
+        def _call_complete(text_payload, *, context=None, speaker=''):
+            if getattr(complete, 'supports_context', False):
+                return complete(request, text_payload, context=context, speaker=speaker)
+            return complete(request, text_payload)
         can_join_batch = (
             getattr(complete, 'supports_batch', False)
             and len(claimed_groups) > 1
@@ -363,7 +386,11 @@ def register(app, subject_of, root: Path, meeting_api_url: str, complete):
         if can_join_batch:
             joined_source = BATCH_SEPARATOR.join(row['source_text'] for row in claimed_groups)
             try:
-                candidate = complete(request, joined_source)
+                candidate = _call_complete(
+                    joined_source,
+                    context=_context_for(claimed_groups[0]),
+                    speaker=claimed_groups[0].get('speaker_name') or claimed_groups[0].get('speaker_id') or '',
+                )
                 if not isinstance(candidate, str):
                     raise ValueError('Invalid translation')
                 parts = candidate.split(BATCH_SEPARATOR)
@@ -382,7 +409,11 @@ def register(app, subject_of, root: Path, meeting_api_url: str, complete):
             for missing in claimed_groups:
                 translated, error = None, None
                 try:
-                    candidate = complete(request, missing['source_text'])
+                    candidate = _call_complete(
+                        missing['source_text'],
+                        context=_context_for(missing),
+                        speaker=missing.get('speaker_name') or missing.get('speaker_id') or '',
+                    )
                     if not isinstance(candidate, str):
                         raise ValueError('Invalid translation')
                     translated = visible_translation(candidate)

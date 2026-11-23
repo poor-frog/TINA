@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { watchTranslation, translationSegments, type TranslationGroup, type TranslationSnapshot } from './translation';
+import { watchTranslation, translationSegments, parseTranscriptLanguage, prioritizeSegmentIds, type TranslationGroup, type TranslationSnapshot } from './translation';
 const gateway = 'http://127.0.0.1:18056';
 const connection = { botGatewayUrl: gateway, account: { id: '7', email: 'fixture@example.test',
   key: 'a'.repeat(43), gateway, terminal: 'http://127.0.0.1:23000' } };
@@ -104,4 +104,15 @@ for (const [state, retry, posts] of [
     assert.equal(count, 2);
   } finally { globalThis.fetch = original; }
 }
+
+// Verify language preference validation and live-tail priority slicing (>128 turns).
+assert.equal(parseTranscriptLanguage('en'), 'en');
+assert.equal(parseTranscriptLanguage('vi'), 'vi');
+assert.equal(parseTranscriptLanguage('invalid'), 'bilingual');
+const longMeeting = Array.from({ length: 150 }, (_, i) => ({ segment_id: `seg-${i}`, completed: true }));
+longMeeting.push({ segment_id: 'draft-tail', completed: false });
+const prioritized = prioritizeSegmentIds(longMeeting);
+assert.equal(prioritized.length, 128);
+assert.equal(prioritized[0], 'seg-22');
+assert.equal(prioritized[127], 'seg-149');
 console.log('translation isolated retries and revision checks passed');
