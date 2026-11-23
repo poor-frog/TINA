@@ -49,7 +49,7 @@ running the deployment scripts.
 
 The GHCR workflows build the 15 Linux amd64 images (including `tina-tts` and `tina-livekit-agent`)
 from the tested `main` commit after `gates` succeeds. Each image is published under the full commit
-SHA. The workflow updates the `:demo` and `:latest` tags once all images are available. Mirror to
+SHA. The workflow updates the `:prod` and `:latest` tags once all images are available. Mirror to
 AWS ECR or run the deployment scripts after that job succeeds to pull the new images.
 
 ### Connect the Chrome extension

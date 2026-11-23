@@ -24,10 +24,10 @@ including `tina-tts` (VieNeu CPU). It calls `ghcr-publish-extras.yml` to build
 the meeting bot, LiveKit voice agent, VieGem (CPU), and optional Gipformer
 (`include_gipformer: true`).
 
-After all images build successfully, **Update GHCR demo and latest tags**
-retags the complete set to `:demo` and `:latest` (skipping commits superseded on
+After all images build successfully, **Update GHCR prod and latest tags**
+retags the complete set to `:prod` and `:latest` (skipping commits superseded on
 `main`). Re-run failed jobs in GitHub Actions to retry a build or tag update.
-AWS deployments and ECR mirrors pull the promoted `:demo` or `:latest` tags
+AWS deployments and ECR mirrors pull the promoted `:prod` or `:latest` tags
 after that job succeeds.
 
 The build uses a tracked source export that excludes dotenv files. The dashboard

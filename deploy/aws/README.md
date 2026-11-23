@@ -28,5 +28,5 @@ port 18007 private to the Compose network.
 
 The `TINA - AWS Terminal and Bot` workflow publishes these two application
 images from `demo/aws` after relevant source changes. Both builds must pass before
-their existing `:demo` tags are updated. The main-branch release workflow continues
+their existing `:prod` tags are updated. The main-branch release workflow continues
 to publish the complete image set.
