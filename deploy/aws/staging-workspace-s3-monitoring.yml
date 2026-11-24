@@ -1,0 +1,227 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudWatch metric filters, alarms, and dashboard for TINA Staging S3-backed ephemeral workspaces.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+
+Parameters:
+  ClusterName: {Type: String, Default: tina-foundation-ecs}
+  WorkspaceBucketName: {Type: String}
+  EphemeralWorkspaceLogGroup: {Type: String}
+  AgentApiLogGroup: {Type: String}
+  RuntimeLogGroup: {Type: String}
+  AgentApiServiceName: {Type: String}
+  RuntimeServiceName: {Type: String}
+  AlarmTopicArn: {Type: String, Default: ''}
+
+Conditions:
+  HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, '']]
+
+Resources:
+  SyncCommitErrorFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref EphemeralWorkspaceLogGroup
+      FilterPattern: '?Traceback ?"commit failed" ?"HTTP Error 500" ?"RuntimeError"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/S3Workspaces
+          MetricName: WorkspaceSyncCommitErrors
+          MetricValue: '1'
+          DefaultValue: 0
+
+  CasConflictFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref EphemeralWorkspaceLogGroup
+      FilterPattern: '"S3 CAS conflict"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/S3Workspaces
+          MetricName: WorkspaceS3CasConflicts
+          MetricValue: '1'
+          DefaultValue: 0
+
+  AgentApi5xxFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref AgentApiLogGroup
+      FilterPattern: '?"500 Internal Server Error" ?"502 Bad Gateway" ?"Exception in ASGI application"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/S3Workspaces
+          MetricName: AgentApi5xxErrors
+          MetricValue: '1'
+          DefaultValue: 0
+
+  AgentApiS3ErrorFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref AgentApiLogGroup
+      FilterPattern: '?"migration failed" ?"compaction skipped" ?"S3 CAS commit failed"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/S3Workspaces
+          MetricName: AgentApiS3Errors
+          MetricValue: '1'
+          DefaultValue: 0
+
+  RuntimeSpawnFailureFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref RuntimeLogGroup
+      FilterPattern: '"workload_spawn_failed"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/S3Workspaces
+          MetricName: RuntimeSpawnFailures
+          MetricValue: '1'
+          DefaultValue: 0
+
+  SyncCommitErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tina-staging-s3-sync-commit-errors
+      AlarmDescription: Ephemeral workspace sync sidecar or worker encountered a commit/runtime error.
+      Namespace: TINA/Staging/S3Workspaces
+      MetricName: WorkspaceSyncCommitErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  CasConflictsHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tina-staging-s3-cas-conflicts-high
+      AlarmDescription: Sustained S3 CAS 412 conflicts on ephemeral workspace commits (>=10 in 5m).
+      Namespace: TINA/Staging/S3Workspaces
+      MetricName: WorkspaceS3CasConflicts
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  AgentApi5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tina-staging-agent-api-5xx
+      AlarmDescription: Staging agent-api returned >=3 5xx responses or ASGI exceptions in 5 minutes.
+      Namespace: TINA/Staging/S3Workspaces
+      MetricName: AgentApi5xxErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  AgentApiS3ErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tina-staging-agent-api-s3-errors
+      AlarmDescription: Staging agent-api encountered S3 workspace store errors (>=2 in 5m).
+      Namespace: TINA/Staging/S3Workspaces
+      MetricName: AgentApiS3Errors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  RuntimeSpawnFailuresAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tina-staging-runtime-spawn-failures
+      AlarmDescription: Staging runtime failed to spawn ephemeral Fargate workspace tasks (>=2 in 5m).
+      Namespace: TINA/Staging/S3Workspaces
+      MetricName: RuntimeSpawnFailures
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  WorkspaceMonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: tina-staging-s3-workspaces
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "S3 Ephemeral Sync & CAS Health (5m Sum)",
+                "region": "${AWS::Region}",
+                "stat": "Sum",
+                "period": 300,
+                "metrics": [
+                  ["TINA/Staging/S3Workspaces", "WorkspaceSyncCommitErrors", {"color": "#d62728"}],
+                  ["TINA/Staging/S3Workspaces", "WorkspaceS3CasConflicts", {"color": "#ff7f0e"}],
+                  ["TINA/Staging/S3Workspaces", "AgentApiS3Errors", {"color": "#9467bd"}]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Agent API 5xx & Runtime Spawn Failures (5m Sum)",
+                "region": "${AWS::Region}",
+                "stat": "Sum",
+                "period": 300,
+                "metrics": [
+                  ["TINA/Staging/S3Workspaces", "AgentApi5xxErrors", {"color": "#d62728"}],
+                  ["TINA/Staging/S3Workspaces", "RuntimeSpawnFailures", {"color": "#e377c2"}]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "ECS Service Utilization (Agent API & Runtime)",
+                "region": "${AWS::Region}",
+                "stat": "Average",
+                "period": 300,
+                "metrics": [
+                  ["AWS/ECS", "CPUUtilization", "ClusterName", "${ClusterName}", "ServiceName", "${AgentApiServiceName}"],
+                  ["AWS/ECS", "MemoryUtilization", "ClusterName", "${ClusterName}", "ServiceName", "${AgentApiServiceName}"],
+                  ["AWS/ECS", "CPUUtilization", "ClusterName", "${ClusterName}", "ServiceName", "${RuntimeServiceName}"],
+                  ["AWS/ECS", "MemoryUtilization", "ClusterName", "${ClusterName}", "ServiceName", "${RuntimeServiceName}"]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "S3 Workspace Bucket Size & Object Count (Daily)",
+                "region": "${AWS::Region}",
+                "stat": "Average",
+                "period": 86400,
+                "metrics": [
+                  ["AWS/S3", "BucketSizeBytes", "BucketName", "${WorkspaceBucketName}", "StorageType", "StandardStorage"],
+                  ["AWS/S3", "NumberOfObjects", "BucketName", "${WorkspaceBucketName}", "StorageType", "AllStorageTypes", {"yAxis": "right"}]
+                ]
+              }
+            }
+          ]
+        }
+
+Outputs:
+  DashboardName: {Value: !Ref WorkspaceMonitoringDashboard}
+  MetricNamespace: {Value: TINA/Staging/S3Workspaces}
+  SyncCommitErrorsAlarmName: {Value: !Ref SyncCommitErrorsAlarm}
+  CasConflictsHighAlarmName: {Value: !Ref CasConflictsHighAlarm}
+  AgentApi5xxAlarmName: {Value: !Ref AgentApi5xxAlarm}
+  AgentApiS3ErrorsAlarmName: {Value: !Ref AgentApiS3ErrorsAlarm}
+  RuntimeSpawnFailuresAlarmName: {Value: !Ref RuntimeSpawnFailuresAlarm}

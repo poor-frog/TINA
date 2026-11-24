@@ -73,7 +73,9 @@ from control_plane import workspace_membership as membership_mod
 from control_plane import git_credentials as git_creds
 from control_plane import system_mounts
 from control_plane.workspace_membership import MembershipError, MembershipIndex, InMemoryMembershipIndex
-from control_plane.dispatch import Dispatcher, ModelConfigRefreshError, build_mount_set, worker_cwd
+from control_plane.dispatch import (
+    WORKSPACE_NOVA_MODEL, Dispatcher, ModelConfigRefreshError, build_mount_set, worker_cwd, workspace_uses_nova,
+)
 from control_plane.events import event_to_invocation
 from shared.ports import SchedulerPort, StreamReader
 from control_plane.workspace_reader import WorkspaceReader
@@ -1019,6 +1021,156 @@ def create_app(
     app.state.live_meetings = live
     app.state.scheduler = scheduler
     settings = dispatcher.settings if dispatcher is not None else None
+    from control_plane.workspace_store import S3WorkspaceStore
+
+    s3_store = S3WorkspaceStore.from_env(wsr.root, redis_url=redis_url)
+    app.state.s3_workspace_store = s3_store
+    if s3_store is not None:
+        migrate_src = (os.getenv("TINA_S3_MIGRATE_FROM_EFS_DIR") or "").strip()
+        if migrate_src and Path(migrate_src).is_dir():
+            try:
+                with s3_store.distributed_lock("efs-migration", timeout=120.0):
+                    s3_store.migrate_from_efs(Path(migrate_src))
+            except Exception:  # noqa: BLE001
+                logger.exception("startup EFS->S3 workspace migration failed")
+        try:
+            with s3_store.distributed_lock("s3-system-compact", timeout=120.0):
+                s3_store.compact_bloated_system_snapshots()
+        except Exception:  # noqa: BLE001
+            logger.warning("startup S3 system compaction skipped", exc_info=True)
+
+        @app.middleware("http")
+        async def _s3_workspace_sync_middleware(request: Request, call_next):
+            path = request.url.path
+            sync_prefixes = (
+                "/api/workspace", "/api/sessions", "/api/routines",
+                "/api/chat", "/api/models", "/invocations",
+            )
+            if not path.startswith(sync_prefixes) or path.startswith("/api/workspace/git-token"):
+                return await call_next(request)
+
+            method = request.method.upper()
+            is_write = method in ("POST", "PUT", "PATCH", "DELETE") and (
+                path.startswith("/api/workspace") or path.startswith("/api/routines")
+            )
+            subject = (request.headers.get("x-user-id") or "").strip()
+            if not subject and settings is not None:
+                subject = (settings.agent_default_subject or "").strip()
+
+            # O(1) invite target resolution before preview/accept
+            if path == "/api/workspace/invites/preview":
+                tok = (request.query_params.get("token") or "").strip()
+                if tok:
+                    await run_in_threadpool(s3_store.sync_invite_target, membership_mod.hash_token(tok))
+                return await call_next(request)
+
+            invite_target_ws: Optional[str] = None
+            if path == "/api/workspace/invites/accept" and method == "POST":
+                try:
+                    raw = await request.body()
+                    parsed = json.loads(raw) if raw else {}
+                    tok = str(parsed.get("token") or "").strip()
+                    if tok:
+                        invite_target_ws = await run_in_threadpool(
+                            s3_store.sync_invite_target, membership_mod.hash_token(tok),
+                        )
+                except Exception:  # noqa: BLE001
+                    pass
+
+            if not subject or not subject.isdecimal():
+                return await call_next(request)
+
+            try:
+                memberships = await run_in_threadpool(mindex.list, subject)
+            except Exception:  # noqa: BLE001
+                memberships = []
+
+            extra_shared: set[str] = set()
+            for qk in ("workspace_id", "slug"):
+                qv = (request.query_params.get(qk) or "").strip()
+                if qv and not qv.startswith(".") and not qv.startswith("_") and not qv.isdecimal():
+                    extra_shared.add(qv)
+            if invite_target_ws:
+                extra_shared.add(invite_target_ws)
+            parts = path.strip("/").split("/")
+            # e.g. /api/workspace/<wid>/leave|unshare|share-enable|archive or /api/workspace/shared/<wid>/active
+            if len(parts) >= 4 and parts[0] == "api" and parts[1] == "workspace":
+                cand = parts[3] if parts[2] == "shared" and len(parts) >= 5 else parts[2]
+                if (cand and cand not in ("tree", "file", "search", "git", "init", "active", "attached",
+                                          "shared", "purpose", "new", "upload", "activate", "deactivate",
+                                          "rename", "swap", "publish", "push", "pull", "members", "invites",
+                                          "meeting-knowledge")
+                        and not cand.startswith(".") and not cand.startswith("_") and not cand.isdecimal()):
+                    extra_shared.add(cand)
+
+            include_sys = (
+                path.startswith("/api/sessions")
+                or path == "/api/chat"
+                or path == "/api/workspace/init"
+                or (request.query_params.get("slug") == "_system")
+            )
+
+            def _pre_sync(force: bool) -> set[str]:
+                s3_store.sync_subject_workspaces(
+                    subject, memberships=memberships, include_system=include_sys, force=force,
+                )
+                for wid in extra_shared:
+                    try:
+                        s3_store.ensure_synced(wsr.root / wid, force=force)
+                    except Exception:  # noqa: BLE001
+                        pass
+                # Snapshot existing top-level shared dir names to catch newly created shared wikis
+                if not wsr.root.exists():
+                    return set()
+                return {
+                    p.name for p in wsr.root.iterdir()
+                    if p.is_dir() and not p.is_symlink()
+                    and not p.name.startswith(".") and not p.name.startswith("_")
+                    and not p.name.isdecimal()
+                }
+
+            def _post_push(before_shared: set[str]) -> None:
+                s3_store.push_attach_state(subject)
+                targets: list[Path] = [wsr.root / subject]
+                if include_sys or (wsr.root / "_system" / subject).exists():
+                    targets.append(wsr.root / "_system" / subject)
+                att_dir = wsr.root / "_attached" / subject
+                if att_dir.is_dir():
+                    for slot in sorted(att_dir.iterdir()):
+                        if slot.is_dir() and not slot.is_symlink() and not slot.name.startswith("."):
+                            targets.append(slot)
+                for entry in memberships:
+                    wid = (entry.get("workspace_id") or "").strip() if isinstance(entry, dict) else ""
+                    if wid and not wid.startswith(".") and not wid.startswith("_") and not wid.isdecimal():
+                        extra_shared.add(wid)
+                if wsr.root.exists():
+                    after_shared = {
+                        p.name for p in wsr.root.iterdir()
+                        if p.is_dir() and not p.is_symlink()
+                        and not p.name.startswith(".") and not p.name.startswith("_")
+                        and not p.name.isdecimal()
+                    }
+                    extra_shared.update(after_shared - before_shared)
+                for wid in sorted(extra_shared):
+                    p = wsr.root / wid
+                    if p.is_dir():
+                        targets.append(p)
+                for p in dict.fromkeys(targets):
+                    try:
+                        s3_store.push_if_changed(p, actor=subject, protect_policy=False)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("S3 write-through push failed for %s", p)
+
+            if is_write:
+                with s3_store.distributed_lock(f"subject:{subject}"):
+                    before = await run_in_threadpool(_pre_sync, True)
+                    response = await call_next(request)
+                    if response.status_code < 400:
+                        await run_in_threadpool(_post_push, before)
+                    return response
+
+            await run_in_threadpool(_pre_sync, False)
+            return await call_next(request)
     # The SSE ownership gate's owner-lookup (P0): default = HTTP to meeting-api; injectable for L2 tests.
     _meeting_owner_lookup = meeting_owner_lookup or _http_meeting_owner_lookup(
         settings.meeting_api_url if settings is not None else "")
@@ -1090,7 +1242,16 @@ def create_app(
             chat_model = model_config.get("model") or provider_default
             streaming_model = model_config.get("meeting_model") or chat_model
         else:
-            chat_model = model_config.get("model") or settings.agent_model or settings.llm_model or "default"
+            from control_plane.aws_voice_chatgpt import workspace_connected
+            from control_plane.system_mounts import pilot_allows
+
+            pilot_fallback = None
+            if pilot_allows(subject) and not model_config.get("mode"):
+                if workspace_connected(subject):
+                    pilot_fallback = "gpt-6-luna"
+                elif (os.getenv("TINA_WORKSPACE_BEDROCK_MODEL") or "").strip():
+                    pilot_fallback = os.getenv("TINA_WORKSPACE_BEDROCK_MODEL", "").strip()
+            chat_model = model_config.get("model") or pilot_fallback or settings.agent_model or settings.llm_model or "default"
             streaming_model = (
                 model_config.get("meeting_model")
                 or model_config.get("model")
@@ -1111,6 +1272,8 @@ def create_app(
         if model_config.get("mode") == "openai-subscription":
             from control_plane.openai_auth import profile_status
             chatgpt_connected = profile_status(subject)["connected"]
+        if workspace_uses_nova(subject, model_config):
+            chat_model = WORKSPACE_NOVA_MODEL
         return {
             "chat_model": chat_model,
             "agent_model": chat_model,
@@ -1436,6 +1599,17 @@ def create_app(
                                  lambda request, text: _transcript_completion(
                                      request, text=text, task='translate', target_language='en'))
 
+    @app.get("/api/models/openai/workspace-status", include_in_schema=False)
+    def openai_workspace_status(request: Request):
+        from control_plane.aws_voice_chatgpt import workspace_status
+        from control_plane.openai_auth import ChatGPTAuthError
+
+        subject = subject_of(request)
+        try:
+            return JSONResponse(workspace_status(subject), headers={"Cache-Control": "no-store"})
+        except ChatGPTAuthError as exc:
+            raise HTTPException(503, str(exc)) from exc
+
     @app.get("/api/models/openai/catalog")
     def openai_model_catalog(request: Request):
         """Return only the displayable model IDs for the caller's connected ChatGPT account."""
@@ -1491,10 +1665,12 @@ def create_app(
         """The dispatcher sink — any trigger source POSTs a unit.v1 dispatch here."""
         pilot = os.getenv("TINA_WORKSPACE_PILOT_USER_IDS", "")
         if pilot and invocation.get("trigger") in ("message", "scheduled"):
+            from control_plane.system_mounts import pilot_allows
+
             # Interactive pilot turns enter via the authenticated chat route.
             identity = invocation.get("identity")
             if (invocation["trigger"] != "scheduled" or not isinstance(identity, dict)
-                    or identity.get("subject") not in pilot.split(",")):
+                    or not pilot_allows(str(identity.get("subject") or ""), pilot)):
                 raise HTTPException(403, "Workspace callback unavailable")
             supplied = request.headers.get("X-Tina-Routine-Signature", "").encode()
             if not supplied or not os.getenv("TINA_INTERNAL_API_SECRET") or not hmac.compare_digest(
@@ -1775,7 +1951,12 @@ def create_app(
         # branch returns `<grounding> + body.prompt`, so the user's words are the exact suffix; insert the
         # sentinel right before them (no-op when nothing was folded). The kg/mounts preambles the worker
         # prepends land before `prompt`, hence before the sentinel too — so they're stripped as well.
-        if body.prompt and prompt.endswith(body.prompt) and len(prompt) > len(body.prompt):
+        from control_plane.system_mounts import pilot_allows
+        bedrock_workspace = pilot_allows(subject) and (
+            subject == os.getenv("TINA_WORKSPACE_BEDROCK_OWNER")
+            or bool((os.getenv("TINA_WORKSPACE_BEDROCK_MODEL") or "").strip())
+        )
+        if body.prompt and prompt.endswith(body.prompt) and (len(prompt) > len(body.prompt) or bedrock_workspace):
             prompt = prompt[: len(prompt) - len(body.prompt)] + CONTEXT_SENTINEL + body.prompt
         # Attribute this turn's commits to the human editor by EMAIL (gateway-injected, trusted) rather
         # than the bare subject id — the git author NAME becomes the email; the synthetic author email
@@ -1809,7 +1990,7 @@ def create_app(
                 if capability_state("model_inference") == NOT_CONFIGURED:
                     cfg = dispatcher.resolve_model_config(subject)
                     from control_plane.aws_voice_chatgpt import workspace_connected
-                    if cfg is not None and not _has_custom_model_endpoint(cfg) and not workspace_connected(subject):
+                    if cfg is not None and not _has_custom_model_endpoint(cfg) and not workspace_connected(subject) and not bedrock_workspace:
                         return StreamingResponse(
                             _sse([{"type": "error", "message": _model_creds_error_message()},
                                   {"type": "turn-complete"}]),
@@ -2781,6 +2962,11 @@ def create_app(
         except MembershipError as exc:
             raise _member_error(exc)
         # The client composes the accept URL; we hand back the token + id + terms once.
+        if s3_store is not None:
+            try:
+                s3_store.record_invite_index(membership_mod.hash_token(minted.token), body.workspace_id)
+            except Exception:  # noqa: BLE001
+                logger.warning("could not index minted invite on S3", exc_info=True)
         return {
             "id": minted.id, "token": minted.token, "role": minted.role,
             "workspace_id": body.workspace_id, "expires_at": minted.expires_at,

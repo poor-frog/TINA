@@ -16,6 +16,104 @@
       "targets": [],
       "description": "Immutable image for the optional workspace-agent profile."
     },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_STORAGE",
+      "class": "defaulted",
+      "default": "efs",
+      "targets": [],
+      "description": "Default workspace storage backend on ECS: efs or s3."
+    },
+    {
+      "key": "RUNTIME_ECS_EPHEMERAL_TASK_DEFINITION",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Single static Fargate task definition ARN for S3-backed ephemeral workspaces."
+    },
+    {
+      "key": "RUNTIME_ECS_EPHEMERAL_SECURITY_GROUP",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Security group ID for S3-backed ephemeral workspace tasks."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_S3_BROKER_ROLE_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "IAM role assumed by Runtime with a per-turn scoped STS Session Policy."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_S3_BUCKET",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Encrypted S3 bucket backing ephemeral workspaces."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_S3_KMS_KEY_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "KMS CMK ARN used to encrypt/decrypt S3 workspace snapshots."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_EFS_ID",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "EFS file system ID used for dynamic per-mount workspace access points (fallback)."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_TASK_ROLE_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "IAM task role ARN for dynamically provisioned EFS workspace workers."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_EXEC_ROLE_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "IAM execution role ARN for dynamically provisioned EFS workspace workers."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_SECURITY_GROUP",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "VPC security group ID for dynamically provisioned EFS workspace workers."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_LOG_GROUP",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "CloudWatch log group name for dynamically provisioned EFS workspace workers."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_VALKEY_HOST",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Valkey host injected into dynamically provisioned workspace stream sidecars."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_VALKEY_SECRET_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Valkey auth secret ARN injected into dynamically provisioned workspace stream sidecars."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_FAMILY_PREFIX",
+      "class": "defaulted",
+      "default": "tina-staging-ws",
+      "targets": [],
+      "description": "ECS task definition family prefix for dynamically provisioned EFS workspace workers."
+    },
   {
    "key": "RUNTIME_ECS_CLUSTER",
    "class": "defaulted",

@@ -21,7 +21,63 @@
       "class": "defaulted",
       "default": "",
       "targets": [],
-      "description": "Numeric staging subjects permitted to dispatch workspace chat and scheduled work."
+      "description": "Numeric staging subjects (or *) permitted to dispatch workspace chat and scheduled work."
+    },
+    {
+      "key": "TINA_WORKSPACE_BEDROCK_MODEL",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Optional default AWS Bedrock Claude inference profile ID for staging workspace accounts without BYO or ChatGPT credentials."
+    },
+    {
+      "key": "TINA_WORKSPACE_BEDROCK_OWNER",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Optional specific staging subject routed to Bedrock workspace mode."
+    },
+    {
+      "key": "TINA_WORKSPACE_STORAGE",
+      "class": "defaulted",
+      "default": "efs",
+      "targets": [],
+      "description": "Workspace persistence backend: efs (default) or s3 (ephemeral Fargate SSD + KMS-encrypted S3 snapshots)."
+    },
+    {
+      "key": "TINA_S3_WORKSPACE_BUCKET",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "KMS-encrypted S3 bucket storing durable workspace snapshots when TINA_WORKSPACE_STORAGE=s3."
+    },
+    {
+      "key": "TINA_S3_WORKSPACE_KMS_KEY_ID",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "KMS key ARN/ID for workspace snapshots and manifests on S3."
+    },
+    {
+      "key": "TINA_S3_SECRETS_KMS_KEY_ID",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Dedicated KMS key ARN/ID strictly for per-user GitHub tokens on S3 (agent-api only)."
+    },
+    {
+      "key": "TINA_S3_WORKSPACE_USERS",
+      "class": "defaulted",
+      "default": "*",
+      "targets": [],
+      "description": "Numeric subject IDs (or *) routed to S3 ephemeral workers when TINA_WORKSPACE_STORAGE=s3."
+    },
+    {
+      "key": "TINA_S3_MIGRATE_FROM_EFS_DIR",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Optional read-only EFS mount path to idempotently migrate into S3 at agent-api startup."
     },
     {
       "key": "TINA_POST_MEETING_ECS_DRAFT",

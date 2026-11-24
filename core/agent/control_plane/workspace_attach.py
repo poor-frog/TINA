@@ -36,6 +36,7 @@ from shared.seeding import resolve_seed_dir, seed_workspace, validate_seed
 log = logging.getLogger(__name__)
 
 STORE_DIRNAME = ".attached"
+EFS_STORE_DIRNAME = "_attached"
 STATE_FILENAME = "state.json"
 SEED_SLOT = "seed"  # the reserved slug for the original template-seeded workspace
 SEED_BACKUP_SLOT = "seed-prev"  # where 'start fresh' tucks the displaced default so it stays recoverable
@@ -179,12 +180,24 @@ def _safe_subject_dir(root: Path, subject: str) -> Path:
     ws = (root / subject).resolve()
     if ws != root.resolve() and root.resolve() not in ws.parents:
         raise ValueError("invalid subject")
-    if subject.startswith("."):  # reserved namespace (the store lives at a dotname)
+    if subject.startswith(".") or subject in ("_system", "_attached", "_global"):  # reserved namespaces
         raise ValueError("invalid subject")
     return ws
 
 
 def _store(root: Path, subject: str) -> Path:
+    from control_plane.system_mounts import pilot_allows
+
+    if pilot_allows(subject):
+        target = root / EFS_STORE_DIRNAME / subject
+        legacy = root / STORE_DIRNAME / subject
+        if legacy.exists() and not legacy.is_symlink() and not target.exists():
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(legacy), str(target))
+            except OSError:
+                log.warning("could not migrate legacy %s/%s to %s/%s", STORE_DIRNAME, subject, EFS_STORE_DIRNAME, subject)
+        return target
     return root / STORE_DIRNAME / subject
 
 

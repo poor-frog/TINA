@@ -56,18 +56,19 @@ class WorkspaceTask:
         return cls(owner, arn, group, image, int(task['cpu']), int(task['memory']), mounts)
 
 
-def select_workspace(tasks, workload, env):
+def parse_workspace_request(workload, env):
     owner = env.get('TINA_OWNER', '')
     trigger = env.get('TINA_UNIT_TRIGGER')
-    if (env.get('TINA_UNIT_ID') != workload or env.get('TINA_UNIT_IN_TOPIC') != f'unit:{workload}:in'
+    if (not re.fullmatch(r'[1-9][0-9]*', owner)
+            or env.get('TINA_UNIT_ID') != workload or env.get('TINA_UNIT_IN_TOPIC') != f'unit:{workload}:in'
             or env.get('TINA_UNIT_OUT_TOPIC') != f'unit:{workload}:out'
-            or not re.fullmatch(r'[0-9a-f]{32}',env.get('TINA_WORKSPACE_ATTEMPT',''))):
+            or not re.fullmatch(r'[0-9a-f]{32}', env.get('TINA_WORKSPACE_ATTEMPT', ''))):
         raise ValueError('Workspace invocation binding mismatch')
     if trigger == 'message':
         session = env.get('TINA_CHAT_SESSION', '')
-        if not re.fullmatch(r'[A-Za-z0-9._-]{1,90}',session) or workload != f'agent-{owner}-chat-{session}':
+        if not re.fullmatch(r'[A-Za-z0-9._-]{1,90}', session) or workload != f'agent-{owner}-chat-{session}':
             raise ValueError('Invalid workspace chat session')
-    elif trigger != 'scheduled' or not re.fullmatch('agent-'+re.escape(owner)+'-scheduled-[a-f0-9]{10}', workload):
+    elif trigger != 'scheduled' or not re.fullmatch('agent-' + re.escape(owner) + '-scheduled-[a-f0-9]{10}', workload):
         raise ValueError('Invalid workspace invocation trigger')
     grants = json.loads(env['TINA_MOUNTS'])
     if not isinstance(grants, list):
@@ -78,8 +79,14 @@ def select_workspace(tasks, workload, env):
         if path in mounts or type(grant.get('write')) is not bool or grant.get('source'):
             raise ValueError('Invalid workspace grant')
         mounts[path] = grant['write']
-    if env.get('TINA_WORKSPACE_PATH') not in mounts:
+    cwd = env.get('TINA_WORKSPACE_PATH', '')
+    if cwd not in mounts:
         raise ValueError('Worker current directory is outside approved mounts')
+    return owner, mounts, cwd
+
+
+def select_workspace(tasks, workload, env):
+    owner, mounts, _cwd = parse_workspace_request(workload, env)
     for task in tasks:
         if task.owner == owner and task.mounts == mounts:
             return task

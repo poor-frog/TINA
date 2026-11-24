@@ -33,9 +33,24 @@ def _token_path(root: str | Path, subject: str) -> Optional[Path]:
     return Path(root) / _SECRETS_DIRNAME / f"{subject}.ghtoken"
 
 
+def _s3_store(root: str | Path):
+    from control_plane.workspace_store import S3WorkspaceStore
+
+    return S3WorkspaceStore.from_env(Path(root))
+
+
 def read_github_token(root: str | Path, subject: str) -> Optional[str]:
     """The caller's stored GitHub token, or ``None`` when unset/unreadable. On the git-op hot path — a
     missing file is simply "no saved token", never an error."""
+    if not subject or not _SUBJECT_RE.match(subject):
+        return None
+    store = _s3_store(root)
+    if store is not None:
+        try:
+            return store.read_secret_token(subject)
+        except Exception:  # noqa: BLE001
+            log.warning("could not read S3 git token for subject=%s", subject, exc_info=True)
+            return None
     p = _token_path(root, subject)
     if p is None:
         return None
@@ -49,6 +64,11 @@ def read_github_token(root: str | Path, subject: str) -> Optional[str]:
 def set_github_token(root: str | Path, subject: str, token: Optional[str]) -> bool:
     """Save (or, with a falsy ``token``, CLEAR) the caller's reusable GitHub token. Returns True when a
     token is now stored, False when cleared/absent. The file is created ``0600`` (owner-only)."""
+    if not subject or not _SUBJECT_RE.match(subject):
+        raise ValueError("invalid subject")
+    store = _s3_store(root)
+    if store is not None:
+        return store.write_secret_token(subject, token)
     p = _token_path(root, subject)
     if p is None:
         raise ValueError("invalid subject")

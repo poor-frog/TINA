@@ -327,24 +327,25 @@ class WorkspaceReader:
         from control_plane.system_mounts import system_store_path
         system = system_store_path(root, subject).resolve()
         legacy_system = (root / ".system" / subject).resolve()
-        attached = root / ".attached" / subject
-        attached_root: Optional[Path] = None
+        attached_roots: list[Path] = []
         candidates: list[Path] = [system, home]
         if system != legacy_system and not (root / ".system" / subject).is_symlink():
             candidates.append(legacy_system)
-        if attached.is_dir() and not attached.is_symlink():
-            try:
-                resolved_attached = attached.resolve()
-                if resolved_attached.parent == (root / ".attached").resolve():
-                    attached_root = resolved_attached
-                    candidates.extend(
-                        slot.resolve()
-                        for slot in sorted(attached_root.iterdir())
-                        if slot.is_dir() and not slot.is_symlink()
-                        and slot.resolve().parent == attached_root
-                    )
-            except (OSError, RuntimeError):
-                attached_root = None
+        for dirname in ("_attached", ".attached"):
+            attached = root / dirname / subject
+            if attached.is_dir() and not attached.is_symlink():
+                try:
+                    resolved_attached = attached.resolve()
+                    if resolved_attached.parent == (root / dirname).resolve():
+                        attached_roots.append(resolved_attached)
+                        candidates.extend(
+                            slot.resolve()
+                            for slot in sorted(resolved_attached.iterdir())
+                            if slot.is_dir() and not slot.is_symlink()
+                            and slot.resolve().parent == resolved_attached
+                        )
+                except (OSError, RuntimeError):
+                    continue
         for e in extra_roots or []:
             try:
                 candidate = self._guard_under_root(Path(e))
@@ -352,7 +353,7 @@ class WorkspaceReader:
                 continue
             # Extra roots are a compatibility seam for private mounts only. Never let a caller turn
             # shared-workspace membership into access to another member's continuity files.
-            if candidate in (home, system) or (attached_root is not None and candidate.parent == attached_root):
+            if candidate in (home, system) or any(candidate.parent == ar for ar in attached_roots):
                 candidates.append(candidate)
         out: list[Path] = []
         seen: set[str] = set()
@@ -415,6 +416,23 @@ class WorkspaceReader:
 
     def _history_for_id(self, roots: list[Path], sid: str) -> list[dict]:
         if not sid or sid in ('.', '..') or Path(sid).name != sid or '\\' in sid:
+            return []
+        if re.fullmatch(r"bedrock-[a-f0-9]{32}", sid):
+            for ws in roots:
+                file = self._workspace_child(ws, Path(".claude/tina-bedrock") / (sid + ".json"))
+                if file is None:
+                    continue
+                try:
+                    with file.open("rb") as stream:
+                        raw = stream.read(300001)
+                    rows = json.loads(raw) if len(raw) <= 300000 else None
+                    if isinstance(rows, list) and all(
+                        isinstance(row, dict) and row.get("role") in ("user", "agent")
+                        and isinstance(row.get("text"), str) for row in rows
+                    ):
+                        return [{"role": row["role"], "text": row["text"], "ops": []} for row in rows]
+                except (OSError, ValueError):
+                    continue
             return []
         # The cwd-slug dir is claude's encoding of the workspace path; there is normally one, but match by
         # the sessionId filename to be safe. Shared roots are excluded above; resolved transcript paths

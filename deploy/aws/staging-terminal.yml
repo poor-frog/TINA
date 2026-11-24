@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: TINA meetings-only Terminal behind the staging internal ALB and CloudFront.
+Description: TINA Terminal behind the staging internal ALB and CloudFront.
 Metadata:
   AWSToolsMetrics: {AWSAgentToolkit: 'true'}
 
@@ -17,9 +17,10 @@ Parameters:
   TerminalRepositoryArn: {Type: String}
   AdminTokenArn: {Type: String}
   InternalSecretArn: {Type: String}
+  AsrControlUrl: {Type: String, Default: ''}
   GoogleSecretArn: {Type: String, Default: ''}
   WorkspacePilotStage: {Type: String, Default: closed, AllowedValues: [closed, chat, wiki, routines]}
-  WorkspacePilotUserIds: {Type: String, Default: '', AllowedPattern: '(|[0-9]+(,[0-9]+)*)'}
+  WorkspacePilotUserIds: {Type: String, Default: '', AllowedPattern: '(|[*]|[0-9]+(,[0-9]+)*)'}
 
 Conditions:
   GoogleEnabled: !Not [!Equals [!Ref GoogleSecretArn, '']]
@@ -117,6 +118,7 @@ Resources:
             - {Name: GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
             - {Name: TINA_API_URL, Value: 'http://core.tina-staging.local:8000'}
             - {Name: TINA_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}
+            - {Name: TINA_ASR_CONTROL_URL, Value: !Ref AsrControlUrl}
             - {Name: NEXTAUTH_URL, Value: !Ref StageUrl}
             - {Name: TERMINAL_URL, Value: !Ref StageUrl}
           Secrets:

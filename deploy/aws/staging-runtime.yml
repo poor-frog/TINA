@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: TINA Runtime service on private ECS Fargate subnets.
+Description: TINA Runtime service on private ECS Fargate subnets with dynamic workspace provisioning.
 
 Parameters:
   ClusterName:
@@ -31,6 +31,22 @@ Parameters:
   WorkspaceTasks: {Type: String, Default: '{}'}
   WorkspaceTaskArns: {Type: CommaDelimitedList, Default: ''}
   WorkspaceRoleArns: {Type: CommaDelimitedList, Default: ''}
+  WorkspaceFileSystemId: {Type: String, Default: ''}
+  DynamicWorkspaceTaskRoleArn: {Type: String, Default: ''}
+  DynamicWorkspaceExecutionRoleArn: {Type: String, Default: ''}
+  DynamicWorkspaceSecurityGroupId: {Type: String, Default: ''}
+  DynamicWorkspaceLogGroup: {Type: String, Default: ''}
+  WorkspaceStorage: {Type: String, Default: efs, AllowedValues: [efs, s3]}
+  EphemeralWorkspaceTaskDefinitionArn: {Type: String, Default: ''}
+  EphemeralWorkspaceTaskRoleArn: {Type: String, Default: ''}
+  EphemeralWorkspaceExecutionRoleArn: {Type: String, Default: ''}
+  EphemeralWorkspaceSecurityGroupId: {Type: String, Default: ''}
+  NovaWorkspaceTaskDefinitionArn: {Type: String, Default: ''}
+  NovaWorkspaceTaskRoleArn: {Type: String, Default: ''}
+  NovaWorkspaceOwnerIds: {Type: String, Default: '', AllowedPattern: '(|[1-9][0-9]*(,[1-9][0-9]*)*)'}
+  WorkspaceS3BrokerRoleArn: {Type: String, Default: ''}
+  WorkspaceS3Bucket: {Type: String, Default: ''}
+  WorkspaceS3DataKeyArn: {Type: String, Default: ''}
   DraftWorkerImage:
     Type: String
     Default: ''
@@ -41,12 +57,34 @@ Parameters:
 
 Conditions:
   WithWorkspaceWorker: !Not [!Equals [!Ref WorkspaceWorkerImage, '']]
+  WithPinnedWorkspaces: !And
+    - !Condition WithWorkspaceWorker
+    - !Not [!Equals [!Join ['', !Ref WorkspaceTaskArns], '']]
+    - !Not [!Equals [!Join ['', !Ref WorkspaceRoleArns], '']]
+  WithDynamicWorkspace: !And
+    - !Condition WithWorkspaceWorker
+    - !Not [!Equals [!Ref WorkspaceFileSystemId, '']]
+    - !Not [!Equals [!Ref DynamicWorkspaceTaskRoleArn, '']]
+    - !Not [!Equals [!Ref DynamicWorkspaceExecutionRoleArn, '']]
+    - !Not [!Equals [!Ref DynamicWorkspaceSecurityGroupId, '']]
+    - !Not [!Equals [!Ref DynamicWorkspaceLogGroup, '']]
+  WithS3Workspace: !And
+    - !Condition WithWorkspaceWorker
+    - !Not [!Equals [!Ref EphemeralWorkspaceTaskDefinitionArn, '']]
+    - !Not [!Equals [!Ref WorkspaceS3BrokerRoleArn, '']]
+    - !Not [!Equals [!Ref WorkspaceS3Bucket, '']]
+    - !Not [!Equals [!Ref WorkspaceS3DataKeyArn, '']]
+  WithNovaWorkspace: !And
+    - !Condition WithS3Workspace
+    - !Not [!Equals [!Ref NovaWorkspaceTaskDefinitionArn, '']]
+    - !Not [!Equals [!Ref NovaWorkspaceTaskRoleArn, '']]
+    - !Not [!Equals [!Ref NovaWorkspaceOwnerIds, '']]
   WithDraftWorker: !Not [!Equals [!Ref DraftWorkerImage, '']]
 
 Resources:
   RuntimeWorkspacePermissions:
     Type: AWS::IAM::Policy
-    Condition: WithWorkspaceWorker
+    Condition: WithPinnedWorkspaces
     Properties:
       PolicyName: StartPinnedWorkspaceWorkers
       Roles: [!Select [1, !Split ['/', !Ref RuntimeTaskRoleArn]]]
@@ -61,6 +99,80 @@ Resources:
           - Effect: Allow
             Action: iam:PassRole
             Resource: !Ref WorkspaceRoleArns
+            Condition:
+              StringEquals: {'iam:PassedToService': ecs-tasks.amazonaws.com}
+  RuntimeDynamicWorkspacePermissions:
+    Type: AWS::IAM::Policy
+    Condition: WithDynamicWorkspace
+    Properties:
+      PolicyName: ManageDynamicWorkspaceWorkers
+      Roles: [!Select [1, !Split ['/', !Ref RuntimeTaskRoleArn]]]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - elasticfilesystem:DescribeAccessPoints
+              - ecs:RegisterTaskDefinition
+              - ecs:DescribeTaskDefinition
+              - ecs:ListTaskDefinitionFamilies
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - elasticfilesystem:CreateAccessPoint
+              - elasticfilesystem:TagResource
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/${WorkspaceFileSystemId}'
+              - !Sub 'arn:${AWS::Partition}:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:access-point/*'
+          - Effect: Allow
+            Action: ecs:RunTask
+            Resource: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/tina-staging-ws-*'
+            Condition:
+              ArnEquals: {'ecs:cluster': !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'}
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: [!Ref DynamicWorkspaceTaskRoleArn, !Ref DynamicWorkspaceExecutionRoleArn]
+            Condition:
+              StringEquals: {'iam:PassedToService': ecs-tasks.amazonaws.com}
+  RuntimeS3WorkspacePermissions:
+    Type: AWS::IAM::Policy
+    Condition: WithS3Workspace
+    Properties:
+      PolicyName: ManageS3EphemeralWorkspaceWorkers
+      Roles: [!Select [1, !Split ['/', !Ref RuntimeTaskRoleArn]]]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Resource: !Ref WorkspaceS3BrokerRoleArn
+          - Effect: Allow
+            Action: ecs:RunTask
+            Resource: !Ref EphemeralWorkspaceTaskDefinitionArn
+            Condition:
+              ArnEquals: {'ecs:cluster': !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'}
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: [!Ref EphemeralWorkspaceTaskRoleArn, !Ref EphemeralWorkspaceExecutionRoleArn]
+            Condition:
+              StringEquals: {'iam:PassedToService': ecs-tasks.amazonaws.com}
+  RuntimeNovaWorkspacePermissions:
+    Type: AWS::IAM::Policy
+    Condition: WithNovaWorkspace
+    Properties:
+      PolicyName: StartNovaWorkspaceWorker
+      Roles: [!Select [1, !Split ['/', !Ref RuntimeTaskRoleArn]]]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: ecs:RunTask
+            Resource: !Ref NovaWorkspaceTaskDefinitionArn
+            Condition:
+              ArnEquals: {'ecs:cluster': !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'}
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !Ref NovaWorkspaceTaskRoleArn
             Condition:
               StringEquals: {'iam:PassedToService': ecs-tasks.amazonaws.com}
   RuntimeLogs:
@@ -254,9 +366,25 @@ Resources:
           Essential: true
           PortMappings: [{ContainerPort: 8090, Protocol: tcp}]
           Environment:
+            - {Name: AWS_REGION, Value: !Ref 'AWS::Region'}
             - {Name: RUNTIME_BACKEND, Value: ecs}
+            - {Name: RUNTIME_ECS_WORKSPACE_STORAGE, Value: !Ref WorkspaceStorage}
             - !If [WithWorkspaceWorker, {Name: RUNTIME_ECS_WORKSPACE_IMAGE, Value: !Ref WorkspaceWorkerImage}, !Ref AWS::NoValue]
             - !If [WithWorkspaceWorker, {Name: RUNTIME_ECS_WORKSPACE_TASKS, Value: !Ref WorkspaceTasks}, !Ref AWS::NoValue]
+            - !If [WithNovaWorkspace, {Name: RUNTIME_ECS_NOVA_WORKSPACE_TASK_DEFINITION, Value: !Ref NovaWorkspaceTaskDefinitionArn}, !Ref AWS::NoValue]
+            - !If [WithNovaWorkspace, {Name: RUNTIME_ECS_NOVA_WORKSPACE_OWNERS, Value: !Ref NovaWorkspaceOwnerIds}, !Ref AWS::NoValue]
+            - !If [WithS3Workspace, {Name: RUNTIME_ECS_EPHEMERAL_TASK_DEFINITION, Value: !Ref EphemeralWorkspaceTaskDefinitionArn}, !Ref AWS::NoValue]
+            - !If [WithS3Workspace, {Name: RUNTIME_ECS_EPHEMERAL_SECURITY_GROUP, Value: !Ref EphemeralWorkspaceSecurityGroupId}, !Ref AWS::NoValue]
+            - !If [WithS3Workspace, {Name: RUNTIME_ECS_WORKSPACE_S3_BROKER_ROLE_ARN, Value: !Ref WorkspaceS3BrokerRoleArn}, !Ref AWS::NoValue]
+            - !If [WithS3Workspace, {Name: RUNTIME_ECS_WORKSPACE_S3_BUCKET, Value: !Ref WorkspaceS3Bucket}, !Ref AWS::NoValue]
+            - !If [WithS3Workspace, {Name: RUNTIME_ECS_WORKSPACE_S3_KMS_KEY_ARN, Value: !Ref WorkspaceS3DataKeyArn}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_EFS_ID, Value: !Ref WorkspaceFileSystemId}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_TASK_ROLE_ARN, Value: !Ref DynamicWorkspaceTaskRoleArn}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_EXEC_ROLE_ARN, Value: !Ref DynamicWorkspaceExecutionRoleArn}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_SECURITY_GROUP, Value: !Ref DynamicWorkspaceSecurityGroupId}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_LOG_GROUP, Value: !Ref DynamicWorkspaceLogGroup}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_VALKEY_HOST, Value: !Ref ValkeyHost}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_VALKEY_SECRET_ARN, Value: !Ref ValkeySecretArn}, !Ref AWS::NoValue]
             - {Name: RUNTIME_ECS_CLUSTER, Value: !Ref ClusterName}
             - {Name: RUNTIME_ECS_BOT_TASK_DEFINITION, Value: !Ref BotTaskDefinitionArn}
             - {Name: RUNTIME_ECS_SUBNETS, Value: !Join [',', !Ref AppSubnetIds]}
@@ -330,3 +458,5 @@ Outputs:
   DraftLogGroup:
     Condition: WithDraftWorker
     Value: !Ref DraftLogs
+
+

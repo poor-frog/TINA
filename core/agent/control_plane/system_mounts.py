@@ -94,11 +94,20 @@ def global_mount(settings, root: str) -> Optional[dict]:
     }
 
 
+def pilot_allows(subject: str, pilot_env: Optional[str] = None) -> bool:
+    """Return True when ``subject`` is a numeric account permitted by TINA_WORKSPACE_PILOT_USER_IDS."""
+    raw = os.getenv("TINA_WORKSPACE_PILOT_USER_IDS", "") if pilot_env is None else pilot_env
+    allowed = [item.strip() for item in raw.split(",") if item.strip()]
+    if not allowed or not subject or not subject.isdecimal():
+        return False
+    return "*" in allowed or subject in allowed
+
+
 def _system_store(root: Path, subject: str) -> Path:
     """The on-disk home of the subject's private-system workspace — under the store's reserved
     ``.system`` namespace, keyed by subject, so it rides the single store-root bind like the baseline."""
-    # EFS access points cannot use a root component beginning with a dot.
-    if subject in os.getenv("TINA_WORKSPACE_PILOT_USER_IDS", "").split(",") and subject.isdecimal():
+    # EFS access points and S3 workspace mounts use _system/<subject> (no dot-prefixed root).
+    if pilot_allows(subject):
         return root / SYSTEM_SLUG / subject
     return root / SYSTEM_STORE_DIRNAME / subject
 
