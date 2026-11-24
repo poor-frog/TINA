@@ -3,6 +3,13 @@
   "service": "meeting-api",
   "keys": [
     {
+      "key": "TINA_MEETING_VOICE_PILOT_ROOM",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Optional room filter for the staging voice pilot."
+    },
+    {
       "key": "MEETING_AGENT_API_URL",
       "class": "defaulted",
       "default": "http://agent-api:8100",

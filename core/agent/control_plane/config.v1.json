@@ -3,6 +3,64 @@
   "service": "agent-api",
   "keys": [
     {
+      "key": "TINA_POST_MEETING_ECS_DRAFT",
+      "class": "defaulted",
+      "default": "0",
+      "targets": [],
+      "description": "Dispatch authorized post-meeting drafts on ECS when set to 1."
+    },
+    {
+      "key": "TINA_MEETING_VOICE_LOCAL_COMPLETION",
+      "class": "defaulted",
+      "default": "0",
+      "targets": [],
+      "description": "Use the local completion process in Agent API for meeting voice when set to 1."
+    },
+    {
+      "key": "TINA_CHATGPT_VOICE_SECRET_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Secrets Manager reference for the explicitly connected voice pilot account."
+    },
+    {
+      "key": "TINA_CHATGPT_VOICE_OWNER",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Account authorized to use the staging voice subscription."
+    },
+    {
+      "key": "TINA_CHATGPT_VOICE_ROOM",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Meeting room authorized for the subscription voice pilot."
+    },
+    {
+      "key": "TINA_CHATGPT_VOICE_MODEL",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Subscribed model selected for an enabled voice pilot."
+    },
+    {
+      "key": "TINA_CHATGPT_VOICE_PILOT",
+      "class": "defaulted",
+      "default": "0",
+      "targets": [],
+      "description": "Marks an isolated subscription voice job for content-free tracing."
+    },
+    {
+      "key": "TINA_DRAFT_PILOT_USER_IDS",
+      "class": "defaulted",
+      "default": "",
+      "targets": [
+        "compose"
+      ],
+      "description": "Comma-separated account IDs eligible for post-meeting draft jobs."
+    },
+    {
       "key": "TINA_VOICE_EMBED_DIR",
       "class": "defaulted",
       "default": "~/.cache/tina/voice-retrieval",

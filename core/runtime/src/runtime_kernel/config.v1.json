@@ -3,6 +3,55 @@
  "service": "runtime",
  "keys": [
   {
+   "key": "RUNTIME_ECS_CLUSTER",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Cluster name required by the ECS backend."
+  },
+  {
+   "key": "RUNTIME_ECS_SUBNETS",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Private subnet IDs required by the ECS backend."
+  },
+  {
+   "key": "RUNTIME_ECS_SECURITY_GROUPS",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Security groups used by meeting bot tasks on ECS."
+  },
+  {
+   "key": "RUNTIME_ECS_INVOCATION_BUCKET",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Private bucket required for ECS invocation objects."
+  },
+  {
+   "key": "RUNTIME_ECS_BOT_TASK_DEFINITION",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Pinned meeting bot task definition required by the ECS backend."
+  },
+  {
+   "key": "RUNTIME_ECS_DRAFT_TASK_DEFINITION",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Pinned source-only draft worker definition when the pilot is enabled."
+  },
+  {
+   "key": "RUNTIME_ECS_DRAFT_SECURITY_GROUP",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Private security group required when the ECS draft worker is enabled."
+  },
+  {
    "key": "RUNTIME_BACKEND",
    "class": "defaulted",
    "default": "docker",
