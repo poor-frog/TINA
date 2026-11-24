@@ -45,6 +45,8 @@ class Enforcer:
         idle = spec.idleTimeoutSec
         max_life = spec.maxLifetimeSec
         profile = self.runtime.profiles.get(spec.profile)
+        if profile is None and spec.profile == "adopted" and status.workloadId.startswith("agent-"):
+            profile = self.runtime.profiles.get("workspace-agent") or self.runtime.profiles.get("agent")
         if profile is not None:
             if idle is None:
                 idle = profile.idle_timeout_sec
@@ -56,11 +58,16 @@ class Enforcer:
         """One enforcement tick. Stop every running workload past a limit; return their ids."""
         now = self.clock.now()
         stopped: list[str] = []
-        for record in self.runtime.store.list():
-            status = record.status
-            if status.state is not RuntimeState.running:
+        for record in list(self.runtime.store.list()):
+            wid = record.status.workloadId
+            try:
+                status = self.runtime.get(wid)
+            except KeyError:
+                self.forget(wid)
                 continue
-            wid = status.workloadId
+            if status.state is not RuntimeState.running:
+                self.forget(wid)
+                continue
             track = self._tracked.get(wid)
             if track is None:
                 continue  # never registered (e.g. created before enforcer attached)

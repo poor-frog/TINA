@@ -54,6 +54,11 @@ Parameters:
   DraftValkeySecurityGroupId:
     Type: String
     Default: ''
+  OwnerQuota: {Type: Number, Default: 3, MinValue: 1, MaxValue: 50}
+  GlobalQuota: {Type: Number, Default: 20, MinValue: 1, MaxValue: 500}
+  ReaperTickSec: {Type: Number, Default: 30, MinValue: 5, MaxValue: 300}
+  WorkspaceIdleTimeoutSec: {Type: Number, Default: 300, MinValue: 60, MaxValue: 3600}
+  WorkspaceMaxLifetimeSec: {Type: Number, Default: 3600, MinValue: 300, MaxValue: 86400}
 
 Conditions:
   WithWorkspaceWorker: !Not [!Equals [!Ref WorkspaceWorkerImage, '']]
@@ -398,6 +403,11 @@ Resources:
             - !If [WithDraftWorker, {Name: AGENT_WORKER_IMAGE, Value: !Ref DraftWorkerImage}, !Ref 'AWS::NoValue']
             - {Name: BROWSER_IMAGE, Value: !Ref BotImage}
             - {Name: VALKEY_HOST, Value: !Ref ValkeyHost}
+            - {Name: RUNTIME_OWNER_QUOTA, Value: !Sub '${OwnerQuota}'}
+            - {Name: RUNTIME_GLOBAL_QUOTA, Value: !Sub '${GlobalQuota}'}
+            - {Name: RUNTIME_REAPER_TICK_SEC, Value: !Sub '${ReaperTickSec}'}
+            - {Name: RUNTIME_WORKSPACE_IDLE_TIMEOUT_SEC, Value: !Sub '${WorkspaceIdleTimeoutSec}'}
+            - {Name: RUNTIME_WORKSPACE_MAX_LIFETIME_SEC, Value: !Sub '${WorkspaceMaxLifetimeSec}'}
           Secrets:
             - {Name: VALKEY_PASSWORD, ValueFrom: !Ref ValkeySecretArn}
           Command:

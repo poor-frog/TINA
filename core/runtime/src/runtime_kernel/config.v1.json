@@ -582,6 +582,55 @@
    "default": "(unset — no subjects routed to Nova workspace task)",
    "description": "Comma-separated owner IDs routed to the dedicated Nova workspace task definition.",
    "targets": []
+  },
+  {
+   "key": "RUNTIME_OWNER_QUOTA",
+   "class": "defaulted",
+   "default": "(unset — no per-owner active workload cap)",
+   "description": "Maximum concurrent active sandbox workloads allowed per owner before returning HTTP 429.",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_GLOBAL_QUOTA",
+   "class": "defaulted",
+   "default": "(unset — no deployment-wide active workload cap)",
+   "description": "Maximum concurrent active sandbox workloads allowed across the entire runtime deployment before returning HTTP 429.",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_REAPER_TICK_SEC",
+   "class": "defaulted",
+   "default": "30",
+   "description": "Interval in seconds for the background idle/max-lifetime workload reaper (0 disables).",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_WORKSPACE_IDLE_TIMEOUT_SEC",
+   "class": "defaulted",
+   "default": "300",
+   "description": "Default idle timeout in seconds for workspace-agent sandboxes before the reaper stops them.",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_WORKSPACE_MAX_LIFETIME_SEC",
+   "class": "defaulted",
+   "default": "3600",
+   "description": "Hard maximum lifetime in seconds for workspace-agent sandboxes regardless of activity.",
+   "targets": []
+  },
+  {
+   "key": "TINA_EGRESS_ALLOWLIST",
+   "class": "defaulted",
+   "default": "(built-in LLM/Bedrock/GitHub/PyPI/npm allowlist)",
+   "description": "Comma-separated domain allowlist enforced by runtime_kernel.egress_proxy for HTTPS CONNECT egress.",
+   "targets": []
+  },
+  {
+   "key": "TINA_EGRESS_PROXY_PORT",
+   "class": "defaulted",
+   "default": "3128",
+   "description": "Listening TCP port for runtime_kernel.egress_proxy.",
+   "targets": []
   }
  ],
  "capabilities": {

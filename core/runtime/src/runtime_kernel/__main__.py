@@ -130,12 +130,41 @@ def _kernel_grace_sec() -> float:
     return backend_grace + 5.0
 
 
+def _optional_positive_int(env_key: str) -> int | None:
+    raw = (os.getenv(env_key) or "").strip()
+    if not raw:
+        return None
+    try:
+        val = int(raw)
+    except ValueError:
+        logger.warning("ignoring non-integer %s=%r", env_key, raw)
+        return None
+    return val if val > 0 else None
+
+
+def _start_reaper(enforcer, interval_sec: float) -> None:
+    """Run the runtime's idle & max-lifetime reaper in a background daemon thread."""
+    def _loop() -> None:
+        while True:
+            time.sleep(interval_sec)
+            try:
+                reaped = enforcer.sweep()
+                if reaped:
+                    logger.info("reaper stopped %d idle/expired workload(s): %s", len(reaped), reaped)
+            except Exception as e:  # noqa: BLE001 — a bad sweep must not kill the reaper
+                logger.warning("reaper sweep error: %s", e)
+
+    threading.Thread(target=_loop, name="workload-reaper", daemon=True).start()
+
+
 def build_production_app():
     """Wire the runtime API with the env-selected spawn backend + the env-driven profile registry,
     plus the durable cron scheduler (REDIS_URL) with a background tick loop."""
     from .api import create_app
     from .config_preflight import preflight
+    from .enforcement import Enforcer
     from .kernel import Runtime
+    from .models import RuntimeState
     from .profiles import apply_command_overrides, default_registry, worker_image_for
 
     # config.v1 boot preflight (ADR-0026): validate the declaration against the env — the runtime has
@@ -169,7 +198,17 @@ def build_production_app():
     # apply_command_overrides is a no-op unless BOT_COMMAND / AGENT_WORKER_COMMAND are set (the
     # process-backend / `lite` case) — docker/k8s keep the image entrypoints unchanged.
     profiles = apply_command_overrides(default_registry())
-    runtime = Runtime(backend=backend, profiles=profiles, grace_sec=_kernel_grace_sec())
+    owner_quota = _optional_positive_int("RUNTIME_OWNER_QUOTA")
+    global_quota = _optional_positive_int("RUNTIME_GLOBAL_QUOTA")
+    runtime = Runtime(
+        backend=backend,
+        profiles=profiles,
+        grace_sec=_kernel_grace_sec(),
+        owner_quota=owner_quota,
+        global_quota=global_quota,
+    )
+    enforcer = Enforcer(runtime)
+    runtime.enforcer = enforcer
     # Re-adopt the workloads this runtime spawned that are STILL on the substrate (containers/pods
     # survive a runtime recreate untouched): without this, the fresh in-memory registry 404s over a
     # live bot, and the control plane misreads that 404 as "bot gone" — the orphaned-live-bot
@@ -181,8 +220,23 @@ def build_production_app():
                 "re-adopted %d workload(s) found on the %s substrate after restart",
                 adopted, backend.name,
             )
+            for rec in runtime.store.list():
+                if rec.status.state is RuntimeState.running:
+                    enforcer.track(rec.status.workloadId)
     except Exception as e:  # noqa: BLE001 — adoption is a boot aid; it must never block the boot
         logger.warning("workload re-adoption failed: %s", e)
+
+    reaper_raw = (os.getenv("RUNTIME_REAPER_TICK_SEC") or "30").strip()
+    try:
+        reaper_interval = float(reaper_raw)
+    except ValueError:
+        reaper_interval = 30.0
+    if reaper_interval > 0:
+        _start_reaper(enforcer, reaper_interval)
+        logger.info(
+            "runtime guardrails active: owner_quota=%s global_quota=%s reaper_tick_sec=%.1f",
+            owner_quota, global_quota, reaper_interval,
+        )
     return create_app(runtime, scheduler=scheduler)
 
 
