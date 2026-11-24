@@ -1,6 +1,7 @@
 "use client";
 /** Identity + Dev/Admin Terminal switch gating for the Production User UI. */
 import { useEffect, useState } from "react";
+import { workspacePilotMode } from "../app/mode";
 
 export interface WebUser {
   name: string;
@@ -37,6 +38,7 @@ export function useWebIdentity(): WebIdentityState {
   const [user, setUser] = useState<WebUser>(DEFAULT_USER);
   const [isAdmin, setIsAdmin] = useState(false);
   const [devFlag, setDevFlag] = useState(false);
+  const [workspacePilot, setWorkspacePilot] = useState(false);
 
   useEffect(() => {
     setDevFlag(devFlagEnabled());
@@ -44,8 +46,9 @@ export function useWebIdentity(): WebIdentityState {
 
     void fetch("/api/auth/me", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: { user?: { email?: string | null; name?: string | null; image?: string | null } } | null) => {
+      .then((data: { workspacePilot?: boolean; user?: { email?: string | null; name?: string | null; image?: string | null } } | null) => {
         if (!active || !data?.user) return;
+        setWorkspacePilot(data.workspacePilot === true);
         const email = (data.user.email || "").trim();
         const name = (data.user.name || (email ? email.split("@")[0] : "") || "Account").trim();
         const firstName = name.split(/\s+/)[0] || "there";
@@ -86,7 +89,7 @@ export function useWebIdentity(): WebIdentityState {
   return {
     user,
     isAdmin,
-    canOpenTerminal: isAdmin || devFlag,
+    canOpenTerminal: workspacePilotMode() ? workspacePilot : isAdmin || devFlag,
     signOut,
   };
 }

@@ -1,5 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: TINA meetings-only Terminal behind the staging internal ALB and CloudFront.
+Metadata:
+  AWSToolsMetrics: {AWSAgentToolkit: 'true'}
 
 Parameters:
   ClusterName: {Type: String}
@@ -16,9 +18,12 @@ Parameters:
   AdminTokenArn: {Type: String}
   InternalSecretArn: {Type: String}
   GoogleSecretArn: {Type: String, Default: ''}
+  WorkspacePilotStage: {Type: String, Default: closed, AllowedValues: [closed, chat, wiki, routines]}
+  WorkspacePilotUserIds: {Type: String, Default: '', AllowedPattern: '(|[0-9]+(,[0-9]+)*)'}
 
 Conditions:
   GoogleEnabled: !Not [!Equals [!Ref GoogleSecretArn, '']]
+  WithWorkspacePilot: !Not [!Equals [!Ref WorkspacePilotUserIds, '']]
 
 Resources:
   NextAuthSecret:
@@ -85,6 +90,10 @@ Resources:
                   - !If [GoogleEnabled, !Ref GoogleSecretArn, !Ref 'AWS::NoValue']
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Expose the full workbench only to server-verified pilot identities.
+        must: Keep meetings as the default and match the image's build-time mode to the rollout parameter.
     Properties:
       Family: !Ref AWS::StackName
       NetworkMode: awsvpc
@@ -102,7 +111,9 @@ Resources:
             - {Name: NODE_ENV, Value: production}
             - {Name: HOSTNAME, Value: 0.0.0.0}
             - {Name: PORT, Value: '3000'}
-            - {Name: NEXT_PUBLIC_TERMINAL_MODE, Value: meetings}
+            - {Name: NEXT_PUBLIC_TERMINAL_MODE, Value: !If [WithWorkspacePilot, workspace-pilot, meetings]}
+            - {Name: TINA_WORKSPACE_PILOT_STAGE, Value: !Ref WorkspacePilotStage}
+            - {Name: TINA_WORKSPACE_PILOT_USER_IDS, Value: !Ref WorkspacePilotUserIds}
             - {Name: GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
             - {Name: TINA_API_URL, Value: 'http://core.tina-staging.local:8000'}
             - {Name: TINA_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}

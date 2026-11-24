@@ -13,3 +13,7 @@
 export function meetingsOnly(): boolean {
   return process.env.NEXT_PUBLIC_TERMINAL_MODE === "meetings";
 }
+
+export function workspacePilotMode(): boolean {
+  return process.env.NEXT_PUBLIC_TERMINAL_MODE === "workspace-pilot";
+}

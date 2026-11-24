@@ -7,6 +7,8 @@ import { getServerSession } from "next-auth";
 import { AUTH_COOKIE, USER_INFO_COOKIE } from "../adminApi";
 import { googleAvatarUrl } from "../googleAvatar";
 import { authOptions } from "../[...nextauth]/authOptions";
+import { canUseWorkspacePilot } from "../workspacePilot";
+import { workspacePilotMode } from "../../../mode";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +45,8 @@ export async function GET() {
   }
 
   return NextResponse.json(
-    { authenticated: true, user: { email: email ?? null, name: name ?? null, image } },
+    { authenticated: true, user: { email: email ?? null, name: name ?? null, image },
+      ...(workspacePilotMode() ? { workspacePilot: await canUseWorkspacePilot() } : {}) },
     { headers: NO_STORE },
   );
 }

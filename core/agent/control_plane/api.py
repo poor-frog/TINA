@@ -1487,8 +1487,20 @@ def create_app(
         return {"models": models}
 
     @app.post("/invocations", status_code=202)
-    def invocations(invocation: dict = Body(...)):
+    def invocations(request: Request, invocation: dict = Body(...)):
         """The dispatcher sink — any trigger source POSTs a unit.v1 dispatch here."""
+        pilot = os.getenv("TINA_WORKSPACE_PILOT_USER_IDS", "")
+        if pilot and invocation.get("trigger") in ("message", "scheduled"):
+            # Interactive pilot turns enter via the authenticated chat route.
+            identity = invocation.get("identity")
+            if (invocation["trigger"] != "scheduled" or not isinstance(identity, dict)
+                    or identity.get("subject") not in pilot.split(",")):
+                raise HTTPException(403, "Workspace callback unavailable")
+            supplied = request.headers.get("X-Tina-Routine-Signature", "").encode()
+            if not supplied or not os.getenv("TINA_INTERNAL_API_SECRET") or not hmac.compare_digest(
+                supplied, routines_mod.callback_signature(invocation).encode()
+            ):
+                raise HTTPException(403, "Invalid workspace routine signature")
         try:
             workload_id = dispatcher.dispatch(invocation)
         except ValidationError as e:  # non-conformant unit.v1 envelope — fail loud (P18)

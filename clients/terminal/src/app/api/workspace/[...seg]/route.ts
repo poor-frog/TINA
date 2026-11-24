@@ -2,12 +2,14 @@
 import type { NextRequest } from "next/server";
 import { resolveApiKey } from "../../proxyAuth";
 import { meetingsOnly } from "../../../mode";
+import { canUseWorkspacePilot } from "../../auth/workspacePilot";
 
 export const dynamic = "force-dynamic";
 
 /** Meetings-only mode: the workspace KG is an agent surface — refused at the edge (404). */
-function refusedResponse(): Response | null {
-  if (!meetingsOnly()) return null;
+async function refusedResponse(seg: string[]): Promise<Response | null> {
+  if (!meetingsOnly() && !seg.some(part => !part || part === "." || part === ".." || /[/%\\?#]/.test(part))
+      && (await canUseWorkspacePilot(["workspace", ...seg].join("/")))) return null;
   return new Response(JSON.stringify({ error: "not_found", detail: "agent endpoints are disabled in meetings mode" }), { status: 404, headers: { "Content-Type": "application/json" } });
 }
 
@@ -15,9 +17,9 @@ function refusedResponse(): Response | null {
 const GATEWAY_URL = (process.env.GATEWAY_URL || "http://127.0.0.1:18056").replace(/\/$/, "");
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ seg: string[] }> }) {
-  const refused = refusedResponse();
-  if (refused) return refused;
   const { seg } = await ctx.params;
+  const refused = await refusedResponse(seg);
+  if (refused) return refused;
   try {
     const apiKey = await resolveApiKey();
     const upstream = await fetch(`${GATEWAY_URL}/agent/workspace/${seg.join("/")}${req.nextUrl.search}`, {
@@ -37,9 +39,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ seg: string
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ seg: string[] }> }) {
-  const refused = refusedResponse();
-  if (refused) return refused;
   const { seg } = await ctx.params;
+  const refused = await refusedResponse(seg);
+  if (refused) return refused;
   try {
     const apiKey = await resolveApiKey();
     const upstream = await fetch(`${GATEWAY_URL}/agent/workspace/${seg.join("/")}${req.nextUrl.search}`, {

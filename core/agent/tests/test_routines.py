@@ -232,3 +232,24 @@ def test_workspace_routine_enabled_patch_rewrites_file_and_reconciles(tmp_path):
         json={"enabled": False},
     )
     assert absent.status_code == 404
+
+
+def test_pilot_scheduler_callback_binds_subject_and_workspace(monkeypatch):
+    monkeypatch.setenv("TINA_WORKSPACE_PILOT_USER_IDS", "11,12")
+    monkeypatch.setenv("TINA_INTERNAL_API_SECRET", "local-test-fixture")
+    routine = R.make_routine(subject="11", name="test", cron="*/5 * * * *", prompt="test")
+    request = R.compile_to_job(routine, invocations_url="http://agent/invocations", workspace="team")["request"]
+    dispatcher = Dispatcher(load_settings(), _FakeRuntime(), _FakeIdentity())
+    called = []
+    def record(invocation):
+        called.append(invocation)
+        return "test-unit"
+    monkeypatch.setattr(dispatcher, "dispatch", record)
+    client = TestClient(create_app(dispatcher))
+    body = request["body"]
+    assert client.post("/invocations", json=body).status_code == 403
+    for change in ({"identity": body["identity"] | {"subject": "12"}},
+                   {"context": {"kind": "generic"}}, {"trigger": "message"}):
+        assert client.post("/invocations", json=body | change, headers=request["headers"]).status_code == 403
+    assert client.post("/invocations", json=body, headers=request["headers"]).status_code == 202
+    assert called == [body]

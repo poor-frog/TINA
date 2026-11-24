@@ -14,6 +14,10 @@ the job's ``metadata`` carries enough to render the card, so MVP2 needs no separ
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
+import os
+from urllib.parse import quote
 from typing import Optional
 
 import contracts
@@ -75,16 +79,32 @@ def build_invocation(routine: dict, *, workspace_ref: str = "main") -> dict:
     return invocation
 
 
-def compile_to_job(routine: dict, *, invocations_url: str) -> dict:
+def callback_signature(invocation: dict) -> str:
+    key = os.getenv("TINA_INTERNAL_API_SECRET", "")
+    if not key:
+        raise ValueError("Workspace scheduler signing key unavailable")
+    body = json.dumps(invocation, sort_keys=True, separators=(",", ":")).encode()
+    return hmac.new(key.encode(), b"tina-workspace-routine-v1\0" + body, hashlib.sha256).hexdigest()
+
+
+def compile_to_job(routine: dict, *, invocations_url: str, workspace: str | None = None) -> dict:
     """Compile a Routine into a ``schedule.v1`` job: the cron, and the HTTP request that fires the
     Invocation at agent-api ``/invocations``. The job ``metadata`` carries the routine summary so the
     Routines surface can list it straight from the scheduler (no separate store)."""
     invocation = build_invocation(routine)
+    if workspace is not None:
+        invocation["context"]["ref"] = {"uri": "workspace://" + quote(workspace, safe="")}
+    request = {"method": "POST", "url": invocations_url, "body": invocation}
+    pilot = os.getenv("TINA_WORKSPACE_PILOT_USER_IDS", "")
+    if pilot:
+        if routine["owner"] not in pilot.split(","):
+            raise ValueError("Workspace routines unavailable for this account")
+        request["headers"] = {"X-Tina-Routine-Signature": callback_signature(invocation)}
     plan = routine["plan"]
     return {
         "cron": routine["trigger"]["cron"],
         **({"timezone": routine["trigger"]["timezone"]} if routine["trigger"].get("timezone") else {}),
-        "request": {"method": "POST", "url": invocations_url, "body": invocation},
+        "request": request,
         "idempotency_key": routine["id"],
         "metadata": {
             "routine_id": routine["id"],

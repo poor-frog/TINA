@@ -7,6 +7,7 @@
 import type { NextRequest } from "next/server";
 import { resolveApiKey } from "../proxyAuth";
 import { meetingsOnly } from "../../mode";
+import { canUseWorkspacePilot } from "../auth/workspacePilot";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,7 @@ function proxyStream(upstreamBody: ReadableStream<Uint8Array>, abort: AbortContr
 
 export async function POST(req: NextRequest) {
   // Meetings-only mode: chat is an agent surface — refused at the edge like the catch-all's agent branch.
-  if (meetingsOnly()) {
+  if (meetingsOnly() || !(await canUseWorkspacePilot())) {
     return new Response(JSON.stringify({ error: "not_found", detail: "agent endpoints are disabled in meetings mode" }), { status: 404, headers: { "Content-Type": "application/json" } });
   }
   const abort = new AbortController();

@@ -15,7 +15,6 @@ import re
 import stat
 import tempfile
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from urllib.parse import quote
 import threading
 from collections import defaultdict
 from dataclasses import dataclass
@@ -495,9 +494,8 @@ def _compile_workspace_job(routine: RoutineFile, *, subject: str, invocations_ur
         prompt=routine.prompt,
         routine_id=routine_id,
     )
-    job_spec = routines_mod.compile_to_job(authored, invocations_url=invocations_url)
+    job_spec = routines_mod.compile_to_job(authored, invocations_url=invocations_url, workspace=workspace)
     job_spec.pop("idempotency_key", None)
-    job_spec['request']['body']['context']['ref'] = {'uri': 'workspace://' + quote(workspace, safe='')}
     if workspace:
         job_spec['metadata']['workspace_slug'] = workspace
     job_spec["metadata"].update({

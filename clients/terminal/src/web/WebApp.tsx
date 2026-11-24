@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./tina-web.css";
 import { AppGates } from "../app/AppGates";
-import { meetingsOnly } from "../app/mode";
+import { meetingsOnly, workspacePilotMode } from "../app/mode";
 import { meetingIdFromPath, meetingPath, TERMINAL_ROUTE_PREFIX, terminalMeetingPath } from "../app/meetingRoute";
 import {
   createContainer,
@@ -88,7 +88,7 @@ function readInitialRoute(initialMeetingId?: string): { view: WebNavView; meetin
 }
 
 export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
-  const meetOnly = meetingsOnly();
+  const meetOnly = meetingsOnly() || workspacePilotMode();
   const { user, isAdmin, canOpenTerminal, signOut } = useWebIdentity();
   const meetings = useLiveMeetings();
   const listLoaded = useLiveMeetingsLoaded();

@@ -261,3 +261,24 @@ The request returns a job ID before inference starts. Agent API stores the
 latest job per owner and meeting on EFS, and checks the meeting and document
 again before serving cited results. A worker that loses its Agent API process
 can be retried after the four-minute job lease expires.
+
+## Workspace Agent pilot
+
+Build the worker, agent and runtime targets in
+[`workspace-pilot.Dockerfile`](workspace-pilot.Dockerfile) from the verified
+staging base images. Pin each result to its ECR digest. Deploy
+[`staging-workspace-worker.yml`](staging-workspace-worker.yml) per pilot
+account, then supply the exact task definitions, roles and security groups
+to Runtime. Each task mounts the account's private workspace and continuity
+directory via separate EFS access points.
+
+Set the same `WorkspacePilotUserIds` on Agent API and Terminal. Build Terminal
+with `NEXT_PUBLIC_TERMINAL_MODE=workspace-pilot`. Leave `WorkspacePilotStage` at
+`closed` until the live tests pass, then advance through `chat`, `wiki`, and `routines`. The full workbench at
+`/terminal` checks the authenticated account against the list. Chat and
+scheduled turns use the pilot's ChatGPT consent for `gpt-6-luna`.
+
+The current task definitions support personal workspaces. A turn can run
+only when its requested mount set matches a pinned definition, including
+each mount's read/write mode. A shared or additionally attached workspace
+needs a matching task definition before the worker can mount it.
