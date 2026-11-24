@@ -35,6 +35,10 @@ Parameters:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
+  EnableLegacyEfs:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
   WorkspacePilotUserIds: {Type: String, Default: '', AllowedPattern: '(|[*]|[0-9]+(,[0-9]+)*)'}
   WorkspaceBedrockModel: {Type: String, Default: 'us.anthropic.claude-sonnet-4-6'}
   WorkspaceStorage: {Type: String, Default: efs, AllowedValues: [efs, s3]}
@@ -83,8 +87,11 @@ Conditions:
     - !Not [!Equals [!Ref WorkspacePilotRoleA, '']]
     - !Not [!Equals [!Ref WorkspacePilotRoleB, '']]
   WithWorkspace: !Equals [!Ref EnableDurableWorkspace, 'true']
-  WithDynamicWorkspace: !And
+  WithLegacyEfs: !And
     - !Condition WithWorkspace
+    - !Equals [!Ref EnableLegacyEfs, 'true']
+  WithDynamicWorkspace: !And
+    - !Condition WithLegacyEfs
     - !Condition WithWorkspacePilot
     - !Not [!Equals [!Ref ValkeySecurityGroupId, '']]
     - !Not [!Equals [!Ref InvocationBucket, '']]
@@ -93,7 +100,7 @@ Conditions:
     - !Not [!Equals [!Ref WorkspaceS3Bucket, '']]
   WithEfsMigration: !And
     - !Condition WithS3Workspace
-    - !Condition WithWorkspace
+    - !Condition WithLegacyEfs
     - !Equals [!Ref MigrateFromEfs, 'true']
   WithTaskRole: !Or [!Condition WithVoiceCompletion, !Condition WithWorkspace]
   WithChatGPTVoice:
@@ -269,7 +276,7 @@ Resources:
             Resource: !GetAtt WorkspaceFileSystem.Arn
   WorkspaceFileSystem:
     Type: AWS::EFS::FileSystem
-    Condition: WithWorkspace
+    Condition: WithLegacyEfs
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Metadata:
@@ -327,7 +334,7 @@ Resources:
                     - !If [WithDynamicWorkspace, !GetAtt DynamicWorkspaceTaskRole.Arn, !Ref 'AWS::NoValue']
   WorkspaceAccessPoint:
     Type: AWS::EFS::AccessPoint
-    Condition: WithWorkspace
+    Condition: WithLegacyEfs
     Properties:
       FileSystemId: !Ref WorkspaceFileSystem
       PosixUser: {Uid: '1000', Gid: '1000'}
@@ -336,7 +343,7 @@ Resources:
         CreationInfo: {OwnerUid: '1000', OwnerGid: '1000', Permissions: '0700'}
   WorkspaceNfs:
     Type: AWS::EC2::SecurityGroup
-    Condition: WithWorkspace
+    Condition: WithLegacyEfs
     Properties:
       GroupDescription: Workspace NFS from the TINA staging Agent API
       VpcId: !Ref VpcId
@@ -372,21 +379,21 @@ Resources:
       ToPort: 6379
   WorkspaceMountTargetA:
     Type: AWS::EFS::MountTarget
-    Condition: WithWorkspace
+    Condition: WithLegacyEfs
     Properties:
       FileSystemId: !Ref WorkspaceFileSystem
       SubnetId: !Select [0, !Ref AppSubnetIds]
       SecurityGroups: [!GetAtt WorkspaceNfs.GroupId]
   WorkspaceMountTargetB:
     Type: AWS::EFS::MountTarget
-    Condition: WithWorkspace
+    Condition: WithLegacyEfs
     Properties:
       FileSystemId: !Ref WorkspaceFileSystem
       SubnetId: !Select [1, !Ref AppSubnetIds]
       SecurityGroups: [!GetAtt WorkspaceNfs.GroupId]
   WorkspacePermissions:
     Type: AWS::IAM::Policy
-    Condition: WithWorkspace
+    Condition: WithLegacyEfs
     Properties:
       PolicyName: WorkspaceViaAccessPoint
       Roles: [!Ref VoiceModelRole]
@@ -410,7 +417,7 @@ Resources:
       TaskRoleArn: !If [WithTaskRole, !GetAtt VoiceModelRole.Arn, !Ref 'AWS::NoValue']
       Volumes:
         - !If
-          - WithWorkspace
+          - WithLegacyEfs
           - Name: workspaces
             EFSVolumeConfiguration:
               FilesystemId: !Ref WorkspaceFileSystem
@@ -449,7 +456,7 @@ Resources:
             - !If
               - WithS3Workspace
               - {SourceVolume: s3-cache, ContainerPath: /workspaces, ReadOnly: false}
-              - !If [WithWorkspace, {SourceVolume: workspaces, ContainerPath: /workspaces, ReadOnly: false}, !Ref 'AWS::NoValue']
+              - !If [WithLegacyEfs, {SourceVolume: workspaces, ContainerPath: /workspaces, ReadOnly: false}, !Ref 'AWS::NoValue']
             - !If [WithEfsMigration, {SourceVolume: workspaces, ContainerPath: /mnt/efs-workspaces, ReadOnly: true}, !Ref 'AWS::NoValue']
           Environment:
             - {Name: AWS_REGION, Value: !Ref 'AWS::Region'}
@@ -469,7 +476,7 @@ Resources:
             - !If [WithWorkspacePilot, {Name: TINA_AGENT_API_SELF_URL, Value: 'http://agent-api.tina-staging.local:8100'}, !Ref AWS::NoValue]
             - {Name: TINA_WORKSPACE_PILOT_USER_IDS, Value: !Ref WorkspacePilotUserIds}
             - {Name: TINA_WORKSPACE_BEDROCK_OWNER, Value: !Ref WorkspaceBedrockOwner}
-            - !If [WithDynamicWorkspace, {Name: TINA_WORKSPACE_BEDROCK_MODEL, Value: !Ref WorkspaceBedrockModel}, !Ref 'AWS::NoValue']
+            - !If [WithWorkspacePilot, {Name: TINA_WORKSPACE_BEDROCK_MODEL, Value: !Ref WorkspaceBedrockModel}, !Ref 'AWS::NoValue']
             - !If [WithWorkspaceChatGPT, {Name: TINA_CHATGPT_WORKSPACE_OWNER, Value: !Ref WorkspaceChatGPTOwner}, !Ref AWS::NoValue]
             - !If [WithWorkspaceChatGPT, {Name: TINA_CHATGPT_WORKSPACE_SECRET_ARN, Value: !Ref WorkspaceChatGPTSecretArn}, !Ref AWS::NoValue]
             - !If [WithWorkspace, {Name: TINA_POST_MEETING_ECS_DRAFT, Value: '1'}, !Ref 'AWS::NoValue']
@@ -538,7 +545,7 @@ Outputs:
   TaskDefinitionArn: {Value: !Ref TaskDefinition}
   LogGroupName: {Value: !Ref Logs}
   WorkspaceFileSystemId:
-    Condition: WithWorkspace
+    Condition: WithLegacyEfs
     Value: !Ref WorkspaceFileSystem
   DynamicWorkspaceTaskRoleArn:
     Condition: WithDynamicWorkspace
