@@ -4,6 +4,13 @@ End-user production interface mounted at `/` and `/meetings/[meetingId]` alongsi
 TINA Terminal workbench at `/terminal`.
 
 ## Architecture
+- **Pre-Login Landing & OAuth Gate (`TinaLanding.tsx` + `HeroMeetingScene.tsx` + `StepScene.tsx` + `PrivateInfraIso.tsx` + `landingCopy.ts` + `tinaLanding.module.css` mounted by `src/app/AuthGate.tsx`)**:
+  Bilingual (`VI` default + live `VI / EN` switcher in header) editorial neo-brutalist warm-paper
+  pre-login showcase tailored for teams & enterprises: Google/Microsoft OAuth, first-run admin
+  claim, dev `@example.test` debug login, interactive multi-layer animated Hero meeting scene,
+  early live VI+EN Transcript & Voice TTS showcase, interactive Google Meet Chrome Extension
+  spotlight (`Song ngữ VI+EN`, `Bắt kịp 60s`, `Ask TINA`), 3-step onboarding, synced surfaces &
+  enterprise use cases, privacy/platforms overview, and FAQ — strictly isolated via CSS Modules.
 - **Scoped CSS (`tina-web.css`)**: All layout, dark/light theme tokens, and Terminal-to-Web CSS
   variable bridges live under `.tina-web` and `.tina-login-shell` so Tailwind and Dockview styles
   in `/terminal` remain completely isolated.

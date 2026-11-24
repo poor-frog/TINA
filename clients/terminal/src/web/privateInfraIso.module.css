@@ -1,0 +1,199 @@
+/* PrivateInfraIso — Dark Obsidian + TINA Brand Mint/Teal isometric architecture stage */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 2px solid #0c0d0a;
+  border-radius: 22px;
+  box-shadow: 5px 5px 0 #0c0d0a;
+  background:
+    radial-gradient(ellipse at 22% 18%, rgba(110, 231, 183, 0.14), transparent 52%),
+    radial-gradient(ellipse at 85% 86%, rgba(23, 107, 91, 0.22), transparent 56%),
+    #0e0f0d;
+  color: #f3f0e8;
+}
+
+.topBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 13px 18px;
+  border-bottom: 1px solid #2a2c24;
+  background: rgba(255, 255, 255, 0.02);
+  font: 600 10.5px/1.3 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.topLive {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #6ee7b7;
+}
+
+.topLive i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6ee7b7;
+  box-shadow: 0 0 0 4px rgba(110, 231, 183, 0.18);
+  display: block;
+}
+
+.topZone {
+  color: rgba(243, 240, 232, 0.58);
+}
+
+.stageWrap {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  padding: 8px 10px 2px;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+}
+
+.nodeHit {
+  cursor: pointer;
+}
+
+/* Animated isometric energy packets */
+.flow {
+  stroke-dasharray: 0.01 18;
+  animation: tinaIsoFlow 1.15s linear infinite;
+}
+
+.flowFast {
+  animation-duration: 0.58s;
+}
+
+.blink {
+  animation: tinaIsoBlink 2.6s step-end infinite;
+}
+
+.ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tinaIsoRing 1.7s ease-out infinite;
+}
+
+@keyframes tinaIsoFlow {
+  to {
+    stroke-dashoffset: -18px;
+  }
+}
+
+@keyframes tinaIsoBlink {
+  0%,
+  68% {
+    opacity: 1;
+  }
+  70%,
+  100% {
+    opacity: 0.22;
+  }
+}
+
+@keyframes tinaIsoRing {
+  0% {
+    opacity: 0.78;
+    transform: scale(0.86);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.38);
+  }
+}
+
+/* Interactive subsystem pills */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 18px 12px;
+  border-top: 1px solid #2a2c24;
+}
+
+.pill {
+  min-height: 29px;
+  padding: 0 11px;
+  border: 1px solid #2e332b;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(243, 240, 232, 0.76);
+  font: 600 11px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+}
+
+.pill:hover {
+  color: #f3f0e8;
+  border-color: rgba(110, 231, 183, 0.5);
+}
+
+.pillActive {
+  background: #6ee7b7;
+  border-color: #6ee7b7;
+  color: #0a0b07;
+}
+
+.pillActive:hover {
+  color: #0a0b07;
+  background: #8aeec6;
+}
+
+/* Live bilingual node detail bar */
+.readout {
+  padding: 14px 18px 16px;
+  border-top: 1px solid #2a2c24;
+  background: rgba(110, 231, 183, 0.045);
+}
+
+.readoutHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 5px;
+}
+
+.readoutHead strong {
+  color: #6ee7b7;
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.readoutHint {
+  color: rgba(243, 240, 232, 0.48);
+  font: 500 10.5px/1.3 "JetBrains Mono", ui-monospace, monospace;
+}
+
+.readout p {
+  margin: 0;
+  color: rgba(243, 240, 232, 0.84);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow,
+  .blink,
+  .ring {
+    animation: none !important;
+  }
+  .ring {
+    opacity: 0;
+  }
+}
