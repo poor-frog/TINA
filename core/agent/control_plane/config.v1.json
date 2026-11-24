@@ -585,6 +585,13 @@
       "secret": true,
       "description": "OpenAI API key fallback for mode=openai-api when the provider entry has no api_key; dispatch stamps it into the Codex worker as OPENAI_API_KEY. Read from the process env only — no deploy surface plumbs it",
       "targets": []
+    },
+    {
+      "key": "AWS_DEFAULT_REGION",
+      "class": "defaulted",
+      "default": "us-east-1",
+      "description": "Fallback AWS region used when AWS_REGION is unset for Bedrock and S3 workspace operations.",
+      "targets": []
     }
   ],
   "capabilities": {

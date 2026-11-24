@@ -547,6 +547,41 @@
     "compose",
     "helm"
    ]
+  },
+  {
+   "key": "VALKEY_HOST",
+   "class": "defaulted",
+   "default": "(unset — ECS dynamic/ephemeral workspace stream host fallback)",
+   "description": "Valkey hostname injected by AWS ECS Fargate runtime templates.",
+   "targets": []
+  },
+  {
+   "key": "AWS_REGION",
+   "class": "defaulted",
+   "default": "us-east-1",
+   "description": "AWS region for ECS/STS/S3 API clients.",
+   "targets": []
+  },
+  {
+   "key": "AWS_DEFAULT_REGION",
+   "class": "defaulted",
+   "default": "us-east-1",
+   "description": "Fallback AWS region for ECS/STS/S3 API clients.",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_ECS_NOVA_WORKSPACE_TASK_DEFINITION",
+   "class": "defaulted",
+   "default": "(unset — Nova workspace task definition disabled)",
+   "description": "Pinned Fargate task definition ARN for Bedrock Nova workspace turns.",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_ECS_NOVA_WORKSPACE_OWNERS",
+   "class": "defaulted",
+   "default": "(unset — no subjects routed to Nova workspace task)",
+   "description": "Comma-separated owner IDs routed to the dedicated Nova workspace task definition.",
+   "targets": []
   }
  ],
  "capabilities": {
