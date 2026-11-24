@@ -27,6 +27,10 @@ Parameters:
     Type: String
   ValkeySecretArn:
     Type: String
+  WorkspaceWorkerImage: {Type: String, Default: '', AllowedPattern: '(|[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64})'}
+  WorkspaceTasks: {Type: String, Default: '{}'}
+  WorkspaceTaskArns: {Type: CommaDelimitedList, Default: ''}
+  WorkspaceRoleArns: {Type: CommaDelimitedList, Default: ''}
   DraftWorkerImage:
     Type: String
     Default: ''
@@ -36,9 +40,29 @@ Parameters:
     Default: ''
 
 Conditions:
+  WithWorkspaceWorker: !Not [!Equals [!Ref WorkspaceWorkerImage, '']]
   WithDraftWorker: !Not [!Equals [!Ref DraftWorkerImage, '']]
 
 Resources:
+  RuntimeWorkspacePermissions:
+    Type: AWS::IAM::Policy
+    Condition: WithWorkspaceWorker
+    Properties:
+      PolicyName: StartPinnedWorkspaceWorkers
+      Roles: [!Select [1, !Split ['/', !Ref RuntimeTaskRoleArn]]]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: ecs:RunTask
+            Resource: !Ref WorkspaceTaskArns
+            Condition:
+              ArnEquals: {'ecs:cluster': !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'}
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !Ref WorkspaceRoleArns
+            Condition:
+              StringEquals: {'iam:PassedToService': ecs-tasks.amazonaws.com}
   RuntimeLogs:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -231,6 +255,8 @@ Resources:
           PortMappings: [{ContainerPort: 8090, Protocol: tcp}]
           Environment:
             - {Name: RUNTIME_BACKEND, Value: ecs}
+            - !If [WithWorkspaceWorker, {Name: RUNTIME_ECS_WORKSPACE_IMAGE, Value: !Ref WorkspaceWorkerImage}, !Ref AWS::NoValue]
+            - !If [WithWorkspaceWorker, {Name: RUNTIME_ECS_WORKSPACE_TASKS, Value: !Ref WorkspaceTasks}, !Ref AWS::NoValue]
             - {Name: RUNTIME_ECS_CLUSTER, Value: !Ref ClusterName}
             - {Name: RUNTIME_ECS_BOT_TASK_DEFINITION, Value: !Ref BotTaskDefinitionArn}
             - {Name: RUNTIME_ECS_SUBNETS, Value: !Join [',', !Ref AppSubnetIds]}

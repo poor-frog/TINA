@@ -88,7 +88,7 @@ class Runtime:
 
     def _persist(self, spec: WorkloadSpec, status: WorkloadStatus) -> None:
         owner = self.owner_resolver(spec)
-        if spec.env.get("TINA_POST_MEETING_DRAFT") == "1":
+        if spec.env.get("TINA_POST_MEETING_DRAFT") == "1" or spec.profile == "workspace-agent":
             spec = spec.model_copy(update={"env": {}})
         self.store.set(WorkloadRecord(spec=spec, status=status, owner=owner))
 

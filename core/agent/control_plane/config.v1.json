@@ -3,6 +3,27 @@
   "service": "agent-api",
   "keys": [
     {
+      "key": "TINA_CHATGPT_WORKSPACE_OWNER",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Primary subject that consented to use a separate subscription for workspace jobs."
+    },
+    {
+      "key": "TINA_CHATGPT_WORKSPACE_SECRET_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Secrets Manager reference for the workspace-only ChatGPT connection."
+    },
+    {
+      "key": "TINA_WORKSPACE_PILOT_USER_IDS",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Numeric staging subjects permitted to dispatch workspace chat and scheduled work."
+    },
+    {
       "key": "TINA_POST_MEETING_ECS_DRAFT",
       "class": "defaulted",
       "default": "0",

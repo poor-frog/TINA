@@ -611,7 +611,11 @@ def reconcile_all_workspace_routines(
     workspaces_dir: str | Path = "/workspaces",
 ) -> list[ReconcileResult]:
     results: list[ReconcileResult] = []
-    for subject in scan_workspace_subjects(workspaces_dir):
+    pilot = os.getenv("TINA_WORKSPACE_PILOT_USER_IDS", "")
+    subjects = scan_workspace_subjects(workspaces_dir)
+    if pilot:
+        subjects = sorted(set(subjects).intersection(pilot.split(",")))
+    for subject in subjects:
         results.append(
             reconcile_workspace_routines(
                 subject,

@@ -324,10 +324,14 @@ class WorkspaceReader:
         """
         root = self._root.resolve()
         home = self._ws(subject)
-        system = (root / ".system" / subject).resolve()
+        from control_plane.system_mounts import system_store_path
+        system = system_store_path(root, subject).resolve()
+        legacy_system = (root / ".system" / subject).resolve()
         attached = root / ".attached" / subject
         attached_root: Optional[Path] = None
         candidates: list[Path] = [system, home]
+        if system != legacy_system and not (root / ".system" / subject).is_symlink():
+            candidates.append(legacy_system)
         if attached.is_dir() and not attached.is_symlink():
             try:
                 resolved_attached = attached.resolve()

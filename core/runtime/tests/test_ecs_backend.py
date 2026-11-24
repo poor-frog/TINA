@@ -101,3 +101,31 @@ def test_recovers_managed_task_and_removes_env_only_after_stop(backend):
     assert backend.exit_code(handle) == 0
     backend.cleanup(handle)
     backend.s3.delete_object.assert_called_once_with(Bucket="private-test", Key=backend._key("mtg-test"))
+
+
+def test_workspace_placement_failure_cleans_only_the_declined_invocation(backend):
+    from runtime_kernel.workspace_tasks import WorkspaceTask
+
+    uid = "agent-11-chat-smoke"
+    mounts = {"/workspaces/11": True, "/workspaces/_system/11": True}
+    backend.workspace_tasks = [WorkspaceTask("11", DEFINITION, "sg-test", IMAGE, 1024, 2048, mounts)]
+    runnable = Runnable(image=IMAGE, command=["python", "-m", "worker"])
+    env = {
+        "TINA_WORKSPACE_ATTEMPT": "a" * 32, "TINA_OWNER": "11", "TINA_UNIT_ID": uid,
+        "TINA_CHAT_SESSION": "smoke", "TINA_UNIT_TRIGGER": "message",
+        "TINA_UNIT_IN_TOPIC": f"unit:{uid}:in", "TINA_UNIT_OUT_TOPIC": f"unit:{uid}:out",
+        "TINA_WORKSPACE_PATH": "/workspaces/11", "TINA_RUNNER": "codex",
+        "TINA_CODEX_AUTH_MODE": "chatgpt-plan",
+        "TINA_MOUNTS": json.dumps([{"path": p, "write": w} for p, w in mounts.items()]),
+    }
+    backend.ecs.run_task.return_value = {"failures": [{"reason": "RESOURCE:CPU"}], "tasks": []}
+    with pytest.raises(RuntimeError, match="did not accept"):
+        backend.start(uid, runnable, env)
+    key = backend.s3.put_object.call_args.kwargs["Key"]
+    assert key.startswith("runtime-invocations/workspace/11/")
+    backend.s3.delete_object.assert_called_once_with(Bucket="private-test", Key=key)
+    backend.s3.delete_object.reset_mock()
+    backend.ecs.run_task.side_effect = TimeoutError
+    with pytest.raises(TimeoutError):
+        backend.start(uid, runnable, env)
+    backend.s3.delete_object.assert_not_called()

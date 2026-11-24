@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: On-demand ARM64 workspace worker for one staging pilot subject.
+Metadata:
+  AWSToolsMetrics: {AWSAgentToolkit: aws-cloudformation@3}
+Parameters:
+  Subject:
+    Type: String
+    AllowedPattern: '[1-9][0-9]*'
+  WorkerImage:
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'
+  WorkspaceFileSystemId: {Type: String, AllowedPattern: 'fs-[a-f0-9]+'}
+  WorkspaceNfsGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  VpcId: {Type: 'AWS::EC2::VPC::Id'}
+  EnableWorkspaceStream: {Type: String, Default: 'false', AllowedValues: ['true','false']}
+  ValkeyHost: {Type: String, Default: ''}
+  ValkeySecretArn: {Type: String, Default: ''}
+  ValkeySecurityGroupId: {Type: String, Default: ''}
+  InvocationBucket: {Type: String, Default: ''}
+Conditions:
+  WithStream: !Equals [!Ref EnableWorkspaceStream, 'true']
+Resources:
+  ValkeyIngress:
+    Condition: WithStream
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ValkeySecurityGroupId
+      SourceSecurityGroupId: !GetAtt Network.GroupId
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+  Home:
+    Type: AWS::EFS::AccessPoint
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Scope personal Wiki files to one staging subject.
+        must: Never mount the workspace store root.
+    Properties:
+      FileSystemId: !Ref WorkspaceFileSystemId
+      PosixUser: {Uid: '1000', Gid: '1000'}
+      RootDirectory:
+        Path: !Sub '/workspaces/${Subject}'
+        CreationInfo: {OwnerUid: '1000', OwnerGid: '1000', Permissions: '0700'}
+  Continuity:
+    Type: AWS::EFS::AccessPoint
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Persist private session pointers across worker replacements.
+        must: Keep chat history under the subject's system directory.
+    Properties:
+      FileSystemId: !Ref WorkspaceFileSystemId
+      PosixUser: {Uid: '1000', Gid: '1000'}
+      RootDirectory:
+        Path: !Sub '/workspaces/_system/${Subject}'
+        CreationInfo: {OwnerUid: '1000', OwnerGid: '1000', Permissions: '0700'}
+  Network:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupDescription: Private staging workspace worker egress
+      SecurityGroupEgress:
+        - !If
+          - WithStream
+          - {IpProtocol: tcp, FromPort: 6379, ToPort: 6379, DestinationSecurityGroupId: !Ref ValkeySecurityGroupId}
+          - !Ref AWS::NoValue
+        - {IpProtocol: tcp, FromPort: 2049, ToPort: 2049, DestinationSecurityGroupId: !Ref WorkspaceNfsGroupId}
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+  AllowNfs:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref WorkspaceNfsGroupId
+      SourceSecurityGroupId: !GetAtt Network.GroupId
+      IpProtocol: tcp
+      FromPort: 2049
+      ToPort: 2049
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties: {RetentionInDays: 7}
+  Execution:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: DownloadWorkerAndLog
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:GetDownloadUrlForLayer, ecr:BatchCheckLayerAvailability]
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-staging/agent-worker'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt Logs.Arn
+        - !If
+          - WithStream
+          - PolicyName: LoadSubjectInvocation
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - {Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref ValkeySecretArn}
+                - {Effect: Allow, Action: 's3:GetBucketLocation', Resource: !Sub 'arn:${AWS::Partition}:s3:::${InvocationBucket}'}
+                - Effect: Allow
+                  Action: s3:GetObject
+                  Resource: !Sub 'arn:${AWS::Partition}:s3:::${InvocationBucket}/runtime-invocations/workspace/${Subject}/*'
+          - !Ref AWS::NoValue
+  WorkerRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Give the worker access to its own two EFS access points.
+        must: Keep execution credentials and other subjects outside the worker role.
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: SubjectWorkspace
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [elasticfilesystem:ClientMount, elasticfilesystem:ClientWrite]
+                Resource: !Sub 'arn:${AWS::Partition}:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/${WorkspaceFileSystemId}'
+                Condition:
+                  ArnEquals:
+                    elasticfilesystem:AccessPointArn: [!GetAtt Home.Arn, !GetAtt Continuity.Arn]
+  Task:
+    Type: AWS::ECS::TaskDefinition
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Run a workspace worker on demand with process and mount isolation.
+        must: Use IAM authorization and TLS on each subject-scoped mount.
+    Properties:
+      Family: !Ref AWS::StackName
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: '1024'
+      Memory: '2048'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt Execution.Arn
+      TaskRoleArn: !GetAtt WorkerRole.Arn
+      Volumes:
+        - Name: home
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref WorkspaceFileSystemId
+            TransitEncryption: ENABLED
+            AuthorizationConfig: {AccessPointId: !Ref Home, IAM: ENABLED}
+        - Name: continuity
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref WorkspaceFileSystemId
+            TransitEncryption: ENABLED
+            AuthorizationConfig: {AccessPointId: !Ref Continuity, IAM: ENABLED}
+      ContainerDefinitions:
+        - Name: worker
+          Image: !Ref WorkerImage
+          Essential: true
+          User: '1000:1000'
+          LinuxParameters: {InitProcessEnabled: true}
+          Environment:
+            - {Name: TINA_OWNER, Value: !Ref Subject}
+            - {Name: HOME, Value: !Sub '/workspaces/_system/${Subject}'}
+            - {Name: TINA_WORKSPACE_PATH, Value: !Sub '/workspaces/${Subject}'}
+          DependsOn: !If [WithStream, [{ContainerName: stream, Condition: HEALTHY}], !Ref AWS::NoValue]
+          MountPoints:
+            - {SourceVolume: home, ContainerPath: !Sub '/workspaces/${Subject}', ReadOnly: false}
+            - {SourceVolume: continuity, ContainerPath: !Sub '/workspaces/_system/${Subject}', ReadOnly: false}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+        - !If
+          - WithStream
+          - Name: stream
+            Image: !Ref WorkerImage
+            Essential: true
+            User: '1000:1000'
+            ReadonlyRootFilesystem: true
+            EntryPoint: [python, -m, worker.workspace_stream]
+            Environment:
+              - {Name: TINA_OWNER, Value: !Ref Subject}
+              - {Name: VALKEY_HOST, Value: !Ref ValkeyHost}
+            Secrets: [{Name: VALKEY_PASSWORD, ValueFrom: !Ref ValkeySecretArn}]
+            HealthCheck:
+              Command: [CMD, python, -c, "import socket; socket.create_connection(('127.0.0.1',8721),2).close()"]
+              Interval: 5
+              Timeout: 3
+              Retries: 5
+              StartPeriod: 5
+            LogConfiguration:
+              LogDriver: awslogs
+              Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+          - !Ref AWS::NoValue
+Outputs:
+  TaskDefinitionArn: {Value: !Ref Task}
+  TaskRoleArn: {Value: !GetAtt WorkerRole.Arn}
+  ExecutionRoleArn: {Value: !GetAtt Execution.Arn}
+  SecurityGroupId: {Value: !GetAtt Network.GroupId}
+  LogGroup: {Value: !Ref Logs}

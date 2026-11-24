@@ -1122,7 +1122,11 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
     _warn = preflight_provider_guard()
     if _warn:
         log.warning("agent-api worker: %s", _warn)
-    client = redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    if os.getenv('TINA_WORKSPACE_STREAM_SIDECAR') == '1':
+        from worker.workspace_stream import WorkspaceStream
+        client = WorkspaceStream(os.environ['TINA_OWNER'], os.environ['TINA_UNIT_ID'])
+    else:
+        client = redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
     out_topic = os.environ["TINA_UNIT_OUT_TOPIC"]
     idle_ms = int(os.environ.get("TINA_IDLE_TIMEOUT_SEC", "120")) * 1000
     start = json.loads(os.environ.get("TINA_START", "{}"))

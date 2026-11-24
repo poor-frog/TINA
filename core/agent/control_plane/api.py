@@ -1796,7 +1796,8 @@ def create_app(
                 # never block a turn; the worker-side auth taxonomy still catches it cleanly.
                 if capability_state("model_inference") == NOT_CONFIGURED:
                     cfg = dispatcher.resolve_model_config(subject)
-                    if cfg is not None and not _has_custom_model_endpoint(cfg):
+                    from control_plane.aws_voice_chatgpt import workspace_connected
+                    if cfg is not None and not _has_custom_model_endpoint(cfg) and not workspace_connected(subject):
                         return StreamingResponse(
                             _sse([{"type": "error", "message": _model_creds_error_message()},
                                   {"type": "turn-complete"}]),

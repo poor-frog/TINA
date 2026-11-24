@@ -636,6 +636,18 @@ class Dispatcher:
             self.dispatched.append(invocation)
         identity = invocation["identity"]
         uid = dispatch_id(invocation)
+        is_chat = invocation["trigger"] == "message" and not is_private_transcript_job(invocation)
+        pilot = os.getenv("TINA_WORKSPACE_PILOT_USER_IDS")
+        workspace_turn = pilot and (is_chat or invocation["trigger"] == "scheduled")
+        if workspace_turn:
+            if identity["subject"] not in pilot.split(","):
+                raise ModelConfigRefreshError("Workspace pilot unavailable for this account", 403)
+            from control_plane.aws_voice_chatgpt import workspace_access_token
+            from control_plane.openai_auth import ChatGPTAuthError
+            try:
+                workspace_token = workspace_access_token(identity["subject"], self._settings.redis_url)
+            except ChatGPTAuthError as exc:
+                raise ModelConfigRefreshError("Connect ChatGPT for this workspace", 409) from exc
         token = self._identity.mint(
             identity["subject"], identity["launcher"], invocation["workspaces"], invocation.get("tools", []),
         )
@@ -653,7 +665,7 @@ class Dispatcher:
         # NOTE: /api/chat gates message-triggers upstream (credential preflight) — this path stays
         # ungated so async triggers (scheduled/event/transcription) never lose a dispatch; their
         # credential-less failure mode is the clean rewritten done frame (llm/errors taxonomy).
-        model_config = self.resolve_model_config(identity["subject"])
+        model_config = {} if workspace_turn else self.resolve_model_config(identity["subject"])
         if (model_config is None and invocation["trigger"] == "message"
                 and not is_private_transcript_job(invocation)
                 and callable(getattr(self._runtime, "stop", None))):
@@ -675,11 +687,16 @@ class Dispatcher:
         #     entrypoint (no double turn).
         # A watchdog then waits for the worker's turn-accepted ack and respawns once if the worker
         # exited in the XADD↔idle-exit race window without taking the message.
-        is_chat = invocation["trigger"] == "message" and not is_private_transcript_job(invocation)
+        profile = self._settings.agent_profile
+        if workspace_turn:
+            env.update(TINA_CODEX_AUTH_MODE="chatgpt-plan", TINA_RUNNER="codex",
+                       TINA_AGENT_MODEL="gpt-6-luna", ACCESS_TOKEN=workspace_token,
+                       TINA_WORKSPACE_ATTEMPT=uuid.uuid4().hex)
+            profile = "workspace-agent"
         guard = self._chat_config_guard(uid, env) if is_chat else nullcontext()
         with guard:
             delivery = self._predeliver(uid, invocation) if is_chat else None
-            acked = self._runtime.spawn(uid, self._settings.agent_profile, env)
+            acked = self._runtime.spawn(uid, profile, env)
         if delivery is not None:
             self._watch_delivery(uid, env, tail=delivery)
         logger.info(
@@ -701,6 +718,9 @@ class Dispatcher:
             key.startswith(("ANTHROPIC_", "AWS_", "GEMINI_", "OPENAI_", "CLAUDE_CODE_", "TINA_LLM_", "TINA_ANTIGRAVITY_"))
             or key in {"TINA_RUNNER", "TINA_AGENT_MODEL", "TINA_AGENT_EFFORT", "TINA_MEETING_MODEL", "TINA_CODEX_AUTH_MODE", "ACCESS_TOKEN"}
         )}
+        # The running container retains its original filesystem mounts and tool grants.
+        for key in ("TINA_MOUNTS", "TINA_WORKSPACES", "TINA_WORKSPACE_PATH", "TINA_UNIT_TOOLS"):
+            selected[key] = env.get(key, "")
         selected["__runtime_policy__"] = model_runtime_revision()
         secret = self._settings.dispatch_signing_key.get_secret_value().encode()
         return hmac.new(secret, json.dumps(selected, sort_keys=True).encode(), hashlib.sha256).hexdigest()
@@ -872,6 +892,9 @@ class Dispatcher:
                     if ev.get("type") == "turn-accepted":
                         return  # the turn is running
                 if not respawned and self._workload_gone(uid):
+                    # A new pilot dispatch must resolve current membership before starting another task.
+                    if env.get("TINA_WORKSPACE_ATTEMPT"):
+                        return
                     logger.warning("warm delivery missed for unit=%s (worker exited) — respawning", uid)
                     try:
                         self._runtime.spawn(uid, self._settings.agent_profile, env)

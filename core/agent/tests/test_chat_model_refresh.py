@@ -144,6 +144,26 @@ def test_busy_previous_turn_is_not_killed_or_given_the_new_message(stack):
     assert runtime.stops == 1 and runtime.worker_env["TINA_RUNNER"] == "codex"
 
 
+@pytest.mark.parametrize("change", ["demote", "revoke"])
+def test_shared_mount_change_replaces_worker_before_next_turn(stack, monkeypatch, change):
+    dispatcher, runtime, config, client = stack
+    grants = [{"slug": "private", "path": "/workspaces/u_jane", "role": "private",
+               "write": True, "primary": True},
+              {"slug": "team", "path": "/workspaces/team", "role": "shared",
+               "write": True, "primary": False}]
+    monkeypatch.setattr("control_plane.dispatch.build_mount_set",
+                        lambda *_: [dict(grant) for grant in grants])
+    uid = dispatcher.dispatch(INVOCATION)
+    complete(client, uid)
+    if change == "revoke":
+        grants.pop()
+    else:
+        grants[-1]["write"] = False
+    dispatcher.dispatch(INVOCATION)
+    assert runtime.stops == 1
+    assert json.loads(runtime.worker_env["TINA_MOUNTS"]) == grants
+
+
 def test_pre_upgrade_idle_worker_without_metadata_is_refreshed(stack):
     dispatcher, runtime, config, client = stack
     uid = "agent-u_jane-chat-same-chat"
@@ -191,3 +211,29 @@ def test_chat_route_surfaces_configuration_refresh_error_as_actionable_409(stack
     response = app.post("/api/chat", json={"prompt": "hi"}, headers={"X-User-Id": "u_jane"})
     assert response.status_code == 409
     assert "previous response" in response.json()["detail"]
+
+
+def test_workspace_pilot_requires_separate_subject_consent(stack, monkeypatch):
+    dispatcher, runtime, config, client = stack
+    monkeypatch.setenv("TINA_WORKSPACE_PILOT_USER_IDS", "11,12")
+    monkeypatch.setenv("TINA_CHATGPT_WORKSPACE_OWNER", "11")
+    monkeypatch.setenv("TINA_CHATGPT_WORKSPACE_SECRET_ARN", "private-workspace-profile")
+    monkeypatch.setenv("ACCESS_TOKEN", "ambient-test-token")
+    monkeypatch.setenv("TINA_CODEX_AUTH_MODE", "chatgpt-plan")
+    monkeypatch.setenv("TINA_AGENT_MODEL", "gpt-6-luna")
+    def broker(*args, **kwargs):
+        assert kwargs["scope"] == "workspace-agent"
+        assert args[1:3] == ("private-workspace-profile", "11")
+        return "workspace-test-token"
+    monkeypatch.setattr("control_plane.aws_voice_chatgpt._access_token", broker)
+    def invocation(owner):
+        return INVOCATION | {"identity": {"subject": owner, "launcher": "user:" + owner},
+                             "workspaces": [{"id": owner, "mode": "rw"}]}
+    for owner, status in [("12", 409), ("13", 403)]:
+        with pytest.raises(ModelConfigRefreshError) as exc:
+            dispatcher.dispatch(invocation(owner))
+        assert exc.value.status == status
+    assert runtime.spawns == 0
+    dispatcher.dispatch(invocation("11"))
+    assert runtime.worker_env["ACCESS_TOKEN"] == "workspace-test-token"
+    assert runtime.worker_env["TINA_AGENT_MODEL"] == "gpt-6-luna"

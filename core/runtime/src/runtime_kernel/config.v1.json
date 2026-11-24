@@ -2,6 +2,20 @@
  "contract": "config.v1",
  "service": "runtime",
  "keys": [
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_TASKS",
+      "class": "defaulted",
+      "default": "{}",
+      "targets": [],
+      "description": "Pinned per-subject task definitions and security groups for workspace workloads."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_IMAGE",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Immutable image for the optional workspace-agent profile."
+    },
   {
    "key": "RUNTIME_ECS_CLUSTER",
    "class": "defaulted",

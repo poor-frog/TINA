@@ -157,6 +157,11 @@ def default_registry() -> ProfileRegistry:
             # empty makes docker (omit Cmd) and k8s (omit --command) both boot the image entrypoint
             # identically. The process backend (lite) never uses this default — it sets BOT_COMMAND
             # to its in-container launcher (deploy/lite/bin/tina-bot-launch), applied below.
+            **({"workspace-agent": Profile(
+                name="workspace-agent",
+                runnable=Runnable(image=os.environ["RUNTIME_ECS_WORKSPACE_IMAGE"], command=["python", "-m", "worker"]),
+                idle_timeout_sec=300, max_lifetime_sec=3600,
+            )} if os.getenv("RUNTIME_ECS_WORKSPACE_IMAGE") else {}),
             "meeting-bot": Profile(
                 name="meeting-bot",
                 runnable=Runnable(

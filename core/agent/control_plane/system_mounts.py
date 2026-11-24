@@ -97,6 +97,9 @@ def global_mount(settings, root: str) -> Optional[dict]:
 def _system_store(root: Path, subject: str) -> Path:
     """The on-disk home of the subject's private-system workspace — under the store's reserved
     ``.system`` namespace, keyed by subject, so it rides the single store-root bind like the baseline."""
+    # EFS access points cannot use a root component beginning with a dot.
+    if subject in os.getenv("TINA_WORKSPACE_PILOT_USER_IDS", "").split(",") and subject.isdecimal():
+        return root / SYSTEM_SLUG / subject
     return root / SYSTEM_STORE_DIRNAME / subject
 
 

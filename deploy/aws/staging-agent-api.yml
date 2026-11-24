@@ -29,6 +29,18 @@ Parameters:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
+  WorkspacePilotUserIds: {Type: String, Default: '', AllowedPattern: '(|[0-9]+(,[0-9]+)*)'}
+  WorkspaceChatGPTOwner: {Type: String, Default: '', AllowedPattern: '[0-9]*'}
+  WorkspaceChatGPTSecretArn: {Type: String, Default: ''}
+  WorkspaceRuntimeSecurityGroupId: {Type: String, Default: ''}
+  WorkspacePilotRoleA:
+    Type: String
+    Default: ''
+    AllowedPattern: '(|arn:[a-z0-9-]+:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+)'
+  WorkspacePilotRoleB:
+    Type: String
+    Default: ''
+    AllowedPattern: '(|arn:[a-z0-9-]+:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+)'
   DraftPilotUserIds:
     Type: String
     Default: ''
@@ -39,6 +51,14 @@ Conditions:
     - !Not [!Equals [!Ref AgentReachUrl, '']]
     - !Not [!Equals [!Ref AgentReachClientSecurityGroupId, '']]
   WithVoiceCompletion: !Equals [!Ref EnableVoiceCompletion, 'true']
+  WithWorkspaceChatGPT: !And
+    - !Condition WithWorkspacePilot
+    - !Not [!Equals [!Ref WorkspaceChatGPTOwner, '']]
+    - !Not [!Equals [!Ref WorkspaceChatGPTSecretArn, '']]
+  WithWorkspacePilot: !Not [!Equals [!Ref WorkspacePilotUserIds, '']]
+  WithWorkspacePilotRoles: !And
+    - !Not [!Equals [!Ref WorkspacePilotRoleA, '']]
+    - !Not [!Equals [!Ref WorkspacePilotRoleB, '']]
   WithWorkspace: !Equals [!Ref EnableDurableWorkspace, 'true']
   WithTaskRole: !Or [!Condition WithVoiceCompletion, !Condition WithWorkspace]
   WithChatGPTVoice:
@@ -63,6 +83,15 @@ Resources:
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - {IpProtocol: tcp, FromPort: 8100, ToPort: 8100, SourceSecurityGroupId: !Ref CoreIngressSecurityGroupId}
+  WorkspaceSchedulerIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: WithWorkspacePilot
+    Properties:
+      GroupId: !GetAtt Ingress.GroupId
+      SourceSecurityGroupId: !Ref WorkspaceRuntimeSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 8100
+      ToPort: 8100
   Discovery:
     Type: AWS::ServiceDiscovery::Service
     Properties:
@@ -118,6 +147,16 @@ Resources:
                   Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-lite-v1:0'
           - !Ref 'AWS::NoValue'
         - !If
+          - WithWorkspaceChatGPT
+          - PolicyName: RefreshWorkspaceChatGPTConnection
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: [secretsmanager:GetSecretValue, secretsmanager:PutSecretValue]
+                  Resource: !Ref WorkspaceChatGPTSecretArn
+          - !Ref AWS::NoValue
+        - !If
           - WithChatGPTVoice
           - PolicyName: RefreshStagingChatGPTConnection
             PolicyDocument:
@@ -145,7 +184,12 @@ Resources:
           - Effect: Deny
             Principal: '*'
             Action: 'elasticfilesystem:Client*'
-            Condition: {ArnNotEquals: {'aws:PrincipalArn': !GetAtt VoiceModelRole.Arn}}
+            Condition:
+              ArnNotEquals:
+                'aws:PrincipalArn': !If
+                  - WithWorkspacePilotRoles
+                  - [!GetAtt VoiceModelRole.Arn, !Ref WorkspacePilotRoleA, !Ref WorkspacePilotRoleB]
+                  - !GetAtt VoiceModelRole.Arn
   WorkspaceAccessPoint:
     Type: AWS::EFS::AccessPoint
     Condition: WithWorkspace
@@ -226,7 +270,11 @@ Resources:
             - {Name: TINA_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}
             - {Name: TINA_GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
             - {Name: TINA_REQUIRE_GATEWAY_IDENTITY, Value: '1'}
-            - {Name: TINA_ROUTINE_RECONCILE_INTERVAL_SEC, Value: '0'}
+            - {Name: TINA_ROUTINE_RECONCILE_INTERVAL_SEC, Value: !If [WithWorkspacePilot, '60', '0']}
+            - !If [WithWorkspacePilot, {Name: TINA_AGENT_API_SELF_URL, Value: 'http://agent-api.tina-staging.local:8100'}, !Ref AWS::NoValue]
+            - {Name: TINA_WORKSPACE_PILOT_USER_IDS, Value: !Ref WorkspacePilotUserIds}
+            - !If [WithWorkspaceChatGPT, {Name: TINA_CHATGPT_WORKSPACE_OWNER, Value: !Ref WorkspaceChatGPTOwner}, !Ref AWS::NoValue]
+            - !If [WithWorkspaceChatGPT, {Name: TINA_CHATGPT_WORKSPACE_SECRET_ARN, Value: !Ref WorkspaceChatGPTSecretArn}, !Ref AWS::NoValue]
             - !If [WithWorkspace, {Name: TINA_POST_MEETING_ECS_DRAFT, Value: '1'}, !Ref 'AWS::NoValue']
             - !If [WithWorkspace, {Name: TINA_DRAFT_PILOT_USER_IDS, Value: !Ref DraftPilotUserIds}, !Ref 'AWS::NoValue']
             - !If [WithAgentReach, {Name: TINA_AGENT_REACH_URL, Value: !Ref AgentReachUrl}, !Ref 'AWS::NoValue']
