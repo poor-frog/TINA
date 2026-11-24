@@ -11,6 +11,7 @@ export type WebIconName =
   | "search"
   | "capture"
   | "chevronDown"
+  | "chevronRight"
   | "sidebar"
   | "plus"
   | "close"
@@ -51,7 +52,24 @@ export type WebIconName =
   | "edit"
   | "share"
   | "zap"
-  | "info";
+  | "info"
+  | "eye"
+  | "eyeOff"
+  | "externalLink"
+  | "alertTriangle"
+  | "pause"
+  | "rotateCcw"
+  | "rotateCw"
+  | "download"
+  | "star"
+  | "checkSquare"
+  | "maximize"
+  | "minimize"
+  | "chevronUp"
+  | "volume"
+  | "volumeX"
+  | "hash"
+  | "sliders";
 
 const PATHS: Record<WebIconName, ReactNode> = {
   home: (
@@ -99,6 +117,7 @@ const PATHS: Record<WebIconName, ReactNode> = {
     </>
   ),
   chevronDown: <path d="m6 9 6 6 6-6" />,
+  chevronRight: <path d="m9 6 6 6-6 6" />,
   sidebar: (
     <>
       <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -300,6 +319,104 @@ const PATHS: Record<WebIconName, ReactNode> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="M12 16v-4.5M12 8.2h.01" />
+    </>
+  ),
+  eye: (
+    <>
+      <path d="M2.2 12s3.6-6.5 9.8-6.5S21.8 12 21.8 12s-3.6 6.5-9.8 6.5S2.2 12 2.2 12Z" />
+      <circle cx="12" cy="12" r="2.8" />
+    </>
+  ),
+  eyeOff: (
+    <>
+      <path d="M3 3l18 18" />
+      <path d="M10.6 10.6a2.8 2.8 0 0 0 3.8 3.8" />
+      <path d="M9.4 5.7A10 10 0 0 1 12 5.5c6.2 0 9.8 6.5 9.8 6.5a16.8 16.8 0 0 1-3.3 4.1" />
+      <path d="M6.4 6.7A16.5 16.5 0 0 0 2.2 12s3.6 6.5 9.8 6.5a10 10 0 0 0 4.3-.9" />
+    </>
+  ),
+  externalLink: (
+    <>
+      <path d="M14.5 4.5h5v5" />
+      <path d="M10.5 13.5 19.5 4.5" />
+      <path d="M18.5 13.5v4.5a1.5 1.5 0 0 1-1.5 1.5H6a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 6 5.5h4.5" />
+    </>
+  ),
+  alertTriangle: (
+    <>
+      <path d="M10.3 4.2 2.4 18a1.9 1.9 0 0 0 1.7 2.8h15.8a1.9 1.9 0 0 0 1.7-2.8L13.7 4.2a1.9 1.9 0 0 0-3.4 0Z" />
+      <path d="M12 9.5v4.3M12 17h.01" />
+    </>
+  ),
+  pause: (
+    <>
+      <rect x="6" y="4.5" width="4" height="15" rx="1" />
+      <rect x="14" y="4.5" width="4" height="15" rx="1" />
+    </>
+  ),
+  rotateCcw: (
+    <>
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+      <path d="M3 3v5h5" />
+    </>
+  ),
+  rotateCw: (
+    <>
+      <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+      <path d="M21 3v5h-5" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M12 4v11.5" />
+      <path d="m7.5 11.5 4.5 4.5 4.5-4.5" />
+      <path d="M4.5 19.5h15" />
+    </>
+  ),
+  star: (
+    <path d="m12 3.2 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3.2Z" />
+  ),
+  checkSquare: (
+    <>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+      <path d="m8 12.2 2.7 2.7 5.3-5.8" />
+    </>
+  ),
+  maximize: (
+    <>
+      <path d="M8 3.5H4.5A1 1 0 0 0 3.5 4.5V8" />
+      <path d="M16 3.5h3.5a1 1 0 0 1 1 1V8" />
+      <path d="M20.5 16v3.5a1 1 0 0 1-1 1H16" />
+      <path d="M8 20.5H4.5a1 1 0 0 1-1-1V16" />
+    </>
+  ),
+  minimize: (
+    <>
+      <path d="M3.5 8H7a1 1 0 0 0 1-1V3.5" />
+      <path d="M20.5 8H17a1 1 0 0 1-1-1V3.5" />
+      <path d="M16 20.5V17a1 1 0 0 1 1-1h3.5" />
+      <path d="M8 20.5V17a1 1 0 0 0-1-1H3.5" />
+    </>
+  ),
+  chevronUp: <path d="m18 15-6-6-6 6" />,
+  volume: (
+    <>
+      <path d="M11 5.5 6.5 9H3.5v6h3L11 18.5v-13Z" />
+      <path d="M15.2 8.8a4.5 4.5 0 0 1 0 6.4M18 6a8.5 8.5 0 0 1 0 12" />
+    </>
+  ),
+  volumeX: (
+    <>
+      <path d="M11 5.5 6.5 9H3.5v6h3L11 18.5v-13Z" />
+      <path d="m15.5 9.5 5 5M20.5 9.5l-5 5" />
+    </>
+  ),
+  hash: <path d="M4 9h16M4 15h16M10 3.5 8 20.5M16 3.5l-2 17" />,
+  sliders: (
+    <>
+      <path d="M4 7h10M18 7h2M4 17h4M12 17h8M4 12h16" />
+      <circle cx="16" cy="7" r="2" />
+      <circle cx="10" cy="17" r="2" />
     </>
   ),
 };

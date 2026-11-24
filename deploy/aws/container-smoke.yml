@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: One-off TINA Runtime or Chromium health check on Fargate using a private ECR image.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  Image:
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'
+  RepositoryArn:
+    Type: String
+  Probe:
+    Type: String
+    AllowedValues: [runtime, chromium]
+    Default: runtime
+  CpuArchitecture:
+    Type: String
+    AllowedValues: [ARM64, X86_64]
+    Default: ARM64
+
+Conditions:
+  ChromiumProbe: !Equals [!Ref Probe, chromium]
+
+Resources:
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECR and CloudWatch HTTPS egress for the one-off Runtime task
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+  SmokeLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 1
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PullImageAndWriteSmokeLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action: [ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer, ecr:BatchGetImage]
+                Resource: !Ref RepositoryArn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt SmokeLogs.Arn
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AWS::StackName
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: !If [ChromiumProbe, '1024', '256']
+      Memory: !If [ChromiumProbe, '2048', '512']
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: !Ref CpuArchitecture
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: probe
+          Image: !Ref Image
+          Essential: true
+          EntryPoint: !If [ChromiumProbe, [/bin/sh, -ec], !Ref 'AWS::NoValue']
+          Environment:
+            - {Name: RUNTIME_BACKEND, Value: process}
+          Command:
+            !If
+              - ChromiumProbe
+              - - |
+                  browser=$(find /ms-playwright -type f -name headless_shell -print -quit)
+                  test -x "$browser"
+                  "$browser" --no-sandbox --disable-dev-shm-usage --disable-gpu --dump-dom \
+                    'data:text/html,<title>TINA Fargate smoke</title>' > /tmp/smoke.html 2>/tmp/chromium.log
+                  grep -q '<title>TINA Fargate smoke</title>' /tmp/smoke.html
+                  echo TINA_CHROMIUM_OK
+              - - python
+                - -c
+                - |
+                  from fastapi.testclient import TestClient
+                  from runtime_kernel.__main__ import build_production_app
+
+                  with TestClient(build_production_app()) as client:
+                      response = client.get("/health")
+                      response.raise_for_status()
+                      print("TINA_RUNTIME_HEALTH_OK")
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref SmokeLogs
+              awslogs-stream-prefix: smoke
+
+Outputs:
+  TaskDefinitionArn:
+    Value: !Ref TaskDefinition
+  TaskSecurityGroupId:
+    Value: !GetAtt TaskSecurityGroup.GroupId
+  LogGroupName:
+    Value: !Ref SmokeLogs

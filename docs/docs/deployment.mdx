@@ -33,8 +33,8 @@ key. It does not adopt or stop existing deployments. To rebuild an already confi
 `.env.keys` file. `make all` preserves Compose volumes.
 
 The default local ports are `13000` for the Terminal and `18056` for the API gateway. A bot needs a
-reachable transcription backend, and agent chat needs a configured model. For this repository's
-Gipformer 1.5 service, install the pinned model assets and follow the [Gipformer Compose guide](https://github.com/poor-frog/TINA/blob/main/deploy/transcription/gipformer/README.md).
+reachable transcription backend, and agent chat needs a configured model. For managed
+VieGem, follow the [VieGem setup guide](https://github.com/poor-frog/TINA/blob/main/deploy/transcription/viegem/README.md).
 Production Terminal sign-in requires configured Google or Microsoft OAuth; see
 [Terminal login](#terminal-login-google-or-microsoft). The deployment mints and prints an API key
 when it is ready; treat it as a secret.
@@ -43,13 +43,13 @@ when it is ready; treat it as a secret.
 
 The [AWS demo kit](https://github.com/poor-frog/TINA/blob/main/deploy/aws-demo/README.md)
 uses two EC2 instances. Core runs the application services and Caddy. Speech runs
-Gipformer and downloads its model assets on first deployment. Prepare the SSM Parameter
+VieGem and downloads its model assets on first deployment. Prepare the SSM Parameter
 Store settings and confirm that Speech can reach GHCR and the model repository before
 running the deployment scripts.
 
-The GHCR workflows build the 14 Linux amd64 demo images from the tested `main` commit
+The GHCR workflows build the 13 Linux amd64 demo images from the tested `main` commit
 after `gates` succeeds. Each image is published under the full commit SHA. The workflow
-updates the `:demo` tags once all 14 images are available. Run the EC2 deployment scripts
+updates the `:demo` tags once all 13 images are available. Run the EC2 deployment scripts
 after that job succeeds to pull the new images.
 
 ### Connect the Chrome extension
@@ -139,9 +139,8 @@ not enable Google Calendar linking.
 
 The meeting API sends audio to the OpenAI-compatible endpoint configured by
 `TRANSCRIPTION_SERVICE_URL`. The stack does not start a model unless its profile or external service
-is configured. This repository includes an optional CPU-only **Gipformer 1.5 + FSMN-VAD** Compose
-service under the `asr` profile; install its pinned assets and follow the
-[Gipformer Compose guide](https://github.com/poor-frog/TINA/blob/main/deploy/transcription/gipformer/README.md).
+is configured. Managed **VieGem + KenLM + FSMN-VAD** starts when configured. Follow the
+[VieGem setup guide](https://github.com/poor-frog/TINA/blob/main/deploy/transcription/viegem/README.md).
 The separate `deploy/transcription` stack provides Faster-Whisper for GPU or CPU deployments.
 Language is detected per transcription window and stamped on each segment; force a single language
 via the bot request's `language` (see [Send a bot](/how-to/send-a-bot)).

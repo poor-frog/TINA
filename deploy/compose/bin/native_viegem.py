@@ -109,8 +109,8 @@ def start():
     fingerprint = hashlib.sha256()
     for path in sorted(p for p in WORKER.glob("*.py") if not p.name.startswith("test_")) + [WORKER / "start.sh", WORKER / "requirements.txt",
             WORKER / "model-assets.json", WORKER / "custom_words.txt", ROOT / "deploy/transcription/http_worker.py",
-            ROOT / "deploy/transcription/gipformer/requirements.txt",
-            ROOT / "deploy/transcription/gipformer/engine.py", ROOT / "deploy/transcription/gipformer/telemetry.py"]:
+            *(WORKER.parent / name for name in ("requirements-asr.txt", "asr_audio.py", "asr_assets.py",
+                                               "asr_telemetry.py", "fsmn-assets.json"))]:
         fingerprint.update(path.read_bytes())
     config = {
         "Label": LABEL, "WorkingDirectory": str(ROOT), "ProgramArguments": ["/bin/sh", str(WORKER / "start.sh")],
@@ -187,14 +187,18 @@ def register():
         if current.get("viegem_url") not in (None, "", endpoint, LEGACY_HOST_ENDPOINT):
             raise RuntimeError("Existing VieGem URL belongs to another endpoint; it was not overwritten.")
         patch = {"viegem_url": endpoint}
-        if settings.get("configured") is False or ("configured" not in settings and
+        migrate_default = os.environ.get("TINA_USE_VIEGEM_DEFAULT") == "1" and (
+            current.get("default_backend") in (None, "", "deployment") and not current.get("url"))
+        if migrate_default or settings.get("configured") is False or ("configured" not in settings and
                 not {k: v for k, v in current.items() if k != "viegem_token"}):
             patch["default_backend"] = "viegem"
         req = urllib.request.Request(url, headers=headers, method="PUT", data=json.dumps(patch).encode())
         with urllib.request.urlopen(req, timeout=10) as response:
             saved = json.load(response)["value"]
-        if saved.get("viegem_url") != endpoint or (current.get("default_backend") and
-                current["default_backend"] != saved.get("default_backend")):
+        expected_default = patch.get("default_backend")
+        if expected_default is None and current.get("default_backend") != "deployment":
+            expected_default = current.get("default_backend")
+        if saved.get("viegem_url") != endpoint or (expected_default and saved.get("default_backend") != expected_default):
             raise RuntimeError("VieGem registration did not preserve the existing default backend.")
     except (OSError, ValueError, KeyError):
         raise RuntimeError("VieGem could not register with Identity; make all is incomplete.") from None

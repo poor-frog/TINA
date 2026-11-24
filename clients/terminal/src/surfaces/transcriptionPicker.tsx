@@ -5,9 +5,8 @@ import { presentError } from "./apiClient";
 import { testTranscription, type AsrRuntime, type ConfigTestResult } from "./settingsApi";
 import styles from "./transcriptionPicker.module.css";
 
-type Backend = "gipformer" | "viegem";
+type Backend = "viegem";
 const MODELS: Array<{ id: Backend; name: string; detail: string }> = [
-  { id: "gipformer", name: "Gipformer 1.5", detail: "FSMN-VAD" },
   { id: "viegem", name: "VieGem + LM", detail: "KenLM · FSMN-VAD" },
 ];
 

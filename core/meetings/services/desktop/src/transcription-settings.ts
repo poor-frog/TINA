@@ -40,7 +40,7 @@ export function transcriptionResolver(defaults: { url: string; token: string; mo
     let config: any;
     try { config = await response.json(); } catch { throw new TranscriptionSettingsError('Invalid transcription settings response'); }
     if (config?.disabled) throw new TranscriptionSettingsError('Transcription is stopped for this account; start it in Settings', 409);
-    if (!['deployment', 'custom', 'apple', 'nvidia', 'funasr', 'sherpa', 'gipformer', 'viegem'].includes(config?.backend)) {
+    if (!['deployment', 'custom', 'apple', 'nvidia', 'funasr', 'sherpa', 'viegem'].includes(config?.backend)) {
       throw new TranscriptionSettingsError('Invalid transcription backend');
     }
     if (!config.url && config.backend === 'deployment') return fallback();

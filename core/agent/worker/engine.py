@@ -653,7 +653,7 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
     from shared.voice_trace import voice_span
     from shared.meeting_knowledge import PREFIX, SYSTEM, validate_answer
     from shared.voice_knowledge import (VOICE_SYSTEM, VOICE_TOOLS, VOICE_PLAN_SYSTEM, VOICE_INTENT_SYSTEM, VOICE_SOURCE_SYSTEM, VOICE_REPAIR_SYSTEM, VOICE_FORMAT_SYSTEM, GENERAL_SYSTEM, VERIFY_SYSTEM,
-        validate_voice_answer, verify_voice_reply, voice_tool_calls)
+        normalize_empty_voice_answer, validate_voice_answer, verify_voice_reply, voice_tool_calls)
     from shared.voice_summary import MAP_SYSTEM, SELECT_SYSTEM
     from shared.voice_task_flow import TASK_FLOW_SYSTEM, TaskPatch
     from shared.voice_decision_flow import DECISION_SYSTEM, EVIDENCE_SYSTEM, DecisionPatch, EvidenceVerdict, checked_evidence
@@ -705,7 +705,7 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                 with voice_span(stage, trace_id):
                     result = generate_text(provider, prompt, system, schema, use_harness=use_harness)
             check_current()
-            return result
+            return normalize_empty_voice_answer(result) if mode == 'voice' and len(result) <= 50000 else result
         def generate_text(provider, prompt, system, schema, *, use_harness=True):
             if use_harness and source.get('use_sandbox_agent') is True and mode in (
                     'voice_plan', 'voice', 'voice_general', 'voice_web', 'voice_summary_map') and system not in (

@@ -427,27 +427,48 @@ def test_deployment_viegem_token_never_persists_in_settings(client, monkeypatch)
 def test_asr_runtime_keeps_accounts_independent_and_fences_stale_updates(client):
     h = _internal()
     assert client.put("/internal/settings/transcription", headers=h, json={
-        "gipformer_url": "http://gipformer.example.test", "gipformer_token": "gip-secret",
         "viegem_url": "http://viegem.example.test", "viegem_token": "vie-secret"}).status_code == 200
     first, one = _user_token(client, email="asr-one@example.test")
     second, two = _user_token(client, email="asr-two@example.test")
     for token in (one, two):
         assert client.put("/user/transcription", headers={"X-API-Key": token}, json={"backend": "viegem"}).status_code == 200
     before = client.get(f"/internal/transcription/runtime?user_id={first}", headers=h).json()
-    assert before["counts"] == {"gipformer": 0, "viegem": 2}
+    assert before["counts"] == {"viegem": 2}
     assert set(before) == {"counts", "account"}
     assert set(before["account"]) == {"backend", "enabled", "revision"}
     assert "token" not in str(before) and "email" not in str(before)
     revision = before["account"]["revision"]
-    payload = {"backend": "gipformer", "enabled": "true", "expected_revision": revision}
+    payload = {"backend": "viegem", "enabled": "false", "expected_revision": revision}
+    assert client.put(f"/internal/users/{first}/transcription-runtime", headers=h,
+                      json={**payload, "backend": "gipformer"}).status_code == 422
     assert client.put(f"/internal/users/{first}/transcription-runtime", headers=h, json=payload).status_code == 200
     assert client.put(f"/internal/users/{first}/transcription-runtime", headers=h, json=payload).status_code == 409
     runtime = client.get(f"/internal/transcription/runtime?user_id={first}", headers=h).json()
-    assert runtime["counts"] == {"gipformer": 1, "viegem": 1}
+    assert runtime["counts"] == {"viegem": 1}
     assert "secret" not in str(runtime) and "asr-two" not in str(runtime)
     assert client.get("/user/transcription", headers={"X-API-Key": two}).json()["backend"] == "viegem"
     assert client.put(f"/internal/users/{first}/transcription-runtime", headers={"X-API-Key": two}, json=payload).status_code == 403
-    payload = {"backend": "gipformer", "enabled": "false", "expected_revision": runtime["account"]["revision"]}
-    assert client.put(f"/internal/users/{first}/transcription-runtime", headers=h, json=payload).status_code == 200
     config = client.get(f"/internal/users/{first}/transcription", headers=h).json()
     assert config["disabled"] is True and not config.get("url") and "token" not in config
+
+
+
+def test_retired_asr_preferences_use_the_configured_default(monkeypatch):
+    from admin_api.app.main import _effective_transcription, _transcription_summary, _without_retired_transcription
+
+    monkeypatch.setenv("TINA_VIEGEM_TOKEN", "fixture-viegem")
+    legacy = {"url": "http://gipformer:8000/", "token": "old", "default_backend": "gipformer",
+              "gipformer_url": "http://host.docker.internal:18002", "gipformer_token": "old"}
+    assert _without_retired_transcription(legacy) == {"default_backend": "deployment"}
+    platform = _without_retired_transcription({
+        **legacy, "viegem_url": "http://viegem:8000", "viegem_token": "fixture-viegem",
+    })
+    assert platform == {"default_backend": "viegem", "viegem_url": "http://viegem:8000", "viegem_token": "fixture-viegem"}
+    prefs = {"backend": "gipformer", "url": "https://personal.example.test", "token": "custom"}
+    assert _effective_transcription(prefs, platform) == {
+        "backend": "viegem", "provider": "tina", "url": "http://viegem:8000",
+        "token": "fixture-viegem", "model": "5CD-AI/VieGem-ASR",
+    }
+    assert _transcription_summary(prefs, platform)["source"] == "platform"
+    assert _effective_transcription({**prefs, "runtime_enabled": "false"}, platform)["disabled"] is True
+    assert _effective_transcription({**prefs, "backend": "custom"}, platform)["token"] == "custom"

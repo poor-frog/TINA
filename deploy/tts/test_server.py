@@ -405,7 +405,7 @@ class AssetTests(unittest.TestCase):
             with patch.object(engine, "__file__", str(root / "engine.py")), patch.dict(
                 sys.modules, {"huggingface_hub": SimpleNamespace(snapshot_download=downloaded)}
             ):
-                engine.verify_assets(root)
+                self.assertEqual(engine.verify_assets(root), snapshot)
                 self.assertEqual(calls[0]["allow_patterns"], ["model.onnx"])
                 self.assertTrue(calls[0]["local_files_only"])
                 (snapshot / "model.onnx").write_bytes(b"tampered")

@@ -7,7 +7,7 @@ The standalone TINA and ê TINA models/checkpoints were removed. Participants ne
 
 ## Deployment
 
-The main stack needs its normal private `.env.keys`, a healthy selected Gipformer 1.5 + FSMN-VAD
+The main stack needs its normal private `.env.keys`, a healthy configured ASR worker
 or VieGem + KenLM + FSMN-VAD endpoint, and working Agent model credentials. Neither backend or
 its decoder/VAD is replaced. Voice observes the original ASR response before LocalAgreement;
 it does not issue a second STT request or change transcript text/confirmation.
@@ -324,7 +324,7 @@ model, `gpt-6-luna`; other adapters/accounts may report unavailable.
 
 Terminal and the rebuilt Extension show public citation links separately from the spoken text.
 Reload the unpacked Extension after rebuilding it. These changes preserve VieGem + KenLM + FSMN-VAD,
-Gipformer + FSMN-VAD, the two LiveKit wake-word models, VieNeu-TTS, and canonical transcript history.
+VieGem + KenLM + FSMN-VAD, the two LiveKit wake-word models, VieNeu-TTS, and canonical transcript history.
 See `core/agent/eval/voice/README.md` for the 30-question synthetic check; it is not a real meeting
 quality benchmark or an end-to-end latency measurement.
 

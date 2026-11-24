@@ -10,7 +10,8 @@ from types import MethodType
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from gipformer.engine import HERE as GIPFORMER_HERE, RATE, read_audio, speech_ranges, verify_assets
+from asr_assets import fsmn_assets
+from asr_audio import RATE, read_audio, speech_ranges, verify_assets
 
 HERE = Path(__file__).resolve().parent
 MODEL = '5CD-AI/VieGem-ASR'
@@ -90,8 +91,7 @@ def verify_model_assets(directory):
     manifest = json.loads((HERE / 'model-assets.json').read_text())
     for group, spec in manifest.items():
         verify_assets(directory / group, spec['files'])
-    vad_spec = json.loads((GIPFORMER_HERE / 'model-assets.json').read_text())
-    verify_assets(directory / 'fsmn-vad', vad_spec['vad_files'])
+    verify_assets(directory / 'fsmn-vad', fsmn_assets()['files'])
 
 
 class VieGemEngine:

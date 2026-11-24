@@ -113,7 +113,7 @@ describe("SetupGate", () => {
     fireEvent.click(screen.getByRole("radio", { name: `${label} API key` }));
     const save = screen.getByRole("button", { name: "Save & test" }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText(`${label} API key`), { target: { value: "synthetic-provider-key" } });
+    fireEvent.change(screen.getByPlaceholderText(`${label} API key`), { target: { value: "synthetic-provider-key" } });
     fireEvent.click(save);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/models", expect.objectContaining({
@@ -129,12 +129,12 @@ describe("SetupGate", () => {
     render(<SetupGate><div data-testid="workbench" /></SetupGate>);
     await screen.findByText("How should the agent think?");
     fireEvent.click(screen.getByRole("radio", { name: `${label} API key` }));
-    fireEvent.change(screen.getByLabelText(`${label} API key`), { target: { value: "synthetic-provider-key" } });
+    fireEvent.change(screen.getByPlaceholderText(`${label} API key`), { target: { value: "synthetic-provider-key" } });
     fireEvent.change(screen.getByLabelText(`${label} model`), { target: { value: "explicit-model" } });
     fireEvent.click(screen.getByRole("radio", { name: "OpenAI API key" }));
     expect((screen.getByPlaceholderText("OpenAI API key") as HTMLInputElement).value).toBe("");
     expect((screen.getByPlaceholderText("OpenAI API model ID") as HTMLInputElement).value).toBe("");
     fireEvent.click(screen.getByRole("radio", { name: `${label} API key` }));
-    expect((screen.getByLabelText(`${label} API key`) as HTMLInputElement).value).toBe("");
+    expect((screen.getByPlaceholderText(`${label} API key`) as HTMLInputElement).value).toBe("");
   });
 });

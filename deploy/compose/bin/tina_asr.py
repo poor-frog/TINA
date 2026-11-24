@@ -10,8 +10,8 @@ import sys
 import tina_diagnostics as diagnostics
 from stack import json_rows
 
-GLOBAL = ("deployment", "custom", "funasr", "sherpa", "apple", "nvidia", "gipformer", "viegem")
-ACCOUNT = ("default", "custom", "funasr", "sherpa", "apple", "nvidia", "gipformer", "viegem")
+GLOBAL = ("deployment", "custom", "funasr", "sherpa", "apple", "nvidia", "viegem")
+ACCOUNT = ("default", "custom", "funasr", "sherpa", "apple", "nvidia", "viegem")
 
 
 class AsrError(RuntimeError):
@@ -85,7 +85,7 @@ def stored(selected, scope, key=""):
         if result.get("key") != "transcription" or not isinstance(result.get("value"), dict):
             raise AsrError("invalid_settings", "Identity returned an unsupported global settings response.")
         value = result["value"]
-        for field in ("default_backend", "url", "token", "funasr_url", "sherpa_url", "apple_url", "apple_token", "nvidia_url", "nvidia_token", "gipformer_url", "gipformer_token", "viegem_url", "viegem_token"):
+        for field in ("default_backend", "url", "token", "funasr_url", "sherpa_url", "apple_url", "apple_token", "nvidia_url", "nvidia_token", "viegem_url", "viegem_token"):
             if field in value and not isinstance(value[field], str):
                 raise AsrError("invalid_settings", "Stored global ASR fields are malformed; inspect current settings.")
         return value
@@ -220,7 +220,7 @@ def configure(selected, args, approve):
             choices = [value for value in allowed if value in current.get("available_backends", ["default", "custom"])]
         else:
             choices = ["deployment", "custom"] + [value for value in allowed[2:] if current.get(value + "_url")
-                and (value not in {"apple", "nvidia", "gipformer", "viegem"} or current.get(value + "_token"))]
+                and (value not in {"apple", "nvidia", "viegem"} or current.get(value + "_token"))]
         backend = choose("Select a configured backend. Custom uses an explicit endpoint; no local port is auto-selected.", choices)
     if backend not in allowed:
         raise AsrError("invalid_backend", "Backend is not supported for the selected scope.")
@@ -245,7 +245,7 @@ def configure(selected, args, approve):
             raise AsrError("endpoint_required", "Provide --url, or configure the endpoint first.")
         if new_url:
             patch[url_field] = new_url
-        supports_token = custom_slot or backend in {"apple", "nvidia", "gipformer", "viegem"}
+        supports_token = custom_slot or backend in {"apple", "nvidia", "viegem"}
         if not supports_token and (args.token_env or args.token_file or args.clear_token):
             raise AsrError("unsupported_token_field", "This named backend has no credential slot in the existing API. Use a custom endpoint for token-authenticated services.")
         changed_token = token_value(args, selected, new_url, old_url,

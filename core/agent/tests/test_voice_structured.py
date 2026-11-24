@@ -8,10 +8,88 @@ from jsonschema import Draft202012Validator
 
 from llm import LLMError, LLMStructuredOutputUnsupported
 from llm.openai_compat import OpenAICompatCompletion
-from llm.openai_responses import OpenAIResponsesCompletion
+from llm.openai_responses import ChatGPTPlanCompletion, OpenAIResponsesCompletion
 from shared.meeting_knowledge import PREFIX
 from shared.voice_schema import voice_schema
 from shared.voice_knowledge import validate_voice_answer, voice_tool_calls
+
+
+def test_worker_timing_logging_keeps_allowlisted_fields_only(caplog):
+    from uuid import uuid4
+    from control_plane.meeting_voice_completion import _log_worker_timings
+
+    started = {'type': 'voice_stage', 'request_id': str(uuid4()), 'span_id': str(uuid4()),
+               'stage': 'verify', 'elapsed_ms': 0, 'status': 'started', 'detail': 'synthetic-private-text'}
+    with caplog.at_level('INFO'):
+        _log_worker_timings(('provider error synthetic-private-text\n' + json.dumps(started) + '\n' +
+                            json.dumps(started | {'stage': 'synthetic-private-text'})).encode())
+    assert 'stage=verify elapsed_ms=0 status=started' in caplog.text
+    assert 'synthetic-private-text' not in caplog.text
+
+
+def test_chatgpt_plan_uses_oauth_and_preserves_rate_limit(monkeypatch):
+    monkeypatch.setenv("ACCESS_TOKEN", "test-plan-token")
+    monkeypatch.setenv("TINA_LLM_MODEL", "plan-model")
+
+    def handle(request):
+        payload = json.loads(request.content)
+        assert request.url == "https://api.openai.com/v1/responses"
+        assert request.headers["Authorization"] == "Bearer test-plan-token"
+        assert payload["store"] is False and payload["stream"] is True
+        assert "max_output_tokens" not in payload and "tools" not in payload
+        event = {"type": "response.failed", "response": {"error": {
+            "code": "subscription_sharing_usage_limit_exceeded"}}}
+        return httpx.Response(200, text=f"data: {json.dumps(event)}\n\n")
+
+    with pytest.raises(LLMError) as error:
+        ChatGPTPlanCompletion(transport=httpx.MockTransport(handle)).complete("Fixture")
+    assert error.value.status_code == 429
+
+
+@pytest.mark.parametrize('failure,marker,expected,http', [
+    ('connection', '', 'reconnect_required', 503),
+    ('provider', 'TINA_CHATGPT_PLAN_RECONNECT_REQUIRED', 'reconnect_required', 503),
+    ('provider', 'TINA_CHATGPT_PLAN_USAGE_LIMIT', 'usage_limit', 429),
+])
+def test_voice_completion_marks_chatgpt_failure_without_switching_provider(monkeypatch, failure, marker, expected, http):
+    from fastapi import HTTPException
+    from control_plane import aws_voice_chatgpt, meeting_voice_completion
+    from control_plane.openai_auth import ChatGPTAuthError
+
+    seen = []
+
+    def token(_):
+        if failure == 'connection':
+            raise ChatGPTAuthError('fixture')
+        return 'placeholder'
+
+    def run(*_, env, **kwargs):
+        assert env['TINA_LLM_PROVIDER'] == 'chatgpt-plan'
+        return SimpleNamespace(stderr=marker, stdout='', returncode=1)
+
+    monkeypatch.setenv('TINA_CHATGPT_VOICE_MODEL', 'gpt-6-luna')
+    monkeypatch.setattr(aws_voice_chatgpt, 'access_token', token)
+    monkeypatch.setattr(meeting_voice_completion.subprocess, 'run', run)
+    monkeypatch.setattr(meeting_voice_completion, '_store_provider_issue', lambda *args: seen.append(args[-1]))
+    with pytest.raises(HTTPException) as error:
+        meeting_voice_completion.complete({'request_id': 'fixture', 'voice_turn': {'meeting_id': 1, 'holder': 'session:fixture'}},
+                                         {}, 'redis://fixture', chatgpt_plan=True)
+    assert error.value.status_code == http and seen == [expected]
+
+
+@pytest.mark.parametrize(('mode', 'expected_url'), [('voice_web', 'http://reach.test:8080'), ('voice', None)])
+def test_completion_worker_receives_reach_url_only_for_public_lookup(monkeypatch, mode, expected_url):
+    from control_plane import meeting_voice_completion
+
+    monkeypatch.setenv('TINA_AGENT_REACH_URL', 'http://reach.test:8080')
+
+    def run(*_, env, **kwargs):
+        assert env.get('TINA_AGENT_REACH_URL') == expected_url
+        return SimpleNamespace(stderr='', stdout='{}', returncode=0)
+
+    monkeypatch.setattr(meeting_voice_completion.subprocess, 'run', run)
+    payload = {'request_id': 'fixture', 'voice_turn': {'meeting_id': 1, 'holder': 'session:fixture'}}
+    assert meeting_voice_completion.complete(payload, {'mode': mode}, 'redis://fixture') == '{}'
 
 
 @pytest.mark.parametrize('expired', [False, True])

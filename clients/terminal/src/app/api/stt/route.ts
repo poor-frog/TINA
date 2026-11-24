@@ -45,7 +45,7 @@ async function selectedTranscription(): Promise<{ url: string; token: string; ba
   const transcription = await response.json() as { backend?: string; url?: string; token?: string; model?: string; disabled?: boolean };
   if (transcription.disabled) throw new Error("Transcription is stopped for this account; start it in Settings");
   const backend = transcription.backend;
-  if (["apple", "nvidia", "funasr", "sherpa", "gipformer", "viegem", "custom"].includes(backend ?? "") && !transcription.url) {
+  if (["apple", "nvidia", "funasr", "sherpa", "viegem", "custom"].includes(backend ?? "") && !transcription.url) {
     throw new Error(`The selected ${backend} ASR backend is not configured`);
   }
   if (transcription.url) {

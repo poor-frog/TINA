@@ -1210,7 +1210,10 @@ def create_app(
         else:
             prefix, session = units.DICTATION_TRANSLATE_PREFIX, "dictation-translate"
         payload = {"request_id": request_id, "text": text}
-        if task == 'knowledge':
+        ecs_draft = (task == 'knowledge'
+                     and getattr(request.state, 'post_meeting_draft', False)
+                     and os.environ.get('TINA_POST_MEETING_ECS_DRAFT') == '1')
+        if task == 'knowledge' and not ecs_draft:
             from shared.voice_trace import voice_trace_id
             trace_id = voice_trace_id.get()
             if trace_id is None:
@@ -1238,6 +1241,10 @@ def create_app(
                     payload['voice_turn'] = {'meeting_id': mid, 'holder': held}
             elif sandbox_voice:
                 raise HTTPException(409, 'Current voice turn required for sandbox')
+            if os.environ.get('TINA_MEETING_VOICE_LOCAL_COMPLETION') == '1' and str(source.get('mode', '')).startswith('voice'):
+                from control_plane.meeting_voice_completion import complete
+                return complete(payload, source, redis_url,
+                                chatgpt_plan=getattr(request.state, 'chatgpt_voice_pilot', False))
         if target_language is not None:
             payload["target_language"] = target_language
         inline = prefix + json.dumps(payload, ensure_ascii=False)
@@ -1249,14 +1256,17 @@ def create_app(
             context={"kind": "none", "session": f"{session}-{request_id}"},
         )
         try:
-            unit_id = dispatcher.dispatch(invocation)
+            if ecs_draft:
+                unit_id = dispatcher.dispatch(invocation, trusted_post_meeting_draft=True)
+            else:
+                unit_id = dispatcher.dispatch(invocation)
         except Exception as exc:  # noqa: BLE001 — do not expose the transcript or dispatch details
             logger.warning("transcript completion dispatch failed task=%s error=%s", task, type(exc).__name__)
             raise HTTPException(status_code=503, detail=f"{label} is unavailable") from exc
 
         output_parts: list[str] = []
         translation_complete = False
-        deadline_seconds = 60.0
+        deadline_seconds = 180.0 if ecs_draft else 60.0
         if task == 'discussion':
             try:
                 window_count = max(1, len(json.loads(text).get('windows', [])))
@@ -1324,6 +1334,11 @@ def create_app(
             raise HTTPException(status_code=502, detail=f"{label} is unavailable") from exc
         finally:
             if voice_redis is not None: voice_redis.close()
+            if ecs_draft and time.monotonic() >= deadline:
+                try:
+                    dispatcher.stop_workload(unit_id)
+                except Exception:
+                    logger.warning("post-meeting draft stop failed")
             if redis_url:
                 try:
                     import redis as _redis
@@ -2059,7 +2074,8 @@ def create_app(
 
     from control_plane.meeting_knowledge import register as register_meeting_knowledge
     register_meeting_knowledge(app, subject_of, _read_target, wsr, settings.meeting_api_url if settings else '',
-                               lambda request, text: _transcript_completion(request, text=text, task='knowledge'))
+                               lambda request, text: _transcript_completion(request, text=text, task='knowledge'),
+                               list_workspaces=lambda request: ws_active(request)['active'])
 
     def _private_write_target(request, slug):
         subject = subject_of(request)
@@ -2988,7 +3004,7 @@ def create_app(
                     t = json.loads(r.read())
                 if t.get("disabled"):
                     return {"ok": False, "source": "settings", "summary": "Transcription is stopped for this account; start it in Settings"}
-                if t.get("backend") in ("apple", "nvidia", "custom", "funasr", "sherpa", "gipformer", "viegem"):
+                if t.get("backend") in ("apple", "nvidia", "custom", "funasr", "sherpa", "viegem"):
                     # An explicitly selected backend must be the one tested. Never green the
                     # selection by falling back to a different env endpoint when it is absent.
                     url, token, source = t.get("url") or "", t.get("token") or "", "settings"

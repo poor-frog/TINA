@@ -16,8 +16,8 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.datastructures import MutableHeaders
 
-from gipformer.engine import AudioInputError
-from gipformer.telemetry import AsrMetrics, duration
+from asr_audio import AudioInputError
+from asr_telemetry import AsrMetrics, duration
 
 MAX_BYTES = 25 * 1024 * 1024
 CAPACITY = 4

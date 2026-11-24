@@ -1,6 +1,6 @@
 # Optional Vietnamese TTS sidecar (speech phase 1)
 
-The default **Trúc Ly** preset (Northern Vietnamese) from **VieNeu-TTS v3 Turbo**,
+The default **Trúc Ly** preset (Northern Vietnamese) with **Blaze VieNeu-TTS v3 Turbo Enhanced (Trộn 0.7)**,
 using the ONNX CPU backend. This implements
 the bot's existing speech HTTP interface. STT, agent dispatch, transcripts and bot playback
 are unchanged. The standalone Compose project remains available. The main stack now also offers an opt-in `speech` profile through `TINA_MEETING_VOICE=1`; see [bot-hosted voice](../../docs/tina-meeting-voice.md).
@@ -48,7 +48,8 @@ TTS API token without changing `deploy/tts/.env` or the main-stack key. An incom
 pair fails closed; it does not silently switch back to shared credentials. Explicit file
 and key overrides retain priority.
 
-For bot-hosted voice, keep the speech profile enabled when recreating the stack:
+For bot-hosted voice, prepopulate the `tts-models` volume with the authenticated
+installer below, then keep the speech profile enabled when recreating the stack:
 
 ```sh
 TINA_MEETING_VOICE=1 python3 deploy/tts/run.py -- make all
@@ -102,10 +103,17 @@ supply Docker, model weights, the main network or the main stack's key.
 
 From this checkout's root, with Docker running and the main network available:
 
+Accept the access conditions on the [Blaze model page](https://huggingface.co/blaze-voice-ai/vienue-v3-turbo-enhanced)
+and sign in with `hf auth login` using a token with read access. The commands below
+use the default Hugging Face token path. Adjust the mount source if you configured a
+different path. The token is available only to the one-time installer container.
+
 ```bash
 docker build -t tina/tts:dev deploy/tts
 docker run --rm --user "$(id -u):$(id -g)" \
   -e HF_HUB_OFFLINE=0 -e HF_HUB_DISABLE_XET=1 \
+  --mount "type=bind,src=$HOME/.cache/huggingface/token,dst=/run/secrets/hf_token,readonly" \
+  -e HF_TOKEN_PATH=/run/secrets/hf_token \
   -v "$HOME/.cache/tina/tts:/models" tina/tts:dev python install_models.py
 python3 deploy/tts/run.py -- docker compose -f deploy/tts/docker-compose.yml up -d --no-build --wait
 curl --fail http://127.0.0.1:18004/health
@@ -123,7 +131,11 @@ Compose cannot decrypt it. The runner supplies the token through the process env
 the Compose file passes only that token to the inference container. `.dockerignore` excludes
 env/key files from the TTS build context.
 
-For a complete build of the main stack with the same TTS token:
+For the main Compose speech profile, use the same installer with the
+`<compose-project>_tts-models` named volume in place of the host cache. If the volume
+does not exist yet, create it from your configured Compose project with
+`docker compose --profile speech create --no-build tts-models`. Then build and
+start with the existing stack runner:
 
 ```bash
 python3 deploy/tts/run.py -- make all
@@ -133,6 +145,22 @@ If using an existing private main configuration, keep its `ENV_FILE`, Compose pr
 override chain. The runner sets `TTS_SERVICE_URL=http://tts:8000` unless already overridden,
 and does not edit the main env file. Keep using the runner when recreating Meeting API so
 the shared token stays consistent. The main env's own decryption key is still required.
+
+## Restore a TTS bundle without downloading the model
+
+If you received a TTS bundle with the pinned Enhanced and MOSS assets, extract it
+outside the checkout and run its restore script from this checkout's root:
+
+```bash
+tar -xf /path/to/downloads/tina-tts-enhanced-9ab89d0.tar -C /path/to/downloads
+bash /path/to/downloads/tina-tts-enhanced-9ab89d0/restore.sh tina-local
+PROJECT=tina-local TINA_MEETING_VOICE=1 python3 deploy/tts/run.py -- make all
+```
+
+Use your Compose project name in both commands. The bundle loads the TTS image
+for your CPU architecture and verifies the model files in that project's
+`tts-models` volume. This skips the Hugging Face download. The rest of the
+stack still uses its normal configuration and dependencies.
 
 ## Legacy private env (Ubuntu/WSL)
 
@@ -158,6 +186,8 @@ if not config.exists():
 PY
 docker run --rm --user "$(id -u):$(id -g)" \
   -e HF_HUB_OFFLINE=0 -e HF_HUB_DISABLE_XET=1 \
+  --mount "type=bind,src=$HOME/.cache/huggingface/token,dst=/run/secrets/hf_token,readonly" \
+  -e HF_TOKEN_PATH=/run/secrets/hf_token \
   -v "$HOME/.cache/tina/tts:/models" tina/tts:dev python install_models.py
 docker compose --env-file "$HOME/.config/tina/tts.env" \
   -f deploy/tts/docker-compose.yml up -d --no-build --wait
@@ -165,8 +195,9 @@ curl --fail http://127.0.0.1:18004/health
 ```
 
 Existing private config is retained. Model/codec files (~566 MB) are downloaded at the revisions
-in `model-assets.json`, verified against upstream SHA-256 for LFS objects and Git blob hashes for
-small files, and mounted read-only. The installer retains upstream cards. Startup verifies the
+in `model-assets.json`, verified against upstream SHA-256 for weights and Git
+blob hashes for small files, and mounted read-only. The installer retains upstream cards and
+reuses complete snapshots without network access. Startup verifies the
 same files and cache references; inference uses `HF_HUB_OFFLINE=1`, no remote model code, and
 disables ONNX telemetry. Weights stay outside the image and source tree. Dependencies are
 hash-locked in `requirements.txt`; regenerate using the command in that file's header.

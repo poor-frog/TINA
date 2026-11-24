@@ -5,13 +5,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { applyTheme, useTheme, type Theme } from "../app/theme";
 import { CalendarConnectionsPanel } from "../surfaces/calendarConnections";
-import { ModelsSection } from "../surfaces/settings";
 import { VoiceSettings } from "../surfaces/voiceSettings";
 import { AsrStatusPanel } from "../surfaces/asrStatus";
 import { GitHubTokenCard, TokensPanel } from "../surfaces/tokens";
 import { WebAvatar } from "./Avatar";
 import { WebIcon, type WebIconName } from "./Icons";
 import { SharedWorkspacesPanel } from "./SharedWorkspacesPanel";
+import { WebModelsPanel } from "./WebModelsPanel";
 import type { WebUser } from "./useWebIdentity";
 
 export type SettingsWorkspace = "personal" | "team";
@@ -56,7 +56,7 @@ const SECTIONS: readonly SectionDef[] = [
     label: "AI Models & Transcription",
     description: "Choose your personal agent LLM provider, ChatGPT plan, and speech-to-text transcription backend.",
     icon: "cpu",
-    keywords: "models llm claude openai chatgpt gemini deepseek groq bedrock transcription stt asr gipformer viegem",
+    keywords: "models llm claude openai chatgpt gemini deepseek groq bedrock transcription stt asr viegem",
   },
   {
     id: "voice",
@@ -319,11 +319,7 @@ export function SettingsView({
           </div>
         );
       case "models":
-        return (
-          <div className="tina-web-settings-card tina-web-settings-embed">
-            <ModelsSection key="personal-models" initialScope="agent" />
-          </div>
-        );
+        return <WebModelsPanel key="personal-models" scopeMode="personal" />;
       case "voice":
         return (
           <div className="tina-web-settings-card tina-web-settings-embed">
@@ -434,11 +430,7 @@ export function SettingsView({
       case "workspaces":
         return <SharedWorkspacesPanel />;
       case "global-models":
-        return (
-          <div className="tina-web-settings-card tina-web-settings-embed">
-            <ModelsSection key="global-defaults" initialScope="global" />
-          </div>
-        );
+        return <WebModelsPanel key="global-defaults" scopeMode="global" />;
       case "asr-status":
         return (
           <div className="tina-web-settings-card tina-web-settings-embed">

@@ -56,36 +56,11 @@ The queue wait limit is 10 seconds. Cancelled native inference retains its lock
 until the model thread finishes. No browser CORS is enabled. The serving interface
 binds only loopback and transcriptions require a Bearer token before upload parsing.
 
-## Docker Compose (`tina-production`)
+## Standalone use
 
-The root Compose stack has an optional `asr` profile for this same Gipformer server.
-It mounts the verified model files from `deploy/transcription/models/gipformer-fsmn`,
-publishes loopback port 18002, and uses the Compose CPU-only PyTorch wheels. Set
-`COMPOSE_PROFILES=asr,automation,dashboard`, `TRANSCRIPTION_SERVICE_URL=http://gipformer:8000`,
-`TRANSCRIPTION_MODEL=custom`, and copy the token from
-`~/.config/tina/gipformer.env` into `TRANSCRIPTION_SERVICE_TOKEN` in
-`deploy/compose/.env`. The host LaunchAgent and Compose service both use port 18002;
-stop/unload the LaunchAgent before starting Compose. Publishing the service on that
-same loopback port keeps existing `host.docker.internal:18002` clients working.
-
-## Select from Terminal Settings
-
-Keep the current platform default **FunASR / Qwen + FSMN**. To opt in for your next
-session, use **Settings → Models → Transcription → Custom endpoint**:
-
-- Service URL: `http://host.docker.internal:18002`
-- Token: the private `TINA_GIPFORMER_TOKEN` from the file above.
-
-The shared setting uses the Docker hostname for Bot/Meeting API. Host Desktop's
-existing resolver translates it to `127.0.0.1`; do not put a container's loopback
-URL in shared settings. Select Vietnamese or automatic language for the session.
-Saving settings applies to the next session, and does not start/stop OS services.
-Choose **Follow platform default** to return to Qwen. This implementation does not
-change any user's saved preferences or the platform default automatically.
-
-The legacy Custom endpoint client sends model `whisper-1` when no model is supplied.
-Here `whisper-1` and `custom` are compatibility aliases for the same pinned
-Gipformer model; `/status` reports its actual checkpoint. They do not load Whisper.
+This worker is retained for research and comparison runs. TINA uses
+[VieGem](../viegem/README.md) as its managed ASR backend. Gipformer accepts
+`whisper-1` and `custom` as compatibility aliases for its pinned model.
 
 ## HTTP and verification
 

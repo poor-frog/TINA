@@ -4,7 +4,7 @@
 atomic private config creation, confirmation, deploy reuse, recovery and optional ASR verification.
 It uses doubles and runs in `tina check cli`; it never starts or stops the production stack.
 
-`test_asr_control.py` also checks that an absent optional VieGem profile cannot break Gipformer
+`test_asr_control.py` also checks that an absent optional VieGem profile still produces runtime
 runtime status, while native MPS status remains available without a Compose VieGem service.
 
 `stack_test.py` brings up the **real** v0.12 compose stack (see `../docker-compose.yml`), proves it

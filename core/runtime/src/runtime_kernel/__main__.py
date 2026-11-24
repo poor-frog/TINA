@@ -4,7 +4,7 @@ Serves ``runtime_kernel.api.create_app(Runtime(backend=<env-selected>, profiles=
 — the runtime.v1 operation surface that spawns bot/agent workloads. The backend is chosen by
 ``RUNTIME_BACKEND`` (default ``docker``): ``docker`` talks to the host socket API (compose mounts
 ``/var/run/docker.sock``), ``k8s`` spawns Pods via kubectl under the runtime's ServiceAccount/RBAC
-(deploy/helm), ``process`` runs child processes. Images come from env (BROWSER_IMAGE / AGENT_IMAGE).
+(deploy/helm), ``process`` runs child processes, and ``ecs`` runs Fargate meeting-bot tasks.
 
 Exposed via ``app`` (PEP 562, built on first access) so ``uvicorn runtime_kernel.api:app`` /
 ``python -m runtime_kernel`` both resolve it without constructing the app at mere import time.
@@ -96,7 +96,7 @@ def _build_backend():
     """Select the spawn backend from ``RUNTIME_BACKEND`` (default ``docker``). compose/desktop run
     ``docker`` (host socket API); a k8s deployment runs ``k8s`` (spawns Pods via kubectl under the
     runtime's ServiceAccount/RBAC — see deploy/helm runtime RBAC). ``process`` is the no-container
-    fallback. Same Backend port across all three, so the runtime.v1 lifecycle is identical."""
+    fallback. ECS uses its provisioned Fargate task definition for meeting bots."""
     kind = os.getenv("RUNTIME_BACKEND", "docker").strip().lower()
     if kind == "k8s":
         from .k8s_backend import K8sBackend
@@ -107,6 +107,10 @@ def _build_backend():
         from .process_backend import ProcessBackend
 
         return ProcessBackend()
+    if kind == "ecs":
+        from .ecs_backend import ECSBackend
+
+        return ECSBackend.from_env()
     from .docker_backend import DockerBackend
 
     return DockerBackend()

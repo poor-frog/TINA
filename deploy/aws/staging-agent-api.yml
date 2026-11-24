@@ -1,0 +1,297 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private TINA Agent API with optional durable staging workspaces.
+
+Parameters:
+  ClusterName: {Type: String}
+  VpcId: {Type: 'AWS::EC2::VPC::Id'}
+  AppSubnetIds: {Type: 'List<AWS::EC2::Subnet::Id>'}
+  AppSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  CoreIngressSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  CoreClientSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  RuntimeClientSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  ServiceNamespaceId: {Type: String}
+  AgentApiImage: {Type: String, AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'}
+  RuntimeUrl: {Type: String}
+  ValkeyHost: {Type: String}
+  ValkeySecretArn: {Type: String}
+  CoreInternalSecretArn: {Type: String}
+  AgentReachUrl: {Type: String, Default: ''}
+  AgentReachClientSecurityGroupId: {Type: String, Default: ''}
+  ChatGPTVoiceOwner: {Type: String, Default: '', AllowedPattern: '[0-9]*'}
+  ChatGPTVoiceRoom: {Type: String, Default: '', AllowedPattern: '(|[a-z]{3}-[a-z]{4}-[a-z]{3})'}
+  ChatGPTVoiceSecretArn: {Type: String, Default: ''}
+  ChatGPTVoiceModel: {Type: String, Default: gpt-6-luna}
+  EnableVoiceCompletion:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  EnableDurableWorkspace:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  DraftPilotUserIds:
+    Type: String
+    Default: ''
+    AllowedPattern: '(|[0-9]+(,[0-9]+)*)'
+
+Conditions:
+  WithAgentReach: !And
+    - !Not [!Equals [!Ref AgentReachUrl, '']]
+    - !Not [!Equals [!Ref AgentReachClientSecurityGroupId, '']]
+  WithVoiceCompletion: !Equals [!Ref EnableVoiceCompletion, 'true']
+  WithWorkspace: !Equals [!Ref EnableDurableWorkspace, 'true']
+  WithTaskRole: !Or [!Condition WithVoiceCompletion, !Condition WithWorkspace]
+  WithChatGPTVoice:
+    !And
+      - !Condition WithVoiceCompletion
+      - !Not [!Equals [!Ref ChatGPTVoiceOwner, '']]
+      - !Not [!Equals [!Ref ChatGPTVoiceRoom, '']]
+      - !Not [!Equals [!Ref ChatGPTVoiceSecretArn, '']]
+
+Resources:
+  DispatchSigningKey:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties: {RetentionInDays: 7}
+  Ingress:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Private TINA Agent API access from staging Core
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 8100, ToPort: 8100, SourceSecurityGroupId: !Ref CoreIngressSecurityGroupId}
+  Discovery:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: agent-api
+      DnsConfig:
+        NamespaceId: !Ref ServiceNamespaceId
+        DnsRecords: [{Type: A, TTL: 15}]
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: PullImageAndReadAgentSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer]
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-staging/agent-api'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt Logs.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: [!Ref DispatchSigningKey, !Ref ValkeySecretArn, !Ref CoreInternalSecretArn]
+  VoiceModelRole:
+    Type: AWS::IAM::Role
+    Condition: WithTaskRole
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - !If
+          - WithVoiceCompletion
+          - PolicyName: InvokeNovaLite
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: bedrock:InvokeModel
+                  Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-lite-v1:0'
+          - !Ref 'AWS::NoValue'
+        - !If
+          - WithChatGPTVoice
+          - PolicyName: RefreshStagingChatGPTConnection
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: [secretsmanager:GetSecretValue, secretsmanager:PutSecretValue]
+                  Resource: !Ref ChatGPTVoiceSecretArn
+          - !Ref 'AWS::NoValue'
+  WorkspaceFileSystem:
+    Type: AWS::EFS::FileSystem
+    Condition: WithWorkspace
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Encrypted: true
+      FileSystemTags: [{Key: Name, Value: tina-staging-workspaces}]
+      FileSystemPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Deny
+            Principal: '*'
+            Action: 'elasticfilesystem:Client*'
+            Condition: {Bool: {'aws:SecureTransport': 'false'}}
+          - Effect: Deny
+            Principal: '*'
+            Action: 'elasticfilesystem:Client*'
+            Condition: {ArnNotEquals: {'aws:PrincipalArn': !GetAtt VoiceModelRole.Arn}}
+  WorkspaceAccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Condition: WithWorkspace
+    Properties:
+      FileSystemId: !Ref WorkspaceFileSystem
+      PosixUser: {Uid: '1000', Gid: '1000'}
+      RootDirectory:
+        Path: /workspaces
+        CreationInfo: {OwnerUid: '1000', OwnerGid: '1000', Permissions: '0700'}
+  WorkspaceNfs:
+    Type: AWS::EC2::SecurityGroup
+    Condition: WithWorkspace
+    Properties:
+      GroupDescription: Workspace NFS from the TINA staging Agent API
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 2049, ToPort: 2049, SourceSecurityGroupId: !GetAtt Ingress.GroupId}
+  WorkspaceMountTargetA:
+    Type: AWS::EFS::MountTarget
+    Condition: WithWorkspace
+    Properties:
+      FileSystemId: !Ref WorkspaceFileSystem
+      SubnetId: !Select [0, !Ref AppSubnetIds]
+      SecurityGroups: [!GetAtt WorkspaceNfs.GroupId]
+  WorkspaceMountTargetB:
+    Type: AWS::EFS::MountTarget
+    Condition: WithWorkspace
+    Properties:
+      FileSystemId: !Ref WorkspaceFileSystem
+      SubnetId: !Select [1, !Ref AppSubnetIds]
+      SecurityGroups: [!GetAtt WorkspaceNfs.GroupId]
+  WorkspacePermissions:
+    Type: AWS::IAM::Policy
+    Condition: WithWorkspace
+    Properties:
+      PolicyName: WorkspaceViaAccessPoint
+      Roles: [!Ref VoiceModelRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [elasticfilesystem:ClientMount, elasticfilesystem:ClientWrite]
+            Resource: !GetAtt WorkspaceFileSystem.Arn
+            Condition: {StringEquals: {'elasticfilesystem:AccessPointArn': !GetAtt WorkspaceAccessPoint.Arn}}
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AWS::StackName
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '512'
+      Memory: '2048'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !If [WithTaskRole, !GetAtt VoiceModelRole.Arn, !Ref 'AWS::NoValue']
+      Volumes:
+        - !If
+          - WithWorkspace
+          - Name: workspaces
+            EFSVolumeConfiguration:
+              FilesystemId: !Ref WorkspaceFileSystem
+              TransitEncryption: ENABLED
+              AuthorizationConfig: {AccessPointId: !Ref WorkspaceAccessPoint, IAM: ENABLED}
+          - !Ref 'AWS::NoValue'
+      ContainerDefinitions:
+        - Name: agent-api
+          Image: !Ref AgentApiImage
+          Essential: true
+          User: !If [WithWorkspace, '1000:1000', !Ref 'AWS::NoValue']
+          PortMappings: [{ContainerPort: 8100}]
+          LinuxParameters: {InitProcessEnabled: true}
+          MountPoints:
+            - !If [WithWorkspace, {SourceVolume: workspaces, ContainerPath: /workspaces, ReadOnly: false}, !Ref 'AWS::NoValue']
+          Environment:
+            - {Name: VALKEY_HOST, Value: !Ref ValkeyHost}
+            - {Name: TINA_RUNTIME_API_URL, Value: !Ref RuntimeUrl}
+            - {Name: TINA_MEETING_API_URL, Value: 'http://core.tina-staging.local:8080'}
+            - {Name: TINA_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}
+            - {Name: TINA_GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
+            - {Name: TINA_REQUIRE_GATEWAY_IDENTITY, Value: '1'}
+            - {Name: TINA_ROUTINE_RECONCILE_INTERVAL_SEC, Value: '0'}
+            - !If [WithWorkspace, {Name: TINA_POST_MEETING_ECS_DRAFT, Value: '1'}, !Ref 'AWS::NoValue']
+            - !If [WithWorkspace, {Name: TINA_DRAFT_PILOT_USER_IDS, Value: !Ref DraftPilotUserIds}, !Ref 'AWS::NoValue']
+            - !If [WithAgentReach, {Name: TINA_AGENT_REACH_URL, Value: !Ref AgentReachUrl}, !Ref 'AWS::NoValue']
+            - !If [WithVoiceCompletion, {Name: TINA_MEETING_VOICE_LOCAL_COMPLETION, Value: '1'}, !Ref 'AWS::NoValue']
+            - !If [WithVoiceCompletion, {Name: TINA_LLM_PROVIDER, Value: bedrock-converse}, !Ref 'AWS::NoValue']
+            - !If [WithVoiceCompletion, {Name: TINA_LLM_MODEL, Value: 'amazon.nova-lite-v1:0'}, !Ref 'AWS::NoValue']
+            - !If [WithChatGPTVoice, {Name: TINA_CHATGPT_VOICE_SECRET_ARN, Value: !Ref ChatGPTVoiceSecretArn}, !Ref 'AWS::NoValue']
+            - !If [WithChatGPTVoice, {Name: TINA_CHATGPT_VOICE_OWNER, Value: !Ref ChatGPTVoiceOwner}, !Ref 'AWS::NoValue']
+            - !If [WithChatGPTVoice, {Name: TINA_CHATGPT_VOICE_ROOM, Value: !Ref ChatGPTVoiceRoom}, !Ref 'AWS::NoValue']
+            - !If [WithChatGPTVoice, {Name: TINA_CHATGPT_VOICE_MODEL, Value: !Ref ChatGPTVoiceModel}, !Ref 'AWS::NoValue']
+          Secrets:
+            - {Name: VALKEY_PASSWORD, ValueFrom: !Ref ValkeySecretArn}
+            - {Name: TINA_INTERNAL_API_SECRET, ValueFrom: !Ref CoreInternalSecretArn}
+            - {Name: TINA_DISPATCH_SIGNING_KEY, ValueFrom: !Ref DispatchSigningKey}
+          Command:
+            - python
+            - -c
+            - |
+              import os
+              import tempfile
+              from urllib.parse import quote
+
+              host = os.environ.pop("VALKEY_HOST")
+              password = quote(os.environ.pop("VALKEY_PASSWORD"), safe="")
+              os.environ["TINA_REDIS_URL"] = f"rediss://:{password}@{host}:6379/0"
+              if os.environ.get("TINA_POST_MEETING_ECS_DRAFT") == "1":
+                  os.environ["HOME"] = tempfile.mkdtemp(prefix="tina-agent-home-")
+              os.execvp("uvicorn", ["uvicorn", "control_plane.api:app", "--host", "0.0.0.0", "--port", "8100"])
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=4).close()"]
+            Interval: 15
+            Timeout: 5
+            Retries: 4
+            StartPeriod: 30
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+  AgentApi:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ClusterName
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      PlatformVersion: '1.4.0'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetIds
+          SecurityGroups:
+            - !Ref AppSecurityGroupId
+            - !Ref CoreClientSecurityGroupId
+            - !Ref RuntimeClientSecurityGroupId
+            - !GetAtt Ingress.GroupId
+            - !If [WithAgentReach, !Ref AgentReachClientSecurityGroupId, !Ref 'AWS::NoValue']
+      ServiceRegistries:
+        - RegistryArn: !GetAtt Discovery.Arn
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+
+Outputs:
+  ServiceName: {Value: !GetAtt AgentApi.Name}
+  AgentApiUrl: {Value: 'http://agent-api.tina-staging.local:8100'}
+  TaskDefinitionArn: {Value: !Ref TaskDefinition}
+  LogGroupName: {Value: !Ref Logs}
+  WorkspaceFileSystemId:
+    Condition: WithWorkspace
+    Value: !Ref WorkspaceFileSystem

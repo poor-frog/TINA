@@ -1,12 +1,12 @@
 ---
 title: "Quickstart"
-description: "Clone TINA, unlock its private deployment config, and start the configured Gipformer stack."
+description: "Clone TINA, unlock its private deployment config, and start the configured TINA stack."
 ---
 
 ---
 
 This walkthrough starts the configured TINA deployment: its Compose project, Google sign-in,
-Gipformer speech recognition, and agent services. It preserves the deployment's existing data.
+speech recognition, and agent services. It preserves the deployment's existing data.
 
 ## Prerequisites
 
@@ -14,7 +14,6 @@ Gipformer speech recognition, and agent services. It preserves the deployment's 
   supporting `up --wait`. Building the source stack needs about **8 vCPUs / 16 GB RAM**.
 - `git`, `make`, Python **3.10+**, a local Docker context, Dotenvx, and the private `.env.keys` file
   matching this repository's encrypted `deploy/compose/.env`.
-- The Gipformer model assets, installed in step 4 below.
 
 ## 1. Clone the repository
 
@@ -42,17 +41,11 @@ root. It must contain the `DOTENV_PRIVATE_KEY` that matches `deploy/compose/.env
 decrypt the existing file. Keep `.env.keys` private. Git ignores it, but do not paste the key into a
 command, commit, issue, or documentation.
 
-## 4. Install Gipformer model assets
+## 4. Preview and start
 
-```bash
-python3 deploy/transcription/gipformer/install-models.py
-```
-
-This downloads and checksum-verifies the pinned Gipformer 1.5 and FSMN-VAD files under
-`deploy/transcription/models/gipformer-fsmn`. The current encrypted Compose config enables the
-`automation,asr,dashboard` profiles and connects the bot to `http://gipformer:8000`.
-
-## 5. Preview and start
+Configure `TINA_VIEGEM_TOKEN` in the selected encrypted env for managed VieGem, or set
+`TRANSCRIPTION_SERVICE_URL` for an external OpenAI-compatible ASR service. `make all` downloads
+and verifies the managed model assets when VieGem is configured.
 
 ```bash
 make plan     # read-only: confirm the project and selected profiles
@@ -77,10 +70,8 @@ the matching Dotenvx key, do not invent a replacement: use the separate [fresh-i
     Open the Terminal URL printed by `make all` and sign in with Google.
   </Step>
   <Step title="Configure speech recognition">
-    The `asr` Compose profile starts Gipformer 1.5 + FSMN-VAD. If your account has a transcription
-    preference that overrides the platform default, select Gipformer under Settings → Models. See
-    the [Gipformer guide](https://github.com/poor-frog/TINA/blob/main/deploy/transcription/gipformer/README.md)
-    and [transcription configuration](/configuration#transcription-stt).
+    Under Settings → Models → Transcription, select VieGem + LM or configure an external endpoint.
+    See [transcription configuration](/configuration#transcription-stt).
   </Step>
   <Step title="Send a bot to a meeting">
     Start a Google Meet, Zoom, or Teams call, copy the join URL, and add it from the UI. A bot joins

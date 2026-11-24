@@ -14,7 +14,6 @@ from preflight import audio_probe_body
 SECRET = os.environ["TINA_INTERNAL_API_SECRET"]
 ADMIN_URL = os.environ.get("ADMIN_API_URL", "http://admin-api:8001").rstrip("/")
 MODELS = {
-    "gipformer": "g-group-ai-lab/gipformer1.5-68M-rnnt",
     "viegem": "5CD-AI/VieGem-ASR",
 }
 
@@ -45,9 +44,6 @@ class RemoteWorkers:
             ADMIN_URL + "/internal/settings/transcription", {"X-Internal-Secret": SECRET}, timeout=5,
         ).get("value", {})
         url, token = settings.get(backend + "_url"), settings.get(backend + "_token")
-        if backend == "gipformer":
-            url = url or os.environ.get("TRANSCRIPTION_SERVICE_URL")
-            token = token or os.environ.get("TRANSCRIPTION_SERVICE_TOKEN")
         if not url or not token:
             raise ControlError(422, "Configure the ASR worker URL and token in Global defaults")
         return url.rstrip("/"), token
@@ -97,8 +93,8 @@ class RemoteWorkers:
 
 def main():
     controller = Controller(
-        Identity(), RemoteWorkers(), "/state/state.json", "tina-aws-remote-gipformer",
-        grace=10, revision="aws-demo-v2",
+        Identity(), RemoteWorkers(), "/state/state.json", "tina-aws-remote-viegem",
+        grace=10, revision="aws-demo-v3",
     )
     key = hmac.new(SECRET.encode(), b"tina-asr-control:v1", "sha256").hexdigest()
     server = ThreadingHTTPServer(("0.0.0.0", 18007), handler(controller, key))

@@ -1,28 +1,29 @@
 name: tina-speech
 services:
-  gipformer-models:
-    image: ghcr.io/poor-frog/tina-gipformer:demo
+  viegem-models:
+    image: ghcr.io/poor-frog/tina-viegem:demo
     entrypoint:
       - python
-      - /app/gipformer/install-models.py
+      - /app/viegem/install-models.py
       - --directory
-      - /app/models/gipformer-fsmn
+      - /app/models/viegem-fsmn
     volumes:
-      - gipformer-models:/app/models/gipformer-fsmn
+      - viegem-models:/app/models/viegem-fsmn
     restart: 'no'
-  gipformer:
-    image: ghcr.io/poor-frog/tina-gipformer:demo
+  viegem:
+    image: ghcr.io/poor-frog/tina-viegem:demo
     environment:
-      TINA_GIPFORMER_HOST: '0.0.0.0'
-      TINA_GIPFORMER_PORT: '8000'
-      TINA_GIPFORMER_MODEL_DIR: /app/models/gipformer-fsmn
-      TINA_GIPFORMER_TOKEN: ${TRANSCRIPTION_SERVICE_TOKEN:?Set in private speech.env}
+      TINA_VIEGEM_HOST: '0.0.0.0'
+      TINA_VIEGEM_DEVICE: cpu
+      TINA_VIEGEM_PORT: '8000'
+      TINA_VIEGEM_MODEL_DIR: /app/models/viegem-fsmn
+      TINA_VIEGEM_TOKEN: ${TRANSCRIPTION_SERVICE_TOKEN:?Set in private speech.env}
     ports:
       - '18002:8000' # Private EC2 only; Security Group allows inbound only from EC2 Core
     volumes:
-      - gipformer-models:/app/models/gipformer-fsmn:ro
+      - viegem-models:/app/models/viegem-fsmn:ro
     depends_on:
-      gipformer-models:
+      viegem-models:
         condition: service_completed_successfully
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
@@ -32,4 +33,4 @@ services:
       start_period: 120s
     restart: unless-stopped
 volumes:
-  gipformer-models:
+  viegem-models:

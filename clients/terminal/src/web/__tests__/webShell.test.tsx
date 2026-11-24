@@ -9,6 +9,7 @@ import {
   terminalMeetingIdFromPath,
   terminalMeetingPath,
 } from "../../app/meetingRoute";
+import { signIn } from "next-auth/react";
 import { AuthGate } from "../../app/AuthGate";
 import { WebShell } from "../WebApp";
 import { computeSpeakerStats } from "../SpeakerTalkTime";
@@ -276,10 +277,11 @@ describe("computeSpeakerStats talk-time analytics", () => {
   });
 });
 
-describe("AuthGate split-screen login upgrade", () => {
+describe("AuthGate pre-login TINA landing", () => {
   const origFetch = globalThis.fetch;
 
   beforeEach(() => {
+    vi.mocked(signIn).mockClear();
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/auth/me")) return new Response("{}", { status: 401 });
@@ -304,6 +306,32 @@ describe("AuthGate split-screen login upgrade", () => {
     expect(screen.getByText("First sign-in = administrator")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Continue with Google/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Continue with Microsoft/i })).toBeTruthy();
+  });
+
+  it("renders editorial TINA landing sections and triggers Google OAuth when admin exists", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/auth/me")) return new Response("{}", { status: 401 });
+      if (url.includes("/api/auth/providers")) {
+        return new Response(JSON.stringify({ google: { id: "google" } }), { status: 200 });
+      }
+      if (url.includes("/api/auth/instance")) {
+        return new Response(JSON.stringify({ admin_exists: true }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    render(<AuthGate><div>App</div></AuthGate>);
+    expect(await screen.findByText("01 · HOW IT WORKS")).toBeTruthy();
+    expect(screen.getByText("02 · LIVE TRANSCRIPT & VOICE")).toBeTruthy();
+    expect(screen.getAllByText("TINA Agent").length).toBeGreaterThan(0);
+
+    // Interactive hero illustration responds to clicking "Gọi “Tina ơi”"
+    fireEvent.click(screen.getByRole("button", { name: /Gọi “Tina ơi”/i }));
+    expect(screen.getByText(/Đã ghi 2 action items/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
+    expect(signIn).toHaveBeenCalledWith("google", expect.objectContaining({ callbackUrl: expect.any(String) }));
   });
 });
 
@@ -340,8 +368,68 @@ describe("WebShell production UI (Option A & Option B)", () => {
       if (url.includes("/api/chat/approval") && init?.method === "POST") {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
+      if (url.includes("/api/meetings/") && url.includes("/voice-assistant")) {
+        return new Response(
+          JSON.stringify({
+            available: true,
+            policy: { enabled: true },
+            runtime: { state: "LISTENING" },
+            replies: [
+              {
+                request_id: "11111111-1111-4111-8111-111111111111",
+                text: "TINA đã tổng hợp 2 điểm chính từ cuộc họp vừa rồi.",
+                state: "completed",
+                created_at_ms: 15_000,
+                source_count: 1,
+                answer_kind: "meeting",
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
       if (url.includes("/api/meetings/") && url.includes("/annotate") && init?.method === "POST") {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (url.includes("/api/user/models")) {
+        if (init?.method === "PUT") {
+          const patch = JSON.parse(String(init.body || "{}")) as Record<string, string>;
+          return new Response(JSON.stringify({ mode: "openai-subscription", model: "gpt-6-luna", ...patch }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ mode: "openai-subscription", model: "gpt-6-luna" }), { status: 200 });
+      }
+      if (url.includes("/api/user/transcription")) {
+        return new Response(
+          JSON.stringify({
+            available_backends: ["default", "viegem", "custom"],
+            effective: { backend: "viegem", label: "VieGem + LM", model: null, source: "platform" },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/models/openai/status")) {
+        return new Response(JSON.stringify({ connected: true, email: "nghixa021@gmail.com" }), { status: 200 });
+      }
+      if (url.includes("/api/models/openai/logout") && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (url.includes("/api/models/openai/catalog")) {
+        return new Response(JSON.stringify({ models: [{ id: "gpt-6-luna", name: "GPT-6 Luna" }] }), { status: 200 });
+      }
+      if (url.includes("/api/models/catalog")) {
+        return new Response(JSON.stringify({ models: [{ id: "gpt-5", name: "GPT-5" }] }), { status: 200 });
+      }
+      if (url.includes("/api/models/test")) {
+        return new Response(
+          JSON.stringify({ ok: true, mode: "openai-subscription", source: "settings", summary: "Connected as nghixa021@gmail.com" }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/admin/settings/models")) {
+        return new Response(JSON.stringify({ value: { mode: "deepseek", model: "deepseek-flash" } }), { status: 200 });
+      }
+      if (url.includes("/api/admin/settings/transcription")) {
+        return new Response(JSON.stringify({ value: { default_backend: "viegem" } }), { status: 200 });
       }
       if (url.includes("/api/meeting/jitsi-hosts")) {
         return new Response(JSON.stringify({ hosts: [] }), { status: 200 });
@@ -491,7 +579,68 @@ describe("WebShell production UI (Option A & Option B)", () => {
       fireEvent.click(talkTimeBtn);
     }
     expect(await screen.findByText("Talk time & metrics")).toBeTruthy();
-    expect(await screen.findByText("Linh")).toBeTruthy();
+    expect((await screen.findAllByText("Linh")).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders the 3-column Fireflies-style Meeting Workspace (Smart Search, Notes/Skills/Action Items, Ask Tina/Transcript, Bottom Player)", async () => {
+    const fetchMock = mockEnvironment({ admin: false });
+    render(<WebShell initialMeetingId="102" />);
+
+    // Center Notes document renders title, code badge, summary card, and action item creator
+    expect(await screen.findByRole("heading", { name: "Design Review" })).toBeTruthy();
+    expect(screen.getByText("#kuz-wvic-dfc")).toBeTruthy();
+    expect(screen.getByText("AI Executive Summary")).toBeTruthy();
+
+    // Add a new action item in Notes & verify Action Items tab badge increments
+    fireEvent.change(screen.getByLabelText("Add new action item"), {
+      target: { value: "Ship updated meeting detail layout" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByText("Ship updated meeting detail layout")).toBeTruthy();
+
+    // Switch to AI Skills tab & run a real grounded skill via streamChatTurn
+    fireEvent.click(screen.getByRole("tab", { name: /AI Skills/i }));
+    expect(screen.getByText("Executive Brief and Decisions")).toBeTruthy();
+
+    // Right panel Ask Tina starter streams through streamChatTurn
+    fireEvent.click(screen.getByRole("tab", { name: /Ask Tina/i }));
+    fireEvent.click(screen.getByRole("button", { name: "What were the main topics?" }));
+    expect(await screen.findByText(/Drafted follow-up summary/)).toBeTruthy();
+
+    // Toggle Smart Search via bottom player Talk time button -> click speaker filters Transcript
+    const talkTimeBtn = screen.getByRole("button", { name: /Talk time/i });
+    if (talkTimeBtn.getAttribute("aria-expanded") !== "true") {
+      fireEvent.click(talkTimeBtn);
+    }
+    expect(await screen.findByText("Smart Search")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Linh/i }));
+    expect(screen.getByRole("tab", { name: /Transcript/i }).getAttribute("aria-selected")).toBe("true");
+
+    // Clear speaker filter -> Voice Agent TTS ("TINA Agent") reply appears inline in Transcript
+    fireEvent.click(screen.getAllByRole("button", { name: /Linh/i })[0]);
+    expect(await screen.findByText("TINA Agent")).toBeTruthy();
+    expect(screen.getByText("TINA đã tổng hợp 2 điểm chính từ cuộc họp vừa rồi.")).toBeTruthy();
+    expect(screen.getByText("Nguồn (1)")).toBeTruthy();
+
+    // TINA Agent filter toggle isolates Voice Agent TTS replies cleanly
+    fireEvent.click(screen.getByRole("button", { name: /TINA Agent/i }));
+    expect(screen.getByText("TINA đã tổng hợp 2 điểm chính từ cuộc họp vừa rồi.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /TINA Agent/i }));
+
+    // Rename via detail top bar ••• menu calls POST /api/meetings/102/annotate
+    fireEvent.click(screen.getByRole("button", { name: "Meeting options" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename meeting" }));
+    fireEvent.change(screen.getByLabelText("Meeting title"), { target: { value: "Design Review Q4" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save title" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/meetings/102/annotate",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ title: "Design Review Q4" }),
+        }),
+      );
+    });
   });
 
   it("exposes Terminal link + Team admin sections (Global Defaults, ASR Workers) for admins and honors URL params", async () => {
@@ -505,6 +654,66 @@ describe("WebShell production UI (Option A & Option B)", () => {
 
     expect(await screen.findByTestId("real-asr-panel")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Global Defaults/i }));
-    expect(await screen.findByTestId("real-models-section-global")).toBeTruthy();
+    expect(await screen.findByText(/Deployment-wide defaults/i)).toBeTruthy();
+    expect(screen.getByText("Global Transcription Backend")).toBeTruthy();
+  });
+
+  it("renders redesigned Agent Model Provider & Auth cards, ChatGPT OAuth disconnect, API key reveal, Antigravity guard, and connection test", async () => {
+    window.history.replaceState({}, "", "/?nav=settings&settingsWorkspace=personal&settingsSection=models");
+    const fetchMock = mockEnvironment({ admin: false });
+    render(<WebShell />);
+
+    // ChatGPT Plan OAuth card displays connected identity & real SVG logos render for all providers
+    expect(await screen.findByText("ChatGPT Plan Connected")).toBeTruthy();
+    expect(screen.getByText("nghixa021@gmail.com")).toBeTruthy();
+    const logoSrcs = Array.from(document.querySelectorAll("img.tina-web-provider-logo")).map((el) =>
+      el.getAttribute("src"),
+    );
+    expect(logoSrcs).toContain("/provider-logos/openai.svg");
+    expect(logoSrcs).toContain("/provider-logos/claude.svg");
+    expect(logoSrcs).toContain("/provider-logos/gemini.svg");
+    expect(logoSrcs).toContain("/provider-logos/deepseek.svg");
+    expect(logoSrcs).toContain("/provider-logos/groq.svg");
+    expect(logoSrcs).toContain("/provider-logos/aws.svg");
+    expect(logoSrcs).toContain("/provider-logos/antigravity.svg");
+
+    fireEvent.click(screen.getByRole("button", { name: /Test connection/i }));
+    expect(await screen.findByText("Connection verified")).toBeTruthy();
+    expect(screen.getByText(/Connected as nghixa021@gmail\.com/)).toBeTruthy();
+
+    // Disconnect ChatGPT calls real logout endpoint and flips card to Not linked
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/models/openai/logout",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    expect(await screen.findByText("Connect your ChatGPT Plan")).toBeTruthy();
+
+    // Switch provider card to OpenAI API -> shows secret reveal toggle & saves via PUT /api/user/models
+    fireEvent.click(screen.getByRole("radio", { name: /OpenAI API/i }));
+    const keyInput = screen.getByLabelText("Credential") as HTMLInputElement;
+    expect(keyInput.type).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "Show API key" }));
+    expect(keyInput.type).toBe("text");
+    fireEvent.change(keyInput, { target: { value: "sk-test-12345" } });
+
+    const saveBtn = screen.getByRole("button", { name: /Save changes/i });
+    expect((saveBtn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/user/models",
+        expect.objectContaining({ method: "PUT" }),
+      );
+    });
+
+    // Switch to Antigravity CLI -> Save stays disabled until risk checkbox is acknowledged
+    fireEvent.click(screen.getByRole("radio", { name: /Antigravity CLI/i }));
+    expect(screen.getByText(/Account suspension risk/i)).toBeTruthy();
+    expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: /I have read this warning/i }));
+    expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

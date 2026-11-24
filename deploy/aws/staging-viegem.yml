@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private CPU VieGem ASR worker for non-commercial TINA staging tests.
+
+Parameters:
+  ClusterName: {Type: String}
+  VpcId: {Type: 'AWS::EC2::VPC::Id'}
+  AppSubnetIds: {Type: 'List<AWS::EC2::Subnet::Id>'}
+  AppSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  ServiceNamespaceId: {Type: String}
+  VieGemImage:
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'
+  VieGemRepositoryArn: {Type: String}
+  DesiredCount: {Type: Number, Default: 0, MinValue: 0, MaxValue: 2}
+
+Resources:
+  Token:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties: {RetentionInDays: 7}
+  Ingress:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Private VieGem access from staging application and bot tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 8000, ToPort: 8000, SourceSecurityGroupId: !Ref AppSecurityGroupId}
+  Discovery:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: viegem
+      DnsConfig:
+        NamespaceId: !Ref ServiceNamespaceId
+        DnsRecords: [{Type: A, TTL: 15}]
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: PullImageAndReadWorkerToken
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer]
+                Resource: !Ref VieGemRepositoryArn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt Logs.Arn
+              - {Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref Token}
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AWS::StackName
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '2048'
+      Memory: '8192'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: viegem
+          Image: !Ref VieGemImage
+          Essential: true
+          PortMappings: [{ContainerPort: 8000}]
+          LinuxParameters: {InitProcessEnabled: true}
+          Environment:
+            - {Name: TINA_VIEGEM_DEVICE, Value: cpu}
+            - {Name: TINA_VIEGEM_HOST, Value: 0.0.0.0}
+            - {Name: TINA_VIEGEM_PORT, Value: '8000'}
+            - {Name: TINA_VIEGEM_MODEL_DIR, Value: /app/models/viegem-fsmn}
+            - {Name: HF_HUB_OFFLINE, Value: '1'}
+            - {Name: TRANSFORMERS_OFFLINE, Value: '1'}
+            - {Name: TOKENIZERS_PARALLELISM, Value: 'false'}
+          Secrets:
+            - {Name: TINA_VIEGEM_TOKEN, ValueFrom: !Ref Token}
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4).close()"]
+            Interval: 10
+            Timeout: 5
+            Retries: 4
+            StartPeriod: 120
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+  Worker:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ClusterName
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      PlatformVersion: '1.4.0'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetIds
+          SecurityGroups: [!GetAtt Ingress.GroupId]
+      ServiceRegistries:
+        - RegistryArn: !GetAtt Discovery.Arn
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+
+Outputs:
+  ServiceName: {Value: !GetAtt Worker.Name}
+  WorkerUrl: {Value: 'http://viegem.tina-staging.local:8000/v1/audio/transcriptions'}
+  WorkerTokenArn: {Value: !Ref Token}
+  TaskDefinitionArn: {Value: !Ref TaskDefinition}
+  WorkerSecurityGroupId: {Value: !GetAtt Ingress.GroupId}
+  LogGroupName: {Value: !Ref Logs}

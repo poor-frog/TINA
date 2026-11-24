@@ -13,7 +13,8 @@ import soundfile as sf
 from fastapi import HTTPException, Request
 
 import server
-from gipformer.engine import GipformerEngine, AudioInputError, read_audio, speech_ranges
+from gipformer.engine import GipformerEngine
+from asr_audio import AudioInputError, read_audio, speech_ranges
 from telemetry import AsrMetrics
 
 

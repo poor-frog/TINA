@@ -1,13 +1,24 @@
 "use client";
-/** MeetingDetailView — End-user meeting view backed by TINA's real MeetingCanvasView
- *  (LiveTranscriptEngine + bilingual translation + audio player), MeetingKnowledge ("Ask TINA"),
- *  real-time Live Assist (`LiveAssistRunningView`), and Speaker Talk Time analytics. */
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+/** MeetingDetailView — 3-column + bottom-player Meeting Workspace matching the Tina/Fireflies
+ *  architecture, 100% wired to TINA's real APIs: durable + live transcripts, Live Assist state,
+ *  Meeting Memory facts, Discussion Review signals, bilingual translation, multi-fragment audio
+ *  playback, grounded Ask Tina SSE streaming, Share session, inline Rename, BotControls, and tools. */
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
-import { SpeakerTalkTimePanel } from "./SpeakerTalkTime";
-import { MeetingCanvasView } from "../canvas/MeetingCanvasView";
-import { MeetingKnowledge } from "../surfaces/MeetingKnowledge";
+import { WebAvatar } from "./Avatar";
+import { Markdown } from "../ui-kit/Markdown";
+import { computeSpeakerStats, formatTalkDuration } from "./SpeakerTalkTime";
+import { MeetingSmartSearch, type DiscussionSignalSummary } from "./MeetingSmartSearch";
+import { MeetingSidePanel, type MeetingVoiceReply } from "./MeetingSidePanel";
+import { ChatGPTPlanNotice, type ChatGPTPlanIssue } from "../surfaces/ChatGPTPlanNotice";
+import { MeetingBottomPlayer, type MeetingBottomPlayerHandle } from "./MeetingBottomPlayer";
 import { LiveAssistRunningView } from "../surfaces/LiveAssistRunningView";
+import { MeetingMemory } from "../surfaces/MeetingMemory";
+import { SpeakerRegistry } from "../surfaces/SpeakerRegistry";
+import { TranscriptReview } from "../surfaces/TranscriptReview";
+import { PostMeetingDraft } from "./PostMeetingDraft";
+import { DiscussionReview } from "../surfaces/DiscussionReview";
+import { LiveMeetingState } from "../surfaces/LiveMeetingState";
 import {
   EMPTY_LIVE_ASSIST_DRAFT,
   mergeLiveMeetingState,
@@ -28,13 +39,121 @@ import {
   meetingWhenLabel,
   presentMeetingActionFailure,
 } from "../surfaces/meeting";
-import { meetingPhase, type MeetingMock } from "../surfaces/meetingModel";
-import { fetchMeetingById, refreshMeetings } from "../surfaces/liveMeetings";
-import { readApiFailure } from "../surfaces/apiClient";
+import { meetingPhase, type MeetingAudioRecording, type MeetingMock, type TranscriptLine } from "../surfaces/meetingModel";
+import {
+  fetchDurableTranscript,
+  fetchMeetingById,
+  refreshMeetings,
+  type ProcessedNoteDTO,
+} from "../surfaces/liveMeetings";
+import { useMeetingLive } from "../surfaces/meetingLive";
+import { useMeetingTranslation, type TranscriptLanguage } from "../canvas/MeetingTranslation";
+import type { MeetingAudioFragment, MeetingAudioPosition } from "../canvas/MeetingAudioPlayer";
+import { streamChatTurn } from "../surfaces/chatStream";
+import { presentError, readApiFailure } from "../surfaces/apiClient";
 import { deletePlannedMeeting, updatePlannedMeeting } from "../surfaces/plannedApi";
 import { parseMeetingInput, meetingUrlFor } from "../surfaces/meetingId";
 import { defaultBotName } from "../surfaces/defaultBotName";
 import { terminalMeetingPath } from "../app/meetingRoute";
+import { meetingDurationMins } from "./meetingsFilter";
+import type { WebUser } from "./useWebIdentity";
+import type { CaptureModalMode } from "./TopBar";
+import styles from "./meetingDetail.module.css";
+
+interface MemoryFactDTO {
+  id: string;
+  type: "action_item" | "decision" | "fact";
+  text: string;
+  evidence?: Array<{ segment_id?: string; speaker_name?: string; start_ms?: number; quote?: string }>;
+}
+
+interface ActionItemRow {
+  id: string;
+  text: string;
+  done: boolean;
+  assignee?: string;
+  source: "live-state" | "memory" | "meeting" | "local";
+  revision?: number;
+  segmentId?: string;
+}
+
+interface LocalMeetingPrefs {
+  starred: boolean;
+  reviewed: boolean;
+  localTasks: Array<{ id: string; text: string; done: boolean; assignee: string }>;
+  doneIds: string[];
+}
+
+const DEFAULT_PREFS: LocalMeetingPrefs = { starred: false, reviewed: false, localTasks: [], doneIds: [] };
+
+const MEETING_SKILLS = [
+  {
+    id: "exec-recap",
+    category: "Summary",
+    title: "Executive Brief and Decisions",
+    description: "Distill the main goals, decisions agreed upon, and open blockers.",
+    prompt: "Write a crisp executive brief for this meeting with sections for Overview, Key Decisions, and Open Risks.",
+  },
+  {
+    id: "action-matrix",
+    category: "Execution",
+    title: "Action Items and Owners",
+    description: "Extract concrete next steps with owners and deadlines mentioned in the call.",
+    prompt: "List every concrete action item from this meeting with its owner and deadline if mentioned.",
+  },
+  {
+    id: "followup-email",
+    category: "Communication",
+    title: "Follow-up Email Draft",
+    description: "Generate a ready-to-send recap email for all attendees.",
+    prompt: "Draft a clear, concise follow-up email summarizing this meeting's outcomes and next steps.",
+  },
+  {
+    id: "coaching",
+    category: "Coaching",
+    title: "Coaching and Talk Balance",
+    description: "Review speaker participation, pacing, and suggestions for the next sync.",
+    prompt: "Evaluate the conversation balance, clarity, and decision velocity in this meeting, and give 3 practical coaching tips.",
+  },
+] as const;
+
+function readMeetingPrefs(id: string): LocalMeetingPrefs {
+  if (typeof window === "undefined") return DEFAULT_PREFS;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(`tina.web.meetingPrefs.${id}`) || "null");
+    if (!parsed || typeof parsed !== "object") return DEFAULT_PREFS;
+    return {
+      starred: parsed.starred === true,
+      reviewed: parsed.reviewed === true,
+      localTasks: Array.isArray(parsed.localTasks) ? parsed.localTasks : [],
+      doneIds: Array.isArray(parsed.doneIds) ? parsed.doneIds : [],
+    };
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
+
+function writeMeetingPrefs(id: string, next: LocalMeetingPrefs) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(`tina.web.meetingPrefs.${id}`, JSON.stringify(next));
+  } catch {
+    /* ignore storage error */
+  }
+}
+
+function formatChapterClock(tsMs?: number, firstMs?: number): string {
+  if (typeof tsMs !== "number" || !Number.isFinite(tsMs)) return "00:00";
+  const relSec =
+    typeof firstMs === "number" && Number.isFinite(firstMs) && tsMs >= firstMs && tsMs > 100_000_000_000
+      ? Math.max(0, Math.floor((tsMs - firstMs) / 1000))
+      : tsMs < 100_000_000_000
+        ? Math.max(0, Math.floor(tsMs / 1000))
+        : 0;
+  const mins = Math.floor(relSec / 60);
+  const secs = relSec % 60;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
 
 export function MeetingDetailView({
   meetingId,
@@ -43,7 +162,11 @@ export function MeetingDetailView({
   wsConnected,
   meetingsOnly,
   canOpenTerminal,
+  user,
   onBack,
+  onOpenMobileNav,
+  onOpenCapture,
+  onUserMenuToggle,
 }: {
   meetingId: string;
   meetings: MeetingMock[];
@@ -51,13 +174,12 @@ export function MeetingDetailView({
   wsConnected: boolean;
   meetingsOnly: boolean;
   canOpenTerminal: boolean;
+  user?: WebUser;
   onBack: () => void;
+  onOpenMobileNav?: () => void;
+  onOpenCapture?: (mode?: CaptureModalMode) => void;
+  onUserMenuToggle?: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
-  const [askOpen, setAskOpen] = useState(false);
-  const [insightsOpen, setInsightsOpen] = useState(() =>
-    typeof window !== "undefined" ? window.innerWidth >= 1280 : false,
-  );
-  const [deleting, setDeleting] = useState(false);
   const [detail, setDetail] = useState<{ id: string; row: MeetingMock | null; error?: string }>();
   const [detailAttempt, setDetailAttempt] = useState(0);
   const byId = /^[1-9]\d*$/.test(meetingId);
@@ -65,25 +187,98 @@ export function MeetingDetailView({
   const needsDetail = byId && !listed;
   const fetched = detail?.id === meetingId ? detail : undefined;
   const m = listed ?? fetched?.row ?? undefined;
+  const resolvedId = m?.id ?? meetingId;
+  const phase = m ? meetingPhase(m) : "live";
+  const isLive = phase === "live";
 
+  // ── Layout & tab state ──
+  const [docTab, setDocTab] = useState<"notes" | "skills" | "tasks" | "live-assist">("notes");
+  const [sideTab, setSideTab] = useState<"ask" | "transcript">(isLive ? "transcript" : "ask");
+  const [smartSearchOpen, setSmartSearchOpen] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth >= 1180 : false,
+  );
+  const [fullscreenDoc, setFullscreenDoc] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
+
+  // ── Filters synced between Smart Search & Transcript ──
+  const [speakerFilter, setSpeakerFilter] = useState("");
+  const [questionsOnly, setQuestionsOnly] = useState(false);
+  const [trackerFilter, setTrackerFilter] = useState("");
+  const [language, setLanguage] = useState<TranscriptLanguage>("bilingual");
+  const [pendingAskPrompt, setPendingAskPrompt] = useState<string | null>(null);
+
+  // ── Rename / Delete / Copy / Process states ──
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedSummary, setCopiedSummary] = useState(false);
+  const [copiedTranscript, setCopiedTranscript] = useState(false);
+  const [processingBusy, setProcessingBusy] = useState(false);
+  const [newTaskDraft, setNewTaskDraft] = useState("");
+  const [taskFilter, setTaskFilter] = useState<"all" | "pending" | "done">("all");
+  const [prefs, setPrefs] = useState<LocalMeetingPrefs>(DEFAULT_PREFS);
+
+  // ── AI Skills execution state ──
+  const [skillOutputs, setSkillOutputs] = useState<Record<string, { text: string; loading: boolean; error?: string }>>({});
+  const [copiedSkillId, setCopiedSkillId] = useState<string | null>(null);
+
+  // ── Real data feeds: durable transcript + live WS stream + memory + discussion review + recordings ──
+  const [durableLines, setDurableLines] = useState<TranscriptLine[]>([]);
+  const [durableNotes, setDurableNotes] = useState<ProcessedNoteDTO[]>([]);
+  const [recordings, setRecordings] = useState<MeetingAudioRecording[]>([]);
+  const [refreshingTranscript, setRefreshingTranscript] = useState(false);
+  const [memoryFacts, setMemoryFacts] = useState<MemoryFactDTO[]>([]);
+  const [discussionSignals, setDiscussionSignals] = useState<DiscussionSignalSummary | null>(null);
+  const [voiceReplies, setVoiceReplies] = useState<MeetingVoiceReply[]>([]);
+  const [chatgptPlanIssue, setChatgptPlanIssue] = useState<ChatGPTPlanIssue | null>(null);
+
+  const liveStream = useMeetingLive(resolvedId, m?.session_uid ?? "");
+
+  // ── Audio fragments + playback sync ──
+  const [audioFragments, setAudioFragments] = useState<MeetingAudioFragment[]>([]);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [audioMessage, setAudioMessage] = useState("");
+  const [playbackPosition, setPlaybackPosition] = useState<MeetingAudioPosition | null>(null);
+  const [playbackActive, setPlaybackActive] = useState(false);
+  const playerRef = useRef<MeetingBottomPlayerHandle>(null);
+
+  // ── Mounted TINA power tool dialog refs ──
+  const memoryOpenRef = useRef<(() => void) | null>(null);
+  const speakersOpenRef = useRef<(() => void) | null>(null);
+  const reviewOpenRef = useRef<(() => void) | null>(null);
+  const discussionOpenRef = useRef<(() => void) | null>(null);
+  const moreRef = useRef<HTMLDivElement>(null);
+  const toolsRef = useRef<HTMLDivElement>(null);
+
+  // Reset per-meeting UI state when switching meetings
   useEffect(() => {
-    if (!needsDetail) return;
-    const controller = new AbortController();
-    void fetchMeetingById(meetingId, controller.signal).then(
-      (row) => { if (!controller.signal.aborted) setDetail({ id: meetingId, row }); },
-      (error) => {
-        if (!controller.signal.aborted)
-          setDetail({ id: meetingId, row: null, error: presentMeetingActionFailure(error) });
-      },
-    );
-    return () => controller.abort();
-  }, [needsDetail, meetingId, detailAttempt]);
+    setPrefs(readMeetingPrefs(meetingId));
+    setDocTab("notes");
+    setSpeakerFilter("");
+    setQuestionsOnly(false);
+    setTrackerFilter("");
+    setSkillOutputs({});
+    setMemoryFacts([]);
+    setDiscussionSignals(null);
+    setVoiceReplies([]);
+    setChatgptPlanIssue(null);
+    setMoreMenuOpen(false);
+    setToolsMenuOpen(false);
+    setRenameOpen(false);
+    setPlaybackActive(false);
+    setPlaybackPosition(null);
+  }, [meetingId]);
 
+  // Honor ?askTina=1 query param
   useEffect(() => {
     if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
     if (url.searchParams.get("askTina") === "1") {
-      setAskOpen(true);
+      setSideTab("ask");
       url.searchParams.delete("askTina");
       try {
         window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
@@ -93,14 +288,166 @@ export function MeetingDetailView({
     }
   }, [meetingId]);
 
-  const phase = m ? meetingPhase(m) : "live";
-  const liveAssistMeetingId = m && phase === "live" ? String(m.id) : "";
+  // Close popovers on outside click / Escape
+  useEffect(() => {
+    if (!moreMenuOpen && !toolsMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreMenuOpen(false);
+      if (toolsRef.current && !toolsRef.current.contains(e.target as Node)) setToolsMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMoreMenuOpen(false);
+        setToolsMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [moreMenuOpen, toolsMenuOpen]);
 
-  // ── Real-time Live Assist state (mirrors MeetingTab in src/surfaces/meeting.tsx) ──
+  // Fetch single meeting detail if not yet in live meetings list
+  useEffect(() => {
+    if (!needsDetail) return;
+    const controller = new AbortController();
+    void fetchMeetingById(meetingId, controller.signal).then(
+      (row) => {
+        if (!controller.signal.aborted) setDetail({ id: meetingId, row });
+      },
+      (error) => {
+        if (!controller.signal.aborted) {
+          setDetail({ id: meetingId, row: null, error: presentMeetingActionFailure(error) });
+        }
+      },
+    );
+    return () => controller.abort();
+  }, [needsDetail, meetingId, detailAttempt]);
+
+  // Fetch real durable transcript + processed notes + recording descriptors
+  const loadDurable = useCallback(async () => {
+    if (!resolvedId) return;
+    setRefreshingTranscript(true);
+    try {
+      const durable = await fetchDurableTranscript(resolvedId);
+      setDurableLines(durable.lines);
+      setDurableNotes(durable.notes);
+      setRecordings(durable.recordings ?? []);
+    } finally {
+      setRefreshingTranscript(false);
+    }
+  }, [resolvedId]);
+
+  useEffect(() => {
+    void loadDurable();
+    const onCorrected = (event: Event) => {
+      const target = (event as CustomEvent).detail?.meetingId;
+      if (target == null || String(target) === resolvedId) void loadDurable();
+    };
+    window.addEventListener("tina:transcript-corrected", onCorrected);
+    return () => window.removeEventListener("tina:transcript-corrected", onCorrected);
+  }, [loadDurable, resolvedId]);
+
+  useEffect(() => {
+    if (!isLive) return;
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void loadDurable();
+    }, 12_000);
+    return () => window.clearInterval(timer);
+  }, [isLive, loadDurable]);
+
+  // Fetch real Meeting Memory facts & Discussion Review summary when available (best-effort)
+  useEffect(() => {
+    if (!resolvedId || !/^[1-9]\d*$/.test(resolvedId)) return;
+    const controller = new AbortController();
+    void fetch(`/api/transcripts/by-id/${encodeURIComponent(resolvedId)}/memory`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { facts?: MemoryFactDTO[] } | null) => {
+        if (!controller.signal.aborted && Array.isArray(data?.facts)) {
+          setMemoryFacts(data.facts);
+        }
+      })
+      .catch(() => undefined);
+
+    if (phase === "post") {
+      void fetch(`/api/discussion-reviews/${encodeURIComponent(resolvedId)}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then(
+          (
+            data: {
+              report?: {
+                windows?: Array<{ relevance?: { label?: string }; progress?: { label?: string } }>;
+              } | null;
+            } | null,
+          ) => {
+            if (controller.signal.aborted) return;
+            const windows = data?.report?.windows;
+            if (!Array.isArray(windows) || windows.length === 0) return;
+            const onTopic = windows.filter((w) => w.relevance?.label === "relevant").length;
+            const advancing = windows.filter((w) => w.progress?.label === "advancing").length;
+            setDiscussionSignals({
+              onTopicPct: Math.round((onTopic / windows.length) * 100),
+              advancingPct: Math.round((advancing / windows.length) * 100),
+              totalWindows: windows.length,
+            });
+          },
+        )
+        .catch(() => undefined);
+    }
+
+    return () => controller.abort();
+  }, [resolvedId, phase]);
+
+  // Fetch Voice Agent TTS ("TINA Agent") replies from `/api/meetings/{id}/voice-assistant`
+  useEffect(() => {
+    if (!resolvedId || !/^[1-9]\d*$/.test(resolvedId)) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const url = `/api/meetings/${encodeURIComponent(resolvedId)}/voice-assistant`;
+
+    const fetchVoice = async () => {
+      try {
+        const res = await fetch(url, { cache: "no-store", signal: controller.signal });
+        if (!res.ok) return;
+        const body = (await res.json()) as { replies?: MeetingVoiceReply[]; chatgpt_plan_issue?: ChatGPTPlanIssue | null };
+        if (!controller.signal.aborted && Array.isArray(body.replies)) {
+          const sorted = [...body.replies].sort((a, b) => (a.created_at_ms || 0) - (b.created_at_ms || 0));
+          setVoiceReplies(sorted);
+          setChatgptPlanIssue(body.chatgpt_plan_issue ?? null);
+        }
+      } catch {
+        /* voice assistant unavailable or aborted */
+      } finally {
+        if (!controller.signal.aborted && isLive) {
+          timer = setTimeout(() => void fetchVoice(), 3000);
+        }
+      }
+    };
+
+    void fetchVoice();
+    const onFocus = () => void fetchVoice();
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("tina:transcript-corrected", onFocus);
+    return () => {
+      controller.abort();
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("tina:transcript-corrected", onFocus);
+    };
+  }, [resolvedId, isLive]);
+
+  // ── Real-time Live Assist / Final Meeting State ──
+  const liveAssistMeetingId = m && (phase === "live" || phase === "post") ? String(m.id) : "";
   const [liveAssistState, setLiveAssistState] = useState<LiveMeetingStateSnapshot | null>(null);
-  const [transcriptViewMeetingId, setTranscriptViewMeetingId] = useState("");
-  const liveAssistEnabled = !!(liveAssistMeetingId && liveAssistState?.enabled);
-  const showingLiveAssist = liveAssistEnabled && transcriptViewMeetingId !== liveAssistMeetingId;
+  const liveAssistEnabled = !!(m && phase === "live" && liveAssistState?.enabled);
   const liveAssistStateRef = useRef<LiveMeetingStateSnapshot | null>(null);
   const [liveAssistError, setLiveAssistError] = useState("");
   const [liveAssistBusy, setLiveAssistBusyState] = useState(false);
@@ -158,19 +505,19 @@ export function MeetingDetailView({
           setLiveAssistError("");
         }
       } catch (reason) {
-        if (!controller.signal.aborted && ticket === liveAssistRequestSerial.current) {
+        if (!controller.signal.aborted && ticket === liveAssistRequestSerial.current && phase === "live") {
           setLiveAssistError(reason instanceof Error ? reason.message : "Could not load Live Assist state");
         }
       }
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 5000);
+    const timer = phase === "live" ? window.setInterval(() => void refresh(), 5000) : null;
     return () => {
       controller.abort();
-      window.clearInterval(timer);
+      if (timer != null) window.clearInterval(timer);
       liveAssistRequestSerial.current++;
     };
-  }, [liveAssistMeetingId, publishLiveAssistState]);
+  }, [liveAssistMeetingId, phase, publishLiveAssistState]);
 
   const setLiveAssistBusy = (value: boolean) => {
     liveAssistBusyRef.current = value;
@@ -220,8 +567,8 @@ export function MeetingDetailView({
         enabled: true,
         ...(!current.configured ? { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone } : {}),
       });
-      setTranscriptViewMeetingId("");
       publishLiveAssistState(enabled, true, false);
+      setDocTab("live-assist");
       await syncLiveAssistDraft(id, enabled);
     } catch (reason) {
       setLiveAssistError(reason instanceof Error ? reason.message : "Could not enable Live Assist");
@@ -265,81 +612,379 @@ export function MeetingDetailView({
         liveAssistStateRef.current = next;
         setLiveAssistState(next);
       }
-      let pending = readPlannedLiveAssistDraft(id);
-      if (action === "edit" && request.id === "goal" && typeof request.patch?.text === "string") {
-        pending = { ...pending, goal: null };
-      } else if (action === "edit" && request.id && typeof request.patch?.text === "string") {
-        pending = { ...pending, agendaEdits: pending.agendaEdits.filter((item) => item.id !== request.id) };
-      } else if (action === "add" && request.type === "agenda" && typeof request.text === "string") {
-        const index = pending.agendaItems.findIndex((item) => item.text === request.text);
-        if (index >= 0) pending = { ...pending, agendaItems: pending.agendaItems.filter((_, i) => i !== index) };
-      }
-      writePlannedLiveAssistDraft(id, pending);
-      setLiveAssistDraft(pending);
       return true;
     } catch (reason) {
       setLiveAssistError(reason instanceof Error ? reason.message : "Could not save Live Assist state");
-      const request =
-        payload && typeof payload === "object"
-          ? (payload as { id?: string; type?: string; text?: string; patch?: { text?: string } })
-          : {};
-      let pending = readPlannedLiveAssistDraft(id);
-      let retained = false;
-      if (action === "edit" && request.id === "goal" && typeof request.patch?.text === "string") {
-        pending = { ...pending, goal: request.patch.text };
-        retained = true;
-      } else if (action === "edit" && request.id && typeof request.patch?.text === "string") {
-        const revision = liveAssistStateRef.current?.items?.find((item) => item.id === request.id)?.revision ?? 0;
-        pending = {
-          ...pending,
-          agendaEdits: [
-            ...pending.agendaEdits.filter((item) => item.id !== request.id),
-            { id: request.id, text: request.patch.text, revision },
-          ],
-        };
-        retained = true;
-      } else if (action === "add" && request.type === "agenda" && typeof request.text === "string") {
-        const draftId = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `draft-${Date.now()}`;
-        pending = { ...pending, agendaItems: [...pending.agendaItems, { id: draftId, text: request.text }] };
-        retained = true;
-      }
-      if (retained) {
-        writePlannedLiveAssistDraft(id, pending);
-        setLiveAssistDraft(pending);
-      }
-      return retained;
+      return false;
     } finally {
       setLiveAssistBusy(false);
     }
   };
 
+  // Merge durable transcript lines with live WS segments when live
+  const allLines: TranscriptLine[] = useMemo(() => {
+    if (isLive && liveStream.transcript.length > 0) {
+      return liveStream.transcript.map((s) => ({
+        id: s.id,
+        t: typeof s.t === "string" ? s.t : typeof s.t === "number" ? formatChapterClock(s.t > 1_000_000_000 ? s.t * 1000 : s.t * 1000) : "",
+        speaker: s.speaker || "Speaker",
+        text: s.text || "",
+        tsMs: s.tsMs,
+        speakerId: s.speakerId,
+        speakerKey: s.speakerKey,
+        speakerStatus: s.speakerStatus,
+      }));
+    }
+    if (durableLines.length > 0) return durableLines;
+    return m?.transcript ?? [];
+  }, [durableLines, isLive, liveStream.transcript, m?.transcript]);
+
+  // Bilingual translation hook
+  const translation = useMeetingTranslation(
+    resolvedId,
+    language,
+    allLines.filter((seg) => !!seg.id).map((seg) => seg.id!),
+  );
+
+  // Resolve real multi-fragment audio URLs for completed meetings
+  const canPlayMeetingAudio = phase === "post";
+  const recordingsSignature = useMemo(
+    () =>
+      recordings
+        .filter((r) => ["completed", "in_progress"].includes(r.status) && !!r.playback_url?.audio)
+        .map((r) => `${r.id}:${r.status}:${r.audio_start_ms ?? ""}:${r.created_at ?? ""}`)
+        .sort()
+        .join("|"),
+    [recordings],
+  );
+  const recordingsRef = useRef(recordings);
+  recordingsRef.current = recordings;
+
+  useEffect(() => {
+    if (!canPlayMeetingAudio) {
+      setAudioFragments([]);
+      setAudioMessage("");
+      setAudioLoading(false);
+      return;
+    }
+    const candidates = recordingsRef.current
+      .filter((rec) => ["completed", "in_progress"].includes(rec.status) && !!rec.playback_url?.audio)
+      .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+    let cancelled = false;
+    setAudioFragments([]);
+    setAudioMessage("");
+    setAudioLoading(candidates.length > 0);
+    if (!candidates.length) {
+      setAudioMessage("No audio recording");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void Promise.all(
+      candidates.map(async (recording) => {
+        const response = await fetch(`/api/recordings/${recording.id}/master?type=audio`, { cache: "no-store" });
+        if (response.status === 404) return null;
+        if (!response.ok) throw new Error(`Recording request failed (${response.status})`);
+        const master = (await response.json()) as {
+          raw_url?: string;
+          url?: string;
+          download_url?: string;
+          duration_seconds?: number | null;
+        };
+        const mediaUrl = master.raw_url || master.url || master.download_url || "";
+        let src = "";
+        if (mediaUrl.startsWith("/recordings/")) {
+          if (!mediaUrl.startsWith(`/recordings/${recording.id}/media/`)) {
+            throw new Error("Invalid recording path");
+          }
+          src = `/api${mediaUrl}`;
+        } else if (/^https?:\/\//.test(mediaUrl)) {
+          src = mediaUrl;
+        }
+        if (!src) return null;
+        const fileDuration = recording.media_files?.find((f) => f.type === "audio")?.duration_seconds;
+        return {
+          src,
+          duration: master.duration_seconds ?? fileDuration ?? 0,
+          ...(recording.session_uid ? { sessionUid: recording.session_uid } : {}),
+          ...(recording.audio_start_ms != null ? { audioStartMs: recording.audio_start_ms } : {}),
+          ...(recording.created_at ? { createdAt: recording.created_at } : {}),
+        } satisfies MeetingAudioFragment;
+      }),
+    )
+      .then((results) => {
+        if (cancelled) return;
+        const resolved = results.filter((f): f is MeetingAudioFragment => f !== null);
+        setAudioFragments(resolved);
+        if (!resolved.length) setAudioMessage("Recording finalizing…");
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setAudioMessage(err instanceof Error ? err.message : "Could not load recording");
+      })
+      .finally(() => {
+        if (!cancelled) setAudioLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [recordingsSignature, canPlayMeetingAudio, resolvedId]);
+
+  // Compute segment <-> audio seek mapping
+  const segmentAudioSeeks = useMemo(() => {
+    const seeks = new Map<string, { fragmentIndex: number; secondsInFragment: number }>();
+    if (!canPlayMeetingAudio || !audioFragments.length) return seeks;
+    for (const seg of allLines) {
+      if (!seg.id || typeof seg.tsMs !== "number" || !Number.isFinite(seg.tsMs)) continue;
+      const candidates = audioFragments.flatMap((fragment, fragmentIndex) => {
+        const origin = fragment.audioStartMs;
+        if (typeof origin !== "number" || !Number.isFinite(origin) || seg.tsMs! < origin - 500) return [];
+        if (seg.sessionUid && fragment.sessionUid && seg.sessionUid !== fragment.sessionUid) return [];
+        const secondsInFragment = Math.max(0, (seg.tsMs! - origin) / 1000);
+        if (fragment.duration > 0 && secondsInFragment >= fragment.duration) return [];
+        return [{ fragmentIndex, secondsInFragment }];
+      });
+      if (candidates.length === 1) {
+        seeks.set(seg.id, candidates[0]);
+      } else if (
+        candidates.length === 0 &&
+        audioFragments.length === 1 &&
+        audioFragments[0].audioStartMs == null &&
+        seg.tsMs < 100_000_000_000
+      ) {
+        const secondsInFragment = seg.tsMs / 1000;
+        if (audioFragments[0].duration <= 0 || secondsInFragment < audioFragments[0].duration) {
+          seeks.set(seg.id, { fragmentIndex: 0, secondsInFragment });
+        }
+      }
+    }
+    return seeks;
+  }, [allLines, audioFragments, canPlayMeetingAudio]);
+
+  const playableSegmentIds = useMemo(() => new Set(segmentAudioSeeks.keys()), [segmentAudioSeeks]);
+
+  const activeSegmentId = useMemo(() => {
+    if (!playbackActive || !playbackPosition) return null;
+    const fragment = audioFragments[playbackPosition.fragmentIndex];
+    if (!fragment) return null;
+    const playbackMs =
+      typeof fragment.audioStartMs === "number" && Number.isFinite(fragment.audioStartMs)
+        ? fragment.audioStartMs + playbackPosition.secondsInFragment * 1000
+        : playbackPosition.virtualTime * 1000;
+    const playable = allLines.filter(
+      (seg) =>
+        seg.id &&
+        segmentAudioSeeks.has(seg.id) &&
+        segmentAudioSeeks.get(seg.id)?.fragmentIndex === playbackPosition.fragmentIndex &&
+        typeof seg.tsMs === "number",
+    );
+    for (let i = playable.length - 1; i >= 0; i--) {
+      const seg = playable[i];
+      if (seg.tsMs! > playbackMs + 500) continue;
+      if (
+        (typeof seg.endTsMs === "number" && playbackMs <= seg.endTsMs + 1000) ||
+        i === playable.length - 1 ||
+        playbackMs < (playable[i + 1]?.tsMs ?? Number.POSITIVE_INFINITY)
+      ) {
+        return seg.id!;
+      }
+    }
+    return null;
+  }, [allLines, audioFragments, playbackActive, playbackPosition, segmentAudioSeeks]);
+
+  const seekSegment = useCallback(
+    (segmentId: string) => {
+      const seek = segmentAudioSeeks.get(segmentId);
+      if (!seek) return;
+      setPlaybackActive(true);
+      playerRef.current?.seekToFragment(seek.fragmentIndex, seek.secondsInFragment);
+    },
+    [segmentAudioSeeks],
+  );
+
+  // Aggregate real Action Items, Questions, Decisions, and Outline chapters
+  const actionItems: ActionItemRow[] = useMemo(() => {
+    const rows: ActionItemRow[] = [];
+    const seen = new Set<string>();
+    const pushUnique = (row: ActionItemRow) => {
+      const key = row.text.trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      rows.push(row);
+    };
+
+    for (const item of liveAssistState?.items ?? []) {
+      if (item.type === "task") {
+        const assigneeRaw = item.details?.assignees_text;
+        const assignee = Array.isArray(assigneeRaw) ? assigneeRaw.join(", ") : assigneeRaw;
+        pushUnique({
+          id: item.id,
+          text: item.text,
+          done: item.status === "completed" || item.status === "cancelled",
+          assignee: assignee || undefined,
+          source: "live-state",
+          revision: item.revision,
+          segmentId: item.evidence?.[0]?.segment_id,
+        });
+      }
+    }
+
+    for (const fact of memoryFacts) {
+      if (fact.type === "action_item") {
+        pushUnique({
+          id: `mem-${fact.id}`,
+          text: fact.text,
+          done: prefs.doneIds.includes(`mem-${fact.id}`),
+          assignee: fact.evidence?.[0]?.speaker_name,
+          source: "memory",
+          segmentId: fact.evidence?.[0]?.segment_id,
+        });
+      }
+    }
+
+    for (const act of m?.actions ?? []) {
+      pushUnique({
+        id: `act-${act.id}`,
+        text: act.label,
+        done: prefs.doneIds.includes(`act-${act.id}`),
+        source: "meeting",
+      });
+    }
+
+    for (const local of prefs.localTasks) {
+      pushUnique({
+        id: local.id,
+        text: local.text,
+        done: local.done,
+        assignee: local.assignee,
+        source: "local",
+      });
+    }
+
+    return rows;
+  }, [liveAssistState?.items, m?.actions, memoryFacts, prefs.doneIds, prefs.localTasks]);
+
+  const decisions = useMemo(() => {
+    const list: Array<{ id: string; text: string; speaker?: string; segmentId?: string }> = [];
+    for (const item of liveAssistState?.items ?? []) {
+      if (item.type === "conclusion") {
+        list.push({ id: item.id, text: item.text, segmentId: item.evidence?.[0]?.segment_id });
+      }
+    }
+    for (const fact of memoryFacts) {
+      if (fact.type === "decision") {
+        list.push({
+          id: `dec-${fact.id}`,
+          text: fact.text,
+          speaker: fact.evidence?.[0]?.speaker_name,
+          segmentId: fact.evidence?.[0]?.segment_id,
+        });
+      }
+    }
+    return list;
+  }, [liveAssistState?.items, memoryFacts]);
+
+  const questionCount = useMemo(() => {
+    const stateQs = (liveAssistState?.items ?? []).filter((item) => item.type === "question").length;
+    const transcriptQs = allLines.filter((l) => (l.text || "").includes("?")).length;
+    return Math.max(stateQs, transcriptQs);
+  }, [allLines, liveAssistState?.items]);
+
+  const firstTsMs = allLines.find((l) => typeof l.tsMs === "number")?.tsMs;
+
+  const outlineChapters = useMemo(() => {
+    const chapters: Array<{ id: string; time: string; title: string; summary: string; segmentId?: string }> = [];
+    const visibleNotes = durableNotes.filter((n) => !n.withdrawn && n.text.trim());
+    for (const note of visibleNotes) {
+      const firstEvidenceSeg =
+        Array.isArray(note.evidence) && note.evidence[0] && typeof note.evidence[0] === "object"
+          ? String((note.evidence[0] as { segment_id?: string }).segment_id || "")
+          : undefined;
+      chapters.push({
+        id: note.id,
+        time: formatChapterClock(note.tsMs ?? (note.t ? note.t * 1000 : undefined), firstTsMs),
+        title: note.chapter || note.speaker || "Discussion",
+        summary: note.text,
+        segmentId: firstEvidenceSeg || undefined,
+      });
+    }
+    if (chapters.length === 0) {
+      for (const item of liveAssistState?.items ?? []) {
+        if (item.type === "agenda" || item.type === "conclusion") {
+          chapters.push({
+            id: item.id,
+            time: formatChapterClock(item.evidence?.[0]?.start_ms, firstTsMs),
+            title: item.type === "agenda" ? "Topic" : "Decision",
+            summary: item.text,
+            segmentId: item.evidence?.[0]?.segment_id,
+          });
+        }
+      }
+    }
+    return chapters;
+  }, [durableNotes, firstTsMs, liveAssistState?.items]);
+
+  const speakerStats = useMemo(() => computeSpeakerStats(allLines), [allLines]);
+  const fallbackDurationSec = useMemo(() => {
+    const mins = m ? meetingDurationMins(m) : null;
+    if (mins != null && mins > 0) return mins * 60;
+    return Math.round(speakerStats.totalDurationMs / 1000);
+  }, [m, speakerStats.totalDurationMs]);
+
   const resolution = meetingResolution(m, byId ? !!fetched : listLoaded);
 
   if (!listed && fetched?.error) {
     return (
-      <div className="tina-web-detail">
-        <p role="alert">{fetched.error}</p>
-        <button type="button" onClick={() => { setDetail(undefined); setDetailAttempt((attempt) => attempt + 1); }}>Try again</button>
-        <button type="button" onClick={onBack}>Back to meetings</button>
+      <div className={styles.shell}>
+        <div className={styles.loadingCenter}>
+          <p role="alert">{fetched.error}</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              onClick={() => {
+                setDetail(undefined);
+                setDetailAttempt((a) => a + 1);
+              }}
+            >
+              Try again
+            </button>
+            <button type="button" className={styles.ghostBtn} onClick={onBack}>
+              Back to meetings
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (needsDetail && resolution === "resolving") {
-    return <div className="tina-web-detail" role="status">Loading meeting…</div>;
+    return (
+      <div className={styles.shell}>
+        <div className={styles.loadingCenter} role="status">
+          Loading meeting…
+        </div>
+      </div>
+    );
   }
 
   if (resolution === "not-found") {
     return (
-      <div className="tina-web-detail">
+      <div className={styles.shell}>
         <MeetingNotFound meetingId={meetingId} onOpenToday={onBack} />
       </div>
     );
   }
 
   const headerState = meetingHeaderState(m, wsConnected);
-  const title = m ? (m.title_custom ?? (m.native_id ?? m.title).replace(/^Google Meet · /, "")) : "Meeting";
-  const when = m ? meetingWhenLabel(m) : "";
+  const title = m ? m.title_custom ?? (m.native_id ?? m.title).replace(/^Google Meet · /, "") : "Meeting";
+  const meetingCode = m?.native_id || m?.id || meetingId;
+  const hostName = m?.participants[0]?.name || speakerStats.speakers[0]?.speaker || user?.name || m?.platform || "Host";
+  const whenText = m ? meetingWhenLabel(m) : "";
+  const durationLabel =
+    fallbackDurationSec > 0 ? formatTalkDuration(fallbackDurationSec * 1000) : m?.platform || "";
+  const summaryText = liveAssistState?.summaries?.meeting || m?.summary || m?.notes || "";
   const canDelete =
     !!m &&
     m.status === "past" &&
@@ -347,58 +992,438 @@ export function MeetingDetailView({
     !m.shared &&
     ["completed", "failed", "stopped"].includes(m.live_status ?? "");
 
-  const deleteMeeting = async (): Promise<string | null> => {
-    if (!m || !canDelete || deleting) return "This meeting is not available to delete.";
+  const updatePrefs = (updater: (cur: LocalMeetingPrefs) => LocalMeetingPrefs) => {
+    setPrefs((cur) => {
+      const next = updater(cur);
+      writeMeetingPrefs(resolvedId, next);
+      return next;
+    });
+  };
+
+  const toggleActionItem = (item: ActionItemRow) => {
+    if (item.source === "live-state" && liveAssistState?.configured && !liveAssistState.readonly) {
+      void liveAssistAction("edit", {
+        id: item.id,
+        expected_revision: item.revision ?? 0,
+        patch: { status: item.done ? "accepted" : "completed" },
+      });
+      return;
+    }
+    if (item.source === "local") {
+      updatePrefs((cur) => ({
+        ...cur,
+        localTasks: cur.localTasks.map((t) => (t.id === item.id ? { ...t, done: !t.done } : t)),
+      }));
+      return;
+    }
+    updatePrefs((cur) => ({
+      ...cur,
+      doneIds: cur.doneIds.includes(item.id)
+        ? cur.doneIds.filter((id) => id !== item.id)
+        : [...cur.doneIds, item.id],
+    }));
+  };
+
+  const addActionItem = async (e: FormEvent) => {
+    e.preventDefault();
+    const text = newTaskDraft.trim();
+    if (!text) return;
+    setNewTaskDraft("");
+    if (liveAssistState?.configured && !liveAssistState.readonly) {
+      await liveAssistAction("add", { type: "task", text, details: {} });
+      return;
+    }
+    updatePrefs((cur) => ({
+      ...cur,
+      localTasks: [
+        ...cur.localTasks,
+        { id: `local-${Date.now()}`, text, done: false, assignee: user?.name || hostName },
+      ],
+    }));
+  };
+
+  const generateAiNotes = async () => {
+    if (!resolvedId || processingBusy) return;
+    setProcessingBusy(true);
+    try {
+      await fetch("/api/meeting/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ meeting_id: resolvedId, native_id: m?.native_id ?? resolvedId, on: true }),
+      });
+      window.dispatchEvent(new CustomEvent("tina:transcript-corrected", { detail: { meetingId: resolvedId } }));
+      void loadDurable();
+    } finally {
+      setProcessingBusy(false);
+    }
+  };
+
+  const runMeetingSkill = async (skill: (typeof MEETING_SKILLS)[number]) => {
+    if (meetingsOnly) return;
+    setSkillOutputs((prev) => ({ ...prev, [skill.id]: { text: "", loading: true } }));
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const activeContext = m
+      ? {
+          kind: "meeting",
+          meeting_id: m.id,
+          platform: m.platform === "Google Meet" ? "google_meet" : m.platform.toLowerCase(),
+          native_id: m.native_id,
+          status: m.live_status,
+          title,
+        }
+      : { kind: "meeting", meeting_id: resolvedId };
+    const controller = new AbortController();
+    try {
+      await streamChatTurn(
+        {
+          prompt: skill.prompt,
+          session: `skill-${resolvedId}-${skill.id}-${Date.now().toString(36)}`,
+          active: activeContext,
+          context: { tz, surface: "web-meeting-skill" },
+        },
+        {
+          onStarting: () => undefined,
+          onTool: () => undefined,
+          onCommit: () => undefined,
+          onRejected: () => {
+            setSkillOutputs((prev) => ({
+              ...prev,
+              [skill.id]: { text: prev[skill.id]?.text ?? "", loading: false, error: "Request was rejected." },
+            }));
+          },
+          onModelFailure: (reply) => {
+            setSkillOutputs((prev) => ({
+              ...prev,
+              [skill.id]: { text: prev[skill.id]?.text ?? "", loading: false, error: reply || "Model inference failed." },
+            }));
+          },
+          onDelta: (delta) => {
+            setSkillOutputs((prev) => ({
+              ...prev,
+              [skill.id]: { text: (prev[skill.id]?.text ?? "") + delta, loading: true },
+            }));
+          },
+          onReply: (reply) => {
+            setSkillOutputs((prev) => ({
+              ...prev,
+              [skill.id]: { text: reply || prev[skill.id]?.text || "", loading: false },
+            }));
+          },
+          onError: (errMsg) => {
+            setSkillOutputs((prev) => ({
+              ...prev,
+              [skill.id]: { text: prev[skill.id]?.text ?? "", loading: false, error: errMsg },
+            }));
+          },
+        },
+        { signal: controller.signal },
+      );
+      setSkillOutputs((prev) => ({
+        ...prev,
+        [skill.id]: { ...prev[skill.id], loading: false },
+      }));
+    } catch (err) {
+      setSkillOutputs((prev) => ({
+        ...prev,
+        [skill.id]: { text: "", loading: false, error: presentError(err).headline },
+      }));
+    }
+  };
+
+  const submitRename = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!m || !renameDraft.trim() || renameBusy) return;
+    setRenameBusy(true);
+    setRenameError(null);
+    try {
+      const res = await fetch(`/api/meetings/${encodeURIComponent(m.id)}/annotate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: renameDraft.trim() }),
+      });
+      if (!res.ok) throw await readApiFailure(res);
+      refreshMeetings();
+      if (needsDetail) setDetailAttempt((a) => a + 1);
+      setRenameOpen(false);
+    } catch (err) {
+      setRenameError(presentMeetingActionFailure(err));
+    } finally {
+      setRenameBusy(false);
+    }
+  };
+
+  const deleteMeeting = async () => {
+    if (!m || !canDelete || deleting) return;
     setDeleting(true);
     try {
       const response = await fetch(`/api/meetings/${encodeURIComponent(m.id)}`, { method: "DELETE" });
       if (!response.ok) throw await readApiFailure(response);
       refreshMeetings();
       onBack();
-      return null;
-    } catch (err) {
-      return presentMeetingActionFailure(err);
     } finally {
       setDeleting(false);
     }
   };
 
-  return (
-    <div className="tina-web-detail">
-      <header className="tina-web-detail-head">
-        <div className="tina-web-detail-id">
-          <button type="button" className="tina-web-btn-ghost" onClick={onBack} aria-label="Back to meetings">
-            <WebIcon name="arrowLeft" size={15} />
-            <span>Back</span>
-          </button>
+  const copyMeetingUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopiedLink(true);
+      window.setTimeout(() => setCopiedLink(false), 1800);
+    } catch {
+      /* ignore */
+    }
+  };
 
-          <div style={{ minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <h1 className="tina-web-detail-title">{title}</h1>
-              {headerState === "live" && <span className="tina-web-status-pill live">Live</span>}
-              {headerState === "pending" && <span className="tina-web-status-pill scheduled">Joining</span>}
-              {headerState === "reconnecting" && <span className="tina-web-status-pill scheduled">Reconnecting…</span>}
-              {phase === "prep" && <span className="tina-web-status-pill scheduled">Planned</span>}
-              {headerState === "recap" && phase === "post" && (
-                <span className="tina-web-status-pill completed">Recap</span>
-              )}
-            </div>
-            {m && (
-              <div className="tina-web-detail-meta">
-                <span>{m.platform}</span>
-                {when && <span>· {when}</span>}
-                {m.participants.length > 0 && <span>· {m.participants.length} participants</span>}
-                {m.has_recording && <span style={{ color: "var(--tw-mint)" }}>· Audio available</span>}
+  const copySummary = async () => {
+    if (!summaryText) return;
+    try {
+      await navigator.clipboard.writeText(summaryText);
+      setCopiedSummary(true);
+      window.setTimeout(() => setCopiedSummary(false), 1800);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const copyFullTranscript = async () => {
+    if (!allLines.length && !voiceReplies.length) return;
+    const startAnchor = m?.start_time ? Date.parse(m.start_time) : undefined;
+    const combined: Array<{ sortMs: number; line: string }> = [
+      ...allLines.map((l, idx) => ({
+        sortMs:
+          typeof l.tsMs === "number" && Number.isFinite(l.tsMs)
+            ? l.tsMs > 100_000_000_000
+              ? l.tsMs
+              : (startAnchor ?? 0) + l.tsMs
+            : (startAnchor ?? 0) + idx,
+        line: `${l.t ? `[${l.t}] ` : ""}${l.speaker || "Speaker"}: ${l.text}`,
+      })),
+      ...voiceReplies.map((r) => {
+        const dt = new Date(r.created_at_ms);
+        const stamp = Number.isFinite(dt.getTime())
+          ? dt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+          : "";
+        const text = r.state === "stopped" && r.played_text != null ? r.played_text : r.text;
+        return {
+          sortMs: r.created_at_ms,
+          line: `${stamp ? `[${stamp}] ` : ""}TINA Agent: ${text}`,
+        };
+      }),
+    ].sort((a, b) => a.sortMs - b.sortMs);
+    try {
+      await navigator.clipboard.writeText(combined.map((item) => item.line).join("\n"));
+      setCopiedTranscript(true);
+      window.setTimeout(() => setCopiedTranscript(false), 1800);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const openTaskCount = actionItems.filter((t) => !t.done).length;
+  const visibleTasks = actionItems.filter((t) =>
+    taskFilter === "pending" ? !t.done : taskFilter === "done" ? t.done : true,
+  );
+  const keywordChips = Array.from(
+    new Set([
+      ...(m?.mentioned ?? []),
+      ...(m?.docs?.map((d) => d.title || d.path.split("/").pop()?.replace(/\.md$/, "") || "") ?? []),
+      ...(m?.participants.map((p) => p.name) ?? []),
+    ]),
+  ).filter(Boolean);
+
+  return (
+    <div className={`${styles.shell} tina-web-embedded-surface`}>
+      {/* Hidden mounted TINA power dialogs */}
+      {resolvedId && phase !== "prep" && (
+        <>
+          <MeetingMemory hideTrigger meetingId={resolvedId} openRef={memoryOpenRef} />
+          <SpeakerRegistry hideTrigger meetingId={resolvedId} openRef={speakersOpenRef} />
+          <TranscriptReview hideTrigger meetingId={resolvedId} openRef={reviewOpenRef} />
+          {phase === "post" && (
+            <DiscussionReview
+              key={`disc-${resolvedId}`}
+              meetingId={resolvedId}
+              meetingTitle={title}
+              openRef={discussionOpenRef}
+            />
+          )}
+        </>
+      )}
+
+      {/* Dedicated Detail Top Bar */}
+      <header className={styles.topBar}>
+        <div className={styles.topBarLeft}>
+          {onOpenMobileNav && (
+            <button
+              type="button"
+              className={styles.mobileMenuBtn}
+              aria-label="Open navigation"
+              onClick={onOpenMobileNav}
+            >
+              <WebIcon name="menu" size={18} />
+            </button>
+          )}
+
+          <nav className={styles.crumb} aria-label="Meeting breadcrumb">
+            <button type="button" className={styles.crumbBack} onClick={onBack}>
+              <WebIcon name="arrowLeft" size={14} />
+              <span>#My Meetings</span>
+            </button>
+            <span className={styles.crumbSep} aria-hidden="true">
+              /
+            </span>
+            <span className={styles.crumbCurrent} title={title}>
+              {meetingCode}
+            </span>
+          </nav>
+
+          {headerState === "live" && <span className={`${styles.statusTag} ${styles.statusTagLive}`}>Live</span>}
+          {headerState === "pending" && <span className={`${styles.statusTag} ${styles.statusTagWarn}`}>Joining</span>}
+          {headerState === "reconnecting" && (
+            <span className={`${styles.statusTag} ${styles.statusTagWarn}`}>Reconnecting…</span>
+          )}
+          {phase === "prep" && <span className={styles.statusTag}>Planned</span>}
+
+          {/* Meeting ••• Options Menu */}
+          <div className={styles.menuWrap} ref={moreRef}>
+            <button
+              type="button"
+              className={styles.iconBtn}
+              aria-label="Meeting options"
+              aria-haspopup="menu"
+              aria-expanded={moreMenuOpen}
+              onClick={() => setMoreMenuOpen((v) => !v)}
+            >
+              <WebIcon name="moreHorizontal" size={16} />
+            </button>
+
+            {moreMenuOpen && (
+              <div className={`${styles.menuPop} ${styles.menuPopLeft}`} role="menu" aria-label="Meeting options">
+                {m && !m.shared && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.menuItem}
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      setRenameDraft(title);
+                      setRenameError(null);
+                      setRenameOpen(true);
+                    }}
+                  >
+                    <WebIcon name="edit" size={14} />
+                    <span>Rename meeting</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={styles.menuItem}
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    void copyMeetingUrl();
+                  }}
+                >
+                  <WebIcon name="link" size={14} />
+                  <span>Copy meeting link</span>
+                </button>
+                {phase !== "prep" && (
+                  <>
+                    <div className={styles.menuDivider} />
+                    {phase === "post" && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={styles.menuItem}
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          discussionOpenRef.current?.();
+                        }}
+                      >
+                        <WebIcon name="fileText" size={14} />
+                        <span>Discussion review</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={styles.menuItem}
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        memoryOpenRef.current?.();
+                      }}
+                    >
+                      <WebIcon name="sparkleSmall" size={14} />
+                      <span>Meeting memory</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={styles.menuItem}
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        speakersOpenRef.current?.();
+                      }}
+                    >
+                      <WebIcon name="users" size={14} />
+                      <span>Speaker identities</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={styles.menuItem}
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        reviewOpenRef.current?.();
+                      }}
+                    >
+                      <WebIcon name="listChecks" size={14} />
+                      <span>Review transcript</span>
+                    </button>
+                  </>
+                )}
+                {canOpenTerminal && (
+                  <>
+                    <div className={styles.menuDivider} />
+                    <a
+                      href={terminalMeetingPath(resolvedId)}
+                      role="menuitem"
+                      className={styles.menuItem}
+                    >
+                      <WebIcon name="terminal" size={14} />
+                      <span>Open in TINA Terminal</span>
+                    </a>
+                  </>
+                )}
+                {canDelete && (
+                  <>
+                    <div className={styles.menuDivider} />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={`${styles.menuItem} ${styles.menuItemDanger}`}
+                      disabled={deleting}
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        void deleteMeeting();
+                      }}
+                    >
+                      <WebIcon name="trash" size={14} />
+                      <span>{deleting ? "Deleting…" : "Delete meeting"}</span>
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
         </div>
 
-        <div className="tina-web-detail-actions">
-          {liveAssistMeetingId && liveAssistState?.can_configure && !liveAssistState.enabled && (
+        <div className={styles.topBarRight}>
+          {isLive && liveAssistState?.can_configure && !liveAssistState.enabled && (
             <button
               type="button"
-              className="tina-web-btn-primary"
+              className={styles.primaryBtn}
               disabled={liveAssistBusy}
               onClick={() => void enableLiveAssist()}
             >
@@ -407,124 +1432,745 @@ export function MeetingDetailView({
             </button>
           )}
 
-          {liveAssistEnabled && (
-            <div className="tina-web-view-tabs" role="tablist" aria-label="Meeting view mode">
+          {m && <BotControls m={m} connected={wsConnected} />}
+
+          {m?.id && !m.shared && (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <ShareSessionButton key={m.id} meetingId={m.id} />
               <button
                 type="button"
-                role="tab"
-                aria-selected={!showingLiveAssist}
-                className={`tina-web-view-tab ${!showingLiveAssist ? "active" : ""}`}
-                onClick={() => setTranscriptViewMeetingId(liveAssistMeetingId)}
+                className={styles.iconBtn}
+                aria-label="Copy link"
+                title={copiedLink ? "Link copied" : "Copy meeting link"}
+                onClick={() => void copyMeetingUrl()}
               >
-                <WebIcon name="list" size={13} />
-                <span>Transcript</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={showingLiveAssist}
-                className={`tina-web-view-tab ${showingLiveAssist ? "active" : ""}`}
-                onClick={() => setTranscriptViewMeetingId("")}
-              >
-                <WebIcon name="fileText" size={13} />
-                <span>Live Assist</span>
+                <WebIcon name={copiedLink ? "check" : "link"} size={15} />
               </button>
             </div>
           )}
 
-          {phase !== "prep" && (
-            <button
-              type="button"
-              className={insightsOpen ? "tina-web-btn-ghost active" : "tina-web-btn-ghost"}
-              aria-expanded={insightsOpen}
-              onClick={() => setInsightsOpen((v) => !v)}
-            >
-              <WebIcon name="chart" size={14} />
-              <span>Talk time</span>
-            </button>
+          {onOpenCapture && (
+            <>
+              <span className={styles.vDivider} aria-hidden="true" />
+              <button
+                type="button"
+                className={styles.iconBtn}
+                aria-label="Capture new meeting"
+                title="Capture or schedule a meeting"
+                onClick={() => onOpenCapture("live")}
+              >
+                <WebIcon name="plus" size={17} />
+              </button>
+            </>
           )}
 
-          {m && !meetingsOnly && phase !== "prep" && (
+          {user && onUserMenuToggle && (
             <button
               type="button"
-              className={askOpen ? "tina-web-btn-primary" : "tina-web-btn-ghost"}
-              aria-expanded={askOpen}
-              onClick={() => setAskOpen((v) => !v)}
+              className={styles.iconBtn}
+              aria-label="Account menu"
+              onClick={onUserMenuToggle}
             >
-              <WebIcon name="tinaAsk" size={14} />
-              <span>{askOpen ? "Hide Ask TINA" : "Ask TINA"}</span>
+              <WebAvatar name={user.name} image={user.image} size={26} />
             </button>
-          )}
-          {m && <BotControls m={m} connected={wsConnected} />}
-          {m?.id && !m.shared && <ShareSessionButton key={m.id} meetingId={m.id} />}
-          {canOpenTerminal && (
-            <a
-              href={terminalMeetingPath(m?.id ?? meetingId)}
-              className="tina-web-btn-ghost"
-              title="Inspect this meeting in TINA Terminal"
-            >
-              <WebIcon name="terminal" size={14} />
-              <span>Terminal</span>
-            </a>
           )}
         </div>
       </header>
 
+      {chatgptPlanIssue && <div className={styles.bannerAlert}><ChatGPTPlanNotice issue={chatgptPlanIssue} /></div>}
       {liveAssistError && !liveAssistState?.enabled && (
-        <div role="alert" className="tina-web-detail-banner danger">
+        <div role="alert" className={styles.bannerAlert}>
           {liveAssistError}
         </div>
       )}
 
       {m && phase === "prep" ? (
-        <PlannedMeetingEditor key={m.id} meeting={m} onBack={onBack}
-          onUpdated={() => { refreshMeetings(); if (needsDetail) setDetailAttempt((attempt) => attempt + 1); }} />
+        <PlannedMeetingEditor
+          key={m.id}
+          meeting={m}
+          onBack={onBack}
+          onUpdated={() => {
+            refreshMeetings();
+            if (needsDetail) setDetailAttempt((a) => a + 1);
+          }}
+        />
       ) : (
-        <div className="tina-web-detail-body">
-          {insightsOpen && (
-            <SpeakerTalkTimePanel meetingId={m?.id ?? meetingId} meeting={m} isLive={phase === "live"} />
-          )}
-
-          <div className="tina-web-detail-canvas">
-            <div className="tina-web-detail-pane" hidden={showingLiveAssist}>
-              <MeetingCanvasView
-                key={m?.id ?? meetingId}
-                meetingId={m?.id ?? meetingId}
-                meetingRecord={m}
-                onDeleteMeeting={canDelete ? deleteMeeting : undefined}
-                deletingMeeting={deleting}
+        <>
+          <div className={styles.body}>
+            {/* Zone 1: Left Smart Search + Speaker Talk Time */}
+            {smartSearchOpen && !fullscreenDoc && (
+              <MeetingSmartSearch
+                meeting={m}
+                lines={allLines}
+                liveAssistState={liveAssistState}
+                taskCount={actionItems.length}
+                questionCount={questionCount}
+                decisionCount={decisions.length}
+                discussionSignals={discussionSignals}
+                isLive={isLive}
+                refreshing={refreshingTranscript}
+                activeSpeaker={speakerFilter}
+                questionsOnly={questionsOnly}
+                activeTracker={trackerFilter}
+                onRefresh={() => void loadDurable()}
+                onSelectTasks={() => setDocTab("tasks")}
+                onToggleQuestions={() => {
+                  setQuestionsOnly((v) => {
+                    const next = !v;
+                    if (next) setSideTab("transcript");
+                    return next;
+                  });
+                }}
+                onSelectSpeaker={(spk) => {
+                  setSpeakerFilter(spk);
+                  if (spk) setSideTab("transcript");
+                }}
+                onSelectTracker={(kw) => {
+                  setTrackerFilter(kw);
+                  if (kw) setSideTab("transcript");
+                }}
               />
-            </div>
-            {liveAssistMeetingId && liveAssistState?.enabled && (
-              <div className="tina-web-detail-pane" hidden={!showingLiveAssist}>
-                <LiveAssistRunningView
-                  key={liveAssistMeetingId}
-                  meetingId={liveAssistMeetingId}
-                  meetingTitle={title}
-                  state={liveAssistState}
-                  busy={liveAssistBusy}
-                  error={liveAssistError}
-                  syncedAt={liveAssistSyncedAt}
-                  pendingDraft={liveAssistDraft}
-                  onAction={liveAssistAction}
-                  onRetryDraft={() => void retryLiveAssistDraft()}
-                />
+            )}
+
+            {/* Zone 2: Center Structured Meeting Document */}
+            <section className={styles.centerMain} aria-label="Meeting notes workspace">
+              <div className={styles.centerTabsRow}>
+                <div className={styles.docTabList} role="tablist" aria-label="Meeting document tabs">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={docTab === "notes"}
+                    className={styles.docTabBtn}
+                    onClick={() => setDocTab("notes")}
+                  >
+                    <span>Notes</span>
+                  </button>
+                  {!meetingsOnly && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={docTab === "skills"}
+                      className={styles.docTabBtn}
+                      onClick={() => setDocTab("skills")}
+                    >
+                      <span>AI Skills</span>
+                      <span className={styles.tabBadge}>{MEETING_SKILLS.length}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={docTab === "tasks"}
+                    className={styles.docTabBtn}
+                    onClick={() => setDocTab("tasks")}
+                  >
+                    <span>Action Items</span>
+                    <span className={styles.tabBadge}>{openTaskCount}</span>
+                  </button>
+                  {liveAssistEnabled && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={docTab === "live-assist"}
+                      className={styles.docTabBtn}
+                      onClick={() => setDocTab("live-assist")}
+                    >
+                      <span>Live Assist</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className={styles.centerToolsRight}>
+                  {phase === "post" && resolvedId && (
+                    <LiveMeetingState
+                      key={`state-${resolvedId}`}
+                      meetingId={resolvedId}
+                      meetingTitle={title}
+                      onSourceJump={(segId) => {
+                        setSideTab("transcript");
+                        seekSegment(segId);
+                      }}
+                    />
+                  )}
+                  <div className={styles.menuWrap} ref={toolsRef}>
+                    <button
+                      type="button"
+                      className={styles.iconBtn}
+                      aria-label="Meeting tools"
+                      title="Meeting tools"
+                      aria-expanded={toolsMenuOpen}
+                      onClick={() => setToolsMenuOpen((v) => !v)}
+                    >
+                      <WebIcon name="sliders" size={15} />
+                    </button>
+                    {toolsMenuOpen && (
+                      <div className={styles.menuPop} role="menu" aria-label="Meeting analysis tools">
+                        {phase === "post" && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className={styles.menuItem}
+                            onClick={() => {
+                              setToolsMenuOpen(false);
+                              discussionOpenRef.current?.();
+                            }}
+                          >
+                            <WebIcon name="fileText" size={14} />
+                            <span>Discussion review</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className={styles.menuItem}
+                          onClick={() => {
+                            setToolsMenuOpen(false);
+                            memoryOpenRef.current?.();
+                          }}
+                        >
+                          <WebIcon name="sparkleSmall" size={14} />
+                          <span>Meeting memory</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className={styles.menuItem}
+                          onClick={() => {
+                            setToolsMenuOpen(false);
+                            speakersOpenRef.current?.();
+                          }}
+                        >
+                          <WebIcon name="users" size={14} />
+                          <span>Speaker identities</span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className={styles.menuItem}
+                          onClick={() => {
+                            setToolsMenuOpen(false);
+                            reviewOpenRef.current?.();
+                          }}
+                        >
+                          <WebIcon name="listChecks" size={14} />
+                          <span>Review transcript</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className={`${styles.iconBtn} ${fullscreenDoc ? styles.iconBtnActive : ""}`}
+                    aria-label={fullscreenDoc ? "Exit fullscreen notes" : "Fullscreen notes"}
+                    title={fullscreenDoc ? "Show side panels" : "Expand notes"}
+                    onClick={() => setFullscreenDoc((v) => !v)}
+                  >
+                    <WebIcon name={fullscreenDoc ? "minimize" : "maximize"} size={15} />
+                  </button>
+                </div>
               </div>
+
+              {docTab === "live-assist" && liveAssistEnabled && liveAssistState ? (
+                <div className={styles.liveAssistPane}>
+                  <LiveAssistRunningView
+                    key={resolvedId}
+                    meetingId={resolvedId}
+                    meetingTitle={title}
+                    state={liveAssistState}
+                    busy={liveAssistBusy}
+                    error={liveAssistError}
+                    syncedAt={liveAssistSyncedAt}
+                    pendingDraft={liveAssistDraft}
+                    onAction={liveAssistAction}
+                    onRetryDraft={() => void retryLiveAssistDraft()}
+                  />
+                </div>
+              ) : (
+                <div className={styles.docScroll}>
+                  <div className={styles.docInner}>
+                    {/* Meeting Title & Metadata Header */}
+                    <div>
+                      <div className={styles.docTitleRow}>
+                        <div className={styles.docTitleGroup}>
+                          <h1 className={styles.docTitle}>{title}</h1>
+                          <span className={styles.meetingCode}>#{meetingCode}</span>
+                        </div>
+                        {audioFragments.length > 0 && (
+                          <button
+                            type="button"
+                            className={styles.ghostBtn}
+                            onClick={() => playerRef.current?.togglePlay()}
+                          >
+                            <WebIcon name="video" size={15} />
+                            <span>Recording</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <div className={styles.docMeta} style={{ marginTop: 12 }}>
+                        <span className={styles.docMetaHost}>
+                          <WebAvatar name={hostName} size={20} />
+                          <span>{hostName}</span>
+                        </span>
+                        {whenText && (
+                          <>
+                            <span className={styles.docMetaSep} aria-hidden="true" />
+                            <span>{whenText}</span>
+                          </>
+                        )}
+                        {durationLabel && (
+                          <>
+                            <span className={styles.docMetaSep} aria-hidden="true" />
+                            <span>{durationLabel}</span>
+                          </>
+                        )}
+                        <span className={styles.docMetaSep} aria-hidden="true" />
+                        <label className={styles.langSelectWrap}>
+                          <WebIcon name="globe" size={14} />
+                          <select
+                            aria-label="Transcript language"
+                            className={styles.langSelect}
+                            value={language}
+                            onChange={(e) => setLanguage(e.currentTarget.value as TranscriptLanguage)}
+                          >
+                            <option value="bilingual">Song ngữ (VI / EN)</option>
+                            <option value="vi">Tiếng Việt</option>
+                            <option value="en">English</option>
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* TAB: NOTES */}
+                    {docTab === "notes" && (
+                      <>
+                        {/* AI Executive Summary Card */}
+                        <section className={styles.summaryCard} aria-label="AI Executive Summary">
+                          <div className={styles.summaryHead}>
+                            <span className={styles.summaryLabel}>
+                              <WebIcon name="sparkleSmall" size={15} />
+                              <span>AI Executive Summary</span>
+                            </span>
+                            <div className={styles.summaryActions}>
+                              {summaryText && (
+                                <button type="button" className={styles.ghostBtn} onClick={() => void copySummary()}>
+                                  <WebIcon name={copiedSummary ? "check" : "copy"} size={13} />
+                                  <span>{copiedSummary ? "Copied" : "Copy"}</span>
+                                </button>
+                              )}
+                              {phase === "post" && !summaryText && (
+                                <button
+                                  type="button"
+                                  className={styles.ghostBtn}
+                                  disabled={processingBusy}
+                                  onClick={() => void generateAiNotes()}
+                                >
+                                  <span>{processingBusy ? "Generating…" : "Generate AI notes"}</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {summaryText ? (
+                            <p className={styles.summaryText}>{summaryText}</p>
+                          ) : (
+                            <div className={styles.summaryEmpty}>
+                              <p>
+                                {isLive
+                                  ? "Summary updates once enough transcript segments are captured or Live Assist is enabled."
+                                  : "No executive summary has been saved for this meeting yet."}
+                              </p>
+                              {!meetingsOnly && (
+                                <div>
+                                  <button
+                                    type="button"
+                                    className={styles.primaryBtn}
+                                    onClick={() =>
+                                      setPendingAskPrompt(
+                                        "Write a concise executive summary of this meeting including main topics and key decisions.",
+                                      )
+                                    }
+                                  >
+                                    <WebIcon name="sparkleSmall" size={14} />
+                                    <span>Summarize with Ask Tina</span>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </section>
+
+                        {phase === "post" && /^[1-9]\d*$/.test(resolvedId) && (
+                          <PostMeetingDraft key={resolvedId} meetingId={resolvedId} />
+                        )}
+
+                        {/* Action Items Section */}
+                        <section className={styles.docSection} aria-label="Action items">
+                          <div className={styles.docSectionHead}>
+                            <h3>Action Items</h3>
+                            <span className={styles.countTag}>{openTaskCount} pending</span>
+                          </div>
+
+                          {actionItems.length > 0 && (
+                            <div className={styles.taskList}>
+                              {actionItems.map((item) => (
+                                <div
+                                  key={item.id}
+                                  className={`${styles.taskRow} ${item.done ? styles.taskRowDone : ""}`}
+                                >
+                                  <button
+                                    type="button"
+                                    className={`${styles.taskCheck} ${item.done ? styles.taskCheckChecked : ""}`}
+                                    aria-label={item.done ? "Mark pending" : "Mark done"}
+                                    onClick={() => toggleActionItem(item)}
+                                  >
+                                    {item.done && <WebIcon name="check" size={12} />}
+                                  </button>
+                                  <div className={styles.taskBody}>
+                                    <span className={styles.taskText} onClick={() => toggleActionItem(item)}>
+                                      {item.text}
+                                    </span>
+                                  </div>
+                                  {item.assignee && <span className={styles.taskAssignee}>@{item.assignee}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <form className={styles.addTaskForm} onSubmit={(e) => void addActionItem(e)}>
+                            <input
+                              type="text"
+                              className={styles.addTaskInput}
+                              aria-label="Add new action item"
+                              placeholder="Add new action item…"
+                              value={newTaskDraft}
+                              onChange={(e) => setNewTaskDraft(e.target.value)}
+                            />
+                            <button type="submit" className={styles.primaryBtn} disabled={!newTaskDraft.trim()}>
+                              Add
+                            </button>
+                          </form>
+                        </section>
+
+                        {/* Chapters & Outline */}
+                        {outlineChapters.length > 0 && (
+                          <section className={styles.docSection} aria-label="Chapters and outline">
+                            <div className={styles.docSectionHead}>
+                              <h3>Chapters &amp; Outline</h3>
+                              <span className={styles.countTag}>{outlineChapters.length}</span>
+                            </div>
+                            <div className={styles.outlineTimeline}>
+                              {outlineChapters.map((chapter) => (
+                                <div key={chapter.id} className={styles.outlineRow}>
+                                  <button
+                                    type="button"
+                                    className={styles.outlineTime}
+                                    onClick={() => {
+                                      setSideTab("transcript");
+                                      if (chapter.segmentId) seekSegment(chapter.segmentId);
+                                    }}
+                                  >
+                                    <WebIcon name="play" size={10} />
+                                    <span>{chapter.time}</span>
+                                  </button>
+                                  <div className={styles.outlineContent}>
+                                    <strong>{chapter.title}</strong>
+                                    <p>{chapter.summary}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </section>
+                        )}
+
+                        {/* Keywords & Connected Entities */}
+                        {keywordChips.length > 0 && (
+                          <section className={styles.docSection} aria-label="Keywords and participants">
+                            <div className={styles.docSectionHead}>
+                              <h3>Participants &amp; Tracked Topics</h3>
+                            </div>
+                            <div className={styles.keywordWrap}>
+                              {keywordChips.map((chip) => (
+                                <button
+                                  key={chip}
+                                  type="button"
+                                  className={styles.keywordChip}
+                                  onClick={() => {
+                                    setTrackerFilter(chip);
+                                    setSideTab("transcript");
+                                  }}
+                                >
+                                  <span>#{chip}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </section>
+                        )}
+                      </>
+                    )}
+
+                    {/* TAB: AI SKILLS */}
+                    {docTab === "skills" && !meetingsOnly && (
+                      <div className={styles.docSection}>
+                        <div className={styles.docSectionHead}>
+                          <div>
+                            <h3>AI Apps &amp; Skills for this Meeting</h3>
+                            <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--tw-text-3)" }}>
+                              Run grounded TINA analysis on this meeting transcript to generate structured outputs.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className={styles.skillsGrid}>
+                          {MEETING_SKILLS.map((skill) => {
+                            const run = skillOutputs[skill.id];
+                            return (
+                              <article key={skill.id} className={styles.skillCard}>
+                                <span className={styles.skillMeta}>{skill.category}</span>
+                                <h4>{skill.title}</h4>
+                                <p>{skill.description}</p>
+                                {run?.error && (
+                                  <div role="alert" style={{ fontSize: 12.5, color: "var(--tw-danger)" }}>
+                                    {run.error}
+                                  </div>
+                                )}
+                                {run?.text && (
+                                  <div className={styles.skillOutput}>
+                                    <Markdown>{run.text}</Markdown>
+                                  </div>
+                                )}
+                                <div className={styles.skillFooter}>
+                                  <button
+                                    type="button"
+                                    className={run?.text ? styles.ghostBtn : styles.primaryBtn}
+                                    disabled={run?.loading}
+                                    onClick={() => void runMeetingSkill(skill)}
+                                  >
+                                    <span>{run?.loading ? "Running…" : run?.text ? "Regenerate" : "Run skill"}</span>
+                                  </button>
+                                  {run?.text && (
+                                    <button
+                                      type="button"
+                                      className={styles.ghostBtn}
+                                      onClick={() => {
+                                        void navigator.clipboard.writeText(run.text);
+                                        setCopiedSkillId(skill.id);
+                                        window.setTimeout(() => setCopiedSkillId(null), 1800);
+                                      }}
+                                    >
+                                      <WebIcon name={copiedSkillId === skill.id ? "check" : "copy"} size={13} />
+                                      <span>{copiedSkillId === skill.id ? "Copied" : "Copy"}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* TAB: ACTION ITEMS */}
+                    {docTab === "tasks" && (
+                      <div className={styles.docSection}>
+                        <div className={styles.docSectionHead}>
+                          <h3>All Action Items ({actionItems.length})</h3>
+                          <div className={styles.docTabList}>
+                            {(["all", "pending", "done"] as const).map((f) => (
+                              <button
+                                key={f}
+                                type="button"
+                                className={styles.docTabBtn}
+                                aria-selected={taskFilter === f}
+                                onClick={() => setTaskFilter(f)}
+                              >
+                                {f === "all" ? "All" : f === "pending" ? "Pending" : "Done"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {visibleTasks.length === 0 ? (
+                          <p style={{ margin: 0, fontSize: 13.5, color: "var(--tw-text-3)" }}>
+                            No action items in this view yet. Add one below or ask Tina to extract action items.
+                          </p>
+                        ) : (
+                          <div className={styles.taskList}>
+                            {visibleTasks.map((item) => (
+                              <div
+                                key={item.id}
+                                className={`${styles.taskRow} ${item.done ? styles.taskRowDone : ""}`}
+                              >
+                                <button
+                                  type="button"
+                                  className={`${styles.taskCheck} ${item.done ? styles.taskCheckChecked : ""}`}
+                                  aria-label={item.done ? "Mark pending" : "Mark done"}
+                                  onClick={() => toggleActionItem(item)}
+                                >
+                                  {item.done && <WebIcon name="check" size={12} />}
+                                </button>
+                                <div className={styles.taskBody}>
+                                  <span className={styles.taskText} onClick={() => toggleActionItem(item)}>
+                                    {item.text}
+                                  </span>
+                                </div>
+                                {item.assignee && <span className={styles.taskAssignee}>@{item.assignee}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <form className={styles.addTaskForm} onSubmit={(e) => void addActionItem(e)}>
+                          <input
+                            type="text"
+                            className={styles.addTaskInput}
+                            aria-label="Add new action item"
+                            placeholder="Add new action item…"
+                            value={newTaskDraft}
+                            onChange={(e) => setNewTaskDraft(e.target.value)}
+                          />
+                          <button type="submit" className={styles.primaryBtn} disabled={!newTaskDraft.trim()}>
+                            Add
+                          </button>
+                        </form>
+
+                        {decisions.length > 0 && (
+                          <div className={styles.docSection} style={{ marginTop: 12 }}>
+                            <div className={styles.docSectionHead}>
+                              <h3>Key Decisions ({decisions.length})</h3>
+                            </div>
+                            <div className={styles.taskList}>
+                              {decisions.map((d) => (
+                                <div key={d.id} className={styles.taskRow}>
+                                  <span className={styles.dot} style={{ marginTop: 6 }} aria-hidden="true" />
+                                  <div className={styles.taskBody}>
+                                    <span className={styles.taskText}>{d.text}</span>
+                                  </div>
+                                  {d.speaker && <span className={styles.taskAssignee}>@{d.speaker}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* Zone 3: Right Ask Tina & Transcript Panel */}
+            {!fullscreenDoc && (
+              <MeetingSidePanel
+                meetingId={resolvedId}
+                meeting={m}
+                firstName={user?.firstName || "there"}
+                meetingsOnly={meetingsOnly}
+                sideTab={sideTab}
+                onSideTabChange={setSideTab}
+                lines={allLines}
+                processedNotes={durableNotes}
+                voiceReplies={voiceReplies}
+                meetingStartMs={m?.start_time ? Date.parse(m.start_time) : undefined}
+                isLive={isLive}
+                language={language}
+                translationSnapshot={translation.snapshot}
+                translationError={translation.error}
+                onRetryTranslation={translation.retry}
+                speakerFilter={speakerFilter}
+                questionsOnly={questionsOnly}
+                trackerFilter={trackerFilter}
+                onClearSpeaker={() => setSpeakerFilter("")}
+                onClearQuestions={() => setQuestionsOnly(false)}
+                onClearTracker={() => setTrackerFilter("")}
+                playableSegmentIds={playableSegmentIds}
+                activeSegmentId={activeSegmentId}
+                onSegmentClick={canPlayMeetingAudio && audioFragments.length ? seekSegment : undefined}
+                pendingPrompt={pendingAskPrompt}
+                onConsumePendingPrompt={() => setPendingAskPrompt(null)}
+              />
             )}
           </div>
 
-          {m && !meetingsOnly && askOpen && (
-            <aside className="tina-web-detail-ask" aria-label="Ask TINA about this meeting">
-              <MeetingKnowledge key={`web-knowledge-${m.id}`} meetingId={String(m.id)} />
-            </aside>
-          )}
+          {/* Zone 4: Bottom Docked Studio Audio Player */}
+          <MeetingBottomPlayer
+            ref={playerRef}
+            fragments={audioFragments}
+            audioLoading={audioLoading}
+            audioMessage={audioMessage}
+            isLive={isLive}
+            fallbackDurationSec={fallbackDurationSec}
+            starred={prefs.starred}
+            reviewed={prefs.reviewed}
+            copiedTranscript={copiedTranscript}
+            smartSearchOpen={smartSearchOpen}
+            onToggleStar={() => updatePrefs((cur) => ({ ...cur, starred: !cur.starred }))}
+            onToggleReviewed={() => updatePrefs((cur) => ({ ...cur, reviewed: !cur.reviewed }))}
+            onCopyTranscript={() => void copyFullTranscript()}
+            onToggleSmartSearch={() => {
+              setFullscreenDoc(false);
+              setSmartSearchOpen((v) => !v);
+            }}
+            onPositionChange={(pos) => {
+              setPlaybackPosition(pos);
+              setPlaybackActive(true);
+            }}
+          />
+        </>
+      )}
+
+      {/* Inline Rename Modal */}
+      {renameOpen && (
+        <div
+          className={styles.modalBackdrop}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Rename meeting"
+          onClick={() => setRenameOpen(false)}
+        >
+          <form
+            className={styles.modalCard}
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => void submitRename(e)}
+          >
+            <h2>Rename meeting</h2>
+            <input
+              type="text"
+              className={styles.addTaskInput}
+              aria-label="Meeting title"
+              value={renameDraft}
+              onChange={(e) => setRenameDraft(e.target.value)}
+              autoFocus
+            />
+            {renameError && (
+              <div role="alert" style={{ fontSize: 12.5, color: "var(--tw-danger)" }}>
+                {renameError}
+              </div>
+            )}
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.ghostBtn} onClick={() => setRenameOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" className={styles.primaryBtn} disabled={renameBusy || !renameDraft.trim()}>
+                {renameBusy ? "Saving…" : "Save title"}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>
   );
 }
 
-function PlannedMeetingEditor({ meeting, onBack, onUpdated }: { meeting: MeetingMock; onBack: () => void; onUpdated: () => void }) {
+function PlannedMeetingEditor({
+  meeting,
+  onBack,
+  onUpdated,
+}: {
+  meeting: MeetingMock;
+  onBack: () => void;
+  onUpdated: () => void;
+}) {
   const [title, setTitle] = useState(meeting.title_custom || meeting.title || "");
   const [meetingUrl, setMeetingUrl] = useState(meeting.meeting_url || "");
   const [scheduledAt, setScheduledAt] = useState(() => {

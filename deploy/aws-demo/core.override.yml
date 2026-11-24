@@ -5,9 +5,9 @@ services:
     image: ghcr.io/poor-frog/tina-agent-reach:demo
   admin-api:
     image: ghcr.io/poor-frog/tina-admin-api:demo
-    # The original compose points to host.docker.internal:18002; use private Speech IP instead.
     environment:
-      TINA_GIPFORMER_URL: ${TRANSCRIPTION_SERVICE_URL:?Set private Speech IP in core-env}
+      TINA_VIEGEM_TOKEN: ${TRANSCRIPTION_SERVICE_TOKEN:?Set private Speech token in core-env}
+      TINA_VIEGEM_URL: ${TRANSCRIPTION_SERVICE_URL:?Set private Speech IP in core-env}
   runtime:
     image: ghcr.io/poor-frog/tina-runtime:demo
   agent-worker:

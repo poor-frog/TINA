@@ -79,6 +79,27 @@ def test_missing_evidence_does_not_masquerade_as_a_question_about_an_ambiguous_r
     assert voice_failure('retrieval_empty')['text'].endswith('?')
 
 
+def test_voice_verifier_rejects_a_sourced_fact_that_only_identifies_the_subject():
+    from shared.voice_knowledge import verify_voice_reply
+
+    source = {'id': 's0', 'quote': 'Bảo phụ trách kiểm thử.'}
+    candidate = {'claims': [{'text': source['quote'], 'source_ids': ['s0']}]}
+
+    def review(prompt):
+        turn = json.loads(prompt)
+        assert turn['reply'] == candidate
+        approved = turn['question'].startswith('Ai phụ trách')
+        return json.dumps({'approved': True} if approved else
+                          {'approved': False, 'reason': 'unsupported_claim', 'claim_indexes': [0]})
+
+    alone = json.loads(verify_voice_reply(json.dumps(candidate), 'Số điện thoại của người phụ trách là gì?',
+                                        [source], review, repair=lambda _: '{"claims":[]}', diagnostics=True))
+    partial = json.loads(verify_voice_reply(json.dumps(candidate), 'Ai phụ trách và số điện thoại là gì?',
+                                          [source], review, diagnostics=True))
+    assert alone['claims'] == []
+    assert partial['claims'] == candidate['claims'] and partial['verification'] == ['approved']
+
+
 def test_pending_clarification_keeps_original_goal_and_corrections_but_expires():
     first = {'question': 'Tóm tắt phần đó.', 'answer': 'Bạn muốn tóm tắt chủ đề nào?',
              'clarification': True, 'created_at_ms': NOW - 2000, 'sources': []}
@@ -372,6 +393,35 @@ def test_malformed_voice_reply_gets_one_regeneration_and_still_requires_source_r
         assert output[0]['verification'] == ['approved']
     else:
         assert not output or not output[0]['claims']
+    assert events[-1]['type'] == 'turn-complete'
+
+
+@pytest.mark.parametrize('provider_error', [False, True])
+def test_voice_worker_distinguishes_empty_evidence_from_provider_failure(monkeypatch, provider_error):
+    from types import SimpleNamespace
+    from llm.errors import LLMError
+    from shared.meeting_knowledge import PREFIX
+    from worker import engine
+
+    monkeypatch.setenv('TINA_CHAT_SESSION', 'meeting-knowledge-missing')
+    events, calls = [], []
+
+    def complete(prompt, **kwargs):
+        calls.append(prompt)
+        if provider_error:
+            raise LLMError('fixture transport failure')
+        return SimpleNamespace(text='{"claims":[],"follow_up":"Bạn có thể cung cấp số điện thoại không?"}')
+
+    monkeypatch.setattr(engine, 'completion_from_env', lambda **_: SimpleNamespace(complete=complete))
+    stream = SimpleNamespace(xadd=lambda _, event: events.append(json.loads(event['event'])), expire=lambda *_: None)
+    source = {'mode': 'voice', 'question': 'Số điện thoại của Lan là gì?',
+              'sources': [{'id': 's0', 'quote': 'Lan phụ trách bản demo.'}], 'tools_remaining': 0}
+    payload = {'request_id': 'missing', 'text': json.dumps(source)}
+    engine._run_meeting_knowledge(stream, 'fixture', {'entrypoint': {'inline': PREFIX + json.dumps(payload)}})
+    assert len(calls) == 1
+    assert [json.loads(event['text']) for event in events if event['type'] == 'message-delta'] == (
+        [] if provider_error else [{'claims': [], 'verification': []}]
+    )
     assert events[-1]['type'] == 'turn-complete'
 
 

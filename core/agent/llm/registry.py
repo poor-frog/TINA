@@ -14,18 +14,21 @@ import os
 
 from llm.anthropic_api import AnthropicCompletion
 from llm.antigravity import AntigravityHarness
+from llm.bedrock_converse import BedrockConverseCompletion
 from llm.claude_cli import ClaudeCliCompletion
 from llm.claude_code import ClaudeCodeHarness
 from llm.codex import CodexHarness
 from llm.errors import LLMConfigError
 from llm.openai_compat import OpenAICompatCompletion
-from llm.openai_responses import OpenAIResponsesCompletion
+from llm.openai_responses import ChatGPTPlanCompletion, OpenAIResponsesCompletion
 from llm.ports import CompletionPort, HarnessPort
 
 COMPLETION_PROVIDERS: dict[str, type] = {
     "openai-compat": OpenAICompatCompletion,
     "openai-responses": OpenAIResponsesCompletion,
+    "chatgpt-plan": ChatGPTPlanCompletion,
     "anthropic": AnthropicCompletion,
+    "bedrock-converse": BedrockConverseCompletion,
     # Subscription-credential deployments: beats ride the claude CLI (no API key needed).
     "claude-cli": ClaudeCliCompletion,
 }

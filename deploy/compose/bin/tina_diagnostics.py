@@ -8,7 +8,7 @@ import urllib.parse
 import urllib.request
 
 LIMIT = 262144
-BACKENDS = {"deployment", "custom", "apple", "nvidia", "funasr", "sherpa", "gipformer", "viegem"}
+BACKENDS = {"deployment", "custom", "apple", "nvidia", "funasr", "sherpa", "viegem"}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

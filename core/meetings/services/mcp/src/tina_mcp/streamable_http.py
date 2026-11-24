@@ -19,6 +19,8 @@ from typing import Any
 
 from fastapi import HTTPException, Request, Response
 from fastapi_mcp.transport.http import FastApiHttpSessionManager
+from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+from mcp.server.auth.provider import AccessToken
 from starlette.types import Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
@@ -56,13 +58,26 @@ async def handle_fastapi_request_streaming(
     )
 
 
-def install_streaming_http_transport(mcp: Any) -> None:
+def install_streaming_http_transport(mcp: Any, *, require_gateway_identity: bool = False) -> None:
     """Patch the mounted FastApiMCP HTTP transport so sessioned GET SSE can start (#921)."""
     http_transport = getattr(mcp, "_http_transport", None)
     if http_transport is None:
         raise RuntimeError("FastApiMCP has no _http_transport — call mount_http() first")
 
     async def _handle(request: Request) -> Response:
+        if require_gateway_identity:
+            # Gateway strips caller-supplied identity headers. The private transport accepts only Gateway traffic.
+            subject = request.headers.get("x-user-id", "")
+            scopes = request.headers.get("x-user-scopes", "").split(",")
+            if not subject.isascii() or not subject.isdecimal() or "tx" not in scopes or not request.headers.get("x-api-key"):
+                raise HTTPException(403, "Transcript access is required")
+            # Only use the credential that Gateway actually resolved for this principal.
+            request.scope["headers"] = [
+                (name, value) for name, value in request.scope["headers"] if name.lower() != b"authorization"
+            ]
+            request.scope["user"] = AuthenticatedUser(
+                AccessToken(token="", client_id="tina-gateway", subject=subject, scopes=scopes)
+            )
         return await handle_fastapi_request_streaming(http_transport, request)
 
     http_transport.handle_fastapi_request = _handle  # type: ignore[method-assign]

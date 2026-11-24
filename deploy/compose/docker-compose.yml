@@ -246,8 +246,7 @@ services:
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
       # Decrypted at startup by stack.py; never copied into platform_settings.
       - TINA_VIEGEM_TOKEN=${TINA_VIEGEM_TOKEN:-}
-      - TINA_GIPFORMER_TOKEN=${TRANSCRIPTION_SERVICE_TOKEN:-}
-      - TINA_GIPFORMER_URL=http://host.docker.internal:${GIPFORMER_HOST_PORT:-18002}
+      - TINA_VIEGEM_URL=${TINA_VIEGEM_URL:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # ── the publish edge (config.v1 class `publish-edge`) ──────────────────────────────────
       # Identity hands `onboarding.completed` to flows here. Same variable, same default-empty
@@ -392,6 +391,7 @@ services:
       # single-user fallback keeps the dev stack working (shared subject). Remove it once the gateway fronts
       # agent-api and X-User-Id is always present — then a missing header fails closed (401).
       - TINA_AGENT_DEFAULT_SUBJECT=${TINA_AGENT_DEFAULT_SUBJECT:-u_live}
+      - TINA_DRAFT_PILOT_USER_IDS=${TINA_DRAFT_PILOT_USER_IDS:-}
       # Server-owned tool.v1 names available to interactive chat; request bodies cannot add tools.
       - 'TINA_CHAT_TOOLBELT=${TINA_CHAT_TOOLBELT:-["reach.web.search","reach.web.read","reach.github.search","reach.github.read"]}'
       - TINA_AGENT_REACH_URL=${TINA_AGENT_REACH_URL-http://agent-reach:8080}
@@ -610,47 +610,6 @@ services:
         condition: service_completed_successfully
     networks: [tina]
     restart: unless-stopped
-
-  # Gipformer 1.5 + FSMN-VAD, CPU-only. Model assets stay in the existing pinned host directory.
-  gipformer-models:
-    profiles: ["asr"]
-    build:
-      context: ../..
-      dockerfile: deploy/transcription/gipformer/Dockerfile
-    image: tina/v012-gipformer:${IMAGE_TAG:-dev}
-    entrypoint: ["python", "/app/gipformer/install-models.py", "--directory", "/app/models/gipformer-fsmn"]
-    volumes:
-      - ../transcription/models/gipformer-fsmn:/app/models/gipformer-fsmn
-    networks: [tina]
-
-  gipformer:
-    profiles: ["asr"]
-    build:
-      context: ../..
-      dockerfile: deploy/transcription/gipformer/Dockerfile
-    image: tina/v012-gipformer:${IMAGE_TAG:-dev}
-    environment:
-      - TINA_GIPFORMER_HOST=0.0.0.0
-      - TINA_GIPFORMER_PORT=8000
-      - TINA_GIPFORMER_MODEL_DIR=/app/models/gipformer-fsmn
-      - TINA_GIPFORMER_TOKEN=${TRANSCRIPTION_SERVICE_TOKEN:-}
-      - TINA_GIPFORMER_DRAIN_KEY=${TINA_GIPFORMER_DRAIN_KEY:-}
-    ports:
-      - "127.0.0.1:${GIPFORMER_HOST_PORT:-18002}:8000"
-    volumes:
-      - ../transcription/models/gipformer-fsmn:/app/models/gipformer-fsmn:ro
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-    init: true
-    restart: unless-stopped
-    depends_on:
-      gipformer-models:
-        condition: service_completed_successfully
-    networks: [tina]
 
   viegem-models:
     profiles: ["viegem"]

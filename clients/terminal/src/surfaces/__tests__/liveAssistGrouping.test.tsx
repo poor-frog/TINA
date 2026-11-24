@@ -3,12 +3,13 @@ import { linkedAgendaIds } from "../LiveAssistRunningView";
 import type { LiveMeetingItem } from "../liveMeetingStateApi";
 
 describe("live agenda assignment", () => {
-  const topic = { id: "topic", details: { agenda_ids: ["first"] } } as LiveMeetingItem;
-  const agendas = ["first", "second"].map((id) => ({ id, type: "agenda" } as LiveMeetingItem));
+  const fixture = (id: string, type: string, details?: LiveMeetingItem["details"]): LiveMeetingItem =>
+    ({ id, type, details, text: "", status: "accepted", revision: 0, human: false, provisional: false, stale: false, evidence: [] });
+  const topic = fixture("topic", "topic", { agenda_ids: ["first"] });
+  const agendas = ["first", "second"].map((id) => fixture(id, "agenda"));
   const items = new Map([topic, ...agendas].map((entry) => [entry.id, entry]));
-  const item = (agendaIds?: string[]) => ({
-    id: "discussion", details: { topic_id: topic.id, ...(agendaIds && { agenda_ids: agendaIds }) },
-  } as LiveMeetingItem);
+  const item = (agendaIds?: string[]) =>
+    fixture("discussion", "discussion", { topic_id: topic.id, ...(agendaIds && { agenda_ids: agendaIds }) });
 
   it("keeps an explicit no-match ungrouped even when its topic has an agenda", () => {
     expect(linkedAgendaIds(item([]), items)).toEqual([]);

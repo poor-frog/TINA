@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from 'react';
 import { VoiceReplySources } from './VoiceReplySources';
+import { ChatGPTPlanNotice, type ChatGPTPlanIssue } from './ChatGPTPlanNotice';
 
 interface Policy { enabled: boolean; include_transcript: boolean; include_approved_actions?:boolean; shared_meeting_ids?:number[]; documents: string[]; revision: number; wake_variants: string[]; noise_suppression:boolean; allow_general_knowledge?:boolean; allow_web_search?:boolean }
 const button = { padding: '6px 10px', background: 'var(--panel2)', color: 'var(--t1)', border: '1px solid var(--line2)', borderRadius: 6, cursor: 'pointer' } as const;
@@ -57,6 +58,7 @@ export function MeetingVoice({ meetingId, nativeId, repliesOnly = false }: { mee
   const [runtime, setRuntime] = useState<Runtime>({ state: 'OFF' });
   const [sourceReply, setSourceReply] = useState<string | null>(null);
   const [replies, setReplies] = useState<VoiceReply[]>([]);
+  const [chatgptPlanIssue, setChatgptPlanIssue] = useState<ChatGPTPlanIssue | null>(null);
   const [documents, setDocuments] = useState<Array<{ path: string; title: string }>>([]);
   const [available, setAvailable] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -75,6 +77,7 @@ export function MeetingVoice({ meetingId, nativeId, repliesOnly = false }: { mee
     const stale = () => setRuntime(current => ({ ...current, heartbeat_fresh: false, diagnostic: null, audio: null }));
     setSourceReply(new URLSearchParams(window.location.search).get('voiceSource'));
     dirty.current = false; setLoaded(false); setPolicy(empty); setRuntime({ state: 'OFF' }); setReplies([]); setError(''); setDocuments([]);
+    setChatgptPlanIssue(null);
     async function refresh() {
       try {
         const r = await fetch(base, { cache: 'no-store', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(5000)]) });
@@ -82,6 +85,7 @@ export function MeetingVoice({ meetingId, nativeId, repliesOnly = false }: { mee
         const value = await r.json();
         if (abort.signal.aborted) return;
         setRuntime(value.runtime); setReplies(value.replies || []); setAvailable(value.available); setLoaded(true);
+        setChatgptPlanIssue(value.chatgpt_plan_issue ?? null);
         clearTimeout(expiryTimer);
         expiryTimer = setTimeout(stale, 15000);
         setError(current => current === statusError ? '' : current);
@@ -215,6 +219,7 @@ export function MeetingVoice({ meetingId, nativeId, repliesOnly = false }: { mee
       {error && <p role="alert" style={{ margin: 0, color: 'var(--warn)' }}>{error}</p>}
     </div>
   </details>}
+    {chatgptPlanIssue && <div style={{ margin: repliesOnly ? 0 : '0 24px 16px' }}><ChatGPTPlanNotice issue={chatgptPlanIssue} /></div>}
     {repliesOnly && error && <p role="alert" style={{ margin: '0 0 8px', color: 'var(--warn)', fontSize: 12 }}>Không tải được câu trả lời của TINA.</p>}
     {replies.length > 0 && <section aria-label="TINA trả lời" style={{ margin: repliesOnly ? 0 : '0 24px 16px', display: 'grid', gap: 8, maxHeight: repliesOnly ? undefined : '30vh', overflowY: repliesOnly ? 'visible' : 'auto', flexShrink: 0 }}>
       {[...replies].reverse().map(reply => <article key={reply.request_id} style={{ padding: 12, border: '1px solid var(--line2)', borderRadius: 8, background: 'var(--panel2)' }}>

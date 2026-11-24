@@ -77,7 +77,7 @@ it('Refresh shows actual per-bot KWS readiness and failure instead of claiming d
   let status='ready';
   vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>{
     if(String(input)==='/api/user/voice')return Response.json({prepare_new_bots:null});
-    if(String(input)==='/api/user/transcription')return Response.json({effective:{label:'Gipformer 1.5'}});
+    if(String(input)==='/api/user/transcription')return Response.json({effective:{label:'VieGem + LM'}});
     if(String(input)==='/api/bots/voice/services')return Response.json({...services,wake:{...services.wake,status,sessions:[{meeting_id:14,status}]}});
     return new Response('',{status:404});
   }));
@@ -87,7 +87,7 @@ it('Refresh shows actual per-bot KWS readiness and failure instead of claiming d
   await screen.findByText('Meeting #14 · Ready');
   status='failed';fireEvent.click(screen.getByRole('tab',{name:'Voice'}));fireEvent.click(screen.getByRole('button',{name:'Refresh status'}));
   await screen.findByText('Meeting #14 · Unavailable');
-  expect(screen.getByText(/Questions use Gipformer 1.5/)).toBeTruthy();
+  expect(screen.getByText(/Questions use VieGem \+ LM/)).toBeTruthy();
 });
 
 it('preview is local WAV playback and its URL is revoked when settings closes',async()=>{

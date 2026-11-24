@@ -449,6 +449,9 @@ def create_app(
         else:
             headers["x-api-key"] = client_key
         headers["x-user-id"] = str(user_id)
+        if _agent_present and request.url.path.startswith("/agent/"):
+            # Only authenticated Gateway requests can carry this marker to the private Agent API.
+            headers["x-gateway-verified"] = "1"
         # The RESOLVED verified email (never client-declared; /internal/validate returns it). agent-api's
         # membership redeem (Lane M) checks it for RESTRICTED invites (allowed_emails).
         if user_data.get("email"):

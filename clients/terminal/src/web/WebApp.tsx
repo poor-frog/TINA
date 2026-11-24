@@ -97,7 +97,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
   const initial = useMemo(() => readInitialRoute(initialMeetingId), [initialMeetingId]);
   const [view, setView] = useState<WebNavView>(initial.view);
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(initial.meetingId);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(initial.view === "meeting");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -144,6 +144,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
   const openMeeting = useCallback((meetingId: string) => {
     setActiveMeetingId(meetingId);
     setView("meeting");
+    setSidebarCollapsed(true);
     setUserMenuOpen(false);
     if (typeof window !== "undefined") {
       const target = meetingPath(meetingId);
@@ -228,6 +229,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
               title={VIEW_TITLES[view]}
               liveMeeting={liveMeetings[0]}
               wsConnected={wsConnected}
+              hideBar={view === "meeting"}
               onOpenMobileNav={() => setMobileNavOpen((v) => !v)}
               onOpenSearch={() => setSearchOpen(true)}
               onOpenMeeting={openMeeting}
@@ -276,7 +278,14 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
                 wsConnected={wsConnected}
                 meetingsOnly={meetOnly}
                 canOpenTerminal={canOpenTerminal}
+                user={user}
                 onBack={() => navigate("meetings")}
+                onOpenMobileNav={() => setMobileNavOpen((v) => !v)}
+                onOpenCapture={openCapture}
+                onUserMenuToggle={(event) => {
+                  event.stopPropagation();
+                  setUserMenuOpen((cur) => !cur);
+                }}
               />
             )}
 

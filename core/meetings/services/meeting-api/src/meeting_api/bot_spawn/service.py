@@ -495,6 +495,11 @@ async def request_bot(
         pref = (bot_context.get('voice') or {}).get('prepare_new_bots')
         context_available = bool(bot_context) or not os.getenv('ADMIN_API_URL', '').strip()
         voice_agent_enabled = context_available and bool(os.getenv('TTS_SERVICE_URL', '').strip()) and pref is not False
+    voice_pilot_rooms = set(os.getenv("TINA_MEETING_VOICE_PILOT_ROOM", "").replace(",", " ").split())
+    voice_assistant_capable = bool(
+        voice_agent_enabled and platform == "google_meet" and env_flag("TINA_MEETING_VOICE", False)
+        and (not voice_pilot_rooms or native_meeting_id in voice_pilot_rooms)
+    )
     configured = _transcription_from_context(bot_context)
     # O-TEL-1 fixture collection, resolved from the SAME best-effort lookup (one hop, two readers).
     # Default ON: only an explicit false from identity stops the tape.
@@ -517,7 +522,7 @@ async def request_bot(
     configured_backend = configured.get("backend")
     if configured.get("disabled") and transcribe_enabled:
         raise TranscriptionNotConfigured("transcription is stopped for this account — start it in Settings")
-    if transcribe_enabled and configured_backend in ("apple", "nvidia", "funasr", "sherpa", "gipformer", "viegem", "custom"):
+    if transcribe_enabled and configured_backend in ("apple", "nvidia", "funasr", "sherpa", "viegem", "custom"):
         if not configured.get("url"):
             raise TranscriptionNotConfigured(
                 f"the selected {configured_backend} transcription backend is not configured "
@@ -751,10 +756,10 @@ async def request_bot(
             }
         if "canonical_notes" not in (reused_row.get("data") or {}):
             policy_patch["canonical_notes"] = {"enabled": True, "windows": {}}
-        if (voice_agent_enabled and transcribe_enabled and platform=='google_meet' and env_flag('TINA_MEETING_VOICE',False)
+        if (voice_assistant_capable and transcribe_enabled
                 and not (reused_row.get('data') or {}).get('voice_assistant')):
             from ..lifecycle.voice import new_meeting_voice_policy
-            policy_patch['voice_assistant']=new_meeting_voice_policy()
+            policy_patch['voice_assistant']=new_meeting_voice_policy(transcript_only=bool(voice_pilot_rooms))
         row = await repo.reopen_meeting(
             meeting_id=reused_row["id"],
             data_patch={
@@ -762,7 +767,7 @@ async def request_bot(
                 "transcribe_enabled": transcribe_enabled,
                 "recording_enabled": recording_enabled,
                 "voice_agent_enabled": voice_agent_enabled,
-                "voice_assistant_capable": bool(voice_agent_enabled and platform == "google_meet" and env_flag("TINA_MEETING_VOICE", False)),
+                "voice_assistant_capable": voice_assistant_capable,
                 "transcription_provider": transcription_provider,
                 "service_authority": authority_record,
             },
@@ -794,10 +799,10 @@ async def request_bot(
         meeting_data["transcribe_enabled"] = transcribe_enabled
         meeting_data["recording_enabled"] = recording_enabled
         meeting_data["voice_agent_enabled"] = voice_agent_enabled
-        meeting_data["voice_assistant_capable"] = bool(voice_agent_enabled and platform == "google_meet" and env_flag("TINA_MEETING_VOICE", False))
+        meeting_data["voice_assistant_capable"] = voice_assistant_capable
         if meeting_data['voice_assistant_capable'] and transcribe_enabled:
             from ..lifecycle.voice import new_meeting_voice_policy
-            meeting_data['voice_assistant']=new_meeting_voice_policy()
+            meeting_data['voice_assistant']=new_meeting_voice_policy(transcript_only=bool(voice_pilot_rooms))
         if transcription_provider is not None:
             meeting_data["transcription_provider"] = transcription_provider
         meeting_data["service_authority"] = authority_record
@@ -924,7 +929,7 @@ async def request_bot(
             tts_env["TTS_SERVICE_URL"] = tts_url
         if tts_token:
             tts_env["TTS_API_TOKEN"] = tts_token
-    if voice_agent_enabled and platform == 'google_meet' and env_flag('TINA_MEETING_VOICE', False):
+    if voice_assistant_capable:
         from ..lifecycle.voice import voice_token
         tts_env.update(TINA_VOICE_URL=f'{meeting_api_url}/bots/voice/{meeting_id}/{connection_id}',
                        TINA_VOICE_TOKEN=voice_token(token_secret, meeting_id, connection_id),

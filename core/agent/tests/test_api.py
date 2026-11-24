@@ -79,7 +79,7 @@ def test_voice_dispatch_preserves_trace_metadata_separately_from_model_input(tmp
     from control_plane.workspace_reader import WorkspaceReader
     from shared.meeting_knowledge import PREFIX
     captured = []
-    monkeypatch.setattr(meeting_knowledge, 'register', lambda *args: captured.append(args[-1]))
+    monkeypatch.setattr(meeting_knowledge, 'register', lambda *args, **kwargs: captured.append(args[-1]))
     class Reader:
         def read(self, *args, **kwargs):
             yield {'type': 'message-delta', 'text': '{"claims":[]}'}
@@ -2132,7 +2132,7 @@ def test_sandbox_dispatch_freezes_the_live_voice_lease_and_rejects_cancelled_tur
     from control_plane.workspace_reader import WorkspaceReader
     from shared.meeting_knowledge import PREFIX
     captured=[];invocations=[];holder=['session:00000000-0000-4000-8000-000000000001']
-    monkeypatch.setattr(meeting_knowledge,'register',lambda *args:captured.append(args[-1]))
+    monkeypatch.setattr(meeting_knowledge,'register',lambda *args, **kwargs:captured.append(args[-1]))
     class Connection:
         def get(self,key):assert key=='meeting:voice:1:lock';return holder[0]
         def delete(self,*args):pass
@@ -2162,7 +2162,7 @@ def test_direct_voice_revocation_stops_only_its_worker(monkeypatch,tmp_path):
     from control_plane import meeting_knowledge
     from control_plane.workspace_reader import WorkspaceReader
     captured=[];stopped=[];holder=['session:00000000-0000-4000-8000-000000000001']
-    monkeypatch.setattr(meeting_knowledge,'register',lambda *args:captured.append(args[-1]))
+    monkeypatch.setattr(meeting_knowledge,'register',lambda *args, **kwargs:captured.append(args[-1]))
     class Connection:
         def get(self,key):return holder[0]
         def delete(self,*args):pass

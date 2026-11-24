@@ -87,7 +87,10 @@ class Runtime:
         return ev
 
     def _persist(self, spec: WorkloadSpec, status: WorkloadStatus) -> None:
-        self.store.set(WorkloadRecord(spec=spec, status=status, owner=self.owner_resolver(spec)))
+        owner = self.owner_resolver(spec)
+        if spec.env.get("TINA_POST_MEETING_DRAFT") == "1":
+            spec = spec.model_copy(update={"env": {}})
+        self.store.set(WorkloadRecord(spec=spec, status=status, owner=owner))
 
     def _record(self, workload_id: str) -> WorkloadRecord:
         record = self.store.get(workload_id)
@@ -260,7 +263,7 @@ class Runtime:
             self.backend.terminate(h)                               # graceful SIGTERM + grace window
             deadline = time.time() + self.grace_sec
             while self.backend.exit_code(h) is None and time.time() < deadline:
-                time.sleep(0.02)
+                time.sleep(getattr(self.backend, "stop_poll_interval", 0.02))
             if self.backend.exit_code(h) is None:
                 self.backend.kill(h)                                # force after grace
             code = self.backend.exit_code(h)

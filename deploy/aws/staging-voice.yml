@@ -1,0 +1,188 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private VieNeu speech synthesis and single-node LiveKit for TINA staging.
+
+Parameters:
+  ClusterName: {Type: String}
+  VpcId: {Type: 'AWS::EC2::VPC::Id'}
+  AppSubnetIds: {Type: 'List<AWS::EC2::Subnet::Id>'}
+  AppSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  ServiceNamespaceId: {Type: String}
+  VieNeuImage: {Type: String, AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'}
+  LiveKitImage: {Type: String, AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'}
+  AgentImage: {Type: String, AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'}
+  DesiredCount: {Type: Number, Default: 0, MinValue: 0, MaxValue: 1}
+
+Resources:
+  TtsToken:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  TtsProfileKey:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  LiveKitSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties: {RetentionInDays: 7}
+  Ingress:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Private TINA staging speech and WebRTC ports
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 7880, ToPort: 7881, SourceSecurityGroupId: !Ref AppSecurityGroupId}
+        - {IpProtocol: udp, FromPort: 7882, ToPort: 7882, SourceSecurityGroupId: !Ref AppSecurityGroupId}
+        - {IpProtocol: tcp, FromPort: 8000, ToPort: 8000, SourceSecurityGroupId: !Ref AppSecurityGroupId}
+        - {IpProtocol: tcp, FromPort: 8080, ToPort: 8080, SourceSecurityGroupId: !Ref AppSecurityGroupId}
+  Discovery:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: voice
+      DnsConfig:
+        NamespaceId: !Ref ServiceNamespaceId
+        DnsRecords: [{Type: A, TTL: 15}]
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: PullImagesAndReadVoiceSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer]
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-staging/vieneu'
+                  - !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-staging/livekit'
+                  - !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-staging/livekit-agent'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt Logs.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: [!Ref TtsToken, !Ref TtsProfileKey, !Ref LiveKitSecret]
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AWS::StackName
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '2048'
+      Memory: '8192'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: vieneu
+          Image: !Ref VieNeuImage
+          Essential: true
+          PortMappings: [{ContainerPort: 8000}]
+          LinuxParameters: {InitProcessEnabled: true}
+          Secrets:
+            - {Name: TTS_API_TOKEN, ValueFrom: !Ref TtsToken}
+            - {Name: TINA_TTS_PROFILE_KEY, ValueFrom: !Ref TtsProfileKey}
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).close()"]
+            Interval: 15
+            Timeout: 5
+            Retries: 5
+            StartPeriod: 120
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+        - Name: livekit
+          Image: !Ref LiveKitImage
+          Essential: true
+          PortMappings:
+            - {ContainerPort: 7880}
+            - {ContainerPort: 7881}
+            - {ContainerPort: 7882, Protocol: udp}
+          Environment:
+            - Name: LIVEKIT_CONFIG
+              Value: |
+                port: 7880
+                bind_addresses: ["0.0.0.0"]
+                rtc:
+                  use_external_ip: false
+                  tcp_port: 7881
+                  udp_port: 7882
+                logging:
+                  level: warn
+          Secrets:
+            - {Name: LIVEKIT_API_SECRET, ValueFrom: !Ref LiveKitSecret}
+          EntryPoint: [/bin/sh, -ec]
+          Command: ['export LIVEKIT_KEYS="tina-staging: $LIVEKIT_API_SECRET"; unset LIVEKIT_API_SECRET; exec /livekit-server']
+          HealthCheck:
+            Command: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:7880/']
+            Interval: 15
+            Timeout: 5
+            Retries: 4
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+        - Name: agent
+          Image: !Ref AgentImage
+          Essential: true
+          DependsOn:
+            - {ContainerName: vieneu, Condition: HEALTHY}
+            - {ContainerName: livekit, Condition: HEALTHY}
+          PortMappings: [{ContainerPort: 8080}]
+          LinuxParameters: {InitProcessEnabled: true}
+          Environment:
+            - {Name: LIVEKIT_URL, Value: 'ws://127.0.0.1:7880'}
+            - {Name: LIVEKIT_API_KEY, Value: tina-staging}
+            - {Name: MEETING_API_URL, Value: 'http://core.tina-staging.local:8080'}
+            - {Name: TTS_SERVICE_URL, Value: 'http://127.0.0.1:8000'}
+            - {Name: TINA_LIVEKIT_AUDIO, Value: '1'}
+          Secrets:
+            - {Name: LIVEKIT_API_SECRET, ValueFrom: !Ref LiveKitSecret}
+            - {Name: TTS_API_TOKEN, ValueFrom: !Ref TtsToken}
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=12).close()"]
+            Interval: 15
+            Timeout: 14
+            Retries: 5
+            StartPeriod: 60
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+  Voice:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ClusterName
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      PlatformVersion: '1.4.0'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetIds
+          SecurityGroups: [!Ref AppSecurityGroupId, !GetAtt Ingress.GroupId]
+      ServiceRegistries:
+        - RegistryArn: !GetAtt Discovery.Arn
+      DeploymentConfiguration:
+        # Cloud Map must point at one LiveKit node for the lifetime of a room.
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+
+Outputs:
+  ServiceName: {Value: !GetAtt Voice.Name}
+  TtsUrl: {Value: 'http://voice.tina-staging.local:8000'}
+  AgentUrl: {Value: 'http://voice.tina-staging.local:8080'}
+  LiveKitUrl: {Value: 'ws://voice.tina-staging.local:7880'}
+  TtsTokenArn: {Value: !Ref TtsToken}
+  TtsProfileKeyArn: {Value: !Ref TtsProfileKey}
+  LogGroupName: {Value: !Ref Logs}

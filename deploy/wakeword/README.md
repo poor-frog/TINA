@@ -5,8 +5,7 @@ and **hey TINA**. Standalone TINA and ê TINA detectors/checkpoints were deleted
 loaded model sessions across bounded channel-local streams; 64 ms capture packets feed 80 ms
 inference steps. No cloud wake-word service is used.
 
-KWS authorizes one caller; the existing selected VieGem + KenLM + FSMN-VAD or Gipformer 1.5 +
-FSMN-VAD still supplies question text and the uninterrupted meeting transcript. A corrected copy
+KWS authorizes one caller; the existing selected VieGem + KenLM + FSMN-VAD still supplies question text and the uninterrupted meeting transcript. A corrected copy
 may remove recognized name variants after acoustic confirmation. Raw ASR/transcript is unchanged.
 ASR text alone cannot activate a new KWS bot. Cached hypotheses handle ASR arriving before KWS;
 source clocks, channel identity and Stop generations fence older audio and late responses.

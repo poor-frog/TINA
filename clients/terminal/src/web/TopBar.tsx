@@ -18,6 +18,7 @@ export function WebTopBar({
   title,
   liveMeeting,
   wsConnected,
+  hideBar = false,
   onOpenMobileNav,
   onOpenSearch,
   onOpenMeeting,
@@ -30,6 +31,7 @@ export function WebTopBar({
   title: string;
   liveMeeting?: MeetingMock;
   wsConnected: boolean;
+  hideBar?: boolean;
   onOpenMobileNav: () => void;
   onOpenSearch: () => void;
   onOpenMeeting: (meetingId: string) => void;
@@ -60,7 +62,7 @@ export function WebTopBar({
 
   return (
     <>
-      <header className="tina-web-topbar">
+      {!hideBar && <header className="tina-web-topbar">
         <div className="tina-web-topbar-left">
           <button
             type="button"
@@ -179,7 +181,7 @@ export function WebTopBar({
             )}
           </div>
         </div>
-      </header>
+      </header>}
 
       {captureOpen && (
         <CaptureMeetingModal

@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: TINA meetings-only Terminal behind the staging internal ALB and CloudFront.
+
+Parameters:
+  ClusterName: {Type: String}
+  VpcId: {Type: 'AWS::EC2::VPC::Id'}
+  AppSubnetIds: {Type: 'List<AWS::EC2::Subnet::Id>'}
+  CoreClientSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  AlbSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  ListenerArn: {Type: String}
+  StageUrl: {Type: String}
+  TerminalImage:
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'
+  TerminalRepositoryArn: {Type: String}
+  AdminTokenArn: {Type: String}
+  InternalSecretArn: {Type: String}
+  GoogleSecretArn: {Type: String, Default: ''}
+
+Conditions:
+  GoogleEnabled: !Not [!Equals [!Ref GoogleSecretArn, '']]
+
+Resources:
+  NextAuthSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  TerminalLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: {RetentionInDays: 7}
+  TerminalIngress:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Terminal HTTP from the internal staging ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 3000, ToPort: 3000, SourceSecurityGroupId: !Ref AlbSecurityGroupId}
+  TerminalTargets:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      Port: 3000
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /api/auth/providers
+      HealthCheckIntervalSeconds: 15
+      HealthyThresholdCount: 2
+  TerminalRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ListenerArn
+      Priority: 100
+      Conditions:
+        - {Field: path-pattern, Values: ['/*']}
+      Actions:
+        - {Type: forward, TargetGroupArn: !Ref TerminalTargets}
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: PullTerminalAndInjectSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer]
+                Resource: !Ref TerminalRepositoryArn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt TerminalLogs.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref AdminTokenArn
+                  - !Ref InternalSecretArn
+                  - !Ref NextAuthSecret
+                  - !If [GoogleEnabled, !Ref GoogleSecretArn, !Ref 'AWS::NoValue']
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AWS::StackName
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '512'
+      Memory: '1024'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: terminal
+          Image: !Ref TerminalImage
+          Essential: true
+          PortMappings: [{ContainerPort: 3000}]
+          Environment:
+            - {Name: NODE_ENV, Value: production}
+            - {Name: HOSTNAME, Value: 0.0.0.0}
+            - {Name: PORT, Value: '3000'}
+            - {Name: NEXT_PUBLIC_TERMINAL_MODE, Value: meetings}
+            - {Name: GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
+            - {Name: TINA_API_URL, Value: 'http://core.tina-staging.local:8000'}
+            - {Name: TINA_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}
+            - {Name: NEXTAUTH_URL, Value: !Ref StageUrl}
+            - {Name: TERMINAL_URL, Value: !Ref StageUrl}
+          Secrets:
+            - {Name: TINA_ADMIN_API_KEY, ValueFrom: !Ref AdminTokenArn}
+            - {Name: TINA_INTERNAL_API_SECRET, ValueFrom: !Ref InternalSecretArn}
+            - {Name: NEXTAUTH_SECRET, ValueFrom: !Ref NextAuthSecret}
+            - !If
+              - GoogleEnabled
+              - {Name: GOOGLE_CLIENT_ID, ValueFrom: !Sub '${GoogleSecretArn}:client_id::'}
+              - !Ref AWS::NoValue
+            - !If
+              - GoogleEnabled
+              - {Name: GOOGLE_CLIENT_SECRET, ValueFrom: !Sub '${GoogleSecretArn}:client_secret::'}
+              - !Ref AWS::NoValue
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref TerminalLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+  TerminalService:
+    Type: AWS::ECS::Service
+    DependsOn: TerminalRule
+    Properties:
+      Cluster: !Ref ClusterName
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      PlatformVersion: '1.4.0'
+      HealthCheckGracePeriodSeconds: 60
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetIds
+          SecurityGroups: [!Ref CoreClientSecurityGroupId, !GetAtt TerminalIngress.GroupId]
+      LoadBalancers:
+        - {ContainerName: terminal, ContainerPort: 3000, TargetGroupArn: !Ref TerminalTargets}
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+
+Outputs:
+  StageUrl:
+    Value: !Ref StageUrl
+  TerminalServiceName:
+    Value: !GetAtt TerminalService.Name
+  TargetGroupArn:
+    Value: !Ref TerminalTargets

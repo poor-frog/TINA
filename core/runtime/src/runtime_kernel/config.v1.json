@@ -6,7 +6,7 @@
    "key": "RUNTIME_BACKEND",
    "class": "defaulted",
    "default": "docker",
-   "description": "spawn backend: docker (host socket API), k8s (Pods via kubectl under the runtime's RBAC), process (child processes — lite)",
+   "description": "spawn backend: docker (host socket API), k8s (Pods via kubectl under the runtime's RBAC), process (child processes — lite), ecs (Fargate meeting-bot tasks)",
    "targets": [
     "helm",
     "lite"

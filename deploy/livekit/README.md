@@ -164,7 +164,7 @@ wake-word quality benchmark; compare original/NS Low/DTLN on the same recordings
 
 `TINA_LIVEKIT_AUDIO=1` routes **both continuous transcript windows and voice-question ASR** through
 a custom `livekit.agents.stt.STT` adapter in this service. The model and token are pinned to the
-backend selected when each Google Meet bot starts: VieGem + KenLM + FSMN-VAD or Gipformer + FSMN-VAD.
+backend selected when each Google Meet bot starts: VieGem + KenLM + FSMN-VAD or a configured OpenAI-compatible endpoint.
 ASR window sizes, retries/LocalAgreement in the bot, original segment offsets, quality checks and
 the sole Meeting API transcript writer stay in place. Continuous transcript does not enter
 AgentSession as a question. This uses standalone SDK recognition, not a whole-utterance
@@ -181,7 +181,7 @@ the same client quality/language filters before LocalAgreement can confirm them.
 Cache misses/checksum disagreement or a disconnected stream fall back to the exact original WAV over
 the existing authenticated HTTP bridge. Subsequent frames reconnect; late replies from the old socket
 are ignored. Request aborts cancel the matching SDK inference. Turn close releases its server cache;
-disconnect releases all caches/tasks. Continuous input still uses windowed VieGem/Gipformer inference,
+disconnect releases all caches/tasks. Continuous input still uses windowed ASR inference,
 not model-native streaming. No new VAD, endpoint threshold or confirmation policy is enabled.
 
 The same private bridge performs the selected **DTLN or WebRTC NS Low** once before splitting PCM into

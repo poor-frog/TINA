@@ -170,7 +170,7 @@ jobs:
           set -euo pipefail
           services=(
             terminal gateway meeting-api agent-api admin-api runtime agent-worker
-            mcp flows dashboard agent-reach bot gipformer viegem
+            mcp flows dashboard agent-reach bot viegem
           )
           sources=()
           for service in "${services[@]}"; do

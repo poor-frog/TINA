@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private PostgreSQL and Valkey for TINA staging on ECS.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  DataSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  DeployValkey:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+
+Conditions:
+  WithValkey: !Equals [!Ref DeployValkey, 'true']
+
+Resources:
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: TINA staging application tasks
+      VpcId: !Ref VpcId
+  PostgresSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PostgreSQL from TINA staging application tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref AppSecurityGroup
+  ValkeySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: WithValkey
+    Properties:
+      GroupDescription: Valkey from TINA staging application tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref AppSecurityGroup
+
+  PostgresSubnets:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: TINA staging private data subnets
+      SubnetIds: !Ref DataSubnetIds
+  Postgres:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      Engine: postgres
+      EngineVersion: '17'
+      DBInstanceClass: db.t4g.micro
+      DBName: tina
+      MasterUsername: tinaadmin
+      ManageMasterUserPassword: true
+      DBSubnetGroupName: !Ref PostgresSubnets
+      VPCSecurityGroups: [!Ref PostgresSecurityGroup]
+      StorageType: gp3
+      AllocatedStorage: '20'
+      StorageEncrypted: true
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 1
+      MultiAZ: false
+
+  ValkeySubnets:
+    Type: AWS::ElastiCache::SubnetGroup
+    Condition: WithValkey
+    Properties:
+      Description: TINA staging private data subnets
+      SubnetIds: !Ref DataSubnetIds
+  ValkeyAuth:
+    Type: AWS::SecretsManager::Secret
+    Condition: WithValkey
+    Properties:
+      GenerateSecretString:
+        PasswordLength: 48
+        ExcludePunctuation: true
+  Valkey:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Condition: WithValkey
+    Properties:
+      ReplicationGroupDescription: TINA staging Valkey
+      Engine: valkey
+      EngineVersion: '8.0'
+      CacheNodeType: cache.t4g.micro
+      ClusterMode: disabled
+      NumCacheClusters: 1
+      AutomaticFailoverEnabled: false
+      MultiAZEnabled: false
+      CacheSubnetGroupName: !Ref ValkeySubnets
+      SecurityGroupIds: [!Ref ValkeySecurityGroup]
+      AtRestEncryptionEnabled: true
+      TransitEncryptionEnabled: true
+      TransitEncryptionMode: required
+      AuthToken: !Sub '{{resolve:secretsmanager:${ValkeyAuth}:SecretString}}'
+
+Outputs:
+  AppSecurityGroupId:
+    Value: !GetAtt AppSecurityGroup.GroupId
+  PostgresHost:
+    Value: !GetAtt Postgres.Endpoint.Address
+  PostgresSecretArn:
+    Value: !GetAtt Postgres.MasterUserSecret.SecretArn
+  ValkeyHost:
+    Condition: WithValkey
+    Value: !GetAtt Valkey.PrimaryEndPoint.Address
+  ValkeySecretArn:
+    Condition: WithValkey
+    Value: !Ref ValkeyAuth

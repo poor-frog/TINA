@@ -80,17 +80,14 @@ class ControlTests(unittest.TestCase):
             self.assertNotIn('TTS_API_TOKEN', saved['env'])
 
     def test_missing_optional_viegem_profile_keeps_runtime_status_available(self):
-        selected = SimpleNamespace(services={"admin-api": {"environment": {}}, "gipformer": {}},
-            viegem_device="disabled", endpoint=lambda service, _: {"gipformer": "http://gipformer"}[service])
-        workers = control.Workers(selected)
-        self.controller.workers = workers
-        with patch.object(control, "request_json", return_value={
-                "model": {"asr_model": "g-group-ai-lab/gipformer1.5-68M-rnnt", "device": "cpu"}}) as probe:
+        selected = SimpleNamespace(services={"admin-api": {"environment": {}}}, viegem_device="disabled")
+        self.controller.workers = control.Workers(selected)
+        with patch.object(control, "request_json") as probe:
             result = self.controller.status("1")
-        self.assertTrue(result["workers"]["gipformer"]["ready"])
         self.assertFalse(result["workers"]["viegem"]["running"])
         self.assertFalse(result["workers"]["viegem"]["ready"])
-        probe.assert_called_once_with("http://gipformer/status", timeout=1)
+        self.assertEqual(set(result["workers"]), {"viegem"})
+        probe.assert_not_called()
 
     def test_native_mps_status_does_not_require_a_compose_viegem_service(self):
         selected = SimpleNamespace(services={"admin-api": {"environment": {}}}, context="orbstack", viegem_device="mps",
@@ -130,15 +127,15 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(result["ready"])
         probe.assert_called_once_with("http://127.0.0.1:18005/status", timeout=1)
 
-    def test_switch_keeps_worker_required_by_another_account(self):
-        self.controller.select("1", "gipformer", True, 0)
+    def test_pause_keeps_worker_required_by_another_account(self):
+        self.controller.select("1", "viegem", False, 0)
         self.assertTrue(self.workers.running["viegem"])
         self.assertEqual(self.identity.users["2"]["backend"], "viegem")
-        self.controller.select("2", "gipformer", True, 0)
+        self.controller.select("2", "viegem", False, 0)
         self.assertFalse(self.workers.running["viegem"])
     def test_busy_sessions_and_inflight_audio_prevent_stop(self):
         self.workers.busy_now = True
-        self.controller.select("1", "gipformer", True, 0); self.controller.select("2", "gipformer", True, 0)
+        self.controller.select("1", "viegem", False, 0); self.controller.select("2", "viegem", False, 0)
         self.assertTrue(self.workers.running["viegem"])
         self.workers.busy_now = False; self.workers.can_drain = False; self.controller.reconcile()
         self.assertTrue(self.workers.running["viegem"])
@@ -147,7 +144,7 @@ class ControlTests(unittest.TestCase):
         original = self.identity.read
         def fail(_=None): raise control.ControlError(503, "Identity unavailable")
         self.identity.read = fail
-        with self.assertRaises(control.ControlError): self.controller._retire({"gipformer": 1, "viegem": 0})
+        with self.assertRaises(control.ControlError): self.controller._retire({"viegem": 0})
         self.assertIn(("drain", "viegem", False), self.workers.calls)
         self.assertTrue(self.workers.running["viegem"])
         self.identity.read = original
@@ -156,15 +153,15 @@ class ControlTests(unittest.TestCase):
         self.controller.unneeded_since["viegem"] = -1000
         original = self.workers.status
         self.workers.status = lambda name: {**original(name), "idle_seconds": 2}
-        self.controller._retire({"gipformer": 1, "viegem": 0})
+        self.controller._retire({"viegem": 0})
         self.assertTrue(self.workers.running["viegem"])
         self.assertFalse(any(call[0] == "drain" for call in self.workers.calls))
     def test_failed_start_and_stale_selection_never_overwrite_preferences(self):
         before = copy.deepcopy(self.identity.users); self.workers.fail_start = True
-        with self.assertRaises(control.ControlError): self.controller.select("1", "gipformer", True, 0)
+        with self.assertRaises(control.ControlError): self.controller.select("1", "viegem", True, 0)
         self.assertEqual(self.identity.users, before)
         self.workers.fail_start = False
-        with self.assertRaises(control.ControlError): self.controller.select("1", "gipformer", True, 99)
+        with self.assertRaises(control.ControlError): self.controller.select("1", "viegem", True, 99)
         self.assertEqual(self.identity.users, before)
 
     def test_http_requires_derived_key_and_rejects_extra_fields(self):
@@ -177,12 +174,13 @@ class ControlTests(unittest.TestCase):
             try:
                 with urllib.request.urlopen(req) as response: return response.status, json.load(response)
             except urllib.error.HTTPError as error: return error.code, json.load(error)
-        payload = {"user_id": "1", "backend": "gipformer", "enabled": True, "revision": 0}
+        payload = {"user_id": "1", "backend": "viegem", "enabled": True, "revision": 0}
         self.assertEqual(call(payload, "wrong")[0], 401)
         self.assertEqual(call({**payload, "command": "stop everything"}, "control-private")[0], 422)
+        self.assertEqual(call({**payload, "backend": "gipformer"}, "control-private")[0], 422)
         code, body = call(payload, "control-private")
         self.assertEqual(code, 200)
-        self.assertEqual(body["account"]["backend"], "gipformer")
+        self.assertEqual(body["account"]["backend"], "viegem")
         self.assertNotIn("control-private", str(body))
 
     def test_discord_sessions_hold_workers_and_unavailable_connector_fails_safe(self):

@@ -146,45 +146,50 @@ def disconnect(subject: str) -> None:
         path.unlink(missing_ok=True)
 
 
+def refresh_profile(profile: dict) -> bool:
+    """Update an authorized profile only when its access token needs refreshing."""
+    expiry = int(profile.get("expires_at") or 0)
+    if profile.get("access_token") and expiry > int(time.time()) + 120:
+        return False
+    form = urllib.parse.urlencode({
+        "grant_type": "refresh_token",
+        "client_id": profile["client_id"],
+        "refresh_token": profile["refresh_token"],
+        "resource": "https://api.openai.com/v1",
+    }).encode()
+    request = urllib.request.Request(
+        _TOKEN_URL, data=form, method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            refreshed = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise ChatGPTAuthError(
+            f"ChatGPT token refresh failed (HTTP {exc.code}); reconnect the account in Settings."
+        ) from exc
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise ChatGPTAuthError("ChatGPT token refresh could not reach OpenAI; retry shortly.") from exc
+    token = refreshed.get("access_token")
+    if not isinstance(token, str) or not token:
+        raise ChatGPTAuthError("OpenAI did not return an access token; reconnect the account.")
+    granted = set(str(refreshed.get("scope") or "").split())
+    if granted and not _SCOPES.issubset(granted):
+        raise ChatGPTAuthError("The refreshed ChatGPT token lacks plan usage permission; reconnect it.")
+    profile["access_token"] = token
+    profile["refresh_token"] = refreshed.get("refresh_token") or profile["refresh_token"]
+    profile["expires_at"] = int(time.time()) + int(refreshed.get("expires_in") or 3600)
+    if refreshed.get("id_token"):
+        profile["id_token"] = refreshed["id_token"]
+    if granted:
+        profile["scopes"] = sorted(granted)
+    return True
+
+
 def access_token(subject: str) -> str:
     """Return a usable access token, refreshing and atomically rotating it when near expiry."""
     with _locked(subject) as path:
         profile = _read(path)
-        expiry = int(profile.get("expires_at") or 0)
-        if profile.get("access_token") and expiry > int(time.time()) + 120:
-            return str(profile["access_token"])
-        form = urllib.parse.urlencode({
-            "grant_type": "refresh_token",
-            "client_id": profile["client_id"],
-            "refresh_token": profile["refresh_token"],
-            "resource": "https://api.openai.com/v1",
-        }).encode()
-        request = urllib.request.Request(
-            _TOKEN_URL, data=form, method="POST",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=15) as response:
-                refreshed = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            raise ChatGPTAuthError(
-                f"ChatGPT token refresh failed (HTTP {exc.code}); reconnect the account in Settings."
-            ) from exc
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise ChatGPTAuthError("ChatGPT token refresh could not reach OpenAI; retry shortly.") from exc
-        token = refreshed.get("access_token")
-        if not isinstance(token, str) or not token:
-            raise ChatGPTAuthError("OpenAI did not return an access token; reconnect the account.")
-        granted = set(str(refreshed.get("scope") or "").split())
-        if granted and not _SCOPES.issubset(granted):
-            raise ChatGPTAuthError("The refreshed ChatGPT token lacks plan usage permission; reconnect it.")
-        profile["access_token"] = token
-        profile["refresh_token"] = refreshed.get("refresh_token") or profile["refresh_token"]
-        profile["expires_at"] = int(time.time()) + int(refreshed.get("expires_in") or 3600)
-        if refreshed.get("id_token"):
-            profile["id_token"] = refreshed["id_token"]
-        if granted:
-            profile["scopes"] = sorted(granted)
-        _write(path, profile)
-        return token
-
+        if refresh_profile(profile):
+            _write(path, profile)
+        return str(profile["access_token"])

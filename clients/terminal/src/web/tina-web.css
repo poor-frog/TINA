@@ -2118,6 +2118,7 @@ html[data-theme="light"] .tina-web .tina-web-btn-ghost:hover {
   --accentbg: rgba(23, 107, 91, 0.22);
   --on-accent: #081210;
   --on-brand: #081210;
+  --warn: #ebddad;
   --focus: var(--tw-mint);
   --sans: var(--tw-font-body);
   --display: var(--tw-font-display);
@@ -2131,6 +2132,7 @@ html[data-theme="light"] .tina-web-detail {
   --accentbg: rgba(23, 107, 91, 0.12);
   --on-accent: #ffffff;
   --on-brand: #ffffff;
+  --warn: #7a5210;
   --focus: var(--tw-teal);
 }
 
@@ -2251,10 +2253,8 @@ html[data-theme="light"] .tina-web-detail {
 
 .tina-web-settings-group-title {
   padding: 0 10px 6px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--tw-text-4);
 }
 
@@ -2332,28 +2332,27 @@ html[data-theme="light"] .tina-web-settings-item.active svg {
 }
 
 .tina-web-settings-header {
-  margin-bottom: 22px;
+  margin-bottom: 24px;
 }
 
 .tina-web-settings-crumb {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 8px;
-  font-size: 11.5px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--tw-mint);
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--tw-text-3);
 }
 
 .tina-web-settings-header h1 {
   margin: 0 0 6px;
   font-family: var(--tw-font-display);
-  font-size: 25px;
+  font-size: 24px;
   font-weight: 600;
   letter-spacing: -0.025em;
   color: var(--tw-text);
+  text-wrap: balance;
 }
 
 .tina-web-settings-header p {

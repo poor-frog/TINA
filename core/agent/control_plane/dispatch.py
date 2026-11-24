@@ -610,6 +610,7 @@ class Dispatcher:
     def dispatch(
         self, invocation: dict, *, trusted_live_meeting: bool = False,
         trusted_canonical_notes: bool = False, trusted_meeting_state: bool = False,
+        trusted_post_meeting_draft: bool = False,
     ) -> str:
         """Validate + spawn. Returns the workload id. Raises on a non-conformant envelope (P18).
 
@@ -617,6 +618,16 @@ class Dispatcher:
         published unit.v1 wire contract — it is stripped before the schema check so the envelope stays
         conformant, while ``dispatch_id`` / ``build_unit_env`` still read it off the in-memory dispatch."""
         contracts.validate_unit_invocation(_without_chat_session(invocation))  # fail loud at the seam
+        if trusted_post_meeting_draft:
+            if not is_meeting_knowledge(invocation):
+                raise ValueError("Expected an authorized meeting knowledge draft")
+            uid = dispatch_id(invocation)
+            return self._runtime.spawn(uid, self._settings.agent_profile, {
+                "TINA_POST_MEETING_DRAFT": "1",
+                "TINA_START": json.dumps(invocation["start"]),
+                "TINA_CHAT_SESSION": chat_session(invocation),
+                "TINA_UNIT_OUT_TOPIC": output_topic(uid),
+            })
         if is_private_transcript_job(invocation):
             observed = dict(invocation)
             observed["start"] = {"entrypoint": {"inline": "[dictation text redacted]"}}

@@ -14,8 +14,8 @@ import soundfile as sf
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from engine import VieGemEngine, verify_model_assets, name_biased_decoder, contextual_biased_decoder
-from gipformer.engine import AudioInputError
-from gipformer.telemetry import AsrMetrics
+from asr_audio import AudioInputError
+from asr_telemetry import AsrMetrics
 from http_worker import create_app
 
 

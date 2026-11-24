@@ -44,6 +44,23 @@ HEADERS = {'X-Internal-Secret': 'test-internal', 'X-User-Id': '7'}
 URL = '/api/internal/meeting-voice/1/answer'
 
 
+def test_chatgpt_pilot_matches_room_and_blocks_non_transcript_sources(voice, monkeypatch):
+    client, row, _, _, _ = voice
+    monkeypatch.setenv('TINA_CHATGPT_VOICE_OWNER', '7')
+    monkeypatch.setenv('TINA_CHATGPT_VOICE_SECRET_ARN', 'fixture')
+    monkeypatch.setenv('TINA_CHATGPT_VOICE_ROOM', 'abc')
+    ready = '/api/internal/meeting-voice/1/ready'
+    policy = row['data']['voice_assistant']
+    assert client.get(ready, headers=HEADERS).status_code == 409
+    policy.update(documents=[], include_transcript=True, agent_backend='completion')
+    assert client.get(ready, headers=HEADERS).status_code == 200
+    policy['allow_web_search'] = True
+    assert client.get(ready, headers=HEADERS).status_code == 409
+    row['native_meeting_id'] = 'other'
+    assert client.get(ready, headers=HEADERS).status_code == 200
+    assert client.get(ready, headers=HEADERS | {'X-User-Id': '8'}).status_code == 404
+
+
 def test_whole_private_wiki_search_reaches_beyond_eight_unlinked_documents_but_not_other_scopes(voice):
     client,row,root,_,_=voice
     policy=row['data']['voice_assistant'];policy.update(engine='livekit',documents=[],include_workspace_wiki=True)

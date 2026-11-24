@@ -19,7 +19,7 @@ Once `ghcr-publish.yml` is on `main`, a successful `gates` run for a push to
 `main` triggers publishing to the existing `ghcr.io/poor-frog/tina-<service>`
 packages. The workflow builds the exact tested commit for Linux x86-64 and
 publishes each image under its full commit SHA. It calls
-`ghcr-publish-extras.yml` to build the meeting bot, Gipformer and VieGem.
+`ghcr-publish-extras.yml` to build the meeting bot and VieGem.
 
 After all 14 images build successfully, **Update GHCR demo tags** retags the
 images one at a time. It skips commits that have been superseded on `main`.
