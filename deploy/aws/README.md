@@ -278,7 +278,12 @@ with `NEXT_PUBLIC_TERMINAL_MODE=workspace-pilot`. Leave `WorkspacePilotStage` at
 `/terminal` checks the authenticated account against the list. Chat and
 scheduled turns use the pilot's ChatGPT consent for `gpt-6-luna`.
 
-The current task definitions support personal workspaces. A turn can run
+The private task definitions support personal workspaces. Deploy a separate
+worker stack per pilot role for a shared Wiki. Set `SharedWorkspace` to the
+existing Wiki ID and `SharedAccess` to the account's maximum role. Register
+the two additional task roles in Agent API and both task revisions per
+subject in Runtime. The viewer's EFS access point grants only ClientMount and
+the container mounts the Wiki read-only. A turn can run
 only when its requested mount set matches a pinned definition, including
 each mount's read/write mode. A shared or additionally attached workspace
 needs a matching task definition before the worker can mount it.

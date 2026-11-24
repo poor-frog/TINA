@@ -33,6 +33,8 @@ Parameters:
   WorkspaceChatGPTOwner: {Type: String, Default: '', AllowedPattern: '[0-9]*'}
   WorkspaceChatGPTSecretArn: {Type: String, Default: ''}
   WorkspaceRuntimeSecurityGroupId: {Type: String, Default: ''}
+  WorkspaceWikiRoleA: {Type: String, Default: '', AllowedPattern: '(|arn:[a-z0-9-]+:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+)'}
+  WorkspaceWikiRoleB: {Type: String, Default: '', AllowedPattern: '(|arn:[a-z0-9-]+:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+)'}
   WorkspacePilotRoleA:
     Type: String
     Default: ''
@@ -56,6 +58,10 @@ Conditions:
     - !Not [!Equals [!Ref WorkspaceChatGPTOwner, '']]
     - !Not [!Equals [!Ref WorkspaceChatGPTSecretArn, '']]
   WithWorkspacePilot: !Not [!Equals [!Ref WorkspacePilotUserIds, '']]
+  WithWikiRoles: !And
+    - !Condition WithWorkspacePilotRoles
+    - !Not [!Equals [!Ref WorkspaceWikiRoleA, '']]
+    - !Not [!Equals [!Ref WorkspaceWikiRoleB, '']]
   WithWorkspacePilotRoles: !And
     - !Not [!Equals [!Ref WorkspacePilotRoleA, '']]
     - !Not [!Equals [!Ref WorkspacePilotRoleB, '']]
@@ -188,7 +194,10 @@ Resources:
               ArnNotEquals:
                 'aws:PrincipalArn': !If
                   - WithWorkspacePilotRoles
-                  - [!GetAtt VoiceModelRole.Arn, !Ref WorkspacePilotRoleA, !Ref WorkspacePilotRoleB]
+                  - !If
+                    - WithWikiRoles
+                    - [!GetAtt VoiceModelRole.Arn, !Ref WorkspacePilotRoleA, !Ref WorkspacePilotRoleB, !Ref WorkspaceWikiRoleA, !Ref WorkspaceWikiRoleB]
+                    - [!GetAtt VoiceModelRole.Arn, !Ref WorkspacePilotRoleA, !Ref WorkspacePilotRoleB]
                   - !GetAtt VoiceModelRole.Arn
   WorkspaceAccessPoint:
     Type: AWS::EFS::AccessPoint

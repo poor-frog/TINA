@@ -12,12 +12,16 @@ Parameters:
   WorkspaceFileSystemId: {Type: String, AllowedPattern: 'fs-[a-f0-9]+'}
   WorkspaceNfsGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
   VpcId: {Type: 'AWS::EC2::VPC::Id'}
+  SharedWorkspace: {Type: String, Default: '', AllowedPattern: '(|[a-zA-Z][a-zA-Z0-9-]{0,79})'}
+  SharedAccess: {Type: String, Default: viewer, AllowedValues: [viewer, contributor]}
   EnableWorkspaceStream: {Type: String, Default: 'false', AllowedValues: ['true','false']}
   ValkeyHost: {Type: String, Default: ''}
   ValkeySecretArn: {Type: String, Default: ''}
   ValkeySecurityGroupId: {Type: String, Default: ''}
   InvocationBucket: {Type: String, Default: ''}
 Conditions:
+  WithSharedWorkspace: !Not [!Equals [!Ref SharedWorkspace, '']]
+  SharedWritable: !Equals [!Ref SharedAccess, contributor]
   WithStream: !Equals [!Ref EnableWorkspaceStream, 'true']
 Resources:
   ValkeyIngress:
@@ -41,6 +45,13 @@ Resources:
       RootDirectory:
         Path: !Sub '/workspaces/${Subject}'
         CreationInfo: {OwnerUid: '1000', OwnerGid: '1000', Permissions: '0700'}
+  Shared:
+    Type: AWS::EFS::AccessPoint
+    Condition: WithSharedWorkspace
+    Properties:
+      FileSystemId: !Ref WorkspaceFileSystemId
+      PosixUser: {Uid: '1000', Gid: '1000'}
+      RootDirectory: {Path: !Sub '/workspaces/${SharedWorkspace}'}
   Continuity:
     Type: AWS::EFS::AccessPoint
     Metadata:
@@ -135,6 +146,13 @@ Resources:
                 Condition:
                   ArnEquals:
                     elasticfilesystem:AccessPointArn: [!GetAtt Home.Arn, !GetAtt Continuity.Arn]
+              - !If
+                - WithSharedWorkspace
+                - Effect: Allow
+                  Action: !If [SharedWritable, [elasticfilesystem:ClientMount, elasticfilesystem:ClientWrite], [elasticfilesystem:ClientMount]]
+                  Resource: !Sub 'arn:${AWS::Partition}:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/${WorkspaceFileSystemId}'
+                  Condition: {ArnEquals: {'elasticfilesystem:AccessPointArn': !GetAtt Shared.Arn}}
+                - !Ref AWS::NoValue
   Task:
     Type: AWS::ECS::TaskDefinition
     Metadata:
@@ -161,6 +179,14 @@ Resources:
             FilesystemId: !Ref WorkspaceFileSystemId
             TransitEncryption: ENABLED
             AuthorizationConfig: {AccessPointId: !Ref Continuity, IAM: ENABLED}
+        - !If
+          - WithSharedWorkspace
+          - Name: shared
+            EFSVolumeConfiguration:
+              FilesystemId: !Ref WorkspaceFileSystemId
+              TransitEncryption: ENABLED
+              AuthorizationConfig: {AccessPointId: !Ref Shared, IAM: ENABLED}
+          - !Ref AWS::NoValue
       ContainerDefinitions:
         - Name: worker
           Image: !Ref WorkerImage
@@ -175,6 +201,10 @@ Resources:
           MountPoints:
             - {SourceVolume: home, ContainerPath: !Sub '/workspaces/${Subject}', ReadOnly: false}
             - {SourceVolume: continuity, ContainerPath: !Sub '/workspaces/_system/${Subject}', ReadOnly: false}
+            - !If
+              - WithSharedWorkspace
+              - {SourceVolume: shared, ContainerPath: !Sub '/workspaces/${SharedWorkspace}', ReadOnly: !If [SharedWritable, false, true]}
+              - !Ref AWS::NoValue
           LogConfiguration:
             LogDriver: awslogs
             Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
