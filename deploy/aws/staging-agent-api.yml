@@ -1,5 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Private TINA Agent API with optional durable staging workspaces.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
 
 Parameters:
   ClusterName: {Type: String}
@@ -35,6 +38,7 @@ Parameters:
   WorkspaceRuntimeSecurityGroupId: {Type: String, Default: ''}
   WorkspaceWikiRoleA: {Type: String, Default: '', AllowedPattern: '(|arn:[a-z0-9-]+:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+)'}
   WorkspaceWikiRoleB: {Type: String, Default: '', AllowedPattern: '(|arn:[a-z0-9-]+:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+)'}
+  WorkspaceSharedRoleC: {Type: String, Default: '', AllowedPattern: '(|arn:[a-z0-9-]+:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+)'}
   WorkspacePilotRoleA:
     Type: String
     Default: ''
@@ -62,6 +66,9 @@ Conditions:
     - !Condition WithWorkspacePilotRoles
     - !Not [!Equals [!Ref WorkspaceWikiRoleA, '']]
     - !Not [!Equals [!Ref WorkspaceWikiRoleB, '']]
+  WithWorkspaceSharedRoleC: !And
+    - !Condition WithWorkspacePilotRoles
+    - !Not [!Equals [!Ref WorkspaceSharedRoleC, '']]
   WithWorkspacePilotRoles: !And
     - !Not [!Equals [!Ref WorkspacePilotRoleA, '']]
     - !Not [!Equals [!Ref WorkspacePilotRoleB, '']]
@@ -177,6 +184,12 @@ Resources:
     Condition: WithWorkspace
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Restrict workspace EFS mounts to the Agent API and pinned per-subject worker roles.
+        must:
+          - Keep TLS and IAM authorization enabled for every EFS client.
+          - Add a worker role only when its task uses access points scoped to its approved mounts.
     Properties:
       Encrypted: true
       FileSystemTags: [{Key: Name, Value: tina-staging-workspaces}]
@@ -196,8 +209,14 @@ Resources:
                   - WithWorkspacePilotRoles
                   - !If
                     - WithWikiRoles
-                    - [!GetAtt VoiceModelRole.Arn, !Ref WorkspacePilotRoleA, !Ref WorkspacePilotRoleB, !Ref WorkspaceWikiRoleA, !Ref WorkspaceWikiRoleB]
-                    - [!GetAtt VoiceModelRole.Arn, !Ref WorkspacePilotRoleA, !Ref WorkspacePilotRoleB]
+                    - !If
+                      - WithWorkspaceSharedRoleC
+                      - [!GetAtt VoiceModelRole.Arn, !Ref WorkspacePilotRoleA, !Ref WorkspacePilotRoleB, !Ref WorkspaceWikiRoleA, !Ref WorkspaceWikiRoleB, !Ref WorkspaceSharedRoleC]
+                      - [!GetAtt VoiceModelRole.Arn, !Ref WorkspacePilotRoleA, !Ref WorkspacePilotRoleB, !Ref WorkspaceWikiRoleA, !Ref WorkspaceWikiRoleB]
+                    - !If
+                      - WithWorkspaceSharedRoleC
+                      - [!GetAtt VoiceModelRole.Arn, !Ref WorkspacePilotRoleA, !Ref WorkspacePilotRoleB, !Ref WorkspaceSharedRoleC]
+                      - [!GetAtt VoiceModelRole.Arn, !Ref WorkspacePilotRoleA, !Ref WorkspacePilotRoleB]
                   - !GetAtt VoiceModelRole.Arn
   WorkspaceAccessPoint:
     Type: AWS::EFS::AccessPoint
