@@ -66,9 +66,9 @@ const SECTIONS: readonly SectionDef[] = [
     workspace: "personal",
     group: "AI & Voice",
     label: "Voice Assistant",
-    description: "Customize microphone dictation, wake word, and live voice assistant preferences.",
+    description: "Choose the voice TINA uses when speaking in your meetings and preview how it sounds.",
     icon: "mic",
-    keywords: "voice dictation microphone audio speech tts",
+    keywords: "voice assistant speaker audio speech tts preview preset",
   },
   {
     id: "appearance",
@@ -351,8 +351,8 @@ export function SettingsView({
         return <WebModelsPanel key="personal-models" scopeMode="personal" />;
       case "voice":
         return (
-          <div className="tina-web-settings-card tina-web-settings-embed">
-            <VoiceSettings hideModelHint={hideModelSettings} />
+          <div className="tina-web-settings-stack">
+            <VoiceSettings voiceOnly hideModelHint={hideModelSettings} />
           </div>
         );
       case "tokens":

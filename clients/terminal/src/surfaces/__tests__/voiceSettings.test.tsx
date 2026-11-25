@@ -1,6 +1,7 @@
 import {afterEach,expect,it,vi} from 'vitest';
 import {cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {SettingsDialog} from '../settings';
+import {VoiceSettings} from '../voiceSettings';
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 const services={wake:{method:'livekit_wakeword',engine:'LiveKit WakeWord',version:'2.1.1',device:'cpu',status:'no_active_bot',
   sessions:[] as Array<{meeting_id:number;status:string}>,names:['TINA ơi','hey TINA'],platforms:['google_meet']},voice_pipeline_configured:true,default_prepare_new_bots:true,
@@ -293,4 +294,51 @@ it('reuses project sources with the room revision and preserves sharing when roo
   expect(JSON.parse(sent[1]!.body as string)).toEqual({...policy,...profile.sources,source_profile_id:profile.id,source_profile_fingerprint:profile.fingerprint});
   fireEvent.click(screen.getByLabelText('Allow general knowledge'));
   expect((screen.getByLabelText('Project sources') as HTMLSelectElement).value).toBe(profile.id);
+});
+
+it('voiceOnly mode shows only voice selection and preview while preserving existing account defaults and pronunciations on save',async()=>{
+  const requests:Array<{url:string;body:any}>=[];
+  vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL,options?:RequestInit)=>{
+    const url=String(input),body=options?.body?JSON.parse(options.body as string):null;
+    if(options?.method==='PUT'){requests.push({url,body});return Response.json(body);}
+    if(url==='/api/user/voice')return Response.json({prepare_new_bots:true,speech_voice:'auto',pronunciations:{TINA:'ti na'}});
+    if(url==='/api/bots/voice/services')return Response.json(services);
+    if(url==='/api/bots/voice/preview')return new Response(new Blob(['RIFF'],{type:'audio/wav'}),{status:200});
+    return new Response('',{status:404});
+  }));
+  const createUrl=vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:preview-voice');
+  const revokeUrl=vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
+  const playSpy=vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue(undefined);
+  const pauseSpy=vi.spyOn(HTMLMediaElement.prototype,'pause').mockImplementation(()=>{});
+  try{
+    render(<VoiceSettings voiceOnly />);
+    const maiAnhRadio=await screen.findByRole('radio',{name:/Mai Anh/i});
+    await waitFor(()=>expect((maiAnhRadio as HTMLButtonElement).disabled).toBe(false));
+
+    // Hides Behavior/Meeting tabs, bot defaults dropdown, pronunciations, and wake diagnostics
+    expect(screen.queryByRole('tab',{name:'Behavior'})).toBeNull();
+    expect(screen.queryByRole('tab',{name:'Meeting'})).toBeNull();
+    expect(screen.queryByLabelText('Default for new Google Meet bots')).toBeNull();
+    expect(screen.queryByText('Pronunciations')).toBeNull();
+    expect(screen.queryByText('Wake phrases')).toBeNull();
+    expect(screen.queryByRole('button',{name:'Refresh status'})).toBeNull();
+
+    // Selecting a voice card enables Save and preserves existing prepare_new_bots + pronunciations
+    fireEvent.click(maiAnhRadio);
+    expect(maiAnhRadio.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByRole('button',{name:'Preview voice'}));
+    expect(await screen.findByLabelText('TINA voice preview')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button',{name:'Save changes'}));
+    await waitFor(()=>expect(requests).toContainEqual({
+      url:'/api/user/voice',
+      body:{prepare_new_bots:true,speech_voice:'Mai Anh',pronunciations:{TINA:'ti na'}},
+    }));
+    await screen.findByText('All changes saved');
+  }finally{
+    createUrl.mockRestore();
+    revokeUrl.mockRestore();
+    playSpy.mockRestore();
+    pauseSpy.mockRestore();
+  }
 });

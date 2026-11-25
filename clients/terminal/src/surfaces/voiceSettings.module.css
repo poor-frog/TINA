@@ -116,3 +116,194 @@
   .footerCopy { flex-basis: 100%; }
   .footer .discard { margin-left: auto; }
 }
+
+/* Streamlined Voice-only picker used in Web SaaS Settings (/) */
+.voiceOnlyRoot {
+  gap: 16px;
+}
+.voiceHero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: var(--sidebar);
+  border: 1px solid var(--line);
+}
+.voiceHeroLeft {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.voiceAvatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 28%, transparent);
+}
+.voiceHeroCopy {
+  min-width: 0;
+}
+.voiceHeroNameRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.voiceHeroNameRow strong {
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.statusReady {
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 26%, transparent);
+}
+.statusMuted {
+  color: var(--t3);
+  background: var(--panel2);
+  border: 1px solid var(--line);
+}
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.previewBox {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--sidebar);
+  border: 1px solid var(--line);
+}
+.previewBox .audio {
+  margin-top: 0;
+}
+.previewBox .helper {
+  margin-top: 8px;
+}
+.voicePickerCard {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.voicePickerHead h2 {
+  margin-bottom: 4px;
+}
+.voicePickerHead .lead {
+  margin-bottom: 0 !important;
+  font-size: 13px;
+}
+.voiceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+}
+.voiceCard {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 14px 15px;
+  border-radius: 13px;
+  text-align: left;
+  color: var(--t1);
+  background: var(--sidebar);
+  border: 1px solid var(--line);
+  transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+.voiceCard:hover:not(:disabled) {
+  border-color: var(--line2);
+  transform: translateY(-1px);
+}
+.voiceCardSelected {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 9%, var(--sidebar));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 32%, transparent);
+}
+.voiceCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.voiceCardName {
+  font-size: 14.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.voiceCheck {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--accent);
+  color: var(--on-accent, #062013);
+}
+.voiceCardMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.voiceTag,
+.voiceTagDefault {
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.voiceTag {
+  color: var(--t2);
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.voiceTagDefault {
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 26%, transparent);
+  font-weight: 500;
+}
+.voiceOnlyFooter {
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 13px 16px;
+  margin-top: 2px;
+  background: var(--sidebar);
+}
+.voiceOnlyFooterDirty {
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--line));
+  background: color-mix(in oklch, var(--accent) 7%, var(--sidebar));
+}
+@container (max-width: 520px) {
+  .voiceHero {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .voiceHero > button {
+    width: 100%;
+  }
+}
