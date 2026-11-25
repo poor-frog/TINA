@@ -185,7 +185,7 @@ Resources:
               Version: '2012-10-17'
               Statement:
                 - Effect: Allow
-                  Action: bedrock:InvokeModel
+                  Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
                   Resource:
                     - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-lite-v1:0'
                     - !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/anthropic.claude-*'

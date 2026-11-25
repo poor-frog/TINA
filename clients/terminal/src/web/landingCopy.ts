@@ -29,7 +29,6 @@ export interface LandingCopy {
     toggleNav: string;
   };
   hero: {
-    eyebrow: string;
     claimBadge: string;
     claimHeading: string;
     claimLead: string;
@@ -208,7 +207,6 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       toggleNav: "Mở menu điều hướng",
     },
     hero: {
-      eyebrow: "HỌP SONG NGỮ VI + EN · TRỢ LÝ GIỌNG NÓI TRỰC TIẾP · BẢO MẬT RIÊNG",
       claimBadge: "Lần đăng nhập đầu tiên = Quản trị viên",
       claimHeading: "Thiết lập không gian TINA",
       claimLead:
@@ -613,7 +611,6 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       toggleNav: "Toggle navigation",
     },
     hero: {
-      eyebrow: "BILINGUAL VI + EN MEETINGS · LIVE VOICE ASSISTANT · PRIVATE",
       claimBadge: "First sign-in = administrator",
       claimHeading: "Set up your instance",
       claimLead:

@@ -18,7 +18,7 @@ Parameters:
   AdminTokenArn: {Type: String}
   InternalSecretArn: {Type: String}
   AsrControlUrl: {Type: String, Default: ''}
-  AppSecurityGroupId: {Type: String, Default: ''}
+  VieGemSecurityGroupId: {Type: String, Default: ''}
   TranscriptionUrl: {Type: String, Default: ''}
   TranscriptionTokenArn: {Type: String, Default: ''}
   TranscriptionModel: {Type: String, Default: '5CD-AI/VieGem-ASR'}
@@ -29,7 +29,7 @@ Parameters:
 
 Conditions:
   GoogleEnabled: !Not [!Equals [!Ref GoogleSecretArn, '']]
-  WithAppSecurityGroup: !Not [!Equals [!Ref AppSecurityGroupId, '']]
+  WithVieGemIngress: !Not [!Equals [!Ref VieGemSecurityGroupId, '']]
   WithTranscription: !And
     - !Not [!Equals [!Ref TranscriptionUrl, '']]
     - !Not [!Equals [!Ref TranscriptionTokenArn, '']]
@@ -51,6 +51,15 @@ Resources:
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - {IpProtocol: tcp, FromPort: 3000, ToPort: 3000, SourceSecurityGroupId: !Ref AlbSecurityGroupId}
+  TerminalVieGemIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: WithVieGemIngress
+    Properties:
+      GroupId: !Ref VieGemSecurityGroupId
+      SourceSecurityGroupId: !GetAtt TerminalIngress.GroupId
+      IpProtocol: tcp
+      FromPort: 8000
+      ToPort: 8000
   TerminalTargets:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -171,7 +180,6 @@ Resources:
           SecurityGroups:
             - !Ref CoreClientSecurityGroupId
             - !GetAtt TerminalIngress.GroupId
-            - !If [WithAppSecurityGroup, !Ref AppSecurityGroupId, !Ref 'AWS::NoValue']
       LoadBalancers:
         - {ContainerName: terminal, ContainerPort: 3000, TargetGroupArn: !Ref TerminalTargets}
       DeploymentConfiguration:

@@ -146,13 +146,13 @@
 
 /* Monitor CRT screen glow + sparkle + voice equalizer */
 .crtGlow {
-  fill: #c8ff3a;
+  fill: #6ee7b7;
   opacity: 0;
   transition: opacity 0.35s ease;
 }
 
 .crtGlowActive {
-  opacity: 0.42;
+  opacity: 0.56;
 }
 
 .sparkle {
@@ -203,13 +203,13 @@
 
 .hotspot:hover {
   border-color: rgba(12, 13, 10, 0.35);
-  background: rgba(200, 255, 58, 0.12);
+  background: rgba(110, 231, 183, 0.16);
 }
 
 .hotspot:focus-visible {
   outline: 2px solid #0c0d0a;
   outline-offset: 2px;
-  background: rgba(200, 255, 58, 0.18);
+  background: rgba(110, 231, 183, 0.22);
 }
 
 .hotspotMinh {
@@ -267,7 +267,7 @@
 }
 
 .speechBubbleAgent {
-  background: #c8ff3a;
+  background: #6ee7b7;
   color: #0a0b07;
 }
 
@@ -383,13 +383,13 @@
 }
 
 .chipActive {
-  background: #c8ff3a;
+  background: #6ee7b7;
   color: #0a0b07;
   box-shadow: 2px 2px 0 #0c0d0a;
 }
 
 .chipActive:hover {
-  background: #d5ff66;
+  background: #8aeec6;
 }
 
 .hintText {

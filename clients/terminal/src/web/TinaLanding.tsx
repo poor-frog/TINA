@@ -1,11 +1,16 @@
 "use client";
-/** TinaLanding — Editorial Neo-Brutalist pre-login landing & OAuth gate for TINA Terminal.
- *  Inspired by the warm-paper / ink-stamp / acid-lime visual system, fully tailored to
- *  TINA's real self-hosted capabilities (Google/Microsoft OAuth, first-run admin claim,
- *  bilingual VI+EN transcription, "Tina ơi" Voice TTS, Chrome Extension, and Workspace). */
+/** TinaLanding — Bilingual (VI / EN, Vietnamese default) editorial pre-login landing
+ *  & OAuth gate for TINA. Built for teams and enterprises: real-time VI+EN bilingual
+ *  transcription, "Tina ơi" Voice TTS with source citations, Google Meet Chrome Extension
+ *  spotlight, interactive cel-animated Hero scene, and private-infrastructure governance. */
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { HeroMeetingScene } from "./HeroMeetingScene";
+import { LANDING_COPY, type LandingLang } from "./landingCopy";
+import { PrivateInfraIso } from "./PrivateInfraIso";
+import { StepScene } from "./StepScene";
 import styles from "./tinaLanding.module.css";
+
+const LANG_STORAGE_KEY = "tina.landing.lang";
 
 export interface TinaLandingProps {
   claiming: boolean;
@@ -23,95 +28,7 @@ export interface TinaLandingProps {
   microsoftIcon: ReactNode;
 }
 
-const TICKER_ITEMS = [
-  "GOOGLE MEET",
-  "ZOOM",
-  "MICROSOFT TEAMS",
-  "BILINGUAL VI + EN",
-  "TINA VOICE AGENT",
-  "GROUNDED WIKI & NOTES",
-  "CHROME EXTENSION",
-  "SELF-HOSTED PRIVACY",
-];
-
-const DEMO_LINES = [
-  {
-    initials: "JL",
-    speaker: "JKY LEE",
-    time: "09:40:43",
-    primary: "Chốt lại tiến độ triển khai AWS staging và Chrome Extension tuần này nhé.",
-    secondary: "Let’s finalize this week’s AWS staging and Chrome Extension rollout.",
-    isAgent: false,
-  },
-  {
-    initials: "LH",
-    speaker: "Linh",
-    time: "09:41:02",
-    primary: "11 stack ECS Fargate đã chạy ổn định trên us-east-1, còn phần custom domain với Multi-AZ cho production.",
-    secondary: "All 11 ECS Fargate stacks are healthy in us-east-1; custom domain and Multi-AZ remain for production.",
-    isAgent: false,
-  },
-  {
-    initials: "TA",
-    speaker: "TINA Agent",
-    badge: "Đã đọc · Nguồn meeting",
-    time: "09:41:15",
-    primary: "TINA đã tổng hợp 2 việc cần làm: gắn custom domain + ACM cho production và cập nhật Extension ID vào allowlist Gateway.",
-    secondary: "Nguồn (2) · Trích dẫn trực tiếp từ đoạn 09:40:43 & 09:41:02",
-    isAgent: true,
-  },
-  {
-    initials: "MN",
-    speaker: "Minh",
-    time: "09:41:28",
-    primary: "Chuẩn luôn, lưu thẳng vào Wiki dự án giúp mình nhé.",
-    secondary: "Looks great — save that directly into the project Wiki.",
-    isAgent: false,
-  },
-];
-
-const CAPABILITIES_LISTEN = [
-  { label: "BILINGUAL ASR", text: "Live Vietnamese & English capture via VieGem + LM, Whisper, Soniox, or Deepgram." },
-  { label: "SPEAKER TALK TIME", text: "Per-speaker word counts, speaking pace (WPM), share rings, and click-to-filter transcripts." },
-  { label: "LIVE ASSIST", text: "Real-time structured notes, decisions, and action items tied to exact transcript quotes." },
-  { label: "SYNCED AUDIO", text: "Durable recordings in your private S3 / MinIO bucket with click-to-seek playback." },
-];
-
-const CAPABILITIES_ACT = [
-  { label: "VOICE ANSWERS", text: "Say “Tina ơi…” in Google Meet for spoken, transcript-grounded answers via VieNeu TTS." },
-  { label: "ASK TINA + MCP", text: "Grounded Q&A across meetings and workspace docs with explicit tool-call approvals." },
-  { label: "SHARED WIKI", text: "Save verified answers and meeting recaps directly into personal or team workspaces." },
-  { label: "ROUTINES", text: "Run scheduled meeting summaries, recurring digests, and follow-up workflows automatically." },
-];
-
-const FAQ_ITEMS = [
-  {
-    q: "How do I sign in to TINA?",
-    a: "Sign in with your Google or Microsoft account configured on this instance. On a fresh installation with no administrator yet, the very first sign-in automatically claims administrator access.",
-  },
-  {
-    q: "Which meeting platforms are supported?",
-    a: "TINA Bot joins Google Meet, Zoom, and Microsoft Teams from a link or connected calendar. On Google Meet, the TINA Chrome Extension also adds an in-call floating panel with live bilingual transcripts and Ask TINA.",
-  },
-  {
-    q: "How does the “Tina ơi” voice agent work?",
-    a: "When voice replies are enabled for a meeting, TINA listens for the wake word, answers out loud through VieNeu TTS and LiveKit using only confirmed transcript and workspace sources, and logs clickable citations right inside the transcript.",
-  },
-  {
-    q: "Which AI models and transcription backends can I use?",
-    a: "Connect ChatGPT Plan (OAuth), Claude, OpenAI API, Google Gemini, Groq, DeepSeek, AWS Bedrock, or any OpenAI-compatible gateway — paired with VieGem + LM, Whisper, Soniox, or Deepgram speech-to-text.",
-  },
-  {
-    q: "Where do my recordings, transcripts, and keys live?",
-    a: "Everything runs on your own Docker Compose or AWS ECS/Fargate infrastructure. Recordings stay in your private S3/MinIO bucket, transcripts stay in PostgreSQL, and all provider credentials remain strictly server-side.",
-  },
-  {
-    q: "What is the difference between TINA Workspace and TINA Terminal?",
-    a: "Everyone gets the clean Meetings, Ask Tina, Routines, and Settings workspace at /. Instance administrators can also switch into the full developer workbench at /terminal.",
-  },
-];
-
-const WAKE_PROMPT = "Tina ơi, tổng hợp 2 quyết định chính của cuộc họp này";
+type ExtPreviewTab = "bilingual" | "catchup" | "ask";
 
 export function TinaLanding({
   claiming,
@@ -128,14 +45,36 @@ export function TinaLanding({
   googleIcon,
   microsoftIcon,
 }: TinaLandingProps) {
+  const [lang, setLang] = useState<LandingLang>("vi");
   const [scrolled, setScrolled] = useState(false);
   const [scrollPct, setScrollPct] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeLine, setActiveLine] = useState(2);
+  const [extTab, setExtTab] = useState<ExtPreviewTab>("bilingual");
+  const [wikiSaved, setWikiSaved] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
 
+  const copy = LANDING_COPY[lang];
   const hasOAuth = providers.google || providers.microsoft;
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(LANG_STORAGE_KEY);
+      if (saved === "vi" || saved === "en") setLang(saved);
+    } catch {
+      // Ignore storage access errors in restricted contexts.
+    }
+  }, []);
+
+  const switchLang = (next: LandingLang) => {
+    setLang(next);
+    try {
+      window.localStorage.setItem(LANG_STORAGE_KEY, next);
+    } catch {
+      // Ignore storage access errors.
+    }
+  };
 
   useEffect(() => {
     const onScroll = () => {
@@ -162,7 +101,7 @@ export function TinaLanding({
     if (typeof window === "undefined") return;
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     const timer = window.setInterval(() => {
-      setActiveLine((cur) => (cur + 1) % DEMO_LINES.length);
+      setActiveLine((cur) => (cur + 1) % LANDING_COPY.vi.live.lines.length);
     }, 3000);
     return () => window.clearInterval(timer);
   }, []);
@@ -182,7 +121,7 @@ export function TinaLanding({
 
   const copyPrompt = async () => {
     try {
-      await navigator.clipboard?.writeText(WAKE_PROMPT);
+      await navigator.clipboard?.writeText(copy.how.steps[2].wakePrompt);
       setCopiedPrompt(true);
       window.setTimeout(() => setCopiedPrompt(false), 1800);
     } catch {
@@ -191,7 +130,7 @@ export function TinaLanding({
   };
 
   return (
-    <div className={styles.root}>
+    <div className={`${styles.root} ${lang === "vi" ? styles.rootVi : ""}`} lang={lang}>
       <div className={styles.grain} aria-hidden="true" />
       <div className={styles.scrollBar} style={{ width: `${scrollPct}%` }} aria-hidden="true" />
 
@@ -204,33 +143,50 @@ export function TinaLanding({
                 <img src="/tina-logo.svg" alt="" width={20} height={20} />
               </span>
               <span className={styles.wordmarkName}>TINA</span>
-              <span className={styles.wordmarkTag}>MEETING AI</span>
             </a>
 
             <div className={styles.navLinks}>
-              <a href="#how">How it works</a>
-              <a href="#transcription">Live Voice</a>
-              <a href="#modes">Modes</a>
-              <a href="#capabilities">Capabilities</a>
-              <a href="#privacy">Privacy</a>
-              <a href="#platforms">Platforms</a>
-              <a href="#faq">FAQ</a>
+              <a href="#transcription">{copy.nav.live}</a>
+              <a href="#extension">{copy.nav.extension}</a>
+              <a href="#how">{copy.nav.how}</a>
+              <a href="#use-cases">{copy.nav.useCases}</a>
+              <a href="#privacy">{copy.nav.privacy}</a>
+              <a href="#faq">{copy.nav.faq}</a>
             </div>
 
             <div className={styles.navActions}>
-              <a className={styles.navSecondary} href="#platforms">Self-hosted</a>
+              <div className={styles.langSwitch} role="group" aria-label="Language">
+                <button
+                  type="button"
+                  className={`${styles.langBtn} ${lang === "vi" ? styles.langBtnActive : ""}`}
+                  aria-pressed={lang === "vi"}
+                  onClick={() => switchLang("vi")}
+                >
+                  VI
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.langBtn} ${lang === "en" ? styles.langBtnActive : ""}`}
+                  aria-pressed={lang === "en"}
+                  onClick={() => switchLang("en")}
+                >
+                  EN
+                </button>
+              </div>
+
               <button
                 type="button"
                 className={`${styles.button} ${styles.buttonDark}`}
                 onClick={triggerPrimarySignIn}
               >
-                <span>{claiming ? "Claim admin" : "Sign in"}</span>
+                <span>{claiming ? copy.nav.claimAdmin : copy.nav.signIn}</span>
                 <span aria-hidden="true">→</span>
               </button>
+
               <button
                 type="button"
                 className={styles.navToggle}
-                aria-label="Toggle navigation"
+                aria-label={copy.nav.toggleNav}
                 aria-expanded={menuOpen}
                 onClick={() => setMenuOpen((v) => !v)}
               >
@@ -244,56 +200,56 @@ export function TinaLanding({
 
         {menuOpen && (
           <nav className={styles.mobileMenu} aria-label="Mobile navigation">
-            <a href="#how" onClick={() => setMenuOpen(false)}>How it works</a>
-            <a href="#transcription" onClick={() => setMenuOpen(false)}>Live Voice &amp; Transcript</a>
-            <a href="#modes" onClick={() => setMenuOpen(false)}>Modes</a>
-            <a href="#capabilities" onClick={() => setMenuOpen(false)}>Capabilities</a>
-            <a href="#privacy" onClick={() => setMenuOpen(false)}>Self-hosted privacy</a>
-            <a href="#platforms" onClick={() => setMenuOpen(false)}>Platforms &amp; Models</a>
-            <a href="#faq" onClick={() => setMenuOpen(false)}>FAQ</a>
+            <a href="#transcription" onClick={() => setMenuOpen(false)}>{copy.nav.live}</a>
+            <a href="#extension" onClick={() => setMenuOpen(false)}>{copy.nav.extension}</a>
+            <a href="#how" onClick={() => setMenuOpen(false)}>{copy.nav.how}</a>
+            <a href="#use-cases" onClick={() => setMenuOpen(false)}>{copy.nav.useCases}</a>
+            <a href="#privacy" onClick={() => setMenuOpen(false)}>{copy.nav.privacy}</a>
+            <a href="#faq" onClick={() => setMenuOpen(false)}>{copy.nav.faq}</a>
           </nav>
         )}
       </header>
 
       <main className={styles.main}>
-        {/* HERO + OAUTH SIGN-IN */}
+        {/* HERO + OAUTH SIGN-IN + INTERACTIVE SCENE */}
         <section className={styles.homeHero} id="home-hero">
           <div className={styles.container}>
             <div className={styles.heroGrid}>
               <div className={styles.heroCopy}>
-                {claiming ? (
+                {claiming && (
                   <div className={styles.claimBadge}>
                     <span className={styles.claimDot} aria-hidden="true" />
-                    <span>First sign-in = administrator</span>
+                    <span>{copy.hero.claimBadge}</span>
                   </div>
-                ) : (
-                  <span className={styles.sectionLabel} style={{ marginBottom: 0, width: "fit-content" }}>
-                    SELF-HOSTED · BILINGUAL VI + EN · LIVE VOICE AGENT
-                  </span>
                 )}
 
                 <h1 className={styles.heroTitle}>
                   {claiming ? (
-                    <>
-                      Set up your instance
-                    </>
+                    <>{copy.hero.claimHeading}</>
                   ) : (
                     <>
-                      Turn every<br />
-                      <span className={styles.serif}>meeting</span> into a<br />
-                      living <span className={styles.heroNoWrap}><span className={styles.heroAccent}>workspace</span>.</span>
+                      {copy.hero.titleLine1}
+                      <br />
+                      <span className={styles.serif}>{copy.hero.titleSerif}</span>
+                      {copy.hero.titleMid}
+                      <br />
+                      {copy.hero.titleLine3Prefix}
+                      <span className={styles.heroNoWrap}>
+                        <span className={styles.heroAccent}>{copy.hero.titleAccent}</span>
+                      </span>
                     </>
                   )}
                 </h1>
 
                 <p className={styles.heroLead}>
                   {claiming ? (
-                    <>
-                      This <strong>TINA</strong> instance has no administrator yet. Sign in to claim admin access and configure AI models, speech transcription, and teammates.
-                    </>
+                    <>{copy.hero.claimLead}</>
                   ) : (
                     <>
-                      <strong>TINA</strong> joins Google Meet, Zoom, and Microsoft Teams — streaming bilingual transcripts, answering out loud when you say <strong>“Tina ơi”</strong>, and turning every call into grounded notes and team memory.
+                      <strong>{copy.hero.leadBrand}</strong>
+                      {copy.hero.leadBeforeWake}
+                      <strong>{copy.hero.leadWake}</strong>
+                      {copy.hero.leadAfterWake}
                     </>
                   )}
                 </p>
@@ -301,21 +257,18 @@ export function TinaLanding({
                 <div className={styles.authBox} id="signin">
                   {claiming && !hasOAuth && directLoginAvailable && (
                     <div className={styles.notice}>
-                      Development test mode — sign-in is limited to <strong>@example.test</strong> addresses. Add{" "}
-                      <code>GOOGLE_CLIENT_ID</code>/<code>SECRET</code> or <code>MICROSOFT_CLIENT_ID</code>/<code>SECRET</code> for OAuth.
+                      {copy.hero.devNoticePrefix}
+                      <code>GOOGLE_CLIENT_ID</code>/<code>SECRET</code> · <code>MICROSOFT_CLIENT_ID</code>/<code>SECRET</code>
+                      {copy.hero.devNoticeSuffix}
                     </div>
                   )}
 
                   {claiming && !hasOAuth && !directLoginAvailable && (
-                    <div className={styles.notice}>
-                      Configure Google or Microsoft OAuth to sign in. Passwordless test login is disabled outside development.
-                    </div>
+                    <div className={styles.notice}>{copy.hero.noOAuthClaimNotice}</div>
                   )}
 
                   {!claiming && !hasOAuth && !directLoginAvailable && (
-                    <div className={styles.notice}>
-                      No OAuth provider is configured on this TINA instance yet. Enable Google or Microsoft OAuth in your server environment.
-                    </div>
+                    <div className={styles.notice}>{copy.hero.noOAuthNotice}</div>
                   )}
 
                   <div className={styles.heroActions}>
@@ -326,7 +279,7 @@ export function TinaLanding({
                         onClick={() => onOAuthSignIn("google")}
                       >
                         {googleIcon}
-                        <span>Continue with Google</span>
+                        <span>{copy.hero.googleCta}</span>
                         <span aria-hidden="true">→</span>
                       </button>
                     )}
@@ -338,33 +291,27 @@ export function TinaLanding({
                         onClick={() => onOAuthSignIn("microsoft")}
                       >
                         {microsoftIcon}
-                        <span>Continue with Microsoft</span>
+                        <span>{copy.hero.microsoftCta}</span>
                         <span aria-hidden="true">→</span>
                       </button>
                     )}
 
-                    <a className={styles.buttonPlain} href="#how">
-                      <span>How TINA works</span>
+                    <a className={styles.buttonPlain} href="#transcription">
+                      <span>{copy.hero.secondaryCta}</span>
                       <span aria-hidden="true">↓</span>
                     </a>
                   </div>
 
                   {hasOAuth && directLoginAvailable && (
-                    <button
-                      type="button"
-                      className={styles.debugToggle}
-                      onClick={onToggleDebug}
-                    >
-                      {showDebug ? "Hide debug sign-in" : "Debug sign-in (@example.test)"}
+                    <button type="button" className={styles.debugToggle} onClick={onToggleDebug}>
+                      {showDebug ? copy.hero.debugHide : copy.hero.debugShow}
                     </button>
                   )}
 
                   {directLoginAvailable && (!hasOAuth || showDebug) && (
                     <form className={styles.directForm} onSubmit={onDirectSubmit}>
                       <div className={styles.directHint}>
-                        {claiming && !hasOAuth
-                          ? "Email — use an @example.test address (development only)."
-                          : "Debug login — use an @example.test address."}
+                        {claiming && !hasOAuth ? copy.hero.directHintClaim : copy.hero.directHintDebug}
                       </div>
                       <div className={styles.directRow}>
                         <input
@@ -380,7 +327,11 @@ export function TinaLanding({
                           className={`${styles.button} ${styles.buttonDark}`}
                           disabled={!email.trim() || submitting}
                         >
-                          {submitting ? "Signing in…" : claiming ? "Sign in as admin" : "Sign in"}
+                          {submitting
+                            ? copy.hero.directSubmitting
+                            : claiming
+                              ? copy.hero.directSubmitAdmin
+                              : copy.hero.directSubmit}
                         </button>
                       </div>
                       {error && (
@@ -391,32 +342,28 @@ export function TinaLanding({
                     </form>
                   )}
 
-                  {claiming && (
-                    <p className={styles.claimFoot}>
-                      This claim screen disappears once an administrator exists.
-                    </p>
-                  )}
+                  {claiming && <p className={styles.claimFoot}>{copy.hero.claimFoot}</p>}
 
                   <div className={styles.securityStrip}>
                     <LockGlyph />
-                    <span>Self-hosted · Credentials stay server-side · Owner-scoped transcripts</span>
+                    <span>{copy.hero.securityStrip}</span>
                   </div>
                 </div>
               </div>
 
-              <HeroMeetingScene />
+              <HeroMeetingScene lang={lang} />
             </div>
           </div>
         </section>
 
         {/* MARQUEE TICKER */}
-        <div className={styles.ticker} aria-label="What TINA supports">
+        <div className={styles.ticker} aria-label="TINA highlights">
           <div className={styles.tickerTrack}>
-            {TICKER_ITEMS.concat(TICKER_ITEMS).map((label, idx) => (
+            {copy.ticker.concat(copy.ticker).map((label, idx) => (
               <span
                 key={`${label}-${idx}`}
                 className={styles.tickerItem}
-                aria-hidden={idx >= TICKER_ITEMS.length ? true : undefined}
+                aria-hidden={idx >= copy.ticker.length ? true : undefined}
               >
                 {label}
                 <span className={styles.tickerStar} aria-hidden="true">✦</span>
@@ -425,121 +372,25 @@ export function TinaLanding({
           </div>
         </div>
 
-        {/* 01 · HOW IT WORKS */}
-        <section className={styles.homeHow} id="how">
-          <div className={styles.container}>
-            <div className={styles.sectionHead}>
-              <span className={styles.sectionLabel}>01 · HOW IT WORKS</span>
-              <h2 className={styles.sectionTitle}>
-                One Google sign-in.<br />
-                <span className={styles.serif}>TINA</span> is in the meeting.
-              </h2>
-              <p className={styles.sectionSub}>
-                Authenticate into your self-hosted workspace, choose your AI model and speech engine once, then dispatch TINA Bot from the web app, Chrome Extension, or calendar.
-              </p>
-              <span className={styles.liveTag}>READY IN &lt; 2 MINUTES</span>
-            </div>
-
-            <div className={styles.stepsGrid}>
-              <article className={styles.stepCard}>
-                <div className={styles.stepArt}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/landing/step1.png" alt="" width={1024} height={1024} />
-                </div>
-                <div className={styles.stepBody}>
-                  <div className={styles.stepKicker}>
-                    <span className={styles.stepNumber}>01</span>
-                    <span className={styles.stepSymbol} aria-hidden="true">↓</span>
-                    <span>SIGN IN</span>
-                  </div>
-                  <h3>Connect your workspace.</h3>
-                  <p>
-                    Sign in with Google OAuth to open your personal or team workspace. Link Google or Outlook calendars so upcoming meetings appear automatically.
-                  </p>
-                </div>
-              </article>
-
-              <article className={styles.stepCard}>
-                <div className={styles.stepArt}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/landing/step2.png" alt="" width={1024} height={1024} />
-                </div>
-                <div className={styles.stepBody}>
-                  <div className={styles.stepKicker}>
-                    <span className={styles.stepNumber}>02</span>
-                    <span className={`${styles.stepSymbol} ${styles.stepSymbolBlue}`} aria-hidden="true">◇</span>
-                    <span>MODELS</span>
-                  </div>
-                  <h3>Bring your own AI &amp; STT.</h3>
-                  <p>
-                    Pick ChatGPT Plan, Claude, Gemini, DeepSeek, Groq, or AWS Bedrock in Settings — paired with VieGem + LM, Whisper, or Soniox transcription.
-                  </p>
-                </div>
-              </article>
-
-              <article className={styles.stepCard}>
-                <div className={styles.stepArt}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/landing/step3.png" alt="" width={1024} height={1024} />
-                </div>
-                <div className={styles.stepBody}>
-                  <div className={styles.stepKicker}>
-                    <span className={styles.stepNumber}>03</span>
-                    <span className={`${styles.stepSymbol} ${styles.stepSymbolOrange}`} aria-hidden="true">→</span>
-                    <span>JOIN</span>
-                  </div>
-                  <h3>Send TINA &amp; speak live.</h3>
-                  <p>
-                    Paste a Google Meet, Zoom, or Teams link — or click Send Bot in Chrome Extension. Speak naturally to summon TINA in-call:
-                  </p>
-                  <button type="button" className={styles.snippet} onClick={() => void copyPrompt()}>
-                    <code>“{WAKE_PROMPT}”</code>
-                    <span className={`${styles.copyStatus} ${copiedPrompt ? styles.copyStatusDone : ""}`}>
-                      {copiedPrompt ? "Copied" : "Copy"}
-                    </span>
-                  </button>
-                </div>
-              </article>
-            </div>
-
-            <div className={styles.proofBanner}>
-              <strong>
-                Bilingual transcription, <span className={styles.proofHighlight}>real-time voice answers</span>, and verifiable workspace memory — running entirely on{" "}
-                <span className={styles.proofHighlight}>your own infrastructure</span>.
-              </strong>
-              <button
-                type="button"
-                className={`${styles.button} ${styles.buttonLime}`}
-                onClick={triggerPrimarySignIn}
-              >
-                <span>Open workspace</span>
-                <span aria-hidden="true">→</span>
-              </button>
-            </div>
-          </div>
-        </section>
-
-        {/* 02 · LIVE TRANSCRIPT & VOICE AGENT */}
+        {/* 01 · LIVE IN-CALL TRANSCRIPT & VOICE AGENT (moved up right after Hero!) */}
         <section className={styles.homeSection} id="transcription">
-          <div className={styles.squiggle} aria-hidden="true" />
           <div className={styles.container}>
             <div className={styles.sectionHead}>
-              <span className={styles.sectionLabel}>02 · LIVE TRANSCRIPT &amp; VOICE</span>
+              <span className={styles.sectionLabel}>{copy.live.label}</span>
               <h2 className={styles.sectionTitle}>
-                Know who said what — <span className={styles.serif}>and ask TINA out loud.</span>
+                {copy.live.titleLead}
+                <span className={styles.serif}>{copy.live.titleSerif}</span>
               </h2>
-              <p className={styles.sectionSub}>
-                Live Vietnamese + English transcripts stream with speaker diarization, interleaved chronologically with TINA Agent’s spoken replies and clickable source citations.
-              </p>
+              <p className={styles.sectionSub}>{copy.live.sub}</p>
             </div>
 
             <div className={styles.transcriptShell}>
               <div className={styles.transcriptTop}>
-                <span>LIVE TRANSCRIPT · SONG NGỮ VI + EN</span>
-                <span className={styles.statusLive}>LIVE</span>
+                <span>{copy.live.shellTitle}</span>
+                <span className={styles.statusLive}>{copy.live.shellStatus}</span>
               </div>
               <div className={styles.transcriptLines}>
-                {DEMO_LINES.map((row, idx) => (
+                {copy.live.lines.map((row, idx) => (
                   <div
                     key={row.time}
                     className={`${styles.transcriptLine} ${row.isAgent ? styles.transcriptLineAgent : ""} ${idx !== activeLine && !row.isAgent ? styles.transcriptLineDim : ""}`}
@@ -562,208 +413,337 @@ export function TinaLanding({
                 ))}
               </div>
               <ul className={styles.transcriptFoot}>
-                <li>Speaker diarization &amp; Talk Time — per-speaker WPM and share</li>
-                <li>Live VI + EN translation overlay — grouped by complete phrases</li>
-                <li>“Tina ơi” Voice TTS — answers aloud with clickable Nguồn citations</li>
-                <li>Audio-synced playback — click any turn to seek directly in the recording</li>
+                {copy.live.bullets.map((bullet) => (
+                  <li key={bullet}>{bullet}</li>
+                ))}
               </ul>
             </div>
           </div>
         </section>
 
-        {/* 03 · MODES */}
-        <section className={styles.homeSection} id="modes">
+        {/* 02 · TINA CHROME EXTENSION SPOTLIGHT */}
+        <section className={`${styles.homeSection} ${styles.homeSectionTinted}`} id="extension">
           <div className={styles.squiggle} aria-hidden="true" />
           <div className={styles.container}>
             <div className={styles.sectionHead}>
-              <span className={styles.sectionLabel}>03 · MODES</span>
+              <span className={styles.sectionLabel}>{copy.extension.label}</span>
               <h2 className={styles.sectionTitle}>
-                One companion across <span className={styles.serif}>every stage</span> of the call.
+                {copy.extension.titleLead}
+                <span className={styles.serif}>{copy.extension.titleSerif}</span>
               </h2>
-              <p className={styles.sectionSub}>
-                From joining the live room to in-call Google Meet assist and post-call synthesis, every surface stays synced to the same meeting record.
-              </p>
+              <p className={styles.sectionSub}>{copy.extension.sub}</p>
+            </div>
+
+            <div className={styles.extGrid}>
+              <div className={styles.extPoints}>
+                {copy.extension.points.map((pt) => (
+                  <article key={pt.tag} className={styles.extPointCard}>
+                    <div className={styles.extPointHead}>
+                      <span className={styles.extPointTag}>{pt.tag}</span>
+                      <h3>{pt.title}</h3>
+                    </div>
+                    <p>{pt.body}</p>
+                  </article>
+                ))}
+              </div>
+
+              <div className={styles.extPreview} aria-label="TINA Chrome Extension interactive preview">
+                <div className={styles.extPreviewTop}>
+                  <span className={styles.extPreviewDots} aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                  <span className={styles.extPreviewUrl}>{copy.extension.previewWindowTitle}</span>
+                  <span className={styles.statusLive}>{copy.extension.previewStatus}</span>
+                </div>
+
+                <div className={styles.extTabBar} role="tablist" aria-label="Chrome Extension features">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={extTab === "bilingual"}
+                    className={`${styles.extTab} ${extTab === "bilingual" ? styles.extTabActive : ""}`}
+                    onClick={() => setExtTab("bilingual")}
+                  >
+                    {copy.extension.tabs.bilingual}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={extTab === "catchup"}
+                    className={`${styles.extTab} ${extTab === "catchup" ? styles.extTabActive : ""}`}
+                    onClick={() => setExtTab("catchup")}
+                  >
+                    {copy.extension.tabs.catchup}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={extTab === "ask"}
+                    className={`${styles.extTab} ${extTab === "ask" ? styles.extTabActive : ""}`}
+                    onClick={() => setExtTab("ask")}
+                  >
+                    {copy.extension.tabs.ask}
+                  </button>
+                </div>
+
+                <div className={styles.extBody} role="tabpanel">
+                  {extTab === "bilingual" &&
+                    copy.extension.bilingualRows.map((row) => (
+                      <div key={row.time} className={styles.extRow}>
+                        <div className={styles.extRowMeta}>
+                          <span>{row.speaker}</span>
+                          <span>{row.time}</span>
+                        </div>
+                        <p className={styles.extRowVi}>{row.vi}</p>
+                        <p className={styles.extRowEn}>{row.en}</p>
+                      </div>
+                    ))}
+
+                  {extTab === "catchup" && (
+                    <>
+                      <span className={styles.extCatchupTag}>{copy.extension.catchupWindow}</span>
+                      <p className={styles.extCatchupLead}>{copy.extension.catchupSummary}</p>
+                      <ul className={styles.extCatchupList}>
+                        {copy.extension.catchupBullets.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+
+                  {extTab === "ask" && (
+                    <>
+                      <div className={styles.extAskQ}>{copy.extension.askQuestion}</div>
+                      <div className={styles.extAskA}>
+                        <p>{copy.extension.askAnswer}</p>
+                        <span className={styles.extAskCite}>{copy.extension.askCitation}</span>
+                        <button
+                          type="button"
+                          className={styles.extWikiBtn}
+                          onClick={() => setWikiSaved((v) => !v)}
+                        >
+                          {wikiSaved ? copy.extension.askWikiSaved : copy.extension.askWikiBtn}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* 03 · HOW IT WORKS (3 hand-drawn illustration cards) */}
+        <section className={styles.homeHow} id="how">
+          <div className={styles.container}>
+            <div className={styles.sectionHead}>
+              <span className={styles.sectionLabel}>{copy.how.label}</span>
+              <h2 className={styles.sectionTitle}>
+                {copy.how.titleLine1}
+                <br />
+                <span className={styles.serif}>{copy.how.titleSerif}</span>
+                {copy.how.titleLine2Rest}
+              </h2>
+              <p className={styles.sectionSub}>{copy.how.sub}</p>
+              <span className={styles.liveTag}>{copy.how.tag}</span>
+            </div>
+
+            <div className={styles.stepsGrid}>
+              <article className={styles.stepCard}>
+                <div className={styles.stepArt}>
+                  <StepScene step={1} />
+                </div>
+                <div className={styles.stepBody}>
+                  <div className={styles.stepKicker}>
+                    <span className={styles.stepNumber}>01</span>
+                    <span className={styles.stepSymbol} aria-hidden="true">↓</span>
+                    <span>{copy.how.steps[0].kicker}</span>
+                  </div>
+                  <h3>{copy.how.steps[0].title}</h3>
+                  <p>{copy.how.steps[0].body}</p>
+                </div>
+              </article>
+
+              <article className={styles.stepCard}>
+                <div className={styles.stepArt}>
+                  <StepScene step={2} />
+                </div>
+                <div className={styles.stepBody}>
+                  <div className={styles.stepKicker}>
+                    <span className={styles.stepNumber}>02</span>
+                    <span className={`${styles.stepSymbol} ${styles.stepSymbolBlue}`} aria-hidden="true">◇</span>
+                    <span>{copy.how.steps[1].kicker}</span>
+                  </div>
+                  <h3>{copy.how.steps[1].title}</h3>
+                  <p>{copy.how.steps[1].body}</p>
+                </div>
+              </article>
+
+              <article className={styles.stepCard}>
+                <div className={styles.stepArt}>
+                  <StepScene step={3} />
+                </div>
+                <div className={styles.stepBody}>
+                  <div className={styles.stepKicker}>
+                    <span className={styles.stepNumber}>03</span>
+                    <span className={`${styles.stepSymbol} ${styles.stepSymbolOrange}`} aria-hidden="true">→</span>
+                    <span>{copy.how.steps[2].kicker}</span>
+                  </div>
+                  <h3>{copy.how.steps[2].title}</h3>
+                  <p>{copy.how.steps[2].body}</p>
+                  <button type="button" className={styles.snippet} onClick={() => void copyPrompt()}>
+                    <code>“{copy.how.steps[2].wakePrompt}”</code>
+                    <span className={`${styles.copyStatus} ${copiedPrompt ? styles.copyStatusDone : ""}`}>
+                      {copiedPrompt ? copy.how.copied : copy.how.copy}
+                    </span>
+                  </button>
+                </div>
+              </article>
+            </div>
+
+            <div className={styles.proofBanner}>
+              <strong>
+                {copy.how.proofPrefix}
+                <span className={styles.proofHighlight}>{copy.how.proofHighlight1}</span>
+                {copy.how.proofMid}
+                <span className={styles.proofHighlight}>{copy.how.proofHighlight2}</span>.
+              </strong>
+              <button
+                type="button"
+                className={`${styles.button} ${styles.buttonLime}`}
+                onClick={triggerPrimarySignIn}
+              >
+                <span>{copy.how.proofCta}</span>
+                <span aria-hidden="true">→</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* 04 · SYNCED SURFACES + ENTERPRISE USE CASES */}
+        <section className={`${styles.homeSection} ${styles.homeSectionTinted}`} id="use-cases">
+          <div className={styles.squiggle} aria-hidden="true" />
+          <div className={styles.container}>
+            <div className={styles.sectionHead}>
+              <span className={styles.sectionLabel}>{copy.useCases.label}</span>
+              <h2 className={styles.sectionTitle}>
+                {copy.useCases.titleLead}
+                <span className={styles.serif}>{copy.useCases.titleSerif}</span>
+                {copy.useCases.titleTail}
+              </h2>
+              <p className={styles.sectionSub}>{copy.useCases.sub}</p>
             </div>
 
             <div className={styles.cardGrid3}>
-              <article className={`${styles.modeCard} ${styles.inkCard}`}>
-                <span className={styles.miniLabel}>MEETING BOT</span>
-                <h3>Live Voice &amp; Capture</h3>
-                <p>
-                  Joins Google Meet, Zoom, or Teams as a visible participant, records audio to your private S3 bucket, transcribes live, and replies via VieNeu TTS when called.
-                </p>
-                <span className={styles.bestFor}>Best for: bilingual teams, live Q&amp;A, hands-free notes</span>
-              </article>
+              {copy.useCases.surfaces.map((surface) => (
+                <article key={surface.tag} className={`${styles.modeCard} ${styles.inkCard}`}>
+                  <span className={styles.miniLabel}>{surface.tag}</span>
+                  <h3>{surface.title}</h3>
+                  <p>{surface.body}</p>
+                  <span className={styles.bestFor}>{surface.bestFor}</span>
+                </article>
+              ))}
+            </div>
 
-              <article className={`${styles.modeCard} ${styles.inkCard}`}>
-                <span className={styles.miniLabel}>CHROME EXTENSION</span>
-                <h3>In-call Meet Overlay</h3>
-                <p>
-                  Floating side panel right inside Google Meet showing live VI + EN rows, 60-second catch-up, Ask TINA with citations, and one-click Save to Wiki.
-                </p>
-                <span className={styles.bestFor}>Best for: staying present inside Google Meet without tab switching</span>
-              </article>
-
-              <article className={`${styles.modeCard} ${styles.inkCard}`}>
-                <span className={styles.miniLabel}>WORKSPACE &amp; TERMINAL</span>
-                <h3>Meeting Memory &amp; Routines</h3>
-                <p>
-                  3-column meeting detail with Smart Search, Speaker Talk Time, Executive Summary, Action Items, Ask Tina with MCP approvals, and scheduled Routines.
-                </p>
-                <span className={styles.bestFor}>Best for: follow-ups, team knowledge, automated recaps</span>
-              </article>
+            <div className={styles.casesBlock}>
+              <h3 className={styles.casesSubhead}>{copy.useCases.casesHeading}</h3>
+              <div className={styles.useCaseGrid2}>
+                {copy.useCases.cases.map((uc) => (
+                  <article key={uc.num} className={styles.useCaseCard}>
+                    <span className={styles.miniLabel}>{uc.num}</span>
+                    <h4>{uc.title}</h4>
+                    <p>{uc.body}</p>
+                  </article>
+                ))}
+              </div>
             </div>
           </div>
         </section>
 
-        {/* 04 · CAPABILITIES */}
-        <section className={`${styles.homeSection} ${styles.homeSectionTinted}`} id="capabilities">
-          <div className={styles.squiggle} aria-hidden="true" />
-          <div className={styles.container}>
-            <div className={styles.sectionHead}>
-              <span className={styles.sectionLabel}>04 · CAPABILITIES</span>
-              <h2 className={styles.sectionTitle}>
-                Meeting awareness — <span className={styles.serif}>grounded in real evidence.</span>
-              </h2>
-              <p className={styles.sectionSub}>
-                Every summary, voice answer, and Wiki page links straight back to exact transcript lines so your team can verify every claim in one click.
-              </p>
-            </div>
-
-            <div className={styles.awarenessGrid}>
-              <article className={styles.awarenessColumn}>
-                <h3>Listens &amp; captures</h3>
-                <ul className={styles.featureList}>
-                  {CAPABILITIES_LISTEN.map((item) => (
-                    <li key={item.label} className={styles.featureRow}>
-                      <span className={styles.featureDot} aria-hidden="true" />
-                      <div className={styles.featureContent}>
-                        <strong>{item.label}</strong>
-                        <span>{item.text}</span>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </article>
-
-              <article className={styles.awarenessColumn}>
-                <h3>Acts &amp; remembers</h3>
-                <ul className={styles.featureList}>
-                  {CAPABILITIES_ACT.map((item) => (
-                    <li key={item.label} className={styles.featureRow}>
-                      <span className={`${styles.featureDot} ${styles.featureDotOrange}`} aria-hidden="true" />
-                      <div className={styles.featureContent}>
-                        <strong>{item.label}</strong>
-                        <span>{item.text}</span>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        {/* 05 · SELF-HOSTED PRIVACY */}
+        {/* 05 · PRIVACY + SUPPORTED PLATFORMS & MODELS */}
         <section className={styles.homeSection} id="privacy">
           <div className={styles.squiggle} aria-hidden="true" />
           <div className={styles.container}>
             <div className={styles.sectionHead}>
-              <span className={styles.sectionLabel}>05 · DATA PRIVACY</span>
+              <span className={styles.sectionLabel}>{copy.privacy.label}</span>
               <h2 className={styles.sectionTitle}>
-                Your meetings stay <span className={styles.serif}>on your stack.</span>
+                {copy.privacy.titleLead}
+                <span className={styles.serif}>{copy.privacy.titleSerif}</span>
               </h2>
-              <p className={styles.sectionSub}>
-                TINA is built self-hosted from the ground up — from local Docker Compose to private AWS VPC / ECS Fargate with RDS PostgreSQL, ElastiCache Valkey, and private S3.
-              </p>
+              <p className={styles.sectionSub}>{copy.privacy.sub}</p>
             </div>
 
-            <div className={styles.cardGrid3}>
-              <article className={`${styles.modeCard} ${styles.inkCard}`}>
-                <span className={styles.miniLabel}>A / YOUR INFRASTRUCTURE</span>
-                <h3>Docker or AWS ECS.</h3>
-                <p>
-                  Run TINA locally on Docker / OrbStack or deploy inside your own AWS VPC with private subnets, ALB + CloudFront, and encrypted storage.
-                </p>
-              </article>
-
-              <article className={`${styles.modeCard} ${styles.inkCard}`}>
-                <span className={styles.miniLabel}>B / SERVER-SIDE SECRETS</span>
-                <h3>Keys never reach the browser.</h3>
-                <p>
-                  LLM API keys, OAuth tokens, and speech credentials are kept server-side and injected from Secrets Manager — never exposed to client JS.
-                </p>
-              </article>
-
-              <article className={`${styles.modeCard} ${styles.inkCard}`}>
-                <span className={styles.miniLabel}>C / OWNER-SCOPED</span>
-                <h3>Default-deny permissions.</h3>
-                <p>
-                  Every meeting transcript, recording, and shared workspace is strictly scoped to its owner and invited teammates — never used for third-party training.
-                </p>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        {/* 06 · PLATFORMS & MODELS */}
-        <section className={styles.homeSection} id="platforms">
-          <div className={styles.container}>
-            <div className={styles.platformShowcase}>
-              <div className={styles.sectionHead}>
-                <span className={styles.sectionLabel}>06 · WORKS EVERYWHERE</span>
-                <h2 className={styles.sectionTitle}>
-                  Built for <span className={styles.serif}>your</span> platforms &amp; models.
-                </h2>
-                <p className={styles.sectionSub}>
-                  Connect the meeting tools your team already lives in and switch AI providers or speech backends anytime without rewriting workflows.
-                </p>
+            <div className={styles.privacyLayout}>
+              <div className={styles.privacyDiagram}>
+                <PrivateInfraIso lang={lang} />
               </div>
 
-              <div className={styles.platformPanels}>
-                <div className={styles.platformPanel}>
-                  <h3>MEETING PLATFORMS &amp; CLIENTS</h3>
-                  <ul className={styles.platformList}>
-                    <li>Google Meet</li>
-                    <li>Zoom</li>
-                    <li>Microsoft Teams</li>
-                    <li>TINA Web Workspace</li>
-                    <li>TINA Chrome Extension</li>
-                    <li>TINA Developer Terminal</li>
-                  </ul>
+              <div className={styles.privacyClaims}>
+                {copy.privacy.cards.map((card) => (
+                  <article key={card.tag} className={`${styles.modeCard} ${styles.inkCard}`}>
+                    <span className={styles.miniLabel}>{card.tag}</span>
+                    <h3>{card.title}</h3>
+                    <p>{card.body}</p>
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className={styles.platformWrap} id="platforms">
+              <div className={styles.platformShowcase}>
+                <div className={styles.sectionHead}>
+                  <span className={styles.sectionLabel}>{copy.privacy.platformsLabel}</span>
+                  <h2 className={styles.sectionTitle}>
+                    {copy.privacy.platformsTitleLead}
+                    <span className={styles.serif}>{copy.privacy.platformsTitleSerif}</span>
+                    {copy.privacy.platformsTitleTail}
+                  </h2>
+                  <p className={styles.sectionSub}>{copy.privacy.platformsSub}</p>
                 </div>
 
-                <div className={styles.platformPanel}>
-                  <h3>AI PROVIDERS &amp; SPEECH ENGINES</h3>
-                  <ul className={styles.platformList}>
-                    <li>ChatGPT Plan (OAuth)</li>
-                    <li>Claude / Anthropic</li>
-                    <li>Google Gemini &amp; AWS Bedrock</li>
-                    <li>DeepSeek, Groq &amp; Custom Gateways</li>
-                    <li>VieGem + LM · Whisper · Soniox STT</li>
-                    <li>VieNeu TTS &amp; LiveKit Voice</li>
-                  </ul>
+                <div className={styles.platformPanels}>
+                  <div className={styles.platformPanel}>
+                    <h3>{copy.privacy.leftColTitle}</h3>
+                    <ul className={styles.platformList}>
+                      {copy.privacy.leftColItems.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className={styles.platformPanel}>
+                    <h3>{copy.privacy.rightColTitle}</h3>
+                    <ul className={styles.platformList}>
+                      {copy.privacy.rightColItems.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </section>
 
-        {/* 07 · FAQ */}
+        {/* 06 · FAQ */}
         <section className={styles.homeSection} id="faq">
           <div className={styles.squiggle} aria-hidden="true" />
           <div className={styles.container}>
             <div className={`${styles.sectionHead} ${styles.sectionHeadCenter}`}>
-              <span className={styles.sectionLabel}>07 · FAQ</span>
+              <span className={styles.sectionLabel}>{copy.faq.label}</span>
               <h2 className={styles.sectionTitle}>
-                Common questions.<br />
-                <span className={styles.serif}>Straight</span> answers.
+                {copy.faq.titleLine1}
+                <br />
+                <span className={styles.serif}>{copy.faq.titleSerif}</span>
+                {copy.faq.titleLine2Rest}
               </h2>
             </div>
 
             <div className={styles.narrow}>
               <div className={styles.faqList}>
-                {FAQ_ITEMS.map((item, idx) => {
+                {copy.faq.items.map((item, idx) => {
                   const isOpen = openFaq === idx;
                   return (
                     <details
@@ -796,23 +776,22 @@ export function TinaLanding({
           <div className={styles.container}>
             <div className={styles.ctaInner}>
               <h2>
-                Ready for your<br />
-                <span className={styles.serif}>next meeting?</span>
+                {copy.cta.titleLine1}
+                <br />
+                <span className={styles.serif}>{copy.cta.titleSerif}</span>
               </h2>
-              <p>
-                Sign in to your self-hosted TINA workspace to capture bilingual transcripts, speak with TINA in-call, and turn discussions into action.
-              </p>
+              <p>{copy.cta.sub}</p>
               <div className={styles.ctaActions}>
                 <button
                   type="button"
                   className={`${styles.button} ${styles.buttonLime}`}
                   onClick={triggerPrimarySignIn}
                 >
-                  <span>{claiming ? "Claim administrator access" : "Sign in to TINA"}</span>
+                  <span>{claiming ? copy.cta.primaryClaim : copy.cta.primary}</span>
                   <span aria-hidden="true">→</span>
                 </button>
                 <a className={`${styles.button} ${styles.buttonSoft}`} href="#home-hero">
-                  Back to top ↑
+                  {copy.cta.backToTop}
                 </a>
               </div>
             </div>
@@ -831,46 +810,44 @@ export function TinaLanding({
                 </span>
                 <span className={styles.wordmarkName}>TINA</span>
               </a>
-              <p>
-                Self-hosted AI meeting companion for Google Meet, Zoom, and Microsoft Teams — with bilingual transcription, live voice answers, and shared workspace memory.
-              </p>
+              <p>{copy.footer.tagline}</p>
             </div>
 
             <div className={styles.footerCol}>
-              <h4>Product</h4>
+              <h4>{copy.footer.col1}</h4>
               <ul>
-                <li><a href="#how">How it works</a></li>
-                <li><a href="#transcription">Live Transcript &amp; Voice</a></li>
-                <li><a href="#modes">Bot, Extension &amp; Workspace</a></li>
-                <li><a href="#capabilities">Capabilities</a></li>
+                <li><a href="#transcription">{copy.nav.live}</a></li>
+                <li><a href="#extension">{copy.nav.extension}</a></li>
+                <li><a href="#how">{copy.nav.how}</a></li>
+                <li><a href="#use-cases">{copy.nav.useCases}</a></li>
               </ul>
             </div>
 
             <div className={styles.footerCol}>
-              <h4>Architecture</h4>
+              <h4>{copy.footer.col2}</h4>
               <ul>
-                <li><a href="#privacy">Self-hosted Privacy</a></li>
-                <li><a href="#platforms">Platforms &amp; Models</a></li>
-                <li><a href="#faq">FAQ</a></li>
+                <li><a href="#privacy">{copy.nav.privacy}</a></li>
+                <li><a href="#platforms">{copy.privacy.platformsLabel}</a></li>
+                <li><a href="#faq">{copy.nav.faq}</a></li>
               </ul>
             </div>
 
             <div className={styles.footerCol}>
-              <h4>Workspace</h4>
+              <h4>{copy.footer.col3}</h4>
               <ul>
                 <li>
                   <button type="button" onClick={triggerPrimarySignIn}>
-                    {claiming ? "Set up instance" : "Sign in"}
+                    {claiming ? copy.footer.col3Claim : copy.footer.col3SignIn}
                   </button>
                 </li>
-                <li><a href="#signin">Authentication options</a></li>
+                <li><a href="#signin">{copy.footer.col3AuthOptions}</a></li>
               </ul>
             </div>
           </div>
 
           <div className={styles.footerBottom}>
-            <span>© 2026 TINA — Self-hosted AI Meeting Companion.</span>
-            <span>Listen clearly. Act together.</span>
+            <span>{copy.footer.copyright}</span>
+            <span>{copy.footer.motto}</span>
           </div>
         </div>
       </footer>

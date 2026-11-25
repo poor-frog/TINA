@@ -282,6 +282,7 @@ describe("AuthGate pre-login TINA landing", () => {
   const origFetch = globalThis.fetch;
 
   beforeEach(() => {
+    window.localStorage.removeItem("tina.landing.lang");
     vi.mocked(signIn).mockClear();
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -301,15 +302,21 @@ describe("AuthGate pre-login TINA landing", () => {
     globalThis.fetch = origFetch;
   });
 
-  it("renders OAuth providers and first-run admin claim messaging", async () => {
+  it("renders OAuth providers and first-run admin claim messaging in VI default and EN toggle", async () => {
     render(<AuthGate><div>App</div></AuthGate>);
-    expect(await screen.findByText("Set up your instance")).toBeTruthy();
+    expect(await screen.findByText("Thiết lập không gian TINA")).toBeTruthy();
+    expect(screen.getByText("Lần đăng nhập đầu tiên = Quản trị viên")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Tiếp tục với Google/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Tiếp tục với Microsoft/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "EN" }));
+    expect(screen.getByText("Set up your instance")).toBeTruthy();
     expect(screen.getByText("First sign-in = administrator")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Continue with Google/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Continue with Microsoft/i })).toBeTruthy();
   });
 
-  it("renders editorial TINA landing sections and triggers Google OAuth when admin exists", async () => {
+  it("renders bilingual TINA landing, Chrome Extension tabs, interactive Hero scene, and Google OAuth", async () => {
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/auth/me")) return new Response("{}", { status: 401 });
@@ -323,15 +330,21 @@ describe("AuthGate pre-login TINA landing", () => {
     }) as typeof fetch;
 
     render(<AuthGate><div>App</div></AuthGate>);
-    expect(await screen.findByText("01 · HOW IT WORKS")).toBeTruthy();
-    expect(screen.getByText("02 · LIVE TRANSCRIPT & VOICE")).toBeTruthy();
+    expect(await screen.findByText("01 · TRẢI NGHIỆM TRONG PHÒNG HỌP")).toBeTruthy();
+    expect(screen.getByText("02 · TINA CHROME EXTENSION")).toBeTruthy();
     expect(screen.getAllByText("TINA Agent").length).toBeGreaterThan(0);
 
     // Calling TINA switches the hero scene to its spoken answer.
     fireEvent.click(screen.getByRole("button", { name: /Gọi “Tina ơi”/i }));
     expect(screen.getByText(/Tuần trước nhóm chốt 2 mục/i)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /Bắt kịp 60s/i }));
+    expect(screen.getByText(/Cửa sổ 09:40:02/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /Ask TINA/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Lưu vào Wiki/i }));
+    expect(screen.getByText(/Đã lưu vào Wiki/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Tiếp tục với Google/i }));
     expect(signIn).toHaveBeenCalledWith("google", expect.objectContaining({ callbackUrl: expect.any(String) }));
   });
 });

@@ -15,17 +15,24 @@ from fastapi import HTTPException
 from control_plane.meeting_voice_completion import _VOICE_MODEL_ENV_KEYS
 
 log = logging.getLogger(__name__)
-_pool_slots = BoundedSemaphore(4)
-_background_slots = BoundedSemaphore(4)
+_pool_slots = BoundedSemaphore(2)
+_background_slots = BoundedSemaphore(2)
 _SUPPORTED_TASKS = frozenset({"polish", "translate", "knowledge", "discussion"})
 _BACKGROUND_TASKS = frozenset({"canonical_notes", "meeting_state"})
 _MAX_OUTPUT_CHARS = 50_000
+
+
+def _stderr_tail(raw: str | None) -> str:
+    if not raw:
+        return ""
+    return raw.strip().splitlines()[-1][:240]
 
 
 def _build_subprocess_env(model_env: dict[str, str] | None, *, extra: dict[str, str]) -> dict[str, str]:
     env = {key: os.environ[key] for key in (
         "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_DEFAULT_REGION", "AWS_REGION",
         "PATH", "PYTHONPATH", "TINA_LLM_PROVIDER", "TINA_LLM_MODEL",
+        "TINA_STATE_FAST_MODEL", "TINA_STATE_REASON_MODEL",
     ) if key in os.environ}
     env.update(HOME="/tmp", **extra)
     if model_env:
@@ -74,12 +81,13 @@ def dispatch_background_meeting_job(
                 [sys.executable, "-m", "worker.local_completion"],
                 input=json.dumps({"task": task, "inline": inline}, ensure_ascii=False),
                 text=True, encoding="utf-8",
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 cwd="/tmp", env=env,
                 timeout=max(5.0, float(timeout_seconds)),
             )
             if result.returncode:
-                log.warning("background meeting job failed task=%s unit=%s rc=%s", task, unit_id, result.returncode)
+                log.warning("background meeting job failed task=%s unit=%s rc=%s err=%s",
+                            task, unit_id, result.returncode, _stderr_tail(getattr(result, "stderr", None)))
         except subprocess.TimeoutExpired:
             log.warning("background meeting job timed out task=%s unit=%s", task, unit_id)
         except Exception:  # noqa: BLE001
@@ -110,7 +118,7 @@ def complete(
             [sys.executable, "-m", "worker.local_completion"],
             input=json.dumps({"task": task, "inline": inline}, ensure_ascii=False),
             text=True, encoding="utf-8",
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             cwd="/tmp", env=env,
             timeout=max(1.0, float(timeout_seconds)),
         )
@@ -119,7 +127,8 @@ def complete(
     finally:
         _pool_slots.release()
     if result.returncode or not result.stdout:
-        log.warning("local completion failed task=%s returncode=%s", task, result.returncode)
+        log.warning("local completion failed task=%s returncode=%s err=%s",
+                    task, result.returncode, _stderr_tail(getattr(result, "stderr", None)))
         raise HTTPException(502, f"{label} is unavailable")
     try:
         envelope = json.loads(result.stdout)

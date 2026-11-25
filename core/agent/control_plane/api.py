@@ -1447,7 +1447,7 @@ def create_app(
                     window_count = max(1, len(json.loads(text).get("windows", [])))
                 except (ValueError, TypeError):
                     window_count = 1
-                timeout_s = min(900.0, 90.0 + window_count * 40.0)
+                timeout_s = min(300.0, 60.0 + window_count * 30.0)
             model_env = resolve_voice_model_env(
                 dispatcher.resolve_model_config(subject),
                 allowlist=settings.model_allowlist if settings else "",
