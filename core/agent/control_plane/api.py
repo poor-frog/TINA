@@ -1616,11 +1616,17 @@ def create_app(
         import urllib.error
         import urllib.request
 
+        from control_plane.aws_voice_chatgpt import workspace_access_token, workspace_connected
         from control_plane.openai_auth import ChatGPTAuthError, access_token
 
         subject = subject_of(request)
         try:
-            token = access_token(subject)
+            if workspace_connected(subject):
+                if settings is None:
+                    raise HTTPException(503, "Workspace ChatGPT is temporarily unavailable.")
+                token = workspace_access_token(subject, settings.redis_url)
+            else:
+                token = access_token(subject)
             req = urllib.request.Request(
                 "https://api.openai.com/v1/models",
                 headers={"Authorization": f"Bearer {token}"},

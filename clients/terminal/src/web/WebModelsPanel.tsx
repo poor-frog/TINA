@@ -396,19 +396,28 @@ function AgentProviderForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope]);
 
+  const mode = values.mode ?? "";
+
   useEffect(() => {
-    if (scope !== "personal") return;
+    // The mounted connection band handles this provider's status and refreshes.
+    if (scope !== "personal" || loading || mode === "openai-subscription") return;
     let active = true;
     fetch("/api/models/openai/status", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : {}))
-      .then((data: { connected?: boolean; email?: string }) => {
-        if (active) onChatGptStatus({ connected: data.connected === true, email: data.email || "" });
+      .then((r) => {
+        if (!r.ok) throw new Error("Could not check ChatGPT status.");
+        return r.json();
       })
-      .catch(() => undefined);
+      .then((data: { available?: boolean; connected?: boolean; email?: string }) => {
+        const connected = data.connected === true && (!workspacePilotMode() || data.available === true);
+        if (active) onChatGptStatus({ connected, email: connected ? data.email || "" : "" });
+      })
+      .catch(() => {
+        if (active) onChatGptStatus({ connected: false, email: "" });
+      });
     return () => {
       active = false;
     };
-  }, [scope, onChatGptStatus]);
+  }, [scope, loading, mode, onChatGptStatus]);
 
   const TRACKED_KEYS = useMemo(
     () => ["mode", "base_url", "region", "api_key", "antigravity_terms_acknowledged", "model", "meeting_model"],
@@ -416,7 +425,6 @@ function AgentProviderForm({
   );
 
   const dirty = TRACKED_KEYS.some((k) => (values[k] ?? "") !== (initial[k] ?? ""));
-  const mode = values.mode ?? "";
   const activeMeta = providerById(mode);
   const apiProviderInfo = apiModelProvider(mode);
   const canSave = !saving && dirty && canSaveModelPrefs(values);

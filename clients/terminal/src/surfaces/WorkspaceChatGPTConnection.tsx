@@ -17,7 +17,10 @@ export function WorkspaceChatGPTConnection({ onConnected }: { onConnected?: (con
       setStatus(connected ? "connected" : result.available === true ? "disconnected" : "unavailable");
       onConnected?.(connected);
     } catch {
-      if (!signal?.aborted) setStatus("error");
+      if (!signal?.aborted) {
+        setStatus("error");
+        onConnected?.(false);
+      }
     }
   }, [onConnected]);
 
@@ -44,8 +47,8 @@ export function WorkspaceChatGPTConnection({ onConnected }: { onConnected?: (con
       <span role="status">{text[status]}</span>
       {(status === "connected" || status === "disconnected") && (
         <details className={styles.accountDetails}>
-          <summary>{status === "connected" ? "Reconnect Workspace ChatGPT" : "Connect Workspace ChatGPT"}</summary>
-          <p>From the TINA checkout on your computer, start the sign-in helper. Then open the link below and approve access on OpenAI.</p>
+          <summary>Workspace ChatGPT setup (staging operators only)</summary>
+          <p>Pilot users should contact their staging operator. Operators with staging AWS access can start the helper from their local TINA checkout, then open the link from that same machine to approve access on OpenAI.</p>
           <code>node deploy/aws/workspace-chatgpt-login.mjs</code>
           <p><a href="http://127.0.0.1:23101/" target="_blank" rel="noopener noreferrer">Open local ChatGPT sign-in</a></p>
         </details>

@@ -51,7 +51,8 @@ function main() {
   const owner = params.WorkspaceChatGPTOwner;
   const secret = params.WorkspaceChatGPTSecretArn;
   const account = deployment.StackId.split(':')[4];
-  if (!/^[1-9][0-9]*$/.test(owner || '') || !params.WorkspacePilotUserIds?.split(',').includes(owner)
+  const pilotIds = params.WorkspacePilotUserIds?.split(',').map(id => id.trim());
+  if (!/^[1-9][0-9]*$/.test(owner || '') || !(pilotIds?.includes('*') || pilotIds?.includes(owner))
       || !secret?.startsWith('arn:aws:secretsmanager:us-east-1:' + account + ':secret:tina/staging/workspace-pilot/chatgpt/' + owner + '/')) {
     throw new Error('The staging Workspace ChatGPT owner and secret must be configured first.');
   }
@@ -82,9 +83,13 @@ function main() {
         + '<form method="post" action="' + start + '"><button>Continue with ChatGPT</button></form></html>');
     }
     if (req.method === 'POST' && url.origin === origin && url.pathname === start && req.headers.origin === origin && !used && !pending) {
+      const clientId = existing.client_id || 'dynamic_agent_client';
       const flow = beginChatGPTAuth({
         generation: previous.VersionId, redirect_uri: origin + callback, ui_origin: origin, subject_id: owner,
-        host_id: existing.host_id, client_id: 'dynamic_agent_client', agent_name_hint: 'TINA',
+        host_id: existing.host_id, client_id: clientId,
+        ...(clientId === 'dynamic_agent_client' ? { agent_name_hint: 'TINA' } : {}),
+        ...(existing.id_token ? { id_token_hint: existing.id_token } : {}),
+        ...(existing.email ? { login_hint: existing.email } : {}),
       });
       pending = flow.pending;
       return res.writeHead(303, { Location: flow.authorizationUrl }).end();
@@ -97,7 +102,7 @@ function main() {
     try {
       const code = url.searchParams.get('code');
       if (!code || url.searchParams.has('error')) throw new Error();
-      const profile = await exchangeChatGPTCode({ code, callbackClientId: url.searchParams.get('client_id'), pending });
+      const profile = await exchangeChatGPTCode({ code, callbackClientId: url.searchParams.get('client_id'), pending, existing });
       if (!profile.scopes.includes('offline_access')) throw new Error();
       const current = aws('secretsmanager', 'get-secret-value', '--secret-id', secret, '--version-stage', 'AWSCURRENT');
       const active = JSON.parse(current.SecretString);

@@ -857,11 +857,9 @@
       "key": "LIVEKIT_API_SECRET",
       "class": "defaulted",
       "default": "",
-      "targets": [
-        "compose",
-        "helm"
-      ],
-      "description": "Optional shared LiveKit HMAC secret for audio bridge capability signing when LiveKit uses an independent secret from INTERNAL_API_SECRET."
+      "secret": true,
+      "targets": [],
+      "description": "Optional shared LiveKit HMAC secret injected by AWS staging for audio bridge capability signing when LiveKit uses an independent secret from INTERNAL_API_SECRET."
     }
   ],
   "capabilities": {

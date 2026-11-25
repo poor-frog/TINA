@@ -12,6 +12,7 @@ import {
 import { signIn } from "next-auth/react";
 import { AuthGate } from "../../app/AuthGate";
 import { WebShell } from "../WebApp";
+import { WebModelsPanel } from "../WebModelsPanel";
 import { computeSpeakerStats } from "../SpeakerTalkTime";
 import {
   EMPTY_MEETING_FILTERS,
@@ -326,9 +327,9 @@ describe("AuthGate pre-login TINA landing", () => {
     expect(screen.getByText("02 · LIVE TRANSCRIPT & VOICE")).toBeTruthy();
     expect(screen.getAllByText("TINA Agent").length).toBeGreaterThan(0);
 
-    // Interactive hero illustration responds to clicking "Gọi “Tina ơi”"
+    // Calling TINA switches the hero scene to its spoken answer.
     fireEvent.click(screen.getByRole("button", { name: /Gọi “Tina ơi”/i }));
-    expect(screen.getByText(/Đã ghi 2 action items/i)).toBeTruthy();
+    expect(screen.getByText(/Tuần trước nhóm chốt 2 mục/i)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
     expect(signIn).toHaveBeenCalledWith("google", expect.objectContaining({ callbackUrl: expect.any(String) }));
@@ -341,10 +342,12 @@ describe("WebShell production UI (Option A & Option B)", () => {
   function mockEnvironment({
     admin,
     workspacePilot,
+    chatGptStatus,
     liveAssistState = { configured: false, enabled: false, can_configure: true, readonly: false, revision: 0, items: [] },
   }: {
     admin: boolean;
     workspacePilot?: boolean;
+    chatGptStatus?: { status: number; body: Record<string, unknown> };
     liveAssistState?: Record<string, unknown>;
   }) {
     let currentState = { ...liveAssistState };
@@ -413,6 +416,9 @@ describe("WebShell production UI (Option A & Option B)", () => {
         );
       }
       if (url.includes("/api/models/openai/status")) {
+        if (chatGptStatus) {
+          return new Response(JSON.stringify(chatGptStatus.body), { status: chatGptStatus.status });
+        }
         return new Response(JSON.stringify({ connected: true, email: "nghixa021@gmail.com" }), { status: 200 });
       }
       if (url.includes("/api/models/openai/logout") && init?.method === "POST") {
@@ -661,6 +667,23 @@ describe("WebShell production UI (Option A & Option B)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Global Defaults/i }));
     expect(await screen.findByText(/Deployment-wide defaults/i)).toBeTruthy();
     expect(screen.getByText("Global Transcription Backend")).toBeTruthy();
+  });
+
+  it.each([
+    [200, true, "ChatGPT plan connected for Workspace"],
+    [200, false, "Workspace ChatGPT setup is unavailable for this TINA account."],
+    [503, true, "Could not check the Workspace ChatGPT connection."],
+  ] as const)("fetches Workspace ChatGPT status once and respects HTTP %s and availability %s", async (status, available, message) => {
+    vi.stubEnv("NEXT_PUBLIC_TERMINAL_MODE", "workspace-pilot");
+    try {
+      const fetchMock = mockEnvironment({ admin: false, workspacePilot: true, chatGptStatus: { status, body: { available, connected: true } } });
+      render(<WebModelsPanel />);
+      expect(await screen.findByText(message)).toBeTruthy();
+      expect(fetchMock.mock.calls.filter(([url]) => url === "/api/models/openai/status")).toHaveLength(1);
+      expect(Boolean(screen.queryByText(/staging operators only/i))).toBe(status === 200 && available);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("renders redesigned Agent Model Provider & Auth cards, ChatGPT OAuth disconnect, API key reveal, Antigravity guard, and connection test", async () => {

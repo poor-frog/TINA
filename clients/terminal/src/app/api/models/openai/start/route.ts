@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   beginChatGPTAuth, callbackUri, currentTinaSubject, readChatGPTProfile, storePending, chatGPTConnection,
 } from "../../../../../lib/chatgptPlanAuth";
+import { workspacePilotMode } from "../../../../mode";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate" } as const;
@@ -20,6 +21,9 @@ function loopbackOrigin(req: NextRequest): string {
 }
 
 export async function POST(req: NextRequest) {
+  if (workspacePilotMode()) {
+    return NextResponse.json({ error: "Contact your staging operator to manage Workspace ChatGPT." }, { status: 403, headers: NO_STORE });
+  }
   const subject = await currentTinaSubject();
   if (!subject) return NextResponse.json({ error: "Sign in to TINA before connecting ChatGPT." }, { status: 401, headers: NO_STORE });
   try {

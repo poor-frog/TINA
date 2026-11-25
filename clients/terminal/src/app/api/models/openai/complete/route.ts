@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callbackUri, completeChatGPTSignIn, currentTinaSubject } from "../../../../../lib/chatgptPlanAuth";
+import { workspacePilotMode } from "../../../../mode";
 
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "no-store" };
 
 export async function POST(req: NextRequest) {
+  if (workspacePilotMode()) {
+    return NextResponse.json({ error: "Contact your staging operator to manage Workspace ChatGPT." }, { status: 403, headers });
+  }
   const origin = req.headers.get("origin");
   try {
     if (req.headers.get("sec-fetch-site") === "cross-site"
