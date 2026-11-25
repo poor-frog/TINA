@@ -33,8 +33,40 @@ function makeSessionId(slug?: string): string {
   return `kb-${safe}-${Date.now().toString(36)}`;
 }
 
-function phaseLabel(phase: ChatPhase | null, hasText = false): string {
+const KNOWLEDGE_WRITE_TOOLS = new Set(["create_wiki", "update_wiki", "Write", "Edit"]);
+
+function toolPhaseLabel(tool: string): string {
+  switch (tool) {
+    case "list_wiki":
+      return "Browsing your library…";
+    case "search_wiki":
+      return "Searching your library…";
+    case "read_wiki":
+    case "Read":
+      return "Reading page…";
+    case "create_wiki":
+    case "Write":
+      return "Creating page in Knowledge…";
+    case "update_wiki":
+    case "Edit":
+      return "Updating page in Knowledge…";
+    case "reach_web_search":
+    case "WebSearch":
+      return "Searching the web…";
+    case "reach_web_read":
+    case "WebFetch":
+      return "Reading web page…";
+    case "reach_github_search":
+    case "reach_github_read":
+      return "Checking GitHub…";
+    default:
+      return "Working…";
+  }
+}
+
+function phaseLabel(phase: ChatPhase | null, hasText = false, activeTool?: string | null): string {
   if (hasText) return "Writing…";
+  if (activeTool) return toolPhaseLabel(activeTool);
   if (phase === "working") return "Reading your library…";
   if (phase === "reconnecting") return "Reconnecting…";
   if (phase === "stalled") return "Still working…";
@@ -73,6 +105,7 @@ export function KnowledgeCopilotDrawer({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<ChatPhase | null>(null);
+  const [activeTool, setActiveTool] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -84,6 +117,7 @@ export function KnowledgeCopilotDrawer({
     abortRef.current = null;
     setBusy(false);
     setPhase(null);
+    setActiveTool(null);
     setSession(makeSessionId(slug));
     setMessages([]);
   }, [slug]);
@@ -122,6 +156,9 @@ export function KnowledgeCopilotDrawer({
       ]);
       setBusy(true);
       setPhase("connecting");
+      setActiveTool(null);
+      let mutatedInTurn = false;
+      let commitSeen = false;
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -166,6 +203,8 @@ export function KnowledgeCopilotDrawer({
               );
             },
             onTool: (tool) => {
+              if (!controller.signal.aborted) setActiveTool(tool);
+              if (KNOWLEDGE_WRITE_TOOLS.has(tool)) mutatedInTurn = true;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === agentId ? { ...m, ops: [...(m.ops ?? []), tool] } : m,
@@ -173,6 +212,7 @@ export function KnowledgeCopilotDrawer({
               );
             },
             onCommit: (sha) => {
+              commitSeen = true;
               setMessages((prev) =>
                 prev.map((m) => (m.id === agentId ? { ...m, commit: sha || "saved" } : m)),
               );
@@ -201,9 +241,16 @@ export function KnowledgeCopilotDrawer({
           { signal: controller.signal },
         );
       } finally {
+        if (mutatedInTurn && !commitSeen && !controller.signal.aborted) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === agentId && !m.error ? { ...m, commit: m.commit || "saved" } : m)),
+          );
+          onWorkspaceMutated();
+        }
         abortRef.current = null;
         setBusy(false);
         setPhase(null);
+        setActiveTool(null);
       }
     },
     [docPath, workspaceName, slug, isReadOnly, session, onWorkspaceMutated],
@@ -416,7 +463,7 @@ export function KnowledgeCopilotDrawer({
                     </span>
                     <span className={styles.copilotAgentName}>Tina</span>
                     {isStreamingThis && (
-                      <span className={styles.copilotPhaseHint}>{phaseLabel(phase, Boolean(m.text))}</span>
+                      <span className={styles.copilotPhaseHint}>{phaseLabel(phase, Boolean(m.text), activeTool)}</span>
                     )}
                     {m.text && !isStreamingThis && (
                       <button
@@ -454,7 +501,7 @@ export function KnowledgeCopilotDrawer({
                           <span />
                           <span />
                         </span>
-                        <span>{phaseLabel(phase)}</span>
+                        <span>{phaseLabel(phase, false, activeTool)}</span>
                       </div>
                     ) : null}
 

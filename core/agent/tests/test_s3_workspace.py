@@ -453,6 +453,62 @@ def test_nova_bedrock_workspace_supports_agent_reach_and_readonly_global(tmp_pat
     assert reach_calls == [("web", "search", "TINA AWS")]
     tool_names = [t["toolSpec"]["name"] for t in turn_calls[0]["toolConfig"]["tools"]]
     assert "reach_web_search" in tool_names and "reach_github_read" in tool_names
+    assert {"list_wiki", "search_wiki", "read_wiki", "create_wiki", "update_wiki"}.issubset(set(tool_names))
+
+    # Natural-language create_wiki (nested folder), list_wiki, search_wiki, and update_wiki (append + replace)
+    created = bedrock_workspace._wiki_tool(
+        mounts_map,
+        "create_wiki",
+        {"workspace": "personal", "path": "kg/projects/acme.md", "text": "# Acme Project\n\nInitial brief.\n"},
+        "Tạo giúp tôi trang dự án Acme trong Knowledge",
+    )
+    assert created["created"] == "kg/projects/acme.md"
+
+    listed = bedrock_workspace._wiki_tool(mounts_map, "list_wiki", {"workspace": "personal"}, "")
+    assert any(item["path"] == "kg/projects/acme.md" and item["title"] == "Acme Project" for item in listed["files"])
+
+    searched = bedrock_workspace._wiki_tool(mounts_map, "search_wiki", {"workspace": "*", "query": "Acme"}, "")
+    assert any(m["workspace"] == "personal" and m["path"] == "kg/projects/acme.md" for m in searched["matches"])
+
+    appended = bedrock_workspace._wiki_tool(
+        mounts_map,
+        "update_wiki",
+        {"workspace": "personal", "path": "kg/projects/acme.md", "mode": "append", "text": "- Next step: demo Friday"},
+        "Thêm action item vào trang Acme",
+    )
+    assert appended["mode"] == "append"
+    body_after_append = bedrock_workspace._wiki_tool(
+        mounts_map, "read_wiki", {"workspace": "personal", "path": "kg/projects/acme.md"}, "",
+    )["text"]
+    assert "Initial brief." in body_after_append and "Next step: demo Friday" in body_after_append
+
+    replaced = bedrock_workspace._wiki_tool(
+        mounts_map,
+        "update_wiki",
+        {"workspace": "personal", "path": "kg/projects/acme.md", "mode": "replace", "text": "# Acme Project\n\nUpdated summary.\n"},
+        "Cập nhật lại nội dung trang Acme",
+    )
+    assert replaced["mode"] == "replace"
+    assert "Updated summary." in (pdir / "kg" / "projects" / "acme.md").read_text(encoding="utf-8")
+
+    # Indirect prompt-injection guard (Option A): external web taint blocks writes when user didn't ask to write,
+    # but permits writing when user explicitly asked to search web and save to Knowledge.
+    with pytest.raises(ValueError, match="external web content"):
+        bedrock_workspace._wiki_tool(
+            mounts_map,
+            "create_wiki",
+            {"workspace": "personal", "path": "kg/injected.md", "text": "pwned"},
+            "Tóm tắt trang web này giúp tôi",
+            external_taint=True,
+        )
+    allowed_after_web = bedrock_workspace._wiki_tool(
+        mounts_map,
+        "create_wiki",
+        {"workspace": "personal", "path": "kg/web-summary.md", "text": "# Web Summary\n\nFacts.\n"},
+        "Tìm trên web về AWS Bedrock rồi lưu vào Knowledge giúp tôi",
+        external_taint=True,
+    )
+    assert allowed_after_web["created"] == "kg/web-summary.md"
 
     # Verify custom HTTPS + anthropic API key overlay cleanly into claude-code runner,
     # clearing stale credentials and setting Claude model aliases.
