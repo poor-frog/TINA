@@ -69,7 +69,12 @@ export type WebIconName =
   | "volume"
   | "volumeX"
   | "hash"
-  | "sliders";
+  | "sliders"
+  | "bookOpen"
+  | "folder"
+  | "upload"
+  | "gitBranch"
+  | "network";
 
 const PATHS: Record<WebIconName, ReactNode> = {
   home: (
@@ -417,6 +422,40 @@ const PATHS: Record<WebIconName, ReactNode> = {
       <path d="M4 7h10M18 7h2M4 17h4M12 17h8M4 12h16" />
       <circle cx="16" cy="7" r="2" />
       <circle cx="10" cy="17" r="2" />
+    </>
+  ),
+  bookOpen: (
+    <>
+      <path d="M2 5.5A2.5 2.5 0 0 1 4.5 3H9a3 3 0 0 1 3 3v14a2.5 2.5 0 0 0-2.5-2.5H4.5A2.5 2.5 0 0 0 2 20V5.5Z" />
+      <path d="M22 5.5A2.5 2.5 0 0 0 19.5 3H15a3 3 0 0 0-3 3v14a2.5 2.5 0 0 1 2.5-2.5h5A2.5 2.5 0 0 1 22 20V5.5Z" />
+    </>
+  ),
+  folder: (
+    <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h4.2l2 2.2h6.8A2.5 2.5 0 0 1 21 8.7v9.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5v-12Z" />
+  ),
+  upload: (
+    <>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </>
+  ),
+  gitBranch: (
+    <>
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </>
+  ),
+  network: (
+    <>
+      <circle cx="12" cy="5" r="2.5" />
+      <circle cx="5" cy="18" r="2.5" />
+      <circle cx="19" cy="18" r="2.5" />
+      <line x1="10.8" y1="7.2" x2="6.2" y2="15.8" />
+      <line x1="13.2" y1="7.2" x2="17.8" y2="15.8" />
+      <line x1="7.5" y1="18" x2="16.5" y2="18" />
     </>
   ),
 };

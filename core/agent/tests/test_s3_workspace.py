@@ -587,3 +587,46 @@ def test_s3_middleware_hydrates_body_slug_on_git_sync_routes(tmp_path, monkeypat
     assert r.status_code == 200
     assert "team-wiki" in synced
     assert "team-wiki" in pushed
+
+
+def test_global_workspace_is_readonly_via_workspace_api(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from control_plane.api import create_app
+    from control_plane.dispatch import Dispatcher
+    from control_plane.system_mounts import ensure_global_workspace
+    from control_plane.workspace_reader import WorkspaceReader
+    from shared.config import load_settings
+
+    root = tmp_path / "workspaces"
+    gdir = ensure_global_workspace(root / "_global")
+    monkeypatch.setenv("TINA_WORKSPACE_STORAGE", "local")
+    settings = load_settings(workspaces_dir=str(root), global_system_workspace_path=str(gdir))
+    app = create_app(Dispatcher(settings, None, None), reader=WorkspaceReader(str(root)))
+    headers = {"x-user-id": "42"}
+
+    with TestClient(app) as client:
+        tree_res = client.get("/api/workspace/tree?slug=_global", headers=headers)
+        assert tree_res.status_code == 200
+        files = tree_res.json()["files"]
+        assert "README.md" in files and "docs/tina-handbook.md" in files
+
+        doc_res = client.get("/api/workspace/document?slug=_global&path=docs/tina-handbook.md", headers=headers)
+        assert doc_res.status_code == 200
+        doc = doc_res.json()
+        assert doc["writable"] is False
+        assert "Kiến trúc 3 tầng" in doc["content"]
+
+        search_res = client.get("/api/workspace/search?slug=_global&q=TINA", headers=headers)
+        assert search_res.status_code == 200
+        assert len(search_res.json()["hits"]) >= 1
+
+        # All mutation attempts against _global must fail closed (403)
+        put_res = client.put("/api/workspace/document", headers=headers, json={
+            "path": "docs/tina-handbook.md", "content": "hacked", "expected_sha256": doc["sha256"], "slug": "_global",
+        })
+        assert put_res.status_code == 403
+        del_res = client.post("/api/workspace/document/delete", headers=headers, json={
+            "path": "docs/tina-handbook.md", "expected_sha256": doc["sha256"], "slug": "_global",
+        })
+        assert del_res.status_code == 403

@@ -355,3 +355,130 @@ export async function readWorkspaceGitDiff(opts: { sha: string; slug?: string; p
   if (opts.path) qs.set("path", opts.path);
   return getJson<GitDiff>(`/api/workspace/git/show?${qs.toString()}`);
 }
+
+// ── Markdown document CRUD, full-text search, and file uploads ───────────────────────────────────
+export interface WorkspaceDocument {
+  content: string;
+  sha256: string;
+  writable: boolean;
+}
+
+export async function readWorkspaceDocument(path: string, opts?: { slug?: string }): Promise<WorkspaceDocument> {
+  const qs = new URLSearchParams({ path });
+  if (opts?.slug) qs.set("slug", opts.slug);
+  return getJson<WorkspaceDocument>(`/api/workspace/document?${qs.toString()}`);
+}
+
+export async function saveWorkspaceDocument(opts: {
+  path: string;
+  content: string;
+  expected_sha256: string | null;
+  slug?: string;
+  commit?: boolean;
+  commit_message?: string;
+}): Promise<{ sha256: string; commit: string | null; commit_error: string | null }> {
+  return getJson(`/api/workspace/document`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      path: opts.path,
+      content: opts.content,
+      expected_sha256: opts.expected_sha256,
+      slug: opts.slug ?? null,
+      commit: opts.commit ?? false,
+      commit_message: opts.commit_message?.trim() || "Review Markdown document",
+    }),
+  });
+}
+
+export interface DocumentMovePreview {
+  path: string;
+  destination: string;
+  fingerprint: string;
+  changes: Array<{ path: string; sha256: string; replacements: number; diff: string }>;
+  warnings: string[];
+}
+
+export async function previewMoveWorkspaceDocument(opts: {
+  path: string;
+  destination: string;
+  expected_sha256: string;
+  slug?: string;
+  update_links?: boolean;
+}): Promise<DocumentMovePreview> {
+  return getJson(`/api/workspace/document/move/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      path: opts.path,
+      destination: opts.destination,
+      expected_sha256: opts.expected_sha256,
+      slug: opts.slug ?? null,
+      update_links: opts.update_links ?? true,
+    }),
+  });
+}
+
+export async function moveWorkspaceDocument(opts: {
+  path: string;
+  destination: string;
+  expected_sha256: string;
+  slug?: string;
+  update_links?: boolean;
+  expected_plan?: string | null;
+}): Promise<{ path: string; updated_links?: number; updated_documents?: number; warnings?: string[] }> {
+  return getJson(`/api/workspace/document/move`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      path: opts.path,
+      destination: opts.destination,
+      expected_sha256: opts.expected_sha256,
+      slug: opts.slug ?? null,
+      update_links: opts.update_links ?? false,
+      expected_plan: opts.expected_plan ?? null,
+    }),
+  });
+}
+
+export async function deleteWorkspaceDocument(opts: {
+  path: string;
+  expected_sha256: string;
+  slug?: string;
+}): Promise<{ deleted: string }> {
+  return getJson(`/api/workspace/document/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      path: opts.path,
+      expected_sha256: opts.expected_sha256,
+      slug: opts.slug ?? null,
+    }),
+  });
+}
+
+export interface WorkspaceSearchHit {
+  path: string;
+  line: number;
+  text: string;
+}
+
+export async function searchWorkspaceContent(
+  q: string,
+  opts?: { slug?: string },
+): Promise<{ hits: WorkspaceSearchHit[]; bounded: boolean }> {
+  const qs = new URLSearchParams({ q });
+  if (opts?.slug) qs.set("slug", opts.slug);
+  return getJson(`/api/workspace/search?${qs.toString()}`);
+}
+
+export async function uploadWorkspaceFiles(files: File[]): Promise<{ files: Array<{ name: string; path: string }> }> {
+  const form = new FormData();
+  for (const file of files) {
+    form.append("files", file);
+  }
+  return getJson(`/api/workspace/upload`, {
+    method: "POST",
+    body: form,
+  });
+}

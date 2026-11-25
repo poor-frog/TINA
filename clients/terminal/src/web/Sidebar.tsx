@@ -3,7 +3,7 @@ import { WebAvatar } from "./Avatar";
 import { WebIcon, type WebIconName } from "./Icons";
 import type { WebUser } from "./useWebIdentity";
 
-export type WebNavView = "home" | "ask" | "meetings" | "meeting" | "tasks" | "routines" | "settings";
+export type WebNavView = "home" | "ask" | "meetings" | "meeting" | "knowledge" | "tasks" | "routines" | "settings";
 
 export function WebSidebar({
   active,
@@ -93,6 +93,7 @@ export function WebSidebar({
         <span className="tina-web-nav-gap" />
 
         {navBtn("meetings", "video", "Meetings", { badge: liveCount > 0 ? liveCount : undefined })}
+        {!meetingsOnly && navBtn("knowledge", "bookOpen", "Knowledge")}
         {!meetingsOnly && navBtn("tasks", "tasks", "Tasks")}
         {!meetingsOnly && navBtn("routines", "skills", "Routines")}
       </nav>

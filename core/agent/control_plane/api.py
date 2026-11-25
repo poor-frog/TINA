@@ -1150,11 +1150,17 @@ def create_app(
                 or path == "/api/workspace/init"
                 or (request.query_params.get("slug") == "_system")
             )
+            include_global = request.query_params.get("slug") == system_mounts.GLOBAL_SLUG
 
             def _pre_sync(force: bool) -> set[str]:
                 s3_store.sync_subject_workspaces(
                     subject, memberships=memberships, include_system=include_sys, force=force,
                 )
+                if include_global:
+                    try:
+                        s3_store.ensure_synced(wsr.root / system_mounts.GLOBAL_SLUG, force=force)
+                    except Exception:  # noqa: BLE001
+                        pass
                 for wid in extra_shared:
                     try:
                         s3_store.ensure_synced(wsr.root / wid, force=force)
@@ -2311,6 +2317,11 @@ def create_app(
         # it can only ever resolve to THIS subject's own .system store — never another user's.
         if target == system_mounts.SYSTEM_SLUG:
             return system_mounts.system_store_path(wsr.root, subject)
+        if target == system_mounts.GLOBAL_SLUG:
+            gmount = system_mounts.global_mount(settings, str(wsr.root)) if settings is not None else None
+            if gmount is None:
+                raise HTTPException(status_code=404, detail="global workspace not configured")
+            return Path(gmount.get("source") or gmount["path"])
         mounts = active_workspaces(wsr.root, subject)  # own actives (real .attached paths); may raise ValueError
         try:
             mounts = mounts + shared_active_mounts(wsr.root, subject, mindex.list(subject))

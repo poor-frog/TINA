@@ -90,6 +90,16 @@ export function WebGlobalSearch({
               },
             },
             {
+              id: "act:knowledge",
+              label: "Open Knowledge Hub",
+              detail: "Personal & Shared Wiki, Platform Guide (_global), Knowledge Graph & GitHub Sync",
+              kind: "action" as const,
+              run: () => {
+                onNavigate("knowledge");
+                onClose();
+              },
+            },
+            {
               id: "act:tasks",
               label: "Open Tasks",
               detail: "Workspace action items and task files",

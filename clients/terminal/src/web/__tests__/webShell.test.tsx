@@ -98,6 +98,7 @@ vi.mock("../../surfaces/MeetingKnowledge", () => ({
   MeetingKnowledge: ({ meetingId }: { meetingId: string }) => (
     <div data-testid="real-meeting-knowledge">Ask TINA Knowledge for {meetingId}</div>
   ),
+  MeetingWikiSourceStatus: () => null,
 }));
 
 vi.mock("../../surfaces/LiveAssistRunningView", () => ({

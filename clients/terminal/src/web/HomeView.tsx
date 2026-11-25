@@ -101,10 +101,18 @@ export function HomeView({
             <h1 className="tina-web-greeting">
               {greeting.text}, {firstName} <span aria-hidden="true">{greeting.emoji}</span>
             </h1>
-            <button type="button" className="tina-web-section-action" onClick={onOpenCapture}>
-              <WebIcon name="plus" size={15} />
-              <span>New meeting</span>
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {!meetingsOnly && (
+                <button type="button" className="tina-web-section-action" onClick={() => onNavigate("knowledge")}>
+                  <WebIcon name="bookOpen" size={15} />
+                  <span>Knowledge</span>
+                </button>
+              )}
+              <button type="button" className="tina-web-section-action" onClick={onOpenCapture}>
+                <WebIcon name="plus" size={15} />
+                <span>New meeting</span>
+              </button>
+            </div>
           </div>
 
           <div className="tina-web-section-head">

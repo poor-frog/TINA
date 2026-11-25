@@ -37,6 +37,13 @@ TINA Terminal workbench at `/terminal`.
 - **Ask Tina (`AskTinaView.tsx`)**: Full-page SSE assistant with real MCP Tool Approval cards
   (`/api/chat/approval`), Copy & Share response actions, searchable `/api/sessions` history,
   meeting pre-grounding, and real `/routine` prompt compilation.
+- **Knowledge Hub (`KnowledgeView.tsx` + `KnowledgeGraphCanvas.tsx` + `knowledgeView.module.css`)**:
+  Full-page workspace Wiki and Knowledge Graph mounted directly at `/?nav=knowledge`, uniting
+  Personal & Extra workspaces, Shared Team Wikis (with Agent mount toggles & share invite minting),
+  and the read-only `_global` Platform Guide, with Markdown/MDX viewing & inline editing,
+  in-place `[[wikilink]]` navigation, full-text search, file upload, Meeting Source Provenance
+  checks (`MeetingWikiSourceStatus`), entity-lane Knowledge Graph (with type filters, zoom, and
+  link inspector), Git commit history + unified diff viewer, and GitHub Pull/Push/Publish sync.
 - **Personal / Team Settings (`SettingsView.tsx` + `WebModelsPanel.tsx` + `webModelsPanel.module.css`)**:
   Two-column hub with URL query sync (`?nav=settings&settingsWorkspace=personal|team&settingsSection=<id>`),
   Hallmark `modern-minimal` AI Provider & Auth flow (hairline-ruled provider matrix using official

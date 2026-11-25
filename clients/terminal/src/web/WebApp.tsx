@@ -35,6 +35,7 @@ import { HomeView } from "./HomeView";
 import { MeetingsView } from "./MeetingsView";
 import { MeetingDetailView } from "./MeetingDetailView";
 import { AskTinaView, type AskTinaPrompt } from "./AskTinaView";
+import { KnowledgeView } from "./KnowledgeView";
 import { TasksView } from "./TasksView";
 import { RoutinesView } from "./RoutinesView";
 import { SettingsView } from "./SettingsView";
@@ -51,6 +52,7 @@ const NAV_VIEWS: ReadonlyArray<Exclude<WebNavView, "meeting">> = [
   "home",
   "ask",
   "meetings",
+  "knowledge",
   "tasks",
   "routines",
   "settings",
@@ -61,6 +63,7 @@ const VIEW_TITLES: Record<WebNavView, string> = {
   ask: "Ask Tina",
   meetings: "Meetings",
   meeting: "Meeting",
+  knowledge: "Knowledge",
   tasks: "Tasks",
   routines: "Routines",
   settings: "Settings",
@@ -116,6 +119,16 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
     setUserMenuOpen(false);
     if (typeof window !== "undefined") {
       const target = "/?nav=settings&settingsWorkspace=personal&settingsSection=calendar";
+      try { window.history.pushState({}, "", target); } catch { /* noop */ }
+    }
+  }, []);
+
+  const openGitHubSettings = useCallback(() => {
+    setView("settings");
+    setActiveMeetingId(null);
+    setUserMenuOpen(false);
+    if (typeof window !== "undefined") {
+      const target = "/?nav=settings&settingsWorkspace=personal&settingsSection=github";
       try { window.history.pushState({}, "", target); } catch { /* noop */ }
     }
   }, []);
@@ -294,6 +307,13 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
                 meetings={meetings}
                 initialPrompt={pendingPrompt}
                 onConsumeInitialPrompt={() => setPendingPrompt(null)}
+              />
+            )}
+
+            {view === "knowledge" && !meetOnly && (
+              <KnowledgeView
+                onAskTina={askTina}
+                onOpenGitHubSettings={openGitHubSettings}
               />
             )}
 
