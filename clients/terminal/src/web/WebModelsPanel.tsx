@@ -38,6 +38,7 @@ interface ProviderMeta {
   logoStyle?: "invertLight" | "awsLight" | "rounded" | "color";
   group: ProviderGroup;
   summary: string;
+  badge?: string;
   keyUrl?: string;
   defaultModelHint?: string;
 }
@@ -49,7 +50,9 @@ const PROVIDERS: readonly ProviderMeta[] = [
     logo: "tina-mark-inverse.svg",
     logoStyle: "color",
     group: "managed",
-    summary: "Workspace and admin default",
+    badge: "Ready",
+    summary: "Built-in TINA AI — works out of the box",
+    defaultModelHint: "Built-in (Amazon Nova / Claude)",
   },
   {
     id: "openai-subscription",
@@ -57,7 +60,7 @@ const PROVIDERS: readonly ProviderMeta[] = [
     logo: "openai.svg",
     logoStyle: "invertLight",
     group: "managed",
-    summary: "Sign in with OpenAI OAuth",
+    summary: "Sign in with your ChatGPT account (no API key)",
   },
   {
     id: "subscription",
@@ -65,7 +68,7 @@ const PROVIDERS: readonly ProviderMeta[] = [
     logo: "claude.svg",
     logoStyle: "color",
     group: "managed",
-    summary: "Deployment Claude credentials",
+    summary: "Use workspace Claude subscription",
   },
   {
     id: "openai-api",
@@ -73,7 +76,7 @@ const PROVIDERS: readonly ProviderMeta[] = [
     logo: "openai.svg",
     logoStyle: "invertLight",
     group: "api",
-    summary: "GPT-5, GPT-4.1, and o3 models",
+    summary: "GPT-5, GPT-4.1, and o3 reasoning models",
     keyUrl: "https://platform.openai.com/api-keys",
     defaultModelHint: "gpt-5",
   },
@@ -83,7 +86,7 @@ const PROVIDERS: readonly ProviderMeta[] = [
     logo: "gemini.svg",
     logoStyle: "color",
     group: "api",
-    summary: "Gemini 3.5, 3.8, and Pro models",
+    summary: "Fast Gemini Flash & Pro models",
     keyUrl: "https://aistudio.google.com/apikey",
     defaultModelHint: "gemini-3.5-flash",
   },
@@ -93,7 +96,7 @@ const PROVIDERS: readonly ProviderMeta[] = [
     logo: "deepseek.svg",
     logoStyle: "color",
     group: "api",
-    summary: "Flash, Chat, and Reasoner",
+    summary: "DeepSeek Chat & Reasoner models",
     keyUrl: "https://platform.deepseek.com/api_keys",
     defaultModelHint: "deepseek-flash",
   },
@@ -103,7 +106,7 @@ const PROVIDERS: readonly ProviderMeta[] = [
     logo: "groq.svg",
     logoStyle: "rounded",
     group: "api",
-    summary: "Low-latency Llama, Qwen, and OSS",
+    summary: "Ultra-fast Llama, Qwen, and OSS",
     keyUrl: "https://console.groq.com/keys",
     defaultModelHint: "openai/gpt-oss-20b",
   },
@@ -113,7 +116,8 @@ const PROVIDERS: readonly ProviderMeta[] = [
     logo: "aws.svg",
     logoStyle: "awsLight",
     group: "advanced",
-    summary: "Regional enterprise Claude",
+    badge: "Cloud",
+    summary: "Amazon Nova & Claude via AWS Bedrock",
   },
   {
     id: "custom",
@@ -121,7 +125,7 @@ const PROVIDERS: readonly ProviderMeta[] = [
     logo: "openrouter.svg",
     logoStyle: "invertLight",
     group: "advanced",
-    summary: "OpenAI or Anthropic gateway URL",
+    summary: "OpenAI or Anthropic-compatible URL",
   },
   {
     id: "antigravity",
@@ -129,14 +133,15 @@ const PROVIDERS: readonly ProviderMeta[] = [
     logo: "antigravity.svg",
     logoStyle: "color",
     group: "advanced",
-    summary: "Unsupported consumer CLI",
+    badge: "Unsupported",
+    summary: "Consumer CLI (not recommended)",
   },
 ];
 
-const PROVIDER_GROUPS: Array<{ id: ProviderGroup; label: string; cols: 2 | 3 }> = [
-  { id: "managed", label: "Sign-in and managed", cols: 3 },
-  { id: "api", label: "Direct API keys", cols: 2 },
-  { id: "advanced", label: "Cloud and custom", cols: 3 },
+const PROVIDER_GROUPS: Array<{ id: ProviderGroup; label: string; hint: string; cols: 2 | 3 }> = [
+  { id: "managed", label: "Ready to use", hint: "Sign in or use TINA's built-in AI without managing API keys", cols: 3 },
+  { id: "api", label: "Bring your own API key", hint: "Connect directly to your preferred AI provider", cols: 2 },
+  { id: "advanced", label: "Cloud & advanced", hint: "Enterprise cloud regions and custom gateways", cols: 3 },
 ];
 
 const API_KEY_MODES = new Set([
@@ -251,46 +256,106 @@ export function WebModelsPanel({
   }, [refreshTranscriptionMeta]);
 
   const activeProvider = providerById(agentSummary.mode);
-  const activeModelText = agentSummary.model || activeProvider.defaultModelHint || activeProvider.name;
+  const activeMode = agentSummary.mode ?? "";
+  const activeChatSummary =
+    activeMode === ""
+      ? chatGptStatus.connected
+        ? "ChatGPT Plan (OAuth)"
+        : agentSummary.model || "Built-in TINA AI"
+      : agentSummary.model || activeProvider.defaultModelHint || activeProvider.name;
+  const activeMeetingSummary =
+    agentSummary.meeting_model ||
+    (activeMode === "" ? "Built-in · Amazon Nova Lite" : "Same as chat model");
 
   return (
     <div className={styles.root}>
       {scopeMode === "personal" && (
-        <div className={styles.topBar}>
-          <div className={styles.tabs} role="tablist" aria-label="Model configuration tab">
+        <>
+          {/* Live Active AI Overview Strip */}
+          <div className={styles.overviewGrid} aria-label="Active configuration summary">
             <button
               type="button"
-              role="tab"
-              aria-selected={subTab === "agent"}
-              className={styles.tabBtn}
+              className={`${styles.overviewCard} ${subTab === "agent" ? styles.overviewCardActive : ""}`}
               onClick={() => setSubTab("agent")}
             >
-              Agent model
+              <span className={styles.overviewIcon}>
+                <ProviderLogo provider={activeProvider} />
+              </span>
+              <span className={styles.overviewBody}>
+                <span className={styles.overviewLabel}>Chat &amp; Knowledge AI</span>
+                <span className={styles.overviewValue} title={activeChatSummary}>
+                  {activeChatSummary}
+                </span>
+                <span className={styles.overviewMeta}>
+                  <span className={styles.statusDot} />
+                  <span>{activeProvider.name}</span>
+                </span>
+              </span>
             </button>
+
             <button
               type="button"
-              role="tab"
-              aria-selected={subTab === "transcription"}
-              className={styles.tabBtn}
+              className={styles.overviewCard}
+              onClick={() => setSubTab("agent")}
+            >
+              <span className={styles.overviewIcon}>
+                <WebIcon name="sparkleSmall" size={16} />
+              </span>
+              <span className={styles.overviewBody}>
+                <span className={styles.overviewLabel}>Meeting &amp; Voice AI</span>
+                <span className={styles.overviewValue} title={activeMeetingSummary}>
+                  {activeMeetingSummary}
+                </span>
+                <span className={styles.overviewMeta}>Summaries · Live voice</span>
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className={`${styles.overviewCard} ${subTab === "transcription" ? styles.overviewCardActive : ""}`}
               onClick={() => setSubTab("transcription")}
             >
-              Speech to text
+              <span className={styles.overviewIcon}>
+                <WebIcon name="mic" size={16} />
+              </span>
+              <span className={styles.overviewBody}>
+                <span className={styles.overviewLabel}>Speech to Text</span>
+                <span className={styles.overviewValue}>
+                  {effectiveTranscription?.label || "VieGem ASR"}
+                </span>
+                <span className={styles.overviewMeta}>
+                  <span className={styles.statusDot} />
+                  <span>Active for meetings</span>
+                </span>
+              </span>
             </button>
           </div>
 
-          <div className={styles.ledger} aria-label="Active configuration summary">
-            <div className={styles.ledgerItem}>
-              <span className={styles.ledgerLabel}>Model</span>
-              <span className={styles.ledgerValue}>{activeModelText}</span>
-            </div>
-            <div className={styles.ledgerItem}>
-              <span className={styles.ledgerLabel}>Transcription</span>
-              <span className={styles.ledgerValue}>
-                {effectiveTranscription?.label || "Platform default"}
-              </span>
+          <div className={styles.topBar}>
+            <div className={styles.tabs} role="tablist" aria-label="Model configuration tab">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={subTab === "agent"}
+                className={styles.tabBtn}
+                onClick={() => setSubTab("agent")}
+              >
+                <WebIcon name="cpu" size={14} />
+                <span>Agent model</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={subTab === "transcription"}
+                className={styles.tabBtn}
+                onClick={() => setSubTab("transcription")}
+              >
+                <WebIcon name="mic" size={14} />
+                <span>Speech to text</span>
+              </button>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {scopeMode === "personal" && subTab === "agent" && (
@@ -432,8 +497,12 @@ function AgentProviderForm({
   const updateField = (key: string, value: string) => {
     const next = { ...values, [key]: value };
     if (key === "mode" && value !== values.mode) {
+      // Clear stale model/meeting_model when switching providers so an old model ID never leaks across modes
+      next.model = "";
+      next.meeting_model = "";
       if (apiModelProvider(value) || apiModelProvider(values.mode)) {
-        for (const pf of ["api_key", "base_url", "model", "meeting_model"]) next[pf] = "";
+        next.api_key = "";
+        next.base_url = "";
       }
       setShowKey(false);
     }
@@ -534,13 +603,16 @@ function AgentProviderForm({
         </div>
       )}
 
-      {/* Provider Matrix */}
-      <section className={`${styles.section} ${styles.sectionFirst}`} aria-label="Choose AI model provider">
+      {/* Step 1: Provider Selection */}
+      <section className={`${styles.sectionCard} ${styles.sectionFirst}`} aria-label="Choose AI model provider">
         <div className={styles.sectionHead}>
           <div className={styles.sectionTitleGroup}>
-            <h2 className={styles.sectionTitle}>Provider</h2>
+            <div className={styles.stepTitleRow}>
+              <span className={styles.stepBadge}>1</span>
+              <h2 className={styles.sectionTitle}>Choose AI Provider</h2>
+            </div>
             <p className={styles.sectionLead}>
-              Choose how TINA authenticates and routes agent replies and meeting summaries.
+              Pick where TINA gets its intelligence for chat replies, knowledge editing, and meeting summaries.
             </p>
           </div>
           {loading && <span className={styles.loadingNote}>Loading…</span>}
@@ -551,7 +623,10 @@ function AgentProviderForm({
             const items = PROVIDERS.filter((p) => p.group === group.id);
             return (
               <div key={group.id} className={styles.group}>
-                <div className={styles.groupLabel}>{group.label}</div>
+                <div className={styles.groupHead}>
+                  <span className={styles.groupLabel}>{group.label}</span>
+                  <span className={styles.groupHint}>{group.hint}</span>
+                </div>
                 <div
                   className={group.cols === 2 ? styles.matrixTwo : styles.matrixThree}
                   role="radiogroup"
@@ -567,7 +642,9 @@ function AgentProviderForm({
                         type="button"
                         role="radio"
                         aria-checked={selected}
-                        className={`${styles.providerCell} ${selected ? styles.providerCellSelected : ""}`}
+                        className={`${styles.providerCell} ${selected ? styles.providerCellSelected : ""} ${
+                          provider.id === "antigravity" ? styles.providerCellMuted : ""
+                        }`}
                         onClick={() => updateField("mode", provider.id)}
                       >
                         <span className={styles.providerIconSlot}>
@@ -579,7 +656,17 @@ function AgentProviderForm({
                             <span
                               className={`${styles.providerMeta} ${isChatGptConnected ? styles.providerMetaConnected : ""}`}
                             >
-                              {isChatGptConnected && <span>Connected</span>}
+                              {isChatGptConnected ? (
+                                <span className={styles.pillConnected}>Connected</span>
+                              ) : provider.badge ? (
+                                <span
+                                  className={`${styles.pillTag} ${
+                                    provider.badge === "Unsupported" ? styles.pillWarn : ""
+                                  }`}
+                                >
+                                  {provider.badge}
+                                </span>
+                              ) : null}
                               {selected && (
                                 <span className={styles.providerCheck} aria-hidden="true">
                                   <WebIcon name="check" size={14} />
@@ -599,11 +686,14 @@ function AgentProviderForm({
         </div>
       </section>
 
-      {/* Authentication */}
-      <section className={styles.section} aria-label="Provider authentication">
+      {/* Step 2: Authentication */}
+      <section className={styles.sectionCard} aria-label="Provider authentication">
         <div className={styles.sectionHead}>
           <div className={styles.sectionTitleGroup}>
-            <h2 className={styles.sectionTitle}>Authentication ({activeMeta.name})</h2>
+            <div className={styles.stepTitleRow}>
+              <span className={styles.stepBadge}>2</span>
+              <h2 className={styles.sectionTitle}>Connect {activeMeta.name}</h2>
+            </div>
             <p className={styles.sectionLead}>{authSubtitle}</p>
           </div>
           {activeMeta.keyUrl && (
@@ -611,7 +701,7 @@ function AgentProviderForm({
               href={activeMeta.keyUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className={styles.inlineLink}
+              className={styles.inlineLinkPill}
             >
               <span>Get API key</span>
               <WebIcon name="externalLink" size={13} />
@@ -769,13 +859,17 @@ function AgentProviderForm({
         )}
       </section>
 
-      {/* Model Selection */}
-      <section className={styles.section} aria-label="Model selection">
+      {/* Step 3: Model Selection */}
+      <section className={styles.sectionCard} aria-label="Model selection">
         <div className={styles.sectionHead}>
           <div className={styles.sectionTitleGroup}>
-            <h2 className={styles.sectionTitle}>Models</h2>
+            <div className={styles.stepTitleRow}>
+              <span className={styles.stepBadge}>3</span>
+              <h2 className={styles.sectionTitle}>Choose Models</h2>
+              <span className={styles.optionalTag}>Optional</span>
+            </div>
             <p className={styles.sectionLead}>
-              Pick the default chat model and an optional model for meeting summaries.
+              Leave blank to use the recommended model automatically, or choose specific models for chat and meetings.
             </p>
           </div>
         </div>
@@ -850,8 +944,8 @@ function AgentProviderForm({
         </div>
       </section>
 
-      {/* Action Footer */}
-      <div className={styles.footer}>
+      {/* Action Footer (elevated & highlighted when changes are unsaved) */}
+      <div className={`${styles.footer} ${dirty ? styles.footerDirty : ""}`}>
         <div className={styles.footerGroup}>
           <button
             type="button"

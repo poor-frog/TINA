@@ -35,14 +35,101 @@
 
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
-  max-width: 820px;
+  gap: 20px;
+  max-width: 860px;
   min-width: 0;
   color: var(--m-ink);
   font-family: var(--tw-font-body);
 }
 
-/* ---------- Top underline tab strip + quiet live configuration ledger ---------- */
+/* ---------- Top 3-card Active AI Overview strip ---------- */
+
+.overviewGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.overviewCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--m-line);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--m-surface-hover) 55%, var(--m-surface)),
+    var(--m-surface)
+  );
+  color: var(--m-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.overviewCardActive {
+  border-color: color-mix(in oklch, var(--m-accent) 48%, var(--m-line));
+  box-shadow: 0 6px 20px -10px color-mix(in oklch, var(--m-accent) 45%, transparent);
+}
+
+.overviewIcon {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--m-line);
+  background: var(--m-chrome);
+  color: var(--m-ok);
+}
+
+.overviewBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.overviewLabel {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--m-ink-3);
+}
+
+.overviewValue {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--m-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overviewMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--m-ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: none;
+  background: var(--m-ok);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--m-ok) 22%, transparent);
+}
+
+/* ---------- Top underline tab strip ---------- */
 
 .topBar {
   display: flex;
@@ -63,8 +150,9 @@
   position: relative;
   display: inline-flex;
   align-items: center;
+  gap: 7px;
   min-height: 40px;
-  padding: 0 0 var(--space-3);
+  padding: 0 2px var(--space-3);
   margin-bottom: calc(-1 * var(--m-hairline));
   border: 0;
   border-bottom: 2px solid transparent;
@@ -86,67 +174,70 @@
   color: var(--m-accent);
 }
 
-.ledger {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  padding-bottom: var(--space-3);
-  min-width: 0;
-  flex-wrap: wrap;
-}
-
-.ledgerItem {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  min-width: 0;
-  font-size: 12.5px;
-}
-
-.ledgerItem + .ledgerItem {
-  padding-left: var(--space-4);
-  border-left: var(--m-hairline) solid var(--m-line);
-}
-
-.ledgerLabel {
-  color: var(--m-ink-3);
-  white-space: nowrap;
-}
-
-.ledgerValue {
-  color: var(--m-ink);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ---------- Flat hairline-separated sections (zero nested cards) ---------- */
+/* ---------- Calm elevated step cards ---------- */
 
 .flow {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 18px;
+}
+
+.sectionCard {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 24px;
+  border-radius: 16px;
+  border: 1px solid var(--m-line);
+  background: var(--m-surface);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
 }
 
 .section {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  padding: var(--space-6) 0;
+  padding: var(--space-5) 0;
   border-top: var(--m-hairline) solid var(--m-line-soft);
 }
 
 .sectionFirst {
-  padding-top: 0;
-  border-top: 0;
+  /* Keep class hook for backwards compat */
+}
+
+.stepTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.stepBadge {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--m-ok);
+  background: color-mix(in oklch, var(--m-accent) 24%, transparent);
+  border: 1px solid color-mix(in oklch, var(--m-ok) 32%, transparent);
+}
+
+.optionalTag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--m-ink-3);
+  background: var(--m-chrome);
+  border: 1px solid var(--m-line-soft);
 }
 
 .sectionHead {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: var(--space-3);
@@ -155,14 +246,14 @@
 .sectionTitleGroup {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 4px;
   min-width: 0;
 }
 
 .sectionTitle {
   margin: 0;
   font-family: var(--tw-font-display);
-  font-size: 15px;
+  font-size: 15.5px;
   font-weight: 600;
   letter-spacing: -0.015em;
   color: var(--m-ink);
@@ -174,22 +265,31 @@
   font-size: 13px;
   line-height: 1.5;
   color: var(--m-ink-3);
-  max-width: 64ch;
+  max-width: 66ch;
 }
 
-.inlineLink {
+.inlineLink,
+.inlineLinkPill {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  color: var(--m-accent);
-  font-size: 13px;
+  gap: 6px;
+  color: var(--m-ok);
+  font-size: 12.5px;
   font-weight: 500;
   white-space: nowrap;
   text-decoration: none;
-  transition: opacity var(--m-dur) ease;
+  transition: opacity var(--m-dur) ease, background-color var(--m-dur) ease, border-color var(--m-dur) ease;
 }
 
-.inlineLink:active {
+.inlineLinkPill {
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--m-ok-line);
+  background: var(--m-ok-bg);
+}
+
+.inlineLink:active,
+.inlineLinkPill:active {
   opacity: 0.78;
 }
 
@@ -198,34 +298,45 @@
   color: var(--m-ink-3);
 }
 
-/* ---------- Hairline-divided provider matrix (1 containment layer) ---------- */
+/* ---------- Tactile individual rounded provider cards ---------- */
 
 .groups {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: 18px;
 }
 
 .group {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 10px;
+}
+
+.groupHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .groupLabel {
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
   color: var(--m-ink-3);
+}
+
+.groupHint {
+  font-size: 12px;
+  color: var(--m-ink-4);
 }
 
 .matrixThree,
 .matrixTwo {
   display: grid;
-  gap: var(--m-hairline);
-  border: var(--m-hairline) solid var(--m-line);
-  border-radius: var(--m-r-lg);
-  background: var(--m-line-soft);
-  overflow: hidden;
+  gap: 10px;
 }
 
 .matrixThree {
@@ -240,38 +351,61 @@
   position: relative;
   display: flex;
   align-items: flex-start;
-  gap: var(--space-3);
+  gap: 12px;
   width: 100%;
   min-width: 0;
-  min-height: 72px;
-  padding: var(--space-3) var(--space-4);
-  border: 0;
-  border-radius: 0;
-  background: var(--m-surface);
+  min-height: 78px;
+  padding: 13px 14px;
+  border: 1px solid var(--m-line);
+  border-radius: 13px;
+  background: var(--m-bg);
   color: var(--m-ink);
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--m-dur) ease;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.providerCellMuted {
+  opacity: 0.76;
 }
 
 .providerCell:active {
   background: var(--m-surface-hover);
-  scale: 1;
+  transform: translateY(0);
 }
 
 .providerCellSelected {
-  background: var(--m-selected-bg);
-  box-shadow: inset 0 0 0 1.5px var(--m-selected-ring);
+  opacity: 1;
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklch, var(--m-accent) 16%, var(--m-surface)),
+    color-mix(in oklch, var(--m-accent) 7%, var(--m-bg))
+  );
+  border-color: var(--m-selected-ring);
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--m-accent) 42%, transparent),
+    0 10px 24px -14px color-mix(in oklch, var(--m-accent) 65%, transparent);
   z-index: 1;
 }
 
 .providerIconSlot {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
-  margin-top: 2px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--m-line-soft);
+  background: var(--m-surface);
   flex: none;
+}
+
+.providerCellSelected .providerIconSlot {
+  border-color: color-mix(in oklch, var(--m-ok) 36%, var(--m-line));
+  background: color-mix(in oklch, var(--m-accent) 18%, var(--m-chrome));
 }
 
 .logo {
@@ -301,7 +435,7 @@
 .providerCopy {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 3px;
   min-width: 0;
   flex: 1;
 }
@@ -310,7 +444,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: 6px;
   min-width: 0;
 }
 
@@ -326,16 +460,16 @@
 
 .providerDesc {
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.42;
   color: var(--m-ink-3);
 }
 
 .providerMeta {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 5px;
   flex: none;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--m-ink-3);
   white-space: nowrap;
@@ -345,9 +479,39 @@
   color: var(--m-ok);
 }
 
+.pillConnected {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--m-ok);
+  background: var(--m-ok-bg);
+  border: 1px solid var(--m-ok-line);
+}
+
+.pillTag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--m-ink-3);
+  background: var(--m-chrome);
+  border: 1px solid var(--m-line-soft);
+}
+
+.pillWarn {
+  color: var(--m-warn);
+  border-color: color-mix(in oklch, var(--m-warn) 35%, var(--m-line));
+}
+
 .providerCheck {
-  display: inline-flex;
-  color: var(--m-accent);
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--m-accent);
+  color: #ffffff;
   flex: none;
 }
 
@@ -656,8 +820,20 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: var(--space-3);
-  padding-top: var(--space-6);
-  border-top: var(--m-hairline) solid var(--m-line-soft);
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--m-line);
+  background: var(--m-surface);
+  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+}
+
+.footerDirty {
+  position: sticky;
+  bottom: 12px;
+  z-index: 15;
+  border-color: color-mix(in oklch, var(--m-accent) 55%, var(--m-line));
+  background: color-mix(in oklch, var(--m-surface) 94%, var(--m-accent));
+  box-shadow: 0 14px 36px -14px rgba(0, 0, 0, 0.55);
 }
 
 .footerGroup {
@@ -887,8 +1063,16 @@
     text-underline-offset: 3px;
   }
 
+  .overviewCard:hover {
+    border-color: var(--m-line-strong);
+    background: var(--m-surface-hover);
+    transform: translateY(-1px);
+  }
+
   .providerCell:hover:not(.providerCellSelected) {
     background: var(--m-surface-hover);
+    border-color: var(--m-line-strong);
+    transform: translateY(-1px);
   }
 
   .input:hover:not(:disabled),
@@ -950,16 +1134,16 @@
 
 /* ---------- Responsive & reduced motion ---------- */
 
-@media (max-width: 720px) {
+@media (max-width: 760px) {
+  .overviewGrid,
   .matrixThree,
   .matrixTwo,
   .fieldGrid {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .ledgerItem + .ledgerItem {
-    padding-left: 0;
-    border-left: 0;
+  .sectionCard {
+    padding: 16px;
   }
 }
 

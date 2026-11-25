@@ -2253,18 +2253,21 @@ html[data-theme="light"] .tina-web-detail {
 
 .tina-web-settings-group-title {
   padding: 0 10px 6px;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--tw-text-4);
 }
 
 .tina-web-settings-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 9px;
-  height: 35px;
-  padding: 0 10px;
-  border-radius: 8px;
+  height: 36px;
+  padding: 0 11px;
+  border-radius: 9px;
   font-size: 13.5px;
   color: var(--tw-text-2);
   text-align: left;
@@ -2286,14 +2289,16 @@ html[data-theme="light"] .tina-web-settings-item:hover {
 }
 
 .tina-web-settings-item.active {
-  background: rgba(23, 107, 91, 0.22);
+  background: linear-gradient(90deg, rgba(23, 107, 91, 0.28), rgba(23, 107, 91, 0.14));
   color: var(--tw-text);
-  font-weight: 500;
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--tw-mint);
 }
 
 html[data-theme="light"] .tina-web-settings-item.active {
   background: rgba(23, 107, 91, 0.12);
   color: var(--tw-teal);
+  box-shadow: inset 3px 0 0 var(--tw-teal);
 }
 
 .tina-web-settings-item.active svg {

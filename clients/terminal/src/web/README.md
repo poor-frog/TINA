@@ -54,10 +54,12 @@ TINA Terminal workbench at `/terminal`.
   to expose raw file trees, Markdown/YAML, and Git diffs.
 - **Personal / Team Settings (`SettingsView.tsx` + `WebModelsPanel.tsx` + `webModelsPanel.module.css`)**:
   Two-column hub with URL query sync (`?nav=settings&settingsWorkspace=personal|team&settingsSection=<id>`),
-  Hallmark `modern-minimal` AI Provider & Auth flow (hairline-ruled provider matrix using official
-  `/provider-logos/*.svg` marks, flat inline OAuth/API-key/Bedrock/Custom authentication band,
-  secret reveal toggle, paired `ModelPicker`/`ChatGPTModelInput` fields, Save & Test verification status),
-  Dark/Light appearance switching (`useTheme`), Team workspace/member/invite management, and admin-only
-  Deployment sections.
+  ordered for everyday workflows first (Meetings, AI & Voice, Preferences/Account, then Developer &
+  Connections). Includes a 3-card live **Active AI Overview** strip (Chat & Knowledge AI, Meeting &
+  Voice AI, Speech to Text), 3-step elevated cards with tactile rounded provider tiles using official
+  `/provider-logos/*.svg` marks, stale-model reset on provider switch, inline OAuth/API-key/Bedrock/Custom
+  authentication, secret reveal toggle, paired `ModelPicker`/`ChatGPTModelInput` fields, sticky unsaved
+  Save & Test bar, Dark/Light appearance switching (`useTheme`), Team workspace/member/invite management,
+  and admin-only Deployment sections.
 - **Dev/Admin bridge**: Shows an "Open TINA Terminal" shortcut only when `/api/admin/me` confirms
   admin/dev access (or `NEXT_PUBLIC_SHOW_TERMINAL_SWITCH=1` / local dev override).
