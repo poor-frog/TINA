@@ -823,7 +823,7 @@ describe("WebShell production UI (Option A & Option B)", () => {
     expect(screen.getByRole("heading", { name: "Workspaces & Members" })).toBeTruthy();
   });
 
-  it("auto-collapses the sidebar when navigating to Ask Tina, Meetings, Knowledge, or Settings while preserving manual toggle", async () => {
+  it("auto-collapses the sidebar on Ask Tina, Meetings, Knowledge, Settings and auto-expands on Home, Tasks, Routines while preserving manual toggle", async () => {
     mockEnvironment({ admin: false });
     render(<WebShell />);
 
@@ -847,16 +847,21 @@ describe("WebShell production UI (Option A & Option B)", () => {
       expect(toggleBtn().getAttribute("aria-expanded")).toBe("true");
     }
 
-    // Manual collapse works normally on any view
-    fireEvent.click(toggleBtn());
-    expect(sidebar().classList.contains("collapsed")).toBe(true);
-    fireEvent.click(toggleBtn());
-    expect(sidebar().classList.contains("collapsed")).toBe(false);
+    // Clicking Home, Tasks, or Routines while collapsed auto-expands the sidebar, and manual collapse still works
+    for (const label of ["Home", "Tasks", "Routines"] as const) {
+      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+      expect(sidebar().classList.contains("collapsed")).toBe(true);
 
-    // Navigating to Tasks or Home preserves the expanded state
-    fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
-    expect(sidebar().classList.contains("collapsed")).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Home" }));
-    expect(sidebar().classList.contains("collapsed")).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      expect(sidebar().classList.contains("collapsed")).toBe(false);
+      expect(toggleBtn().getAttribute("aria-expanded")).toBe("true");
+
+      // Manual collapse and expand work normally
+      fireEvent.click(toggleBtn());
+      expect(sidebar().classList.contains("collapsed")).toBe(true);
+      expect(toggleBtn().getAttribute("aria-expanded")).toBe("false");
+      fireEvent.click(toggleBtn());
+      expect(sidebar().classList.contains("collapsed")).toBe(false);
+    }
   });
 });

@@ -162,9 +162,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
   const navigate = useCallback((next: Exclude<WebNavView, "meeting">) => {
     setView(next);
     setActiveMeetingId(null);
-    if (AUTO_COLLAPSE_SIDEBAR_VIEWS.has(next)) {
-      setSidebarCollapsed(true);
-    }
+    setSidebarCollapsed(AUTO_COLLAPSE_SIDEBAR_VIEWS.has(next));
     setUserMenuOpen(false);
     if (typeof window !== "undefined") {
       if (
@@ -208,9 +206,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
       const route = readInitialRoute();
       setView(route.view);
       setActiveMeetingId(route.meetingId);
-      if (AUTO_COLLAPSE_SIDEBAR_VIEWS.has(route.view)) {
-        setSidebarCollapsed(true);
-      }
+      setSidebarCollapsed(AUTO_COLLAPSE_SIDEBAR_VIEWS.has(route.view));
       setUserMenuOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
