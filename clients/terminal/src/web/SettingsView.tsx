@@ -3,6 +3,7 @@
  *  (`?nav=settings&settingsWorkspace=personal|team&settingsSection=<id>`).
  *  100% wired to real TINA APIs & panels — zero mock toggles or placeholder billing controls. */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { hideModelSettings as hideModelSettingsEnv } from "../app/mode";
 import { applyTheme, useTheme, type Theme } from "../app/theme";
 import { CalendarConnectionsPanel } from "../surfaces/calendarConnections";
 import { VoiceSettings } from "../surfaces/voiceSettings";
@@ -36,6 +37,7 @@ interface SectionDef {
   icon: WebIconName;
   keywords: string;
   adminOnly?: boolean;
+  modelSettings?: boolean;
 }
 
 const SECTIONS: readonly SectionDef[] = [
@@ -57,6 +59,7 @@ const SECTIONS: readonly SectionDef[] = [
     description: "Choose which AI powers your chats, meeting summaries, and speech-to-text transcription.",
     icon: "cpu",
     keywords: "models llm claude openai chatgpt gemini deepseek groq bedrock transcription stt asr viegem",
+    modelSettings: true,
   },
   {
     id: "voice",
@@ -122,6 +125,7 @@ const SECTIONS: readonly SectionDef[] = [
     icon: "globe",
     keywords: "global admin default models transcription deployment funasr sherpa viegem apple nvidia",
     adminOnly: true,
+    modelSettings: true,
   },
   {
     id: "asr-status",
@@ -146,7 +150,16 @@ function defaultSectionFor(workspace: SettingsWorkspace): SettingsSectionId {
   return workspace === "team" ? "workspaces" : "calendar";
 }
 
-function readSettingsRouteFromUrl(isAdmin: boolean): { workspace: SettingsWorkspace; section: SettingsSectionId } {
+function isSectionAvailable(s: SectionDef, isAdmin: boolean, hideModels: boolean): boolean {
+  if (s.adminOnly && !isAdmin) return false;
+  if (s.modelSettings && hideModels) return false;
+  return true;
+}
+
+function readSettingsRouteFromUrl(
+  isAdmin: boolean,
+  hideModels: boolean,
+): { workspace: SettingsWorkspace; section: SettingsSectionId } {
   if (typeof window === "undefined") {
     return { workspace: "personal", section: "calendar" };
   }
@@ -154,7 +167,7 @@ function readSettingsRouteFromUrl(isAdmin: boolean): { workspace: SettingsWorksp
   const rawWs = params.get("settingsWorkspace");
   const rawSec = params.get("settingsSection");
 
-  const matchedSec = SECTIONS.find((s) => s.id === rawSec && (!s.adminOnly || isAdmin));
+  const matchedSec = SECTIONS.find((s) => s.id === rawSec && isSectionAvailable(s, isAdmin, hideModels));
   if (matchedSec) {
     return { workspace: matchedSec.workspace, section: matchedSec.id };
   }
@@ -183,23 +196,28 @@ export function SettingsView({
   user = DEFAULT_USER,
   isAdmin = false,
   canOpenTerminal = false,
+  hideModelSettings = hideModelSettingsEnv(),
   terminalHref = "/terminal",
   onSignOut,
 }: {
   user?: WebUser;
   isAdmin?: boolean;
   canOpenTerminal?: boolean;
+  hideModelSettings?: boolean;
   terminalHref?: string;
   onSignOut?: () => void;
 } = {}) {
   const pendingAdminSectionRef = useRef<SettingsSectionId | null>(
     typeof window !== "undefined" && !isAdmin
       ? (SECTIONS.find(
-          (s) => s.id === new URLSearchParams(window.location.search).get("settingsSection") && s.adminOnly,
+          (s) =>
+            s.id === new URLSearchParams(window.location.search).get("settingsSection") &&
+            s.adminOnly &&
+            !(hideModelSettings && s.modelSettings),
         )?.id ?? null)
       : null,
   );
-  const initial = useMemo(() => readSettingsRouteFromUrl(isAdmin), [isAdmin]);
+  const initial = useMemo(() => readSettingsRouteFromUrl(isAdmin, hideModelSettings), [isAdmin, hideModelSettings]);
   const [workspace, setWorkspace] = useState<SettingsWorkspace>(initial.workspace);
   const [section, setSection] = useState<SettingsSectionId>(initial.section);
   const [search, setSearch] = useState("");
@@ -210,12 +228,23 @@ export function SettingsView({
     if (!isAdmin || !pendingAdminSectionRef.current) return;
     const pendingId = pendingAdminSectionRef.current;
     pendingAdminSectionRef.current = null;
-    const adminMatch = SECTIONS.find((s) => s.id === pendingId && s.adminOnly);
+    const adminMatch = SECTIONS.find(
+      (s) => s.id === pendingId && s.adminOnly && !(hideModelSettings && s.modelSettings),
+    );
     if (adminMatch) {
       setWorkspace(adminMatch.workspace);
       setSection(adminMatch.id);
     }
-  }, [isAdmin]);
+  }, [isAdmin, hideModelSettings]);
+
+  // If a runtime feature flag hides model settings after initial render, move away cleanly.
+  useEffect(() => {
+    if (!hideModelSettings) return;
+    const currentDef = SECTIONS.find((s) => s.id === section);
+    if (currentDef?.modelSettings) {
+      setSection(defaultSectionFor(workspace));
+    }
+  }, [hideModelSettings, section, workspace]);
 
   useEffect(() => {
     if (pendingAdminSectionRef.current) return;
@@ -225,17 +254,17 @@ export function SettingsView({
   useEffect(() => {
     const onPopState = () => {
       pendingAdminSectionRef.current = null;
-      const next = readSettingsRouteFromUrl(isAdmin);
+      const next = readSettingsRouteFromUrl(isAdmin, hideModelSettings);
       setWorkspace(next.workspace);
       setSection(next.section);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [isAdmin]);
+  }, [isAdmin, hideModelSettings]);
 
   const availableSections = useMemo(
-    () => SECTIONS.filter((item) => !item.adminOnly || isAdmin),
-    [isAdmin],
+    () => SECTIONS.filter((item) => isSectionAvailable(item, isAdmin, hideModelSettings)),
+    [isAdmin, hideModelSettings],
   );
 
   const selectWorkspace = useCallback(
@@ -323,7 +352,7 @@ export function SettingsView({
       case "voice":
         return (
           <div className="tina-web-settings-card tina-web-settings-embed">
-            <VoiceSettings />
+            <VoiceSettings hideModelHint={hideModelSettings} />
           </div>
         );
       case "tokens":

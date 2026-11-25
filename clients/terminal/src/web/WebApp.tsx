@@ -91,7 +91,7 @@ function readInitialRoute(initialMeetingId?: string): { view: WebNavView; meetin
 }
 
 export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
-  const { user, isAdmin, canOpenTerminal, signOut } = useWebIdentity();
+  const { user, isAdmin, canOpenTerminal, hideModelSettings, signOut } = useWebIdentity();
   const meetOnly = meetingsOnly() || (workspacePilotMode() && !canOpenTerminal);
   const meetings = useLiveMeetings();
   const listLoaded = useLiveMeetingsLoaded();
@@ -341,6 +341,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
                 user={user}
                 isAdmin={isAdmin}
                 canOpenTerminal={canOpenTerminal}
+                hideModelSettings={hideModelSettings}
                 terminalHref={terminalHref}
                 onSignOut={signOut}
               />

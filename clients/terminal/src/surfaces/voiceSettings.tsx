@@ -24,7 +24,7 @@ function pronunciationMap(text:string):Record<string,string>{
   return result;
 }
 
-export function VoiceSettings(){
+export function VoiceSettings({ hideModelHint = false }: { hideModelHint?: boolean } = {}){
   const [tab,setTab]=useState<'voice'|'behavior'|'meeting'>('voice'),prefix=useId();
   const [loaded,setLoaded]=useState(false);
   const [speechVoice,setSpeechVoice]=useState('auto'),[terms,setTerms]=useState(''),[savedSpeech,setSavedSpeech]=useState({voice:'auto',terms:''});
@@ -46,7 +46,7 @@ export function VoiceSettings(){
         const [p,s,t]=await Promise.all([prefs.json(),status.json(),asr.ok?asr.json():{effective:undefined}]);
         if(abort.signal.aborted)return;
         const selection=p.prepare_new_bots==null?'default':p.prepare_new_bots?'on':'off';
-        setSaved(selection);setValue(selection);setServices(s);setBackend(t.effective?.label||'Choose a model in Settings → Models → Transcription');
+        setSaved(selection);setValue(selection);setServices(s);setBackend(t.effective?.label||(hideModelHint?'Managed by workspace deployment':'Choose a model in Settings → Models → Transcription'));
         const speech={voice:p.speech_voice==='Trúc Ly'?'auto':p.speech_voice||'auto',terms:Object.entries(p.pronunciations||{}).map(([key,value])=>`${key} = ${value}`).join('\n')};
         setSpeechVoice(speech.voice);setTerms(speech.terms);setSavedSpeech(speech);setLoaded(true);
       }).catch(()=>{if(!abort.signal.aborted)setError('Could not load voice settings.');})

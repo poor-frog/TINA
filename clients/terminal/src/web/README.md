@@ -60,6 +60,8 @@ TINA Terminal workbench at `/terminal`.
   `/provider-logos/*.svg` marks, stale-model reset on provider switch, inline OAuth/API-key/Bedrock/Custom
   authentication, secret reveal toggle, paired `ModelPicker`/`ChatGPTModelInput` fields, sticky unsaved
   Save & Test bar, Dark/Light appearance switching (`useTheme`), Team workspace/member/invite management,
-  and admin-only Deployment sections.
+  and admin-only Deployment sections. Set `NEXT_PUBLIC_HIDE_MODEL_SETTINGS=1` (build-time and/or runtime
+  container env surfaced by `/api/auth/me`) to hide both **AI Models & Transcription** (Personal) and
+  **Global Defaults** (Team) on `/` while keeping model controls available in `/terminal`.
 - **Dev/Admin bridge**: Shows an "Open TINA Terminal" shortcut only when `/api/admin/me` confirms
   admin/dev access (or `NEXT_PUBLIC_SHOW_TERMINAL_SWITCH=1` / local dev override).

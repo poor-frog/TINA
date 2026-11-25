@@ -17,3 +17,11 @@ export function meetingsOnly(): boolean {
 export function workspacePilotMode(): boolean {
   return process.env.NEXT_PUBLIC_TERMINAL_MODE === "workspace-pilot";
 }
+
+/** Hide AI Models & Transcription (Personal) and Global Defaults (Team) in the Web SaaS
+ *  Settings UI (`/`), keeping model management exclusively inside `/terminal`.
+ *  Checked both at build time (client bundle default via `NEXT_PUBLIC_HIDE_MODEL_SETTINGS=1`)
+ *  and at request time in `/api/auth/me` so toggling the container env works without rebuilding. */
+export function hideModelSettings(): boolean {
+  return process.env.NEXT_PUBLIC_HIDE_MODEL_SETTINGS === "1";
+}

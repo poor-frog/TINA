@@ -356,11 +356,13 @@ describe("WebShell production UI (Option A & Option B)", () => {
   function mockEnvironment({
     admin,
     workspacePilot,
+    hideModelSettings,
     chatGptStatus,
     liveAssistState = { configured: false, enabled: false, can_configure: true, readonly: false, revision: 0, items: [] },
   }: {
     admin: boolean;
     workspacePilot?: boolean;
+    hideModelSettings?: boolean;
     chatGptStatus?: { status: number; body: Record<string, unknown> };
     liveAssistState?: Record<string, unknown>;
   }) {
@@ -371,6 +373,7 @@ describe("WebShell production UI (Option A & Option B)", () => {
         return new Response(JSON.stringify({
           user: { name: "Sarup Banskota", email: "sarup@tina.local" },
           ...(typeof workspacePilot === "boolean" ? { workspacePilot } : {}),
+          ...(typeof hideModelSettings === "boolean" ? { hideModelSettings } : {}),
         }), { status: 200 });
       }
       if (url.includes("/api/admin/me")) {
@@ -777,5 +780,44 @@ describe("WebShell production UI (Option A & Option B)", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("hides AI Models & Transcription and Team Global Defaults in Web Settings when NEXT_PUBLIC_HIDE_MODEL_SETTINGS=1 (or via /api/auth/me runtime flag)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HIDE_MODEL_SETTINGS", "1");
+    try {
+      window.history.replaceState({}, "", "/?nav=settings&settingsWorkspace=personal&settingsSection=models");
+      mockEnvironment({ admin: true });
+      const { unmount } = render(<WebShell />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("link", { name: "Open TINA Terminal" }).getAttribute("href")).toBe("/terminal");
+      });
+      // Falls back from ?settingsSection=models to Calendar & Auto-join and omits the Personal Models item
+      expect(screen.queryByRole("button", { name: /AI Models & Transcription/i })).toBeNull();
+      expect(screen.getByRole("heading", { name: "Calendar & Auto-join" })).toBeTruthy();
+
+      // Team Settings keeps Workspaces & Members + ASR Workers for admins, but hides Global Defaults
+      fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+      expect(screen.getByRole("button", { name: /Workspaces & Members/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /ASR Workers/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /Global Defaults/i })).toBeNull();
+
+      // Settings search does not surface hidden model panels
+      fireEvent.change(screen.getByLabelText("Search settings"), { target: { value: "openai" } });
+      expect(screen.queryByRole("button", { name: /AI Models & Transcription/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Global Defaults/i })).toBeNull();
+      unmount();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    // Runtime toggle via /api/auth/me also hides model settings without rebuilding the client bundle
+    window.history.replaceState({}, "", "/?nav=settings&settingsWorkspace=team&settingsSection=global-models");
+    mockEnvironment({ admin: true, hideModelSettings: true });
+    render(<WebShell />);
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Global Defaults/i })).toBeNull();
+    });
+    expect(screen.getByRole("heading", { name: "Workspaces & Members" })).toBeTruthy();
   });
 });

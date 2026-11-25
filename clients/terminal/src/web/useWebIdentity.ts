@@ -1,7 +1,7 @@
 "use client";
 /** Identity + Dev/Admin Terminal switch gating for the Production User UI. */
 import { useEffect, useState } from "react";
-import { workspacePilotMode } from "../app/mode";
+import { hideModelSettings as hideModelSettingsEnv, workspacePilotMode } from "../app/mode";
 
 export interface WebUser {
   name: string;
@@ -14,6 +14,7 @@ export interface WebIdentityState {
   user: WebUser;
   isAdmin: boolean;
   canOpenTerminal: boolean;
+  hideModelSettings: boolean;
   signOut: () => void;
 }
 
@@ -39,6 +40,7 @@ export function useWebIdentity(): WebIdentityState {
   const [isAdmin, setIsAdmin] = useState(false);
   const [devFlag, setDevFlag] = useState(false);
   const [workspacePilot, setWorkspacePilot] = useState(false);
+  const [hideModels, setHideModels] = useState<boolean>(() => hideModelSettingsEnv());
 
   useEffect(() => {
     setDevFlag(devFlagEnabled());
@@ -46,9 +48,12 @@ export function useWebIdentity(): WebIdentityState {
 
     void fetch("/api/auth/me", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: { workspacePilot?: boolean; user?: { email?: string | null; name?: string | null; image?: string | null } } | null) => {
+      .then((data: { workspacePilot?: boolean; hideModelSettings?: boolean; user?: { email?: string | null; name?: string | null; image?: string | null } } | null) => {
         if (!active || !data?.user) return;
         setWorkspacePilot(data.workspacePilot === true);
+        if (typeof data.hideModelSettings === "boolean") {
+          setHideModels(data.hideModelSettings);
+        }
         const email = (data.user.email || "").trim();
         const name = (data.user.name || (email ? email.split("@")[0] : "") || "Account").trim();
         const firstName = name.split(/\s+/)[0] || "there";
@@ -90,6 +95,7 @@ export function useWebIdentity(): WebIdentityState {
     user,
     isAdmin,
     canOpenTerminal: workspacePilotMode() ? workspacePilot : isAdmin || devFlag,
+    hideModelSettings: hideModels,
     signOut,
   };
 }
