@@ -44,9 +44,11 @@ COPY core/agent/shared ./shared
 RUN python -c "from underthesea import word_tokenize; assert word_tokenize('hệ thống nhận dạng giọng nói')"
 COPY core/agent/control_plane ./control_plane
 COPY core/agent/contracts ./contracts
-# Credential probes and model/effort validation share provider code with the worker.
-# This copies Python adapters only; CLI executables still run exclusively in workers.
+# Credential probes, model/effort validation, and stateless local completions (voice + notes/live-assist
+# pool) share Python-only provider/worker modules; CLI executables (claude/codex/agy) still live exclusively
+# in the separate worker image.
 COPY core/agent/llm ./llm
+COPY core/agent/worker ./worker
 RUN python -c "from llm.model_capabilities import normalized_effort; from control_plane.config_test import test_bedrock; assert not test_bedrock('test', 'test-model', 'us-east-1', post=lambda *args: (403, '{}'))['ok']"
 # The registry of workspace templates (the control plane validates/seeds from one — Phase 6).
 # workspace-seeds/<name>/ — one validated seed per subdir (today: default, finos).

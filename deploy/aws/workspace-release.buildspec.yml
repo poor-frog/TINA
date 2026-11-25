@@ -31,7 +31,7 @@ phases:
             repo=tina-staging/agent-api
             dockerfile=core/agent/services/agent-api/Dockerfile
             executable=python
-            check='import boto3, control_plane.api, control_plane.workspace_store, control_plane.workspace_reader'
+            check='import boto3, control_plane.api, control_plane.workspace_store, control_plane.workspace_reader, worker.local_completion, worker.meeting_voice_local'
             ;;
           runtime)
             repo=tina-foundation/runtime
