@@ -160,7 +160,8 @@ def default_registry() -> ProfileRegistry:
             **({"workspace-agent": Profile(
                 name="workspace-agent",
                 runnable=Runnable(image=os.environ["RUNTIME_ECS_WORKSPACE_IMAGE"], command=["python", "-m", "worker"]),
-                idle_timeout_sec=300, max_lifetime_sec=3600,
+                idle_timeout_sec=int(os.getenv("RUNTIME_WORKSPACE_IDLE_TIMEOUT_SEC", "300")),
+                max_lifetime_sec=int(os.getenv("RUNTIME_WORKSPACE_MAX_LIFETIME_SEC", "3600")),
             )} if os.getenv("RUNTIME_ECS_WORKSPACE_IMAGE") else {}),
             "meeting-bot": Profile(
                 name="meeting-bot",

@@ -97,7 +97,9 @@ def compile_to_job(routine: dict, *, invocations_url: str, workspace: str | None
     request = {"method": "POST", "url": invocations_url, "body": invocation}
     pilot = os.getenv("TINA_WORKSPACE_PILOT_USER_IDS", "")
     if pilot:
-        if routine["owner"] not in pilot.split(","):
+        from control_plane.system_mounts import pilot_allows
+
+        if not pilot_allows(routine["owner"], pilot):
             raise ValueError("Workspace routines unavailable for this account")
         request["headers"] = {"X-Tina-Routine-Signature": callback_signature(invocation)}
     plan = routine["plan"]

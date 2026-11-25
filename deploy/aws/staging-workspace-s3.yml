@@ -1,0 +1,696 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3-backed ephemeral workspace storage, KMS keys, STS broker role, and single static Fargate worker task definition.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+
+Parameters:
+  ClusterName: {Type: String}
+  VpcId: {Type: 'AWS::EC2::VPC::Id'}
+  RuntimeTaskRoleArn: {Type: String}
+  AgentApiTaskRoleArn: {Type: String}
+  NovaWorkerImage: {Type: String, AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'}
+  WorkerImage:
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'
+  ValkeyHost: {Type: String}
+  ValkeySecretArn: {Type: String}
+  ValkeySecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  InvocationBucket: {Type: String}
+  SnapshotRetentionDays: {Type: Number, Default: 30, MinValue: 7, MaxValue: 365}
+  EnableEgressProxy: {Type: String, Default: 'false', AllowedValues: ['true', 'false']}
+  ProxyImage: {Type: String, Default: '', AllowedPattern: '(|[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64})'}
+  ProxyRepositoryArn: {Type: String, Default: ''}
+  AppSubnetIds: {Type: CommaDelimitedList, Default: ''}
+  ServiceNamespaceId: {Type: String, Default: ''}
+  VpcCidr: {Type: String, Default: '10.42.0.0/16'}
+  S3PrefixListId: {Type: String, Default: 'pl-63a5400a'}
+  EgressAllowlist: {Type: String, Default: ''}
+
+Conditions:
+  WithEgressProxy: !And
+    - !Equals [!Ref EnableEgressProxy, 'true']
+    - !Not [!Equals [!Ref ProxyImage, '']]
+    - !Not [!Equals [!Join ['', !Ref AppSubnetIds], '']]
+    - !Not [!Equals [!Ref ServiceNamespaceId, '']]
+  HasProxyRepoArn: !Not [!Equals [!Ref ProxyRepositoryArn, '']]
+  HasCustomAllowlist: !Not [!Equals [!Ref EgressAllowlist, '']]
+
+Resources:
+  WorkspaceDataKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: KMS CMK for TINA staging S3 workspace snapshots and manifests
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountRootAdmin
+            Effect: Allow
+            Principal: {AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'}
+            Action: 'kms:*'
+            Resource: '*'
+  WorkspaceDataKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/tina-staging-workspace-data
+      TargetKeyId: !Ref WorkspaceDataKey
+
+  WorkspaceSecretsKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: KMS CMK strictly for per-user reusable GitHub tokens (agent-api only)
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountRootAdmin
+            Effect: Allow
+            Principal: {AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'}
+            Action: 'kms:*'
+            Resource: '*'
+  WorkspaceSecretsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/tina-staging-workspace-secrets
+      TargetKeyId: !Ref WorkspaceSecretsKey
+
+  WorkspaceStoreBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'tina-staging-workspaces-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt WorkspaceDataKey.Arn
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldVersionsAndOrphanUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref SnapshotRetentionDays
+            ExpiredObjectDeleteMarker: true
+
+  WorkspaceStoreBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WorkspaceStoreBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: RequireTLS
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt WorkspaceStoreBucket.Arn
+              - !Sub '${WorkspaceStoreBucket.Arn}/*'
+            Condition:
+              Bool: {'aws:SecureTransport': 'false'}
+
+  WorkspaceS3BrokerRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Assumed by Runtime with an inline STS Session Policy scoped strictly to one turn's granted prefixes.
+        must: Never permit access to secrets/* or object deletion.
+    Properties:
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {AWS: !Ref RuntimeTaskRoleArn}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ScopedWorkspaceS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt WorkspaceStoreBucket.Arn
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource:
+                  - !Sub '${WorkspaceStoreBucket.Arn}/users/*'
+                  - !Sub '${WorkspaceStoreBucket.Arn}/shared/*'
+                  - !Sub '${WorkspaceStoreBucket.Arn}/_global/*'
+              - Effect: Allow
+                Action: [kms:Decrypt, kms:GenerateDataKey]
+                Resource: !GetAtt WorkspaceDataKey.Arn
+              - Effect: Deny
+                Action: 's3:*'
+                Resource: !Sub '${WorkspaceStoreBucket.Arn}/secrets/*'
+              - Effect: Deny
+                Action: ['s3:DeleteObject', 's3:DeleteObjectVersion', 's3:PutBucketPolicy']
+                Resource: '*'
+
+  AgentApiWorkspaceS3Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: AgentApiWorkspaceS3Access
+      Roles: [!Select [1, !Split ['/', !Ref AgentApiTaskRoleArn]]]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: s3:ListBucket
+            Resource: !GetAtt WorkspaceStoreBucket.Arn
+          - Effect: Allow
+            Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+            Resource: !Sub '${WorkspaceStoreBucket.Arn}/*'
+          - Effect: Allow
+            Action: [kms:Decrypt, kms:Encrypt, kms:GenerateDataKey]
+            Resource:
+              - !GetAtt WorkspaceDataKey.Arn
+              - !GetAtt WorkspaceSecretsKey.Arn
+
+  EphemeralWorkspaceLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: {RetentionInDays: 7}
+
+  EgressProxyLogs:
+    Type: AWS::Logs::LogGroup
+    Condition: WithEgressProxy
+    Properties: {RetentionInDays: 7}
+
+  VpcEndpointsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: WithEgressProxy
+    Properties:
+      VpcId: !Ref VpcId
+      GroupDescription: PrivateLink interface endpoints (ECR, Logs, SecretsManager) for zero-direct-internet Fargate sandboxes
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref VpcCidr}
+
+  EcrApiVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: WithEgressProxy
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.api'
+      PrivateDnsEnabled: true
+      SubnetIds: [!Select [0, !Ref AppSubnetIds]]
+      SecurityGroupIds: [!GetAtt VpcEndpointsSecurityGroup.GroupId]
+
+  EcrDkrVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: WithEgressProxy
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.dkr'
+      PrivateDnsEnabled: true
+      SubnetIds: [!Select [0, !Ref AppSubnetIds]]
+      SecurityGroupIds: [!GetAtt VpcEndpointsSecurityGroup.GroupId]
+
+  LogsVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: WithEgressProxy
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      PrivateDnsEnabled: true
+      SubnetIds: [!Select [0, !Ref AppSubnetIds]]
+      SecurityGroupIds: [!GetAtt VpcEndpointsSecurityGroup.GroupId]
+
+  SecretsManagerVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: WithEgressProxy
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: Interface
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.secretsmanager'
+      PrivateDnsEnabled: true
+      SubnetIds: [!Select [0, !Ref AppSubnetIds]]
+      SecurityGroupIds: [!GetAtt VpcEndpointsSecurityGroup.GroupId]
+
+  EgressProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: WithEgressProxy
+    Properties:
+      VpcId: !Ref VpcId
+      GroupDescription: Strict HTTPS CONNECT allowlist proxy for ephemeral workspaces
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+        - {IpProtocol: udp, FromPort: 53, ToPort: 53, CidrIp: !Ref VpcCidr}
+        - {IpProtocol: tcp, FromPort: 53, ToPort: 53, CidrIp: !Ref VpcCidr}
+
+  EphemeralWorkspaceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupDescription: Ephemeral S3 workspace worker egress (Valkey + HTTPS/S3 Gateway, no EFS)
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 6379, ToPort: 6379, DestinationSecurityGroupId: !Ref ValkeySecurityGroupId}
+        - {IpProtocol: udp, FromPort: 53, ToPort: 53, CidrIp: !Ref VpcCidr}
+        - {IpProtocol: tcp, FromPort: 53, ToPort: 53, CidrIp: !Ref VpcCidr}
+        - !If
+          - WithEgressProxy
+          - {IpProtocol: tcp, FromPort: 443, ToPort: 443, DestinationPrefixListId: !Ref S3PrefixListId}
+          - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+        - !If
+          - WithEgressProxy
+          - {IpProtocol: tcp, FromPort: 443, ToPort: 443, DestinationSecurityGroupId: !GetAtt VpcEndpointsSecurityGroup.GroupId}
+          - !Ref 'AWS::NoValue'
+        - !If
+          - WithEgressProxy
+          - {IpProtocol: tcp, FromPort: 3128, ToPort: 3128, DestinationSecurityGroupId: !GetAtt EgressProxySecurityGroup.GroupId}
+          - !Ref 'AWS::NoValue'
+
+  EgressProxyIngressFromWorkers:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: WithEgressProxy
+    Properties:
+      GroupId: !GetAtt EgressProxySecurityGroup.GroupId
+      SourceSecurityGroupId: !GetAtt EphemeralWorkspaceSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 3128
+      ToPort: 3128
+
+  EgressProxyDiscovery:
+    Type: AWS::ServiceDiscovery::Service
+    Condition: WithEgressProxy
+    Properties:
+      Name: egress-proxy
+      DnsConfig:
+        NamespaceId: !Ref ServiceNamespaceId
+        DnsRecords: [{Type: A, TTL: 15}]
+
+  EgressProxyExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: WithEgressProxy
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: PullProxyImageAndWriteLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:GetDownloadUrlForLayer, ecr:BatchCheckLayerAvailability]
+                Resource: !If
+                  - HasProxyRepoArn
+                  - !Ref ProxyRepositoryArn
+                  - !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-foundation/runtime'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt EgressProxyLogs.Arn
+
+  EgressProxyTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Condition: WithEgressProxy
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Dedicated zero-IAM HTTPS CONNECT allowlist proxy for ephemeral agent sandboxes.
+        must: Keep ReadonlyRootFilesystem true and zero TaskRoleArn.
+    Properties:
+      Family: tina-staging-egress-proxy
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: '256'
+      Memory: '512'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt EgressProxyExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: egress-proxy
+          Image: !Ref ProxyImage
+          Essential: true
+          User: '1000:1000'
+          ReadonlyRootFilesystem: true
+          EntryPoint: [python, -m, runtime_kernel.egress_proxy]
+          PortMappings: [{ContainerPort: 3128, Protocol: tcp}]
+          Environment:
+            - {Name: TINA_EGRESS_PROXY_PORT, Value: '3128'}
+            - !If [HasCustomAllowlist, {Name: TINA_EGRESS_ALLOWLIST, Value: !Ref EgressAllowlist}, !Ref 'AWS::NoValue']
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3128/health', timeout=2).close()"]
+            Interval: 15
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 15
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref EgressProxyLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: proxy}
+
+  EgressProxyService:
+    Type: AWS::ECS::Service
+    Condition: WithEgressProxy
+    DependsOn:
+      - EcrApiVpcEndpoint
+      - EcrDkrVpcEndpoint
+      - LogsVpcEndpoint
+    Properties:
+      Cluster: !Ref ClusterName
+      TaskDefinition: !Ref EgressProxyTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      PlatformVersion: '1.4.0'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetIds
+          SecurityGroups: [!GetAtt EgressProxySecurityGroup.GroupId]
+      ServiceRegistries:
+        - RegistryArn: !GetAtt EgressProxyDiscovery.Arn
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+
+  EphemeralWorkspaceValkeyIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ValkeySecurityGroupId
+      SourceSecurityGroupId: !GetAtt EphemeralWorkspaceSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+
+  EphemeralWorkspaceExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: PullWorkerAndInvocationEnvFiles
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:GetDownloadUrlForLayer, ecr:BatchCheckLayerAvailability]
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-staging/agent-worker'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt EphemeralWorkspaceLogs.Arn
+              - {Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref ValkeySecretArn}
+              - {Effect: Allow, Action: 's3:GetBucketLocation', Resource: !Sub 'arn:${AWS::Partition}:s3:::${InvocationBucket}'}
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${InvocationBucket}/runtime-invocations/workspace/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${InvocationBucket}/runtime-invocations/workspace-sync/*'
+
+  EphemeralWorkspaceTaskRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Bedrock-only task role for ephemeral workers. ZERO S3 permissions so untrusted Bash cannot access S3.
+        must: Never grant s3:* or secretsmanager:* to this role.
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: EphemeralWorkerBedrockOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/anthropic.claude-*'
+                  - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-*'
+                  - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/global.anthropic.claude-*'
+
+  EphemeralWorkspaceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Single static Fargate task definition serving unlimited users and shared wikis via local ephemeral SSD + scoped sync sidecar.
+        must: Keep STS credentials confined to sync sidecar environmentFiles; never expose them to worker.
+    Properties:
+      Family: tina-staging-ws-ephemeral
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: '1024'
+      Memory: '2048'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt EphemeralWorkspaceExecutionRole.Arn
+      TaskRoleArn: !GetAtt EphemeralWorkspaceTaskRole.Arn
+      Volumes:
+        - Name: workspaces
+        - Name: sync-tmp
+        - Name: worker-tmp
+      ContainerDefinitions:
+        - Name: init-perms
+          Image: !Ref WorkerImage
+          Essential: false
+          EntryPoint: [sh, -c]
+          Command: ["chown 1000:1000 /workspaces /sync-tmp /worker-tmp && chmod 0755 /workspaces && chmod 1777 /sync-tmp /worker-tmp"]
+          MountPoints:
+            - {SourceVolume: workspaces, ContainerPath: /workspaces, ReadOnly: false}
+            - {SourceVolume: sync-tmp, ContainerPath: /sync-tmp, ReadOnly: false}
+            - {SourceVolume: worker-tmp, ContainerPath: /worker-tmp, ReadOnly: false}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref EphemeralWorkspaceLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: init}
+        - Name: stream
+          Image: !Ref WorkerImage
+          Essential: true
+          User: '1000:1000'
+          ReadonlyRootFilesystem: true
+          EntryPoint: [python, -m, worker.workspace_stream]
+          Environment:
+            - {Name: VALKEY_HOST, Value: !Ref ValkeyHost}
+          Secrets:
+            - {Name: VALKEY_PASSWORD, ValueFrom: !Ref ValkeySecretArn}
+          HealthCheck:
+            Command: [CMD, python, -c, "import socket; socket.create_connection(('127.0.0.1',8721),2).close()"]
+            Interval: 5
+            Timeout: 3
+            Retries: 5
+            StartPeriod: 5
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref EphemeralWorkspaceLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: stream}
+        - Name: sync
+          Image: !Ref WorkerImage
+          Essential: true
+          User: '1000:1000'
+          ReadonlyRootFilesystem: true
+          EntryPoint: [python, -m, worker.workspace_sync]
+          DependsOn:
+            - {ContainerName: init-perms, Condition: SUCCESS}
+          Environment:
+            - {Name: TMPDIR, Value: /tmp}
+          MountPoints:
+            - {SourceVolume: workspaces, ContainerPath: /workspaces, ReadOnly: false}
+            - {SourceVolume: sync-tmp, ContainerPath: /tmp, ReadOnly: false}
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8722/health', timeout=2).close()"]
+            Interval: 5
+            Timeout: 3
+            Retries: 10
+            StartPeriod: 10
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref EphemeralWorkspaceLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: sync}
+        - Name: worker
+          Image: !Ref WorkerImage
+          Essential: true
+          User: '1000:1000'
+          ReadonlyRootFilesystem: true
+          LinuxParameters: {InitProcessEnabled: true}
+          DependsOn:
+            - {ContainerName: stream, Condition: HEALTHY}
+            - {ContainerName: sync, Condition: HEALTHY}
+          Environment:
+            - {Name: TMPDIR, Value: /tmp}
+            - {Name: XDG_CACHE_HOME, Value: /tmp/.cache}
+            - {Name: XDG_CONFIG_HOME, Value: /tmp/.config}
+            - {Name: XDG_DATA_HOME, Value: /tmp/.local/share}
+            - {Name: npm_config_cache, Value: /tmp/.npm}
+            - {Name: UV_CACHE_DIR, Value: /tmp/.uv}
+            - !If [WithEgressProxy, {Name: HTTPS_PROXY, Value: 'http://egress-proxy.tina-staging.local:3128'}, !Ref 'AWS::NoValue']
+            - !If [WithEgressProxy, {Name: https_proxy, Value: 'http://egress-proxy.tina-staging.local:3128'}, !Ref 'AWS::NoValue']
+            - !If [WithEgressProxy, {Name: HTTP_PROXY, Value: 'http://egress-proxy.tina-staging.local:3128'}, !Ref 'AWS::NoValue']
+            - !If [WithEgressProxy, {Name: http_proxy, Value: 'http://egress-proxy.tina-staging.local:3128'}, !Ref 'AWS::NoValue']
+            - !If [WithEgressProxy, {Name: NO_PROXY, Value: '127.0.0.1,localhost,.tina-staging.local,.s3.us-east-1.amazonaws.com,169.254.170.2,169.254.169.254'}, !Ref 'AWS::NoValue']
+            - !If [WithEgressProxy, {Name: no_proxy, Value: '127.0.0.1,localhost,.tina-staging.local,.s3.us-east-1.amazonaws.com,169.254.170.2,169.254.169.254'}, !Ref 'AWS::NoValue']
+          MountPoints:
+            - {SourceVolume: workspaces, ContainerPath: /workspaces, ReadOnly: false}
+            - {SourceVolume: worker-tmp, ContainerPath: /tmp, ReadOnly: false}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref EphemeralWorkspaceLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: worker}
+
+  NovaWorkspaceTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: EphemeralWorkerBedrockOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-lite-v1:0'
+
+  NovaWorkspaceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    UpdateReplacePolicy: Retain
+    Properties:
+      Family: tina-staging-ws-nova
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: '1024'
+      Memory: '2048'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt EphemeralWorkspaceExecutionRole.Arn
+      TaskRoleArn: !GetAtt NovaWorkspaceTaskRole.Arn
+      Volumes:
+        - Name: workspaces
+        - Name: sync-tmp
+        - Name: worker-tmp
+      ContainerDefinitions:
+        - Name: init-perms
+          Image: !Ref NovaWorkerImage
+          Essential: false
+          EntryPoint: [sh, -c]
+          Command: ["chown 1000:1000 /workspaces /sync-tmp /worker-tmp && chmod 0755 /workspaces && chmod 1777 /sync-tmp /worker-tmp"]
+          MountPoints:
+            - {SourceVolume: workspaces, ContainerPath: /workspaces, ReadOnly: false}
+            - {SourceVolume: sync-tmp, ContainerPath: /sync-tmp, ReadOnly: false}
+            - {SourceVolume: worker-tmp, ContainerPath: /worker-tmp, ReadOnly: false}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref EphemeralWorkspaceLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: init}
+        - Name: stream
+          Image: !Ref NovaWorkerImage
+          Essential: true
+          User: '1000:1000'
+          ReadonlyRootFilesystem: true
+          EntryPoint: [python, -m, worker.workspace_stream]
+          Environment:
+            - {Name: VALKEY_HOST, Value: !Ref ValkeyHost}
+          Secrets:
+            - {Name: VALKEY_PASSWORD, ValueFrom: !Ref ValkeySecretArn}
+          HealthCheck:
+            Command: [CMD, python, -c, "import socket; socket.create_connection(('127.0.0.1',8721),2).close()"]
+            Interval: 5
+            Timeout: 3
+            Retries: 5
+            StartPeriod: 5
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref EphemeralWorkspaceLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: stream}
+        - Name: sync
+          Image: !Ref NovaWorkerImage
+          Essential: true
+          User: '1000:1000'
+          ReadonlyRootFilesystem: true
+          EntryPoint: [python, -m, worker.workspace_sync]
+          DependsOn:
+            - {ContainerName: init-perms, Condition: SUCCESS}
+          Environment:
+            - {Name: TMPDIR, Value: /tmp}
+          MountPoints:
+            - {SourceVolume: workspaces, ContainerPath: /workspaces, ReadOnly: false}
+            - {SourceVolume: sync-tmp, ContainerPath: /tmp, ReadOnly: false}
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8722/health', timeout=2).close()"]
+            Interval: 5
+            Timeout: 3
+            Retries: 10
+            StartPeriod: 10
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref EphemeralWorkspaceLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: sync}
+        - Name: worker
+          Image: !Ref NovaWorkerImage
+          Essential: true
+          User: '1000:1000'
+          ReadonlyRootFilesystem: true
+          LinuxParameters: {InitProcessEnabled: true}
+          DependsOn:
+            - {ContainerName: stream, Condition: HEALTHY}
+            - {ContainerName: sync, Condition: HEALTHY}
+          Environment:
+            - {Name: TMPDIR, Value: /tmp}
+            - {Name: XDG_CACHE_HOME, Value: /tmp/.cache}
+            - {Name: XDG_CONFIG_HOME, Value: /tmp/.config}
+            - {Name: XDG_DATA_HOME, Value: /tmp/.local/share}
+            - {Name: npm_config_cache, Value: /tmp/.npm}
+            - {Name: UV_CACHE_DIR, Value: /tmp/.uv}
+            - !If [WithEgressProxy, {Name: HTTPS_PROXY, Value: 'http://egress-proxy.tina-staging.local:3128'}, !Ref 'AWS::NoValue']
+            - !If [WithEgressProxy, {Name: https_proxy, Value: 'http://egress-proxy.tina-staging.local:3128'}, !Ref 'AWS::NoValue']
+            - !If [WithEgressProxy, {Name: HTTP_PROXY, Value: 'http://egress-proxy.tina-staging.local:3128'}, !Ref 'AWS::NoValue']
+            - !If [WithEgressProxy, {Name: http_proxy, Value: 'http://egress-proxy.tina-staging.local:3128'}, !Ref 'AWS::NoValue']
+            - !If [WithEgressProxy, {Name: NO_PROXY, Value: '127.0.0.1,localhost,.tina-staging.local,.s3.us-east-1.amazonaws.com,169.254.170.2,169.254.169.254'}, !Ref 'AWS::NoValue']
+            - !If [WithEgressProxy, {Name: no_proxy, Value: '127.0.0.1,localhost,.tina-staging.local,.s3.us-east-1.amazonaws.com,169.254.170.2,169.254.169.254'}, !Ref 'AWS::NoValue']
+          MountPoints:
+            - {SourceVolume: workspaces, ContainerPath: /workspaces, ReadOnly: false}
+            - {SourceVolume: worker-tmp, ContainerPath: /tmp, ReadOnly: false}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref EphemeralWorkspaceLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: worker}
+
+Outputs:
+  WorkspaceStoreBucketName: {Value: !Ref WorkspaceStoreBucket}
+  WorkspaceStoreBucketArn: {Value: !GetAtt WorkspaceStoreBucket.Arn}
+  WorkspaceDataKeyArn: {Value: !GetAtt WorkspaceDataKey.Arn}
+  WorkspaceSecretsKeyArn: {Value: !GetAtt WorkspaceSecretsKey.Arn}
+  WorkspaceS3BrokerRoleArn: {Value: !GetAtt WorkspaceS3BrokerRole.Arn}
+  EphemeralWorkspaceTaskDefinitionArn: {Value: !Ref EphemeralWorkspaceTaskDefinition}
+  EphemeralWorkspaceTaskRoleArn: {Value: !GetAtt EphemeralWorkspaceTaskRole.Arn}
+  EphemeralWorkspaceExecutionRoleArn: {Value: !GetAtt EphemeralWorkspaceExecutionRole.Arn}
+  EphemeralWorkspaceSecurityGroupId: {Value: !GetAtt EphemeralWorkspaceSecurityGroup.GroupId}
+  EphemeralWorkspaceLogGroup: {Value: !Ref EphemeralWorkspaceLogs}
+  NovaWorkspaceTaskDefinitionArn: {Value: !Ref NovaWorkspaceTaskDefinition}
+  NovaWorkspaceTaskRoleArn: {Value: !GetAtt NovaWorkspaceTaskRole.Arn}
+  EgressProxyLogGroup:
+    Condition: WithEgressProxy
+    Value: !Ref EgressProxyLogs
+  EgressProxyServiceName:
+    Condition: WithEgressProxy
+    Value: !GetAtt EgressProxyService.Name
+  EgressProxyUrl:
+    Condition: WithEgressProxy
+    Value: http://egress-proxy.tina-staging.local:3128
+  EgressProxySecurityGroupId:
+    Condition: WithEgressProxy
+    Value: !GetAtt EgressProxySecurityGroup.GroupId

@@ -10,6 +10,26 @@ Parameters:
     Type: String
   WebAclArn:
     Type: String
+  CustomDomainName:
+    Type: String
+    Default: ''
+    Description: Optional custom HTTPS hostname (e.g. staging.example.com). Leave empty to use the default CloudFront domain.
+  AcmCertificateArn:
+    Type: String
+    Default: ''
+    Description: Issued us-east-1 ACM certificate ARN covering CustomDomainName.
+  HostedZoneId:
+    Type: String
+    Default: ''
+    Description: Optional Route53 Public Hosted Zone ID to create A and AAAA alias records for CustomDomainName.
+
+Conditions:
+  HasCustomDomain: !And
+    - !Not [!Equals [!Ref CustomDomainName, '']]
+    - !Not [!Equals [!Ref AcmCertificateArn, '']]
+  CreateDnsAlias: !And
+    - !Condition HasCustomDomain
+    - !Not [!Equals [!Ref HostedZoneId, '']]
 
 Resources:
   OriginSecurityGroup:
@@ -72,8 +92,13 @@ Resources:
         Enabled: true
         HttpVersion: http2
         WebACLId: !Ref WebAclArn
-        ViewerCertificate:
-          CloudFrontDefaultCertificate: true
+        Aliases: !If [HasCustomDomain, [!Ref CustomDomainName], !Ref 'AWS::NoValue']
+        ViewerCertificate: !If
+          - HasCustomDomain
+          - AcmCertificateArn: !Ref AcmCertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
         Origins:
           - Id: tina-internal-alb
             DomainName: !GetAtt LoadBalancer.DNSName
@@ -89,9 +114,28 @@ Resources:
           - ErrorCode: 503
             ErrorCachingMinTTL: 0
 
+  CustomDomainAliasRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Condition: CreateDnsAlias
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        - Name: !Ref CustomDomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+        - Name: !Ref CustomDomainName
+          Type: AAAA
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+
 Outputs:
   StageUrl:
-    Value: !Sub 'https://${Distribution.DomainName}'
+    Value: !If [HasCustomDomain, !Sub 'https://${CustomDomainName}', !Sub 'https://${Distribution.DomainName}']
+  CloudFrontDomainName:
+    Value: !GetAtt Distribution.DomainName
   DistributionId:
     Value: !Ref Distribution
   ListenerArn:

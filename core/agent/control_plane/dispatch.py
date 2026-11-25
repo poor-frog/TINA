@@ -25,7 +25,7 @@ from typing import Optional
 import contracts
 from control_plane.workspace_attach import active_workspaces, shared_active_mounts
 from control_plane.workspace_purpose import read_purpose
-from control_plane.system_mounts import GLOBAL_SLUG, SYSTEM_SLUG, global_mount, system_mount
+from control_plane.system_mounts import GLOBAL_SLUG, SYSTEM_SLUG, global_mount, pilot_allows, system_mount
 from shared.config import Settings
 from shared.ports import IdentityPort, RuntimePort
 from shared.units import (
@@ -152,6 +152,60 @@ MODEL_AUTH_ENV_ALLOWLIST = (
     "TINA_ANTIGRAVITY_AUTH_MODE",
     "TINA_ANTIGRAVITY_TERMS_ACKNOWLEDGED",
 )
+
+
+def _has_workspace_byo_model(cfg: dict) -> bool:
+    mode = (cfg.get("mode") or "").strip()
+    if mode == "custom":
+        return bool((cfg.get("base_url") or "").strip())
+    if mode in {"openai-api", "groq", "deepseek", "gemini", "antigravity"}:
+        return bool((cfg.get("api_key") or "").strip())
+    if mode == "bedrock":
+        return True
+    return False
+
+
+def _s3_workspace_enabled(subject: str) -> bool:
+    if (os.getenv("TINA_WORKSPACE_STORAGE") or "").strip().lower() != "s3":
+        return False
+    users = (os.getenv("TINA_S3_WORKSPACE_USERS") or "*").strip()
+    return pilot_allows(subject, users)
+
+
+WORKSPACE_NOVA_MODEL = "amazon.nova-lite-v1:0"
+
+
+def workspace_uses_nova(subject: str, config: dict) -> bool:
+    allow = os.getenv("TINA_WORKSPACE_BEDROCK_OWNER", "").split(",")
+    if subject not in allow or not pilot_allows(subject) or not _s3_workspace_enabled(subject):
+        return False
+    mode = (config.get("mode") or "").strip()
+    if mode == "bedrock" and config.get("model") == WORKSPACE_NOVA_MODEL and not config.get("api_key"):
+        return True
+    from control_plane.aws_voice_chatgpt import workspace_connected
+    return not mode and not workspace_connected(subject)
+
+
+def _apply_workspace_bedrock_defaults(env: dict[str, str], *, region: str = "", model: str = "",
+                                      meeting_model: str = "", allowlist: str = "") -> None:
+    resolved_region = (region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1").strip()
+    default_model = (os.environ.get("TINA_WORKSPACE_BEDROCK_MODEL") or "us.anthropic.claude-sonnet-4-6").strip()
+    target = (model if model and _allowlisted(model, allowlist) else "") or default_model
+    env["TINA_RUNNER"] = "claude-code"
+    env["CLAUDE_CODE_USE_BEDROCK"] = "1"
+    env["TINA_CODEX_AUTH_MODE"] = ""
+    env["AWS_REGION"] = resolved_region
+    env["AWS_DEFAULT_REGION"] = resolved_region
+    env["TINA_AGENT_MODEL"] = target
+    env["TINA_LLM_MODEL"] = target
+    env["TINA_MEETING_MODEL"] = meeting_model if meeting_model and _allowlisted(meeting_model, allowlist) else target
+    for alias in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                  "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL"):
+        env[alias] = target
+    for key_name in ("AWS_BEARER_TOKEN_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+                     "AWS_SESSION_TOKEN", "AWS_PROFILE", "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY",
+                     "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "ACCESS_TOKEN"):
+        env[key_name] = ""
 
 
 def _allowlisted(model: str, allowlist: str) -> bool:
@@ -285,6 +339,10 @@ def overlay_model_config(env: dict[str, str], config: dict, *, allowlist: str = 
             env["TINA_LLM_PROVIDER"] = "anthropic"
             env["TINA_LLM_BASE_URL"] = base
             env["TINA_LLM_API_KEY"] = key
+        elif os.getenv("TINA_WORKSPACE_PILOT_USER_IDS"):
+            _apply_workspace_bedrock_defaults(
+                env, region=region, model=model, meeting_model=meeting_model, allowlist=allowlist,
+            )
         return
     if mode in ("openai-api", "openai-subscription"):
         env["TINA_RUNNER"] = "codex"
@@ -638,16 +696,11 @@ class Dispatcher:
         uid = dispatch_id(invocation)
         is_chat = invocation["trigger"] == "message" and not is_private_transcript_job(invocation)
         pilot = os.getenv("TINA_WORKSPACE_PILOT_USER_IDS")
-        workspace_turn = pilot and (is_chat or invocation["trigger"] == "scheduled")
-        if workspace_turn:
-            if identity["subject"] not in pilot.split(","):
-                raise ModelConfigRefreshError("Workspace pilot unavailable for this account", 403)
-            from control_plane.aws_voice_chatgpt import workspace_access_token
-            from control_plane.openai_auth import ChatGPTAuthError
-            try:
-                workspace_token = workspace_access_token(identity["subject"], self._settings.redis_url)
-            except ChatGPTAuthError as exc:
-                raise ModelConfigRefreshError("Connect ChatGPT for this workspace", 409) from exc
+        workspace_turn = bool(pilot) and (is_chat or invocation["trigger"] == "scheduled")
+        workspace_auth_mode: Optional[str] = None
+        workspace_token: Optional[str] = None
+        if workspace_turn and not pilot_allows(identity["subject"], pilot):
+            raise ModelConfigRefreshError("Workspace pilot unavailable for this account", 403)
         token = self._identity.mint(
             identity["subject"], identity["launcher"], invocation["workspaces"], invocation.get("tools", []),
         )
@@ -660,38 +713,47 @@ class Dispatcher:
             except Exception:  # noqa: BLE001
                 logger.warning("membership-index lookup failed for subject=%s — dispatching private mounts only",
                                identity["subject"])
-        # Settings → Models: resolve the subject's effective model config (fail soft — a down
-        # identity service must never block a turn; the deployment env defaults still dispatch).
-        # NOTE: /api/chat gates message-triggers upstream (credential preflight) — this path stays
-        # ungated so async triggers (scheduled/event/transcription) never lose a dispatch; their
-        # credential-less failure mode is the clean rewritten done frame (llm/errors taxonomy).
-        model_config = {} if workspace_turn else self.resolve_model_config(identity["subject"])
+        multi_provider_pilot = bool((os.getenv("TINA_WORKSPACE_BEDROCK_MODEL") or "").strip())
+        model_config = self.resolve_model_config(identity["subject"]) if (not workspace_turn or multi_provider_pilot) else {}
         if (model_config is None and invocation["trigger"] == "message"
                 and not is_private_transcript_job(invocation)
                 and callable(getattr(self._runtime, "stop", None))):
             raise ModelConfigRefreshError("Could not load your saved model configuration. Retry shortly.")
+        if workspace_turn:
+            from control_plane.aws_voice_chatgpt import workspace_access_token, workspace_connected
+            from control_plane.openai_auth import ChatGPTAuthError
+
+            if is_chat and workspace_uses_nova(identity["subject"], model_config or {}):
+                workspace_auth_mode = "bedrock-workspace"
+            elif multi_provider_pilot and _has_workspace_byo_model(model_config or {}):
+                workspace_auth_mode = "byo"
+            elif workspace_connected(identity["subject"]):
+                try:
+                    workspace_token = workspace_access_token(identity["subject"], self._settings.redis_url)
+                except ChatGPTAuthError as exc:
+                    raise ModelConfigRefreshError("Connect ChatGPT for this workspace", 409) from exc
+                workspace_auth_mode = "chatgpt-plan"
+            elif multi_provider_pilot:
+                workspace_auth_mode = "bedrock"
+            else:
+                raise ModelConfigRefreshError("Connect ChatGPT for this workspace", 409)
         env = build_unit_env(self._settings, invocation, unit_id=uid, token=token, memberships=memberships,
-                             model_config=model_config, trusted_live_meeting=trusted_live_meeting,
-                              trusted_canonical_notes=trusted_canonical_notes, trusted_meeting_state=trusted_meeting_state)
-        # WARM DELIVERY (the lost-turn fix). The runtime's create is an IDEMPOTENT TOUCH for a
-        # workload that is still starting/running (ADR-0027) — it returns the live status and
-        # DISCARDS the spec env, where a chat message's prompt rides. So a message sent while the
-        # thread's worker is alive (mid-turn, or parked in its serve() idle window) used to
-        # dispatch NOWHERE: the UI hung on "Starting agent" until the worker idled out. Fix:
-        # pre-deliver ordinary message prompts to unit:<id>:in BEFORE spawn; ephemeral transcript jobs
-        # use only their entrypoint so transcript text never lands in a Redis input stream —
-        #   · worker WARM  → create touches; the parked serve() loop consumes the message (no
-        #     container / CLI cold start — this is also the fast path);
-        #   · worker GONE  → create really spawns; the fresh worker anchors its in-topic read at
-        #     the boot tail, SKIPS the pre-delivered copy, and runs the same prompt as its
-        #     entrypoint (no double turn).
-        # A watchdog then waits for the worker's turn-accepted ack and respawns once if the worker
-        # exited in the XADD↔idle-exit race window without taking the message.
+                             model_config=model_config if workspace_auth_mode in (None, "byo") else {},
+                             trusted_live_meeting=trusted_live_meeting,
+                             trusted_canonical_notes=trusted_canonical_notes, trusted_meeting_state=trusted_meeting_state)
         profile = self._settings.agent_profile
         if workspace_turn:
-            env.update(TINA_CODEX_AUTH_MODE="chatgpt-plan", TINA_RUNNER="codex",
-                       TINA_AGENT_MODEL="gpt-6-luna", ACCESS_TOKEN=workspace_token,
-                       TINA_WORKSPACE_ATTEMPT=uuid.uuid4().hex)
+            if workspace_auth_mode == "chatgpt-plan":
+                env.update(TINA_CODEX_AUTH_MODE="chatgpt-plan", TINA_RUNNER="codex",
+                           TINA_AGENT_MODEL="gpt-6-luna", ACCESS_TOKEN=workspace_token or "")
+            elif workspace_auth_mode == "bedrock-workspace":
+                env.update(TINA_RUNNER="bedrock-workspace", TINA_AGENT_MODEL=WORKSPACE_NOVA_MODEL)
+            elif workspace_auth_mode == "bedrock":
+                _apply_workspace_bedrock_defaults(env, allowlist=self._settings.model_allowlist)
+            if _s3_workspace_enabled(identity["subject"]):
+                env["TINA_WORKSPACE_STORAGE"] = "s3"
+                env["HOME"] = f"{self._settings.workspaces_dir}/_system/{identity['subject']}"
+            env["TINA_WORKSPACE_ATTEMPT"] = uuid.uuid4().hex
             profile = "workspace-agent"
         guard = self._chat_config_guard(uid, env) if is_chat else nullcontext()
         with guard:

@@ -595,10 +595,13 @@ def scan_workspace_subjects(workspaces_dir: str | Path = "/workspaces") -> list[
     if not root.exists():
         return []
     subjects = {p.name for p in root.iterdir() if p.is_dir() and not p.is_symlink()
-                and not p.name.startswith('.') and not (p / 'policy/members.json').exists()}
-    attached = root / '.attached'
-    if attached.is_dir() and not attached.is_symlink():
-        subjects.update(p.name for p in attached.iterdir() if p.is_dir() and not p.is_symlink() and not p.name.startswith('.'))
+                and not p.name.startswith('.') and not p.name.startswith('_')
+                and not (p / 'policy/members.json').exists()}
+    for dirname in ('.attached', '_attached'):
+        attached = root / dirname
+        if attached.is_dir() and not attached.is_symlink():
+            subjects.update(p.name for p in attached.iterdir()
+                            if p.is_dir() and not p.is_symlink() and not p.name.startswith('.'))
     return sorted(subjects)
 
 
@@ -608,12 +611,21 @@ def reconcile_all_workspace_routines(
     invocations_url: str,
     workspaces_dir: str | Path = "/workspaces",
 ) -> list[ReconcileResult]:
+    from control_plane.system_mounts import pilot_allows
+    from control_plane.workspace_store import S3WorkspaceStore
+
     results: list[ReconcileResult] = []
     pilot = os.getenv("TINA_WORKSPACE_PILOT_USER_IDS", "")
-    subjects = scan_workspace_subjects(workspaces_dir)
+    s3_store = S3WorkspaceStore.from_env(Path(workspaces_dir))
+    if s3_store is not None:
+        subjects = s3_store.list_user_subjects()
+    else:
+        subjects = scan_workspace_subjects(workspaces_dir)
     if pilot:
-        subjects = sorted(set(subjects).intersection(pilot.split(",")))
+        subjects = sorted(s for s in subjects if pilot_allows(s, pilot))
     for subject in subjects:
+        if s3_store is not None:
+            s3_store.sync_subject_workspaces(subject, force=False)
         results.append(
             reconcile_workspace_routines(
                 subject,

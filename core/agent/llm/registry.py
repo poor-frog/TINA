@@ -15,6 +15,7 @@ import os
 from llm.anthropic_api import AnthropicCompletion
 from llm.antigravity import AntigravityHarness
 from llm.bedrock_converse import BedrockConverseCompletion
+from llm.bedrock_workspace import BedrockWorkspaceHarness
 from llm.claude_cli import ClaudeCliCompletion
 from llm.claude_code import ClaudeCodeHarness
 from llm.codex import CodexHarness
@@ -34,6 +35,7 @@ COMPLETION_PROVIDERS: dict[str, type] = {
 }
 
 HARNESS_RUNNERS: dict[str, type] = {
+    "bedrock-workspace": BedrockWorkspaceHarness,
     "antigravity": AntigravityHarness,
     "claude-code": ClaudeCodeHarness,
     "codex": CodexHarness,

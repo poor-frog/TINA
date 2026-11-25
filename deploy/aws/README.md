@@ -288,3 +288,34 @@ the container mounts that workspace read-only. A turn runs only when its
 requested mount set matches a pinned definition, including each mount's
 read/write mode. Each active combination of private and shared workspaces
 needs a matching task definition before the worker can mount it.
+
+## Custom domain, ACM SSL, and Chrome Extension cutover
+
+Replace the default `*.cloudfront.net` hostname once a domain is owned so Google OAuth
+callbacks, MCP public origins, and Chrome Extension CORS stay fixed across rebuilds.
+
+1. **Issue the `us-east-1` ACM certificate** with [`staging-domain-acm.yml`](staging-domain-acm.yml):
+   - Route53-managed DNS: pass `DomainName=<host>`, `CreateHostedZone=true` + `RootDomainName=<apex>` (or `ExistingHostedZoneId=<zone-id>`). Copy `NameServers` to your registrar if creating a new zone.
+   - External DNS (e.g. Cloudflare): leave `CreateHostedZone=false` and `ExistingHostedZoneId=""`, then create the ACM DNS validation CNAME printed in ACM Console.
+2. **Attach the custom domain to CloudFront** by updating `tina-staging-edge` with [`staging-edge.yml`](staging-edge.yml):
+   - Pass `CustomDomainName=<host>`, `AcmCertificateArn=<CertificateArn>`, and `HostedZoneId=<zone-id>` (for automatic Route53 `A`/`AAAA` Alias records; for external DNS leave `HostedZoneId=""` and point a CNAME/ALIAS at `CloudFrontDomainName`).
+3. **Update public origins & Chrome Extension CORS** across the application stacks:
+   - `tina-staging-terminal`: update `StageUrl=https://<host>` (updates `NEXTAUTH_URL` and `TERMINAL_URL`).
+   - `tina-staging-mcp`: update `PublicOrigin=https://<host>` (updates `TINA_MCP_PUBLIC_ORIGIN`).
+   - `tina-staging-core`: set `GatewayExtensionOrigins=chrome-extension://<extension-id>` (can be enabled before custom domain cutover).
+4. **Update Google Cloud Console & verify**:
+   - Add Authorized JavaScript origin `https://<host>` and Authorized redirect URIs `https://<host>/api/auth/callback/google` and `https://<host>/api/auth/callback/google-calendar`.
+   - Verify `GET https://<host>/edge-health` returns `TINA_EDGE_READY`, `GET https://<host>/api/auth/me` returns `401` unauthenticated, and OAuth sign-in returns `200`.
+
+## Staging power management (sleep / wake cost control)
+
+Use [`staging-power.sh`](staging-power.sh) to scale staging Fargate services down when
+idle and restore them before demos or evaluations:
+
+```sh
+./deploy/aws/staging-power.sh status       # show all 11 ECS services, active sandboxes, and RDS state
+./deploy/aws/staging-power.sh sleep-heavy  # stop VieGem + Voice (4 vCPU / 16 GiB); keep web/chat/wiki live
+./deploy/aws/staging-power.sh sleep        # scale all 11 services to 0 and stop RDS (~70-85% compute savings)
+./deploy/aws/staging-power.sh wake         # start RDS + wake all 11 services and verify CloudFront health
+./deploy/aws/staging-power.sh wake-lite    # start RDS + wake 9 web/agent services (leave VieGem/Voice at 0)
+```

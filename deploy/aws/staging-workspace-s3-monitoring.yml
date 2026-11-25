@@ -1,0 +1,579 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudWatch metric filters, full-stack Ops alarms (S3/Egress/ALB/ECS/RDS), and dashboard for TINA Staging.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+
+Parameters:
+  ClusterName: {Type: String, Default: tina-foundation-ecs}
+  WorkspaceBucketName: {Type: String}
+  EphemeralWorkspaceLogGroup: {Type: String}
+  EgressProxyLogGroup: {Type: String, Default: ''}
+  AgentApiLogGroup: {Type: String}
+  RuntimeLogGroup: {Type: String}
+  CoreLogGroup: {Type: String, Default: ''}
+  VieGemLogGroup: {Type: String, Default: ''}
+  VoiceLogGroup: {Type: String, Default: ''}
+  AgentApiServiceName: {Type: String}
+  RuntimeServiceName: {Type: String}
+  CoreServiceName: {Type: String, Default: ''}
+  VieGemServiceName: {Type: String, Default: ''}
+  VoiceServiceName: {Type: String, Default: ''}
+  AlbFullName: {Type: String, Default: ''}
+  GatewayTargetGroupFullName: {Type: String, Default: ''}
+  RdsInstanceIdentifier: {Type: String, Default: ''}
+  AlarmTopicArn: {Type: String, Default: ''}
+
+Conditions:
+  HasAlarmTopic: !Not [!Equals [!Ref AlarmTopicArn, '']]
+  HasEgressProxyLogs: !Not [!Equals [!Ref EgressProxyLogGroup, '']]
+  HasAlb: !Not [!Equals [!Ref AlbFullName, '']]
+  HasGatewayTg: !And [!Condition HasAlb, !Not [!Equals [!Ref GatewayTargetGroupFullName, '']]]
+  HasRds: !Not [!Equals [!Ref RdsInstanceIdentifier, '']]
+  HasCore: !And [!Not [!Equals [!Ref CoreServiceName, '']], !Not [!Equals [!Ref CoreLogGroup, '']]]
+  HasVieGem: !And [!Not [!Equals [!Ref VieGemServiceName, '']], !Not [!Equals [!Ref VieGemLogGroup, '']]]
+  HasVoice: !And [!Not [!Equals [!Ref VoiceServiceName, '']], !Not [!Equals [!Ref VoiceLogGroup, '']]]
+
+Resources:
+  # ── S3 Ephemeral & Egress Proxy Log Metric Filters ─────────────────────────
+  SyncCommitErrorFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref EphemeralWorkspaceLogGroup
+      FilterPattern: '?Traceback ?"commit failed" ?"HTTP Error 500" ?"RuntimeError"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/S3Workspaces
+          MetricName: WorkspaceSyncCommitErrors
+          MetricValue: '1'
+          DefaultValue: 0
+
+  CasConflictFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref EphemeralWorkspaceLogGroup
+      FilterPattern: '"S3 CAS conflict"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/S3Workspaces
+          MetricName: WorkspaceS3CasConflicts
+          MetricValue: '1'
+          DefaultValue: 0
+
+  WorkerCrashOrOomFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref EphemeralWorkspaceLogGroup
+      FilterPattern: '?"OutOfMemory" ?"MemoryError" ?"SIGKILL" ?"Segmentation fault" ?"Killed"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/S3Workspaces
+          MetricName: WorkerCrashOrOomErrors
+          MetricValue: '1'
+          DefaultValue: 0
+
+  EgressDeniedFilter:
+    Type: AWS::Logs::MetricFilter
+    Condition: HasEgressProxyLogs
+    Properties:
+      LogGroupName: !Ref EgressProxyLogGroup
+      FilterPattern: '"EGRESS_DENY"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/S3Workspaces
+          MetricName: EgressProxyDeniedCount
+          MetricValue: '1'
+          DefaultValue: 0
+
+  AgentApi5xxFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref AgentApiLogGroup
+      FilterPattern: '?"500 Internal Server Error" ?"502 Bad Gateway" ?"Exception in ASGI application"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/S3Workspaces
+          MetricName: AgentApi5xxErrors
+          MetricValue: '1'
+          DefaultValue: 0
+
+  AgentApiS3ErrorFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref AgentApiLogGroup
+      FilterPattern: '?"migration failed" ?"compaction skipped" ?"S3 CAS commit failed"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/S3Workspaces
+          MetricName: AgentApiS3Errors
+          MetricValue: '1'
+          DefaultValue: 0
+
+  RuntimeSpawnFailureFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref RuntimeLogGroup
+      FilterPattern: '"workload_spawn_failed"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/S3Workspaces
+          MetricName: RuntimeSpawnFailures
+          MetricValue: '1'
+          DefaultValue: 0
+
+  CoreCrashFilter:
+    Type: AWS::Logs::MetricFilter
+    Condition: HasCore
+    Properties:
+      LogGroupName: !Ref CoreLogGroup
+      FilterPattern: '?"500 Internal Server Error" ?"OutOfMemory" ?"MemoryError" ?"CRITICAL" ?"Killed"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/Ops
+          MetricName: CoreCrashOr5xxErrors
+          MetricValue: '1'
+          DefaultValue: 0
+
+  VieGemCrashFilter:
+    Type: AWS::Logs::MetricFilter
+    Condition: HasVieGem
+    Properties:
+      LogGroupName: !Ref VieGemLogGroup
+      FilterPattern: '?"OutOfMemory" ?"MemoryError" ?"CUDA out of memory" ?"Killed" ?"Traceback"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/Ops
+          MetricName: VieGemCrashOrOomErrors
+          MetricValue: '1'
+          DefaultValue: 0
+
+  VoiceCrashFilter:
+    Type: AWS::Logs::MetricFilter
+    Condition: HasVoice
+    Properties:
+      LogGroupName: !Ref VoiceLogGroup
+      FilterPattern: '?"OutOfMemory" ?"MemoryError" ?"Killed" ?"Traceback"'
+      MetricTransformations:
+        - MetricNamespace: TINA/Staging/Ops
+          MetricName: VoiceCrashOrOomErrors
+          MetricValue: '1'
+          DefaultValue: 0
+
+  # ── S3 Ephemeral & Sandbox Alarms ──────────────────────────────────────────
+  SyncCommitErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tina-staging-s3-sync-commit-errors
+      AlarmDescription: Ephemeral workspace sync sidecar or worker encountered a commit/runtime error.
+      Namespace: TINA/Staging/S3Workspaces
+      MetricName: WorkspaceSyncCommitErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  CasConflictsHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tina-staging-s3-cas-conflicts-high
+      AlarmDescription: Sustained S3 CAS 412 conflicts on ephemeral workspace commits (>=10 in 5m).
+      Namespace: TINA/Staging/S3Workspaces
+      MetricName: WorkspaceS3CasConflicts
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  WorkerCrashOrOomAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tina-staging-worker-oom-or-crash
+      AlarmDescription: Ephemeral sandbox worker logged OOM/SIGKILL/crash signature.
+      Namespace: TINA/Staging/S3Workspaces
+      MetricName: WorkerCrashOrOomErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  EgressDeniedHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasEgressProxyLogs
+    Properties:
+      AlarmName: tina-staging-egress-proxy-denied-high
+      AlarmDescription: Sandbox egress allowlist proxy blocked >=15 disallowed outbound requests in 5m.
+      Namespace: TINA/Staging/S3Workspaces
+      MetricName: EgressProxyDeniedCount
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 15
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  AgentApi5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tina-staging-agent-api-5xx
+      AlarmDescription: Staging agent-api returned >=3 5xx responses or ASGI exceptions in 5 minutes.
+      Namespace: TINA/Staging/S3Workspaces
+      MetricName: AgentApi5xxErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  AgentApiS3ErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tina-staging-agent-api-s3-errors
+      AlarmDescription: Staging agent-api encountered S3 workspace store errors (>=2 in 5m).
+      Namespace: TINA/Staging/S3Workspaces
+      MetricName: AgentApiS3Errors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  RuntimeSpawnFailuresAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tina-staging-runtime-spawn-failures
+      AlarmDescription: Staging runtime failed to spawn ephemeral Fargate workspace tasks (>=2 in 5m).
+      Namespace: TINA/Staging/S3Workspaces
+      MetricName: RuntimeSpawnFailures
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  # ── ALB 5xx & Target Health Alarms ─────────────────────────────────────────
+  AlbElb5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlb
+    Properties:
+      AlarmName: tina-staging-alb-5xx
+      AlarmDescription: Staging ALB returned >=5 ELB 5xx errors in 5 minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_ELB_5XX_Count
+      Dimensions:
+        - {Name: LoadBalancer, Value: !Ref AlbFullName}
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  AlbTarget5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlb
+    Properties:
+      AlarmName: tina-staging-alb-target-5xx
+      AlarmDescription: Staging ALB targets returned >=10 HTTP 5xx errors in 5 minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_Target_5XX_Count
+      Dimensions:
+        - {Name: LoadBalancer, Value: !Ref AlbFullName}
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  AlbUnhealthyGatewayTargetsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasGatewayTg
+    Properties:
+      AlarmName: tina-staging-alb-unhealthy-targets
+      AlarmDescription: Staging Gateway target group has >=1 unhealthy target for 2 consecutive minutes.
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - {Name: LoadBalancer, Value: !Ref AlbFullName}
+        - {Name: TargetGroup, Value: !Ref GatewayTargetGroupFullName}
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  # ── ECS Memory Pressure & Crash Alarms (agent-api, core, viegem, voice) ───
+  AgentApiMemoryHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: tina-staging-agent-api-memory-high
+      AlarmDescription: Staging agent-api ECS memory utilization >=85% for 10 minutes (OOM risk).
+      Namespace: AWS/ECS
+      MetricName: MemoryUtilization
+      Dimensions:
+        - {Name: ClusterName, Value: !Ref ClusterName}
+        - {Name: ServiceName, Value: !Ref AgentApiServiceName}
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 85
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  CoreMemoryHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasCore
+    Properties:
+      AlarmName: tina-staging-core-memory-high
+      AlarmDescription: Staging core ECS memory utilization >=85% for 10 minutes (OOM risk).
+      Namespace: AWS/ECS
+      MetricName: MemoryUtilization
+      Dimensions:
+        - {Name: ClusterName, Value: !Ref ClusterName}
+        - {Name: ServiceName, Value: !Ref CoreServiceName}
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 85
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  CoreCrashAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasCore
+    Properties:
+      AlarmName: tina-staging-core-errors
+      AlarmDescription: Staging core logged >=5 5xx/CRITICAL/OOM events in 5 minutes.
+      Namespace: TINA/Staging/Ops
+      MetricName: CoreCrashOr5xxErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  VieGemMemoryHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasVieGem
+    Properties:
+      AlarmName: tina-staging-viegem-memory-high
+      AlarmDescription: Staging VieGem ASR ECS memory utilization >=85% for 10 minutes (OOM risk).
+      Namespace: AWS/ECS
+      MetricName: MemoryUtilization
+      Dimensions:
+        - {Name: ClusterName, Value: !Ref ClusterName}
+        - {Name: ServiceName, Value: !Ref VieGemServiceName}
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 85
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  VieGemCrashAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasVieGem
+    Properties:
+      AlarmName: tina-staging-viegem-crash
+      AlarmDescription: Staging VieGem ASR logged OOM/Traceback crash (>=2 in 5m).
+      Namespace: TINA/Staging/Ops
+      MetricName: VieGemCrashOrOomErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  VoiceMemoryHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasVoice
+    Properties:
+      AlarmName: tina-staging-voice-memory-high
+      AlarmDescription: Staging Voice ECS memory utilization >=85% for 10 minutes (OOM risk).
+      Namespace: AWS/ECS
+      MetricName: MemoryUtilization
+      Dimensions:
+        - {Name: ClusterName, Value: !Ref ClusterName}
+        - {Name: ServiceName, Value: !Ref VoiceServiceName}
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 85
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  VoiceCrashAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasVoice
+    Properties:
+      AlarmName: tina-staging-voice-crash
+      AlarmDescription: Staging Voice service logged OOM/Traceback crash (>=2 in 5m).
+      Namespace: TINA/Staging/Ops
+      MetricName: VoiceCrashOrOomErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  # ── RDS PostgreSQL Health Alarms (CPU / FreeStorage / Connections) ─────────
+  RdsCpuHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasRds
+    Properties:
+      AlarmName: tina-staging-rds-cpu-high
+      AlarmDescription: Staging RDS CPU utilization >=80% for 10 minutes.
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Dimensions:
+        - {Name: DBInstanceIdentifier, Value: !Ref RdsInstanceIdentifier}
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  RdsStorageLowAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasRds
+    Properties:
+      AlarmName: tina-staging-rds-storage-low
+      AlarmDescription: Staging RDS free storage space <=3 GiB (out of 20 GiB).
+      Namespace: AWS/RDS
+      MetricName: FreeStorageSpace
+      Dimensions:
+        - {Name: DBInstanceIdentifier, Value: !Ref RdsInstanceIdentifier}
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3221225472
+      ComparisonOperator: LessThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  RdsConnectionsHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasRds
+    Properties:
+      AlarmName: tina-staging-rds-connections-high
+      AlarmDescription: Staging RDS database connections >=65 (db.t4g.micro saturation risk).
+      Namespace: AWS/RDS
+      MetricName: DatabaseConnections
+      Dimensions:
+        - {Name: DBInstanceIdentifier, Value: !Ref RdsInstanceIdentifier}
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 65
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmTopicArn], !Ref 'AWS::NoValue']
+
+  # ── Unified CloudWatch Operations Dashboard ────────────────────────────────
+  WorkspaceMonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: tina-staging-s3-workspaces
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "S3 Ephemeral Sync, Worker OOM & Egress Deny (5m Sum)",
+                "region": "${AWS::Region}",
+                "stat": "Sum",
+                "period": 300,
+                "metrics": [
+                  ["TINA/Staging/S3Workspaces", "WorkspaceSyncCommitErrors", {"color": "#d62728"}],
+                  ["TINA/Staging/S3Workspaces", "WorkerCrashOrOomErrors", {"color": "#8c564b"}],
+                  ["TINA/Staging/S3Workspaces", "WorkspaceS3CasConflicts", {"color": "#ff7f0e"}],
+                  ["TINA/Staging/S3Workspaces", "EgressProxyDeniedCount", {"color": "#1f77b4"}],
+                  ["TINA/Staging/S3Workspaces", "AgentApiS3Errors", {"color": "#9467bd"}]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "ALB 5xx, Agent API 5xx & Runtime Spawn Failures (5m Sum)",
+                "region": "${AWS::Region}",
+                "stat": "Sum",
+                "period": 300,
+                "metrics": [
+                  ["AWS/ApplicationELB", "HTTPCode_ELB_5XX_Count", "LoadBalancer", "${AlbFullName}", {"color": "#d62728"}],
+                  ["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "${AlbFullName}", {"color": "#ff7f0e"}],
+                  ["TINA/Staging/S3Workspaces", "AgentApi5xxErrors", {"color": "#9467bd"}],
+                  ["TINA/Staging/S3Workspaces", "RuntimeSpawnFailures", {"color": "#e377c2"}]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "ECS Memory Utilization (agent-api, core, viegem, voice, runtime)",
+                "region": "${AWS::Region}",
+                "stat": "Average",
+                "period": 300,
+                "metrics": [
+                  ["AWS/ECS", "MemoryUtilization", "ClusterName", "${ClusterName}", "ServiceName", "${AgentApiServiceName}"],
+                  ["AWS/ECS", "MemoryUtilization", "ClusterName", "${ClusterName}", "ServiceName", "${CoreServiceName}"],
+                  ["AWS/ECS", "MemoryUtilization", "ClusterName", "${ClusterName}", "ServiceName", "${VieGemServiceName}"],
+                  ["AWS/ECS", "MemoryUtilization", "ClusterName", "${ClusterName}", "ServiceName", "${VoiceServiceName}"],
+                  ["AWS/ECS", "MemoryUtilization", "ClusterName", "${ClusterName}", "ServiceName", "${RuntimeServiceName}"]
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "RDS PostgreSQL CPU, Free Storage & Connections",
+                "region": "${AWS::Region}",
+                "stat": "Average",
+                "period": 300,
+                "metrics": [
+                  ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${RdsInstanceIdentifier}"],
+                  ["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", "${RdsInstanceIdentifier}"],
+                  ["AWS/RDS", "FreeStorageSpace", "DBInstanceIdentifier", "${RdsInstanceIdentifier}", {"yAxis": "right"}]
+                ]
+              }
+            }
+          ]
+        }
+
+Outputs:
+  DashboardName: {Value: !Ref WorkspaceMonitoringDashboard}
+  MetricNamespace: {Value: TINA/Staging/S3Workspaces}
+  SyncCommitErrorsAlarmName: {Value: !Ref SyncCommitErrorsAlarm}
+  CasConflictsHighAlarmName: {Value: !Ref CasConflictsHighAlarm}
+  WorkerCrashOrOomAlarmName: {Value: !Ref WorkerCrashOrOomAlarm}
+  AgentApi5xxAlarmName: {Value: !Ref AgentApi5xxAlarm}
+  AgentApiS3ErrorsAlarmName: {Value: !Ref AgentApiS3ErrorsAlarm}
+  RuntimeSpawnFailuresAlarmName: {Value: !Ref RuntimeSpawnFailuresAlarm}

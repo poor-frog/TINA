@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Public Route53 hosted zone (optional) and us-east-1 ACM TLS certificate for TINA CloudFront custom domain.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: Exact HTTPS hostname to serve TINA on CloudFront (e.g. staging.example.com or app.example.com).
+  RootDomainName:
+    Type: String
+    Default: ''
+    Description: Root DNS zone name (e.g. example.com). Required only when CreateHostedZone=true.
+  CreateHostedZone:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Set true to create a new Route53 Public Hosted Zone. Leave false when using an existing Route53 zone or external DNS (Cloudflare/Namecheap).
+  ExistingHostedZoneId:
+    Type: String
+    Default: ''
+    Description: Existing Route53 Public Hosted Zone ID for automatic ACM DNS validation. Leave empty for external DNS.
+
+Conditions:
+  ShouldCreateHostedZone: !And
+    - !Equals [!Ref CreateHostedZone, 'true']
+    - !Not [!Equals [!Ref RootDomainName, '']]
+  HasExistingHostedZone: !And
+    - !Equals [!Ref CreateHostedZone, 'false']
+    - !Not [!Equals [!Ref ExistingHostedZoneId, '']]
+  HasRoute53Zone: !Or
+    - !Condition ShouldCreateHostedZone
+    - !Condition HasExistingHostedZone
+
+Resources:
+  PublicHostedZone:
+    Type: AWS::Route53::HostedZone
+    Condition: ShouldCreateHostedZone
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Ref RootDomainName
+      HostedZoneConfig:
+        Comment: Public DNS zone for TINA custom domain
+
+  EdgeCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions: !If
+        - HasRoute53Zone
+        - - DomainName: !Ref DomainName
+            HostedZoneId: !If [ShouldCreateHostedZone, !Ref PublicHostedZone, !Ref ExistingHostedZoneId]
+        - !Ref 'AWS::NoValue'
+
+Outputs:
+  DomainName:
+    Value: !Ref DomainName
+  CertificateArn:
+    Value: !Ref EdgeCertificate
+  HostedZoneId:
+    Condition: HasRoute53Zone
+    Value: !If [ShouldCreateHostedZone, !Ref PublicHostedZone, !Ref ExistingHostedZoneId]
+  NameServers:
+    Condition: ShouldCreateHostedZone
+    Description: Configure these NS records at your domain registrar to delegate DNS to Route53.
+    Value: !Join [',', !GetAtt PublicHostedZone.NameServers]

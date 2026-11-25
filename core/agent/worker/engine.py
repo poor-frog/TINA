@@ -1041,20 +1041,28 @@ def _run_dictation_translate(stream, out_topic: str, start: dict) -> None:
 
 # ── the harness loop (redis + the turn injected) ─────────────────────────────────────────────────
 
-def serve(stream: _Stream, *, out_topic: str, in_topic: str, turn: TurnFn, start: dict, idle_ms: int) -> None:
+def serve(stream: _Stream, *, out_topic: str, in_topic: str, turn: TurnFn, start: dict, idle_ms: int,
+          sync_client=None) -> None:
     """Run the entrypoint turn (if any), then serve interactive messages on ``in_topic`` until idle.
 
     Each turn's UnitEvents are XADD'd to ``out_topic`` (tagged with a turn id), followed by a
     ``turn-complete`` marker. An empty blocking read (idle) returns — the process exits and the
     container is reaped (TTL-on-idle). A ``{"type":"stop"}`` message exits immediately.
 
-    Every turn opens with a ``turn-accepted`` event — the worker's LIVENESS ACK. It flips the UI
-    off "Starting agent" the moment the turn is picked up (long before the first model token) and
-    is the evidence the dispatcher's warm-delivery watchdog waits on: no accepted event = the
-    message was NOT taken (worker exited in the race window) → the dispatcher respawns. A warm
-    in-topic message carries a ``nonce`` the ack echoes so the watchdog can match ITS delivery.
+    When ``sync_client`` is wired (``TINA_WORKSPACE_SYNC_SIDECAR=1``), warm follow-up turns refresh
+    from S3 before running and EVERY turn commits back to S3 BEFORE emitting ``turn-complete``.
     """
+    drain_requested = False
+
     def run_message(prompt: str, turn_id: str, nonce: str | None = None) -> None:
+        nonlocal drain_requested
+        if sync_client is not None and turn_id != "t0":
+            try:
+                ref = sync_client.refresh()
+                if isinstance(ref, dict) and ref.get("drain_after_turn"):
+                    drain_requested = True
+            except Exception as exc:  # noqa: BLE001
+                log.warning("workspace sync refresh failed before %s: %s", turn_id, exc)
         ack: dict = {"type": "turn-accepted", "turn_id": turn_id}
         if nonce:
             ack["nonce"] = nonce
@@ -1062,15 +1070,20 @@ def serve(stream: _Stream, *, out_topic: str, in_topic: str, turn: TurnFn, start
         approval_port = McpApprovalBroker(stream, out_topic, cursor, turn_id=turn_id)
         for ev in turn(prompt, approval_port):
             stream.xadd(out_topic, {"event": json.dumps({**ev, "turn_id": turn_id})})
+        if sync_client is not None:
+            try:
+                res = sync_client.commit()
+                if isinstance(res, dict) and res.get("drain_after_turn"):
+                    drain_requested = True
+            except Exception as exc:  # noqa: BLE001
+                log.exception("workspace sync commit failed after %s", turn_id)
+                stream.xadd(out_topic, {"event": json.dumps({
+                    "type": "error",
+                    "message": f"Workspace sync to S3 failed: {exc}",
+                    "turn_id": turn_id,
+                })})
         stream.xadd(out_topic, {"event": json.dumps({"type": "turn-complete", "turn_id": turn_id})})
 
-    # Anchor the in-topic cursor at the BOOT-TIME tail, before the entrypoint turn runs. The
-    # dispatcher pre-delivers each chat message to the in topic BEFORE asking the runtime to spawn
-    # (warm delivery): on a COLD spawn that same prompt arrives as the entrypoint, so everything
-    # already in the stream at boot must be SKIPPED (no double turn) — while a message that lands
-    # DURING the entrypoint turn (previously invisible to a "$" read, a lost turn) is consumed
-    # right after it. Streams without history anchor at 0-0; a stream object without xrevrange
-    # (older test fakes) keeps the legacy "$" behavior.
     last = "$"
     xrevrange = getattr(stream, "xrevrange", None)
     if xrevrange is not None:
@@ -1084,10 +1097,12 @@ def serve(stream: _Stream, *, out_topic: str, in_topic: str, turn: TurnFn, start
     first = start_prompt(start)
     if first:
         run_message(first, "t0")
+        if drain_requested:
+            return
 
     n = 0
     while True:
-        if cursor.stop_requested:
+        if cursor.stop_requested or drain_requested:
             return
         msg = cursor.read_next(block=idle_ms)
         if msg is None:
@@ -1266,11 +1281,15 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
                           or "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch").split(",")
             turn_policy = {}
         session = os.environ.get("TINA_CHAT_SESSION") or DEFAULT_CHAT_SESSION
+        sync_client = None
+        if os.getenv("TINA_WORKSPACE_SYNC_SIDECAR") == "1":
+            from worker.workspace_sync import WorkspaceSyncClient
+            sync_client = WorkspaceSyncClient()
         serve(
             client, out_topic=out_topic, in_topic=os.environ["TINA_UNIT_IN_TOPIC"],
             turn=lambda prompt, approval_port=None: run_turn_over_workspace(
                 work, prompt, model=model, allowed_tools=chat_tools, session=session,
                 approval_port=approval_port, **turn_policy,
             ),
-            start=start, idle_ms=idle_ms,
+            start=start, idle_ms=idle_ms, sync_client=sync_client,
         )
