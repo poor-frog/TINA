@@ -10,6 +10,8 @@ import { ChatGPTModelInput } from "../surfaces/chatGPTModelInput";
 import { ModelPicker } from "../surfaces/modelPicker";
 import { BEDROCK_REGIONS, fallbackChoicesForMode } from "../surfaces/modelCatalog";
 import { TranscriptionPicker } from "../surfaces/transcriptionPicker";
+import { workspacePilotMode } from "../app/mode";
+import { WorkspaceChatGPTConnection } from "../surfaces/WorkspaceChatGPTConnection";
 import {
   apiModelProvider,
   canSaveModelPrefs,
@@ -931,6 +933,19 @@ function AgentProviderForm({
    -------------------------------------------------------------------------- */
 
 function WebChatGPTAuthBand({
+  status,
+  onStatusChange,
+}: {
+  status: { connected: boolean; email: string };
+  onStatusChange: (next: { connected: boolean; email: string }) => void;
+}) {
+  const onConnected = useCallback((connected: boolean) => onStatusChange({ connected, email: "" }), [onStatusChange]);
+  return workspacePilotMode()
+    ? <WorkspaceChatGPTConnection onConnected={onConnected} />
+    : <LocalWebChatGPTAuthBand status={status} onStatusChange={onStatusChange} />;
+}
+
+function LocalWebChatGPTAuthBand({
   status,
   onStatusChange,
 }: {

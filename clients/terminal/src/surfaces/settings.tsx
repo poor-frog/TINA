@@ -17,6 +17,8 @@ import { BEDROCK_REGIONS, fallbackChoicesForMode } from "./modelCatalog";
 import { AsrStatusPanel } from "./asrStatus";
 import { TranscriptionPicker } from "./transcriptionPicker";
 import { VoiceSettings } from './voiceSettings';
+import { workspacePilotMode } from "../app/mode";
+import { WorkspaceChatGPTConnection } from "./WorkspaceChatGPTConnection";
 import transcriptionStyles from "./transcriptionPicker.module.css";
 import navigationStyles from "./settingsNavigation.module.css";
 import modelStyles from "./agentModelSettings.module.css";
@@ -90,6 +92,10 @@ const field: CSSProperties = { width: "100%", boxSizing: "border-box", fontSize:
 const btn: CSSProperties = { fontSize: 13, padding: "6px 14px", borderRadius: 7, border: "1px solid var(--line)", background: "var(--panel2)", color: "var(--t1)", cursor: "pointer" };
 
 export function ChatGPTPlanConnection() {
+  return workspacePilotMode() ? <WorkspaceChatGPTConnection /> : <LocalChatGPTPlanConnection />;
+}
+
+function LocalChatGPTPlanConnection() {
   const [connected, setConnected] = useState(false);
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
