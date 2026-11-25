@@ -347,11 +347,30 @@ describe("KnowledgeView v3 (Notion-Style Non-Tech Knowledge Hub)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Ask Tina$/i }));
     expect(screen.getByLabelText(/Ask Tina assistant/i)).toBeTruthy();
 
+    // Empty state renders tactile starter cards, then collapses to compact follow-up pills once active
+    expect(screen.getByRole("group", { name: /Suggested prompts/i })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Summarize space/i }));
     await waitFor(() => {
       expect(screen.getByText(/Clear executive summary/i)).toBeTruthy();
       expect(screen.getByText(/Updated space · refreshed/i)).toBeTruthy();
     });
+    expect(screen.getByRole("group", { name: /Quick follow-up prompts/i })).toBeTruthy();
+
+    // Copy response action writes markdown text to clipboard
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Copy response/i }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("Clear executive summary.");
+    });
+
+    // Start a new chat returns to the clean starter state
+    fireEvent.click(screen.getByRole("button", { name: /Start a new chat/i }));
+    expect(screen.getByRole("group", { name: /Suggested prompts/i })).toBeTruthy();
+
     // Regression guard: agent-api ChatContextBody requires context.surface to be an object dict, never a string
     const chatReq = mockStreamChatTurn.mock.calls[0]?.[0] as { context?: { surface?: unknown } };
     expect(typeof chatReq?.context?.surface).toBe("object");

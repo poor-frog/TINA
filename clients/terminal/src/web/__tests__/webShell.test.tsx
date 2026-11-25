@@ -820,4 +820,41 @@ describe("WebShell production UI (Option A & Option B)", () => {
     });
     expect(screen.getByRole("heading", { name: "Workspaces & Members" })).toBeTruthy();
   });
+
+  it("auto-collapses the sidebar when navigating to Ask Tina, Meetings, Knowledge, or Settings while preserving manual toggle", async () => {
+    mockEnvironment({ admin: false });
+    render(<WebShell />);
+
+    const sidebar = () => document.querySelector("aside.tina-web-sidebar") as HTMLElement;
+    const toggleBtn = () => document.querySelector("button.tina-web-collapse-btn") as HTMLButtonElement;
+
+    // Starts expanded on Home
+    expect(await screen.findByRole("heading", { name: /Sarup/ })).toBeTruthy();
+    expect(sidebar().classList.contains("collapsed")).toBe(false);
+    expect(toggleBtn().getAttribute("aria-expanded")).toBe("true");
+
+    // Clicking each two-pane nav destination auto-collapses the sidebar, and manual expand still works
+    for (const label of ["Ask Tina", "Meetings", "Knowledge", "Settings"] as const) {
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      expect(sidebar().classList.contains("collapsed")).toBe(true);
+      expect(toggleBtn().getAttribute("aria-expanded")).toBe("false");
+
+      // Manual expand works normally
+      fireEvent.click(toggleBtn());
+      expect(sidebar().classList.contains("collapsed")).toBe(false);
+      expect(toggleBtn().getAttribute("aria-expanded")).toBe("true");
+    }
+
+    // Manual collapse works normally on any view
+    fireEvent.click(toggleBtn());
+    expect(sidebar().classList.contains("collapsed")).toBe(true);
+    fireEvent.click(toggleBtn());
+    expect(sidebar().classList.contains("collapsed")).toBe(false);
+
+    // Navigating to Tasks or Home preserves the expanded state
+    fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
+    expect(sidebar().classList.contains("collapsed")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    expect(sidebar().classList.contains("collapsed")).toBe(false);
+  });
 });

@@ -1,9 +1,10 @@
 "use client";
-/** KnowledgeCopilotDrawer — Friendly inline Ask Tina AI side panel docked beside the Knowledge Hub.
- *  Streams live SSE answers grounded on the open page or space, offers 1-click Summarize / Find action items /
- *  Suggest links actions, supports seeded prompts from uploaded files or Connections Map, and auto-refreshes on save. */
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { WebIcon } from "./Icons";
+/** KnowledgeCopilotDrawer — Refined inline Ask Tina AI side panel docked beside the Knowledge Hub.
+ *  Streams live SSE answers grounded on the open page or space, presents tactile empty-state starter
+ *  cards that collapse into compact follow-up chips during conversation, supports copyable replies,
+ *  seeded prompts from uploaded files or Connections Map, and auto-refreshes on workspace commits. */
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { WebIcon, type WebIconName } from "./Icons";
 import { friendlyPageTitle } from "./knowledgeFriendly";
 import { Markdown } from "../ui-kit/Markdown";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
@@ -18,9 +19,26 @@ interface CopilotMsg {
   error?: string;
 }
 
+interface QuickPromptItem {
+  id: string;
+  icon: WebIconName;
+  title: string;
+  shortLabel: string;
+  subtitle: string;
+  prompt: string;
+}
+
 function makeSessionId(slug?: string): string {
   const safe = (slug || "personal").replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 28);
   return `kb-${safe}-${Date.now().toString(36)}`;
+}
+
+function phaseLabel(phase: ChatPhase | null, hasText = false): string {
+  if (hasText) return "Writing…";
+  if (phase === "working") return "Reading your library…";
+  if (phase === "reconnecting") return "Reconnecting…";
+  if (phase === "stalled") return "Still working…";
+  return "Thinking…";
 }
 
 export function KnowledgeCopilotDrawer({
@@ -55,8 +73,11 @@ export function KnowledgeCopilotDrawer({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<ChatPhase | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const copyTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     abortRef.current?.abort();
@@ -74,8 +95,17 @@ export function KnowledgeCopilotDrawer({
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
     };
   }, []);
+
+  // Auto-resize composer textarea cleanly up to 140px
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [input, open]);
 
   const sendPrompt = useCallback(
     async (rawText: string) => {
@@ -187,6 +217,64 @@ export function KnowledgeCopilotDrawer({
     void sendPrompt(text);
   }, [open, initialPrompt, onConsumeInitialPrompt, sendPrompt]);
 
+  const targetLabel = docTitle || (docPath ? friendlyPageTitle(docPath) : workspaceName);
+
+  const quickPrompts = useMemo<QuickPromptItem[]>(
+    () => [
+      {
+        id: "summarize",
+        icon: "fileText",
+        title: docPath ? "Summarize page" : "Summarize space",
+        shortLabel: docPath ? "Summarize" : "Summarize space",
+        subtitle: docPath
+          ? "Key points, decisions & open questions"
+          : "Overview of top pages and themes",
+        prompt: docPath
+          ? `Summarize "${targetLabel}" in clear bullet points with key decisions and open questions.`
+          : `Give me an overview of the most important pages in ${workspaceName}.`,
+      },
+      {
+        id: "actions",
+        icon: "listChecks",
+        title: "Find action items",
+        shortLabel: "Action items",
+        subtitle: docPath
+          ? "Extract tasks, owners & next steps"
+          : "Open tasks and follow-ups across pages",
+        prompt: docPath
+          ? `List all action items and owners mentioned in "${targetLabel}"${isReadOnly ? " (do not modify view-only pages)" : ""}.`
+          : `List open tasks and follow-ups across ${workspaceName}.`,
+      },
+      {
+        id: "links",
+        icon: "network",
+        title: "Suggest links",
+        shortLabel: "Suggest links",
+        subtitle: docPath
+          ? "Related pages to connect & clarify"
+          : "Discover pages that belong together",
+        prompt: docPath
+          ? `Suggest related pages in ${workspaceName} to link with "${targetLabel}" and ways to make this page clearer.`
+          : `Suggest which pages in ${workspaceName} are related and should be connected.`,
+      },
+    ],
+    [docPath, isReadOnly, targetLabel, workspaceName],
+  );
+
+  const handleCopy = useCallback(async (msgId: string, text: string) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(msgId);
+      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = window.setTimeout(() => {
+        setCopiedId((cur) => (cur === msgId ? null : cur));
+      }, 1800);
+    } catch {
+      /* ignore clipboard denial */
+    }
+  }, []);
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!input.trim() || busy) return;
@@ -197,26 +285,41 @@ export function KnowledgeCopilotDrawer({
 
   if (!open) return null;
 
-  const targetLabel = docTitle || (docPath ? friendlyPageTitle(docPath) : workspaceName);
+  const lastMessageId = messages[messages.length - 1]?.id;
 
   return (
     <aside className={styles.copilotDrawer} aria-label="Ask Tina assistant">
-      <div className={styles.copilotHead}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-          <WebIcon name="tinaAsk" size={16} />
-          <div style={{ minWidth: 0 }}>
-            <div className={styles.copilotTitle}>Ask Tina</div>
+      <header className={styles.copilotHead}>
+        <div className={styles.copilotIdentity}>
+          <span className={styles.copilotBrandIcon} aria-hidden="true">
+            <WebIcon name="tinaAsk" size={16} />
+          </span>
+          <div className={styles.copilotHeadingMeta}>
+            <div className={styles.copilotTitleRow}>
+              <span className={styles.copilotTitle}>Ask Tina</span>
+              {busy ? (
+                <span className={styles.copilotLiveBadge}>
+                  <span className={styles.copilotLiveDot} aria-hidden="true" />
+                  Live
+                </span>
+              ) : isReadOnly ? (
+                <span className={styles.copilotReadonlyPill}>View-only</span>
+              ) : null}
+            </div>
             <div className={styles.copilotSub} title={devView && docPath ? docPath : targetLabel}>
-              {docPath ? `Reading ${targetLabel}` : `Space · ${workspaceName}`}
+              <WebIcon name={docPath ? "fileText" : "layers"} size={11} />
+              <span>{docPath ? `Reading ${targetLabel}` : `Space · ${workspaceName}`}</span>
             </div>
           </div>
         </div>
-        <div className={styles.railHeadActions}>
+
+        <div className={styles.copilotHeadActions}>
           {onOpenFullAsk && (
             <button
               type="button"
-              className={styles.tinyBtn}
+              className={styles.copilotIconBtn}
               title="Open full-screen Ask Tina"
+              aria-label="Open full-screen Ask Tina"
               onClick={() =>
                 onOpenFullAsk(
                   docPath
@@ -225,167 +328,236 @@ export function KnowledgeCopilotDrawer({
                 )
               }
             >
-              <WebIcon name="externalLink" size={12} />
+              <WebIcon name="externalLink" size={14} />
             </button>
           )}
           <button
             type="button"
-            className={styles.tinyBtn}
+            className={styles.copilotIconBtn}
             title="Start a new chat"
+            aria-label="Start a new chat"
+            disabled={messages.length === 0 && !busy}
             onClick={() => {
               abortRef.current?.abort();
               setMessages([]);
               setSession(makeSessionId(slug));
             }}
           >
-            <WebIcon name="refresh" size={12} />
+            <WebIcon name="refresh" size={14} />
           </button>
-          <button type="button" className={styles.tinyBtn} aria-label="Close Ask Tina" onClick={onClose}>
-            <WebIcon name="close" size={12} />
+          <button
+            type="button"
+            className={styles.copilotIconBtn}
+            title="Close Ask Tina"
+            aria-label="Close Ask Tina"
+            onClick={onClose}
+          >
+            <WebIcon name="close" size={15} />
           </button>
         </div>
-      </div>
-
-      <div className={styles.copilotQuickBar}>
-        <button
-          type="button"
-          className={styles.chip}
-          disabled={busy}
-          onClick={() =>
-            void sendPrompt(
-              docPath
-                ? `Summarize "${targetLabel}" in clear bullet points with key decisions and open questions.`
-                : `Give me an overview of the most important pages in ${workspaceName}.`,
-            )
-          }
-        >
-          {docPath ? "Summarize page" : "Summarize space"}
-        </button>
-        <button
-          type="button"
-          className={styles.chip}
-          disabled={busy}
-          onClick={() =>
-            void sendPrompt(
-              docPath
-                ? `List all action items and owners mentioned in "${targetLabel}"${isReadOnly ? " (do not modify view-only pages)" : ""}.`
-                : `List open tasks and follow-ups across ${workspaceName}.`,
-            )
-          }
-        >
-          Find action items
-        </button>
-        <button
-          type="button"
-          className={styles.chip}
-          disabled={busy}
-          onClick={() =>
-            void sendPrompt(
-              docPath
-                ? `Suggest related pages in ${workspaceName} to link with "${targetLabel}" and ways to make this page clearer.`
-                : `Suggest which pages in ${workspaceName} are related and should be connected.`,
-            )
-          }
-        >
-          Suggest links
-        </button>
-      </div>
+      </header>
 
       <div className={styles.copilotFeed}>
-        {messages.length === 0 && (
+        {messages.length === 0 ? (
           <div className={styles.copilotEmpty}>
-            <WebIcon name="sparkleSmall" size={20} />
-            <p>
-              Ask anything about <strong>{targetLabel}</strong>, compare with past meetings, or ask Tina to draft
-              updates — changes appear here automatically.
+            <div className={styles.copilotHeroBadge} aria-hidden="true">
+              <WebIcon name="sparkleSmall" size={22} />
+            </div>
+            <h3 className={styles.copilotHeroTitle}>
+              {docPath ? `Ask about ${targetLabel}` : `How can I help with ${workspaceName}?`}
+            </h3>
+            <p className={styles.copilotHeroDesc}>
+              {isReadOnly
+                ? `Explore ${targetLabel}, cross-check past meetings, and surface answers instantly.`
+                : `Compare notes with past meetings, find decisions, or draft edits — updates sync here automatically.`}
             </p>
+
+            <div className={styles.copilotStarterList} role="group" aria-label="Suggested prompts">
+              {quickPrompts.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={styles.copilotStarterCard}
+                  disabled={busy}
+                  onClick={() => void sendPrompt(item.prompt)}
+                >
+                  <span className={styles.copilotStarterIcon} aria-hidden="true">
+                    <WebIcon name={item.icon} size={15} />
+                  </span>
+                  <span className={styles.copilotStarterCopy}>
+                    <span className={styles.copilotStarterTitle}>{item.title}</span>
+                    <span className={styles.copilotStarterSub}>{item.subtitle}</span>
+                  </span>
+                  <span className={styles.copilotStarterArrow} aria-hidden="true">
+                    <WebIcon name="chevronRight" size={14} />
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className={styles.copilotThread}>
+            {messages.map((m) => {
+              const isStreamingThis = busy && m.role === "agent" && m.id === lastMessageId;
+
+              if (m.role === "user") {
+                return (
+                  <div key={m.id} className={styles.copilotTurnUser}>
+                    <div className={styles.copilotBubbleUser}>{m.text}</div>
+                  </div>
+                );
+              }
+
+              return (
+                <div key={m.id} className={styles.copilotTurnAgent}>
+                  <div className={styles.copilotAgentMeta}>
+                    <span className={styles.copilotAgentAvatar} aria-hidden="true">
+                      <WebIcon name="sparkleSmall" size={12} />
+                    </span>
+                    <span className={styles.copilotAgentName}>Tina</span>
+                    {isStreamingThis && (
+                      <span className={styles.copilotPhaseHint}>{phaseLabel(phase, Boolean(m.text))}</span>
+                    )}
+                    {m.text && !isStreamingThis && (
+                      <button
+                        type="button"
+                        className={styles.copilotCopyBtn}
+                        aria-label="Copy response"
+                        title={copiedId === m.id ? "Copied" : "Copy response"}
+                        onClick={() => void handleCopy(m.id, m.text)}
+                      >
+                        <WebIcon name={copiedId === m.id ? "check" : "copy"} size={12} />
+                        <span>{copiedId === m.id ? "Copied" : "Copy"}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className={styles.copilotAgentBody}>
+                    {devView && m.ops && m.ops.length > 0 && (
+                      <div className={styles.copilotOps}>
+                        {m.ops.map((op, i) => (
+                          <span key={`${op}-${i}`} className={styles.copilotOpTag}>
+                            {op}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {m.text ? (
+                      <div className={`${styles.docProse} ${styles.copilotProse}`}>
+                        <Markdown>{m.text}</Markdown>
+                      </div>
+                    ) : !m.error ? (
+                      <div className={styles.copilotThinking} role="status">
+                        <span className={styles.copilotTypingDots} aria-hidden="true">
+                          <span />
+                          <span />
+                          <span />
+                        </span>
+                        <span>{phaseLabel(phase)}</span>
+                      </div>
+                    ) : null}
+
+                    {m.commit && (
+                      <div className={styles.copilotCommit}>
+                        <WebIcon name="check" size={12} />
+                        <span>
+                          {devView
+                            ? `Updated workspace (${m.commit.slice(0, 7)}) — refreshed`
+                            : "Updated space · refreshed"}
+                        </span>
+                      </div>
+                    )}
+
+                    {m.error && (
+                      <div className={styles.copilotErr} role="alert">
+                        <WebIcon name="alertTriangle" size={13} />
+                        <span>{m.error}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={`${styles.copilotMsg} ${m.role === "user" ? styles.copilotMsgUser : styles.copilotMsgAgent}`}
-          >
-            {m.role === "user" ? (
-              <div>{m.text}</div>
-            ) : (
-              <>
-                {devView && m.ops && m.ops.length > 0 && (
-                  <div className={styles.copilotOps}>
-                    {m.ops.map((op, i) => (
-                      <span key={`${op}-${i}`} className={styles.wsTag}>
-                        {op}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {m.text ? (
-                  <div className={styles.docProse} style={{ fontSize: 13 }}>
-                    <Markdown>{m.text}</Markdown>
-                  </div>
-                ) : !m.error ? (
-                  <span className={styles.cardSub}>
-                    {phase === "working" ? "Reading your library…" : "Thinking…"}
-                  </span>
-                ) : null}
-                {m.commit && (
-                  <div className={styles.copilotCommit}>
-                    <WebIcon name="check" size={12} />
-                    <span>
-                      {devView
-                        ? `Updated workspace (${m.commit.slice(0, 7)}) — refreshed`
-                        : "Updated space · refreshed"}
-                    </span>
-                  </div>
-                )}
-                {m.error && <div className={styles.copilotErr}>{m.error}</div>}
-              </>
-            )}
-          </div>
-        ))}
         <div ref={endRef} />
       </div>
 
-      <form className={styles.copilotComposer} onSubmit={handleSubmit}>
-        <textarea
-          className={styles.copilotInput}
-          rows={2}
-          aria-label="Ask Tina a question"
-          placeholder={`Ask Tina about ${targetLabel}…`}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSubmit(e);
-            }
-          }}
-        />
-        <div className={styles.copilotComposerBar}>
-          <span className={styles.cardSub} style={{ fontSize: 11 }}>
-            {busy ? "Tina is writing…" : "Enter to send · Shift+Enter new line"}
-          </span>
-          {busy ? (
-            <button
-              type="button"
-              className={`${styles.tinyBtn} ${styles.btnDanger}`}
-              onClick={() => abortRef.current?.abort()}
-            >
-              <WebIcon name="stop" size={11} />
-              <span>Stop</span>
-            </button>
-          ) : (
-            <button
-              type="submit"
-              className={`${styles.tinyBtn} ${styles.btnPrimary}`}
-              disabled={!input.trim()}
-            >
-              <WebIcon name="sendUp" size={11} />
-              <span>Send</span>
-            </button>
-          )}
-        </div>
-      </form>
+      <div className={styles.copilotDock}>
+        {messages.length > 0 && (
+          <div className={styles.copilotQuickStrip} role="group" aria-label="Quick follow-up prompts">
+            {quickPrompts.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={styles.copilotQuickPill}
+                disabled={busy}
+                onClick={() => void sendPrompt(item.prompt)}
+              >
+                <WebIcon name={item.icon} size={12} />
+                <span>{item.shortLabel}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <form className={styles.copilotComposer} onSubmit={handleSubmit}>
+          <textarea
+            ref={inputRef}
+            className={styles.copilotInput}
+            rows={1}
+            aria-label="Ask Tina a question"
+            placeholder={`Ask Tina about ${targetLabel}…`}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit(e);
+              }
+            }}
+          />
+          <div className={styles.copilotComposerBar}>
+            <div className={styles.copilotComposerContext} title={targetLabel}>
+              <span className={styles.copilotContextDot} aria-hidden="true" />
+              <span className={styles.copilotContextText}>
+                {busy ? "Tina is writing…" : targetLabel}
+              </span>
+            </div>
+
+            <div className={styles.copilotComposerActions}>
+              {!busy && (
+                <span className={styles.copilotKeyHint} aria-hidden="true">
+                  ↵
+                </span>
+              )}
+              {busy ? (
+                <button
+                  type="button"
+                  className={styles.copilotStopBtn}
+                  aria-label="Stop"
+                  title="Stop generating"
+                  onClick={() => abortRef.current?.abort()}
+                >
+                  <WebIcon name="stop" size={12} />
+                  <span>Stop</span>
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  className={styles.copilotSendBtn}
+                  aria-label="Send"
+                  title="Send message (Enter)"
+                  disabled={!input.trim()}
+                >
+                  <WebIcon name="sendUp" size={14} strokeWidth={2.2} />
+                </button>
+              )}
+            </div>
+          </div>
+        </form>
+      </div>
     </aside>
   );
 }

@@ -58,6 +58,14 @@ const NAV_VIEWS: ReadonlyArray<Exclude<WebNavView, "meeting">> = [
   "settings",
 ];
 
+const AUTO_COLLAPSE_SIDEBAR_VIEWS: ReadonlySet<WebNavView> = new Set([
+  "ask",
+  "meetings",
+  "meeting",
+  "knowledge",
+  "settings",
+]);
+
 const VIEW_TITLES: Record<WebNavView, string> = {
   home: "Home",
   ask: "Ask Tina",
@@ -100,7 +108,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
   const initial = useMemo(() => readInitialRoute(initialMeetingId), [initialMeetingId]);
   const [view, setView] = useState<WebNavView>(initial.view);
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(initial.meetingId);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(initial.view === "meeting");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => AUTO_COLLAPSE_SIDEBAR_VIEWS.has(initial.view));
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -117,6 +125,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
   const openCalendarSettings = useCallback(() => {
     setView("settings");
     setActiveMeetingId(null);
+    setSidebarCollapsed(true);
     setUserMenuOpen(false);
     if (typeof window !== "undefined") {
       const target = "/?nav=settings&settingsWorkspace=personal&settingsSection=calendar";
@@ -127,6 +136,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
   const openGitHubSettings = useCallback(() => {
     setView("settings");
     setActiveMeetingId(null);
+    setSidebarCollapsed(true);
     setUserMenuOpen(false);
     if (typeof window !== "undefined") {
       const target = "/?nav=settings&settingsWorkspace=personal&settingsSection=github";
@@ -138,6 +148,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
     setPendingKnowledge({ doc: docPath, ws: wsSlug, tab: "documents" });
     setView("knowledge");
     setActiveMeetingId(null);
+    setSidebarCollapsed(true);
     setUserMenuOpen(false);
     if (typeof window !== "undefined") {
       const sp = new URLSearchParams({ nav: "knowledge", doc: docPath, tab: "documents" });
@@ -151,6 +162,9 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
   const navigate = useCallback((next: Exclude<WebNavView, "meeting">) => {
     setView(next);
     setActiveMeetingId(null);
+    if (AUTO_COLLAPSE_SIDEBAR_VIEWS.has(next)) {
+      setSidebarCollapsed(true);
+    }
     setUserMenuOpen(false);
     if (typeof window !== "undefined") {
       if (
@@ -194,6 +208,9 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
       const route = readInitialRoute();
       setView(route.view);
       setActiveMeetingId(route.meetingId);
+      if (AUTO_COLLAPSE_SIDEBAR_VIEWS.has(route.view)) {
+        setSidebarCollapsed(true);
+      }
       setUserMenuOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {

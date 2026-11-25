@@ -32,6 +32,8 @@ export function WebSidebar({
   onUserMenuToggle: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onCloseMobile: () => void;
 }) {
+  const isCollapsed = collapsed && !mobileOpen;
+
   const navBtn = (
     id: Exclude<WebNavView, "meeting">,
     icon: WebIconName,
@@ -46,7 +48,7 @@ export function WebSidebar({
         className={`tina-web-nav-item ${isActive ? "active" : ""} ${opts?.ask ? "ask" : ""}`}
         aria-label={label}
         aria-current={isActive ? "page" : undefined}
-        title={collapsed ? label : undefined}
+        title={isCollapsed ? label : undefined}
         onClick={() => {
           onNavigate(id);
           onCloseMobile();
@@ -60,14 +62,14 @@ export function WebSidebar({
   };
 
   return (
-    <aside className={`tina-web-sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}>
+    <aside className={`tina-web-sidebar ${isCollapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}>
       <div className="tina-web-sidebar-head">
         <button
           type="button"
           className="tina-web-user-btn"
-          aria-label={collapsed ? "Expand sidebar" : "Workspace account"}
-          title={collapsed ? "Expand sidebar" : user.email || user.name}
-          onClick={collapsed ? onToggleCollapse : onUserMenuToggle}
+          aria-label={isCollapsed ? "Expand sidebar" : "Workspace account"}
+          title={isCollapsed ? "Expand sidebar" : user.email || user.name}
+          onClick={isCollapsed ? onToggleCollapse : onUserMenuToggle}
         >
           <WebAvatar name={user.name} image={user.image} size={20} />
           <span className="tina-web-user-name">{user.firstName}</span>
@@ -77,9 +79,9 @@ export function WebSidebar({
         <button
           type="button"
           className="tina-web-collapse-btn"
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          aria-expanded={!collapsed}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!isCollapsed}
+          title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           onClick={onToggleCollapse}
         >
           <WebIcon name="sidebar" size={16} strokeWidth={1.5} />
