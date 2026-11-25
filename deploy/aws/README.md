@@ -306,3 +306,16 @@ callbacks, MCP public origins, and Chrome Extension CORS stay fixed across rebui
 4. **Update Google Cloud Console & verify**:
    - Add Authorized JavaScript origin `https://<host>` and Authorized redirect URIs `https://<host>/api/auth/callback/google` and `https://<host>/api/auth/callback/google-calendar`.
    - Verify `GET https://<host>/edge-health` returns `TINA_EDGE_READY`, `GET https://<host>/api/auth/me` returns `401` unauthenticated, and OAuth sign-in returns `200`.
+
+## Staging power management (sleep / wake cost control)
+
+Use [`staging-power.sh`](staging-power.sh) to scale staging Fargate services down when
+idle and restore them before demos or evaluations:
+
+```sh
+./deploy/aws/staging-power.sh status       # show all 11 ECS services, active sandboxes, and RDS state
+./deploy/aws/staging-power.sh sleep-heavy  # stop VieGem + Voice (4 vCPU / 16 GiB); keep web/chat/wiki live
+./deploy/aws/staging-power.sh sleep        # scale all 11 services to 0 and stop RDS (~70-85% compute savings)
+./deploy/aws/staging-power.sh wake         # start RDS + wake all 11 services and verify CloudFront health
+./deploy/aws/staging-power.sh wake-lite    # start RDS + wake 9 web/agent services (leave VieGem/Voice at 0)
+```
