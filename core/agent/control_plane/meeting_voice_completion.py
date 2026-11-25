@@ -93,6 +93,10 @@ def resolve_voice_model_env(model_config: dict | None, *, allowlist: str = "", s
         return {}
     if mode in ("groq", "deepseek", "gemini", "openai-api") and not (staged.get("TINA_LLM_API_KEY") or "").strip():
         return {}
+    if mode == "anthropic" and not any(
+        (staged.get(k) or "").strip() for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "TINA_LLM_API_KEY")
+    ):
+        return {}
     if mode == "custom" and not (staged.get("TINA_LLM_BASE_URL") or "").strip():
         return {}
     result = {key: staged[key] for key in _VOICE_MODEL_ENV_KEYS if staged.get(key)}

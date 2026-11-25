@@ -701,10 +701,13 @@ class Dispatcher:
             from control_plane.meeting_voice_completion import resolve_voice_model_env
             inline = ((invocation.get("start") or {}).get("entrypoint") or {}).get("inline") or ""
             subject = identity["subject"]
-            model_env = resolve_voice_model_env(
-                self.resolve_model_config(subject),
-                allowlist=self._settings.model_allowlist,
-                subject=subject,
+            model_env = (
+                resolve_voice_model_env(
+                    self.resolve_model_config(subject),
+                    allowlist=self._settings.model_allowlist,
+                    subject=subject,
+                )
+                if trusted_canonical_notes else None
             )
             ws_root = Path(self._settings.workspaces_dir)
             ws_path = str(ws_root / subject)
@@ -786,7 +789,8 @@ class Dispatcher:
                            TINA_LLM_PROVIDER="chatgpt-plan", TINA_LLM_MODEL="gpt-6-luna",
                            TINA_AGENT_MODEL="gpt-6-luna", ACCESS_TOKEN=workspace_token or "")
             elif workspace_auth_mode == "bedrock-workspace":
-                env.update(TINA_RUNNER="bedrock-workspace", TINA_AGENT_MODEL=WORKSPACE_NOVA_MODEL)
+                env.update(TINA_RUNNER="bedrock-workspace", TINA_LLM_PROVIDER="bedrock-converse",
+                           TINA_LLM_MODEL=WORKSPACE_NOVA_MODEL, TINA_AGENT_MODEL=WORKSPACE_NOVA_MODEL)
             elif workspace_auth_mode == "bedrock":
                 _apply_workspace_bedrock_defaults(env, allowlist=self._settings.model_allowlist)
             if _s3_workspace_enabled(identity["subject"]):

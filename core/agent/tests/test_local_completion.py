@@ -223,3 +223,75 @@ def test_dispatcher_routes_canonical_notes_and_live_assist_to_background_pool_an
     assert env["TINA_MEETING_NUMERIC_ID"] == "42"
     assert env["TINA_LLM_PROVIDER"] == "bedrock-converse"
     assert env["TINA_WORKSPACE_ATTEMPT"]
+
+
+def test_meeting_state_keeps_platform_provider_and_anthropic_without_key_falls_back(tmp_path, monkeypatch):
+    from control_plane.dispatch import Dispatcher
+    from shared import units
+    from shared.config import Settings
+
+    monkeypatch.setenv("TINA_LOCAL_COMPLETION_POOL", "1")
+    monkeypatch.setenv("TINA_WORKSPACE_PILOT_USER_IDS", "*")
+    monkeypatch.setenv("TINA_WORKSPACE_STORAGE", "s3")
+    monkeypatch.setenv("TINA_WORKSPACE_BEDROCK_OWNER", "5")
+    monkeypatch.setenv("TINA_S3_WORKSPACE_USERS", "*")
+
+    assert meeting_voice_completion.resolve_voice_model_env(
+        {"mode": "anthropic", "model": "claude-sonnet-4-6"}
+    ) == {}
+
+    settings = Settings(
+        workspaces_dir=str(tmp_path),
+        redis_url="redis://127.0.0.1:6379/0",
+        dispatch_signing_key="a" * 32,
+        agent_profile="agent",
+    )
+    spawned = []
+    bg_calls = []
+
+    class FakeRuntime:
+        def spawn(self, uid, profile, env):
+            spawned.append((uid, profile, dict(env)))
+            return uid
+
+    class FakeIdentity:
+        def mint(self, *args, **kwargs):
+            return "tok"
+
+    class FakeGroqResolver:
+        def resolve(self, subject):
+            if subject == "5":
+                return {}
+            return {"mode": "groq", "api_key": "gsk-test", "model": "openai/gpt-oss-20b"}
+
+    monkeypatch.setattr(
+        local_completion, "dispatch_background_meeting_job",
+        lambda **kw: (bg_calls.append(kw), kw["unit_id"])[1],
+    )
+    dispatcher = Dispatcher(settings, FakeRuntime(), FakeIdentity(), model_config=FakeGroqResolver())
+
+    inv_notes = units.make_dispatch(
+        subject="7", trigger="transcription",
+        start=units.entrypoint(inline=units.CANONICAL_NOTES_PREFIX + '{"meeting_id":42}'),
+        context={"kind": "meeting", "meeting": {"meeting_id": "42", "session_uid": "canonical-2", "platform": "google_meet"}},
+    )
+    dispatcher.dispatch(inv_notes, trusted_canonical_notes=True)
+    assert bg_calls[-1]["model_env"]["TINA_LLM_PROVIDER"] == "openai-compat"
+
+    inv_state = units.make_dispatch(
+        subject="7", trigger="transcription",
+        start=units.entrypoint(inline=units.MEETING_STATE_PREFIX + '{"meeting_id":42}'),
+        context={"kind": "meeting", "meeting": {"meeting_id": "42", "session_uid": "state-fast-2", "platform": "google_meet"}},
+    )
+    dispatcher.dispatch(inv_state, trusted_meeting_state=True)
+    assert bg_calls[-1]["model_env"] is None
+
+    inv_nova = units.make_dispatch(
+        subject="5", trigger="message",
+        start=units.entrypoint(inline="Hello Nova"),
+        context={"kind": "none", "session": "nova-chat-1"},
+    )
+    dispatcher.dispatch(inv_nova)
+    assert spawned[-1][2]["TINA_RUNNER"] == "bedrock-workspace"
+    assert spawned[-1][2]["TINA_LLM_PROVIDER"] == "bedrock-converse"
+    assert spawned[-1][2]["TINA_LLM_MODEL"] == spawned[-1][2]["TINA_AGENT_MODEL"]

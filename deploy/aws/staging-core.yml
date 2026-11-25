@@ -19,6 +19,7 @@ Parameters:
   RecordingsBucket: {Type: String}
   TranscriptionUrl: {Type: String, Default: ''}
   TranscriptionTokenArn: {Type: String, Default: ''}
+  EnableAsrControl: {Type: String, Default: 'false', AllowedValues: ['true', 'false']}
   TtsUrl: {Type: String, Default: ''}
   TtsTokenArn: {Type: String, Default: ''}
   TtsProfileKeyArn: {Type: String, Default: ''}
@@ -44,6 +45,9 @@ Conditions:
   WithTranscription: !And
     - !Not [!Equals [!Ref TranscriptionUrl, '']]
     - !Not [!Equals [!Ref TranscriptionTokenArn, '']]
+  WithAsrControl: !And
+    - !Condition WithTranscription
+    - !Equals [!Ref EnableAsrControl, 'true']
   WithVoice: !And
     - !Not [!Equals [!Ref TtsUrl, '']]
     - !Not [!Equals [!Ref TtsTokenArn, '']]
@@ -94,6 +98,10 @@ Resources:
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - {IpProtocol: tcp, FromPort: 8000, ToPort: 8001, SourceSecurityGroupId: !GetAtt CoreClients.GroupId}
+        - !If
+          - WithAsrControl
+          - {IpProtocol: tcp, FromPort: 18007, ToPort: 18007, SourceSecurityGroupId: !GetAtt CoreClients.GroupId}
+          - !Ref 'AWS::NoValue'
         - {IpProtocol: tcp, FromPort: 8080, ToPort: 8080, SourceSecurityGroupId: !Ref AppSecurityGroupId}
         - !If
           - WithMcp
@@ -233,11 +241,17 @@ Resources:
           PortMappings: [{ContainerPort: 8001}]
           Environment:
             - {Name: DB_HOST, Value: !Ref PostgresHost}
+            - !If
+              - WithAsrControl
+              - Name: TINA_VIEGEM_URL
+                Value: !Select [0, !Split ['/v1/audio/transcriptions', !Ref TranscriptionUrl]]
+              - !Ref 'AWS::NoValue'
             - !If [WithFlows, {Name: TINA_FLOWS_API_URL, Value: !Ref FlowsApiUrl}, !Ref 'AWS::NoValue']
           Secrets:
             - {Name: DB_PASSWORD, ValueFrom: !Ref CoreDbPassword}
             - {Name: ADMIN_API_TOKEN, ValueFrom: !Ref AdminToken}
             - {Name: INTERNAL_API_SECRET, ValueFrom: !Ref InternalSecret}
+            - !If [WithAsrControl, {Name: TINA_VIEGEM_TOKEN, ValueFrom: !Ref TranscriptionTokenArn}, !Ref 'AWS::NoValue']
             - !If [WithFlows, {Name: TINA_FLOWS_API_KEY, ValueFrom: !Ref FlowsApiKeyArn}, !Ref 'AWS::NoValue']
           Command:
             - python
@@ -266,6 +280,37 @@ Resources:
           LogConfiguration:
             LogDriver: awslogs
             Options: {awslogs-group: !Ref CoreLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+        - !If
+          - WithAsrControl
+          - Name: asr-control
+            Image: !Ref AdminImage
+            Essential: false
+            DependsOn: [{ContainerName: admin, Condition: HEALTHY}]
+            PortMappings: [{ContainerPort: 18007}]
+            Command: [python, /app/asr-control/asr-controller.py]
+            Environment:
+              - {Name: ADMIN_API_URL, Value: 'http://127.0.0.1:8001'}
+            Secrets:
+              - {Name: TINA_INTERNAL_API_SECRET, ValueFrom: !Ref InternalSecret}
+            HealthCheck:
+              Command:
+                - CMD
+                - python
+                - -c
+                - |
+                  import hashlib, hmac, os, urllib.request
+                  secret = os.environ["TINA_INTERNAL_API_SECRET"]
+                  key = hmac.new(secret.encode(), b"tina-asr-control:v1", hashlib.sha256).hexdigest()
+                  request = urllib.request.Request("http://127.0.0.1:18007/health",
+                                                   headers={"X-ASR-Control-Key": key})
+                  urllib.request.urlopen(request, timeout=3).close()
+              Interval: 15
+              Timeout: 5
+              Retries: 3
+            LogConfiguration:
+              LogDriver: awslogs
+              Options: {awslogs-group: !Ref CoreLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+          - !Ref 'AWS::NoValue'
         - Name: meeting
           Image: !Ref MeetingImage
           Essential: true
@@ -418,3 +463,6 @@ Outputs:
     Value: !Ref CoreLogs
   GatewayUrl:
     Value: http://core.tina-staging.local:8000
+  AsrControlUrl:
+    Condition: WithAsrControl
+    Value: http://core.tina-staging.local:18007
