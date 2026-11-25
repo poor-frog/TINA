@@ -487,6 +487,7 @@ Resources:
             - !If [WithWorkspace, {Name: TINA_DRAFT_PILOT_USER_IDS, Value: !Ref DraftPilotUserIds}, !Ref 'AWS::NoValue']
             - !If [WithAgentReach, {Name: TINA_AGENT_REACH_URL, Value: !Ref AgentReachUrl}, !Ref 'AWS::NoValue']
             - !If [WithAgentReach, {Name: TINA_CHAT_TOOLBELT, Value: '["reach.web.search","reach.web.read","reach.github.search","reach.github.read"]'}, !Ref 'AWS::NoValue']
+            - !If [WithS3Workspace, {Name: TINA_GLOBAL_SYSTEM_WORKSPACE_PATH, Value: '/workspaces/_global'}, !Ref 'AWS::NoValue']
             - !If [WithVoiceCompletion, {Name: TINA_MEETING_VOICE_LOCAL_COMPLETION, Value: '1'}, !Ref 'AWS::NoValue']
             - !If [WithVoiceCompletion, {Name: TINA_LOCAL_COMPLETION_POOL, Value: '1'}, !Ref 'AWS::NoValue']
             - !If [WithVoiceCompletion, {Name: TINA_STATE_FAST_MODEL, Value: 'amazon.nova-lite-v1:0'}, !Ref 'AWS::NoValue']

@@ -158,9 +158,11 @@ def _has_workspace_byo_model(cfg: dict) -> bool:
     mode = (cfg.get("mode") or "").strip()
     if mode == "custom":
         return bool((cfg.get("base_url") or "").strip())
-    if mode in {"openai-api", "groq", "deepseek", "gemini", "antigravity"}:
+    if mode in {"openai-api", "groq", "deepseek", "gemini", "antigravity", "anthropic"}:
         return bool((cfg.get("api_key") or "").strip())
     if mode == "bedrock":
+        return True
+    if mode == "subscription" and bool((os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip()):
         return True
     return False
 
@@ -371,12 +373,28 @@ def overlay_model_config(env: dict[str, str], config: dict, *, allowlist: str = 
                     "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE"):
             env[key] = ""
         return
+    if mode == "anthropic":
+        key = (config.get("api_key") or "").strip()
+        if not key:
+            return
+        env["TINA_RUNNER"] = "claude-code"
+        env["TINA_CODEX_AUTH_MODE"] = ""
+        env["ANTHROPIC_API_KEY"] = key
+        env["TINA_LLM_PROVIDER"] = "anthropic"
+        env["TINA_LLM_API_KEY"] = key
+        for other_key in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN",
+                          "OPENAI_API_KEY", "ACCESS_TOKEN", "AWS_BEARER_TOKEN_BEDROCK",
+                          "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE"):
+            env[other_key] = ""
+        return
     if mode != "custom":
         return
     base_url = (config.get("base_url") or "").strip()
     api_key = (config.get("api_key") or "").strip()
     if not base_url:
         return  # custom mode without an endpoint is inert — deployment credentials still apply
+    env["TINA_RUNNER"] = "claude-code"
+    env["TINA_CODEX_AUTH_MODE"] = ""
     env["ANTHROPIC_BASE_URL"] = base_url
     env["TINA_LLM_PROVIDER"] = "openai-compat"
     env["TINA_LLM_BASE_URL"] = base_url

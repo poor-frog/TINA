@@ -29,6 +29,7 @@ _WORKSPACE_ALLOWED_ENV_FIELDS = frozenset({
     "TINA_MEETING_MODEL",
     "ACCESS_TOKEN", "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_OAUTH_TOKEN",
     "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
     "CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_BEARER_TOKEN_BEDROCK",
@@ -40,6 +41,7 @@ _NOVA_FIELDS = frozenset({
     "TINA_OWNER", "TINA_UNIT_ID", "TINA_UNIT_TRIGGER", "TINA_UNIT_IN_TOPIC",
     "TINA_UNIT_OUT_TOPIC", "TINA_START", "TINA_MOUNTS", "TINA_WORKSPACE_PATH",
     "TINA_CHAT_SESSION", "TINA_RUNNER", "TINA_PRINCIPAL_NAME", "TINA_PRINCIPAL_EMAIL",
+    "TINA_AGENT_REACH_URL", "TINA_UNIT_TOOLS",
 })
 _NOVA_MODEL = "amazon.nova-lite-v1:0"
 
@@ -61,9 +63,10 @@ def _validate_workspace_runner(env: dict[str, str], *, allow_multi_provider: boo
         if (env.get("CLAUDE_CODE_USE_BEDROCK") == "1"
                 or env.get("ANTHROPIC_API_KEY")
                 or env.get("ANTHROPIC_AUTH_TOKEN")
-                or env.get("CLAUDE_CODE_OAUTH_TOKEN")):
+                or env.get("CLAUDE_CODE_OAUTH_TOKEN")
+                or (env.get("ANTHROPIC_BASE_URL") or "").startswith("https://")):
             return
-        raise ValueError("Staging workspace Claude runner requires Bedrock or API credentials")
+        raise ValueError("Staging workspace Claude runner requires Bedrock, API credentials, or HTTPS custom endpoint")
     if runner == "antigravity":
         if env.get("GEMINI_API_KEY"):
             return
@@ -80,7 +83,7 @@ _SAFE_ECS_UNIT_TOOLS = frozenset({
 
 
 def _allowed_workspace_unit_tools(env: dict[str, str], *, native_nova: bool) -> str:
-    if native_nova or not (env.get("TINA_AGENT_REACH_URL") or "").strip():
+    if not (env.get("TINA_AGENT_REACH_URL") or "").strip():
         return "[]"
     try:
         requested = json.loads(env.get("TINA_UNIT_TOOLS") or "[]")

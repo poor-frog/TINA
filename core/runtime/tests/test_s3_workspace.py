@@ -22,6 +22,7 @@ TASK_ARN = "arn:aws:ecs:us-east-1:123456789012:task/tina/eph-1"
 
 def test_session_policy_scopes_prefixes_and_readonly_shared_wikis():
     mounts = {
+        "/workspaces/_global": False,
         "/workspaces/_system/42": True,
         "/workspaces/42": True,
         "/workspaces/_attached/42/workspace-1": True,
@@ -42,9 +43,23 @@ def test_session_policy_scopes_prefixes_and_readonly_shared_wikis():
         "arn:aws:s3:::tina-ws-bucket/users/42/*",
     ]
     assert stmts["RO"]["Action"] == "s3:GetObject"
-    assert stmts["RO"]["Resource"] == ["arn:aws:s3:::tina-ws-bucket/shared/wiki-ro/*"]
+    assert stmts["RO"]["Resource"] == [
+        "arn:aws:s3:::tina-ws-bucket/_global/*",
+        "arn:aws:s3:::tina-ws-bucket/shared/wiki-ro/*",
+    ]
     assert "secrets" not in raw
     assert "DeleteObject" not in raw
+
+    # Writable _global must always be rejected at both validation and policy layers
+    import pytest
+    from runtime_kernel.dynamic_workspace import validate_dynamic_mounts
+    with pytest.raises(ValueError, match="read-only"):
+        validate_dynamic_mounts("42", {"/workspaces/_global": True, "/workspaces/_system/42": True}, "/workspaces/_system/42")
+    with pytest.raises(ValueError, match="read-only"):
+        build_scoped_s3_session_policy(
+            bucket="tina-ws-bucket", kms_key_arn="arn:aws:kms:us-east-1:123456789012:key/data-key",
+            owner="42", mounts={"/workspaces/_global": True, "/workspaces/_system/42": True},
+        )
 
 
 def test_ecs_backend_s3_ephemeral_isolates_sts_creds_to_sync_sidecar():
@@ -147,24 +162,36 @@ def test_ecs_backend_honors_workspace_idle_timeout_env(monkeypatch):
 
 
 def test_ecs_backend_filters_safe_agent_reach_tools():
-    from runtime_kernel.ecs_backend import _allowed_workspace_unit_tools
+    from runtime_kernel.ecs_backend import (
+        _NOVA_FIELDS,
+        _WORKSPACE_ALLOWED_ENV_FIELDS,
+        _allowed_workspace_unit_tools,
+        _validate_workspace_runner,
+    )
+    from runtime_kernel.egress_proxy import DEFAULT_ALLOWLIST, host_allowed
 
-    # Without Agent Reach URL or on Nova Lite, toolbelt stays empty.
+    # Without Agent Reach URL, toolbelt stays empty.
     assert _allowed_workspace_unit_tools(
         {"TINA_UNIT_TOOLS": '["reach.web.search","calendar.write"]'}, native_nova=False,
     ) == "[]"
-    assert _allowed_workspace_unit_tools(
-        {"TINA_AGENT_REACH_URL": "http://agent-reach.tina-staging.local:8080",
-         "TINA_UNIT_TOOLS": '["reach.web.search"]'}, native_nova=True,
-    ) == "[]"
 
-    # With Agent Reach URL on general S3 worker, only safe public reach.* tools pass through.
-    granted = json.loads(_allowed_workspace_unit_tools(
-        {"TINA_AGENT_REACH_URL": "http://agent-reach.tina-staging.local:8080",
-         "TINA_UNIT_TOOLS": '["reach.web.search","calendar.create","reach.github.read","reach.web.search"]'},
-        native_nova=False,
-    ))
-    assert granted == ["reach.web.search", "reach.github.read"]
+    # With Agent Reach URL on BOTH general S3 and Nova workers, only safe public reach.* tools pass through.
+    for is_nova in (False, True):
+        granted = json.loads(_allowed_workspace_unit_tools(
+            {"TINA_AGENT_REACH_URL": "http://agent-reach.tina-staging.local:8080",
+             "TINA_UNIT_TOOLS": '["reach.web.search","calendar.create","reach.github.read","reach.web.search"]'},
+            native_nova=is_nova,
+        ))
+        assert granted == ["reach.web.search", "reach.github.read"]
+
+    # Nova fields carry Agent Reach URL + unit tools, and Claude OAuth + DeepSeek + HTTPS Custom URL are allowed.
+    assert {"TINA_AGENT_REACH_URL", "TINA_UNIT_TOOLS"} <= _NOVA_FIELDS
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in _WORKSPACE_ALLOWED_ENV_FIELDS
+    _validate_workspace_runner({"TINA_RUNNER": "claude-code", "CLAUDE_CODE_OAUTH_TOKEN": "tok"}, allow_multi_provider=True)
+    _validate_workspace_runner({"TINA_RUNNER": "claude-code", "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic", "ANTHROPIC_AUTH_TOKEN": "sk-ds"}, allow_multi_provider=True)
+    _validate_workspace_runner({"TINA_RUNNER": "claude-code", "ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1"}, allow_multi_provider=True)
+    assert host_allowed("api.deepseek.com", DEFAULT_ALLOWLIST)
+    assert host_allowed("openrouter.ai", DEFAULT_ALLOWLIST)
 
 
 def test_ecs_backend_launches_live_meeting_copilot_on_s3_ephemeral_worker():

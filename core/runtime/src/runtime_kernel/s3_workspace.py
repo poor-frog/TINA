@@ -40,6 +40,12 @@ def build_scoped_s3_session_policy(
     ro_resources: list[str] = []
 
     for path, write in sorted(mounts.items()):
+        if path == "/workspaces/_global":
+            if write:
+                raise ValueError("Global system workspace mount must be read-only")
+            list_prefixes.append("_global/*")
+            ro_resources.append(f"{bucket_arn}/_global/*")
+            continue
         if path in (f"/workspaces/{owner}", f"/workspaces/_system/{owner}"):
             continue
         if path.startswith(f"/workspaces/_attached/{owner}/"):

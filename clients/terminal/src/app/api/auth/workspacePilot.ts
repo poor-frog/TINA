@@ -16,11 +16,11 @@ export function pilotRouteEnabled(path: string, method?: string): boolean {
   if (path.split("/").some(seg => !/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(seg))) return false;
   if (/^(chat(?:\/(?:reset|stop|approval))?|sessions(?:\/[^/]+\/history)?|models(?:\/(?:test|catalog|openai\/catalog))?|dictation\/(?:polish|translate)|meeting\/(?:process|jitsi-hosts|relay-health)|meeting-translations\/[^/]+|discussion-reviews\/[^/]+|workspace\/meeting-knowledge\/[^/]+(?:\/(?:ask|apply|facts\/review|answers\/[^/]+|source-profiles(?:\/remove)?|voice-drafts(?:\/[^/]+\/review)?))?)$/.test(path)) return true;
   if (stage === "chat") return false;
-  if (/^workspace\/(tree|file|search|document(?:\/(?:move(?:\/preview)?|delete))?|git(?:\/show)?|init|active|attached|shared|purpose|new|upload|activate|deactivate|swap|rename|members(?:\/[^/]+(?:\/role)?)?|invites(?:\/[^/]+)?|shared\/(?:new|[^/]+\/active)|[^/]+\/(?:share-enable|leave|unshare|archive))$/.test(path)) return true;
   if (method?.toUpperCase() === "DELETE" && /^workspace\/[^/]+$/.test(path)) {
     const slug = path.slice("workspace/".length);
-    if (!RESERVED_WORKSPACE_SLUGS.has(slug)) return true;
+    return !RESERVED_WORKSPACE_SLUGS.has(slug);
   }
+  if (/^workspace\/(tree|file|search|document(?:\/(?:move(?:\/preview)?|delete))?|git(?:\/show)?|git-token|git-remote-status|push|pull|publish|init|active|attached|shared|purpose|new|upload|activate|deactivate|swap|rename|members(?:\/[^/]+(?:\/role)?)?|invites(?:\/[^/]+)?|shared\/(?:new|[^/]+\/active)|[^/]+\/(?:share-enable|leave|unshare|archive))$/.test(path)) return true;
   return stage === "routines" && /^routines(?:\/[^/]+(?:\/enabled)?)?$/.test(path);
 }
 

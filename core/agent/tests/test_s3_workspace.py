@@ -377,3 +377,61 @@ def test_workspace_stream_pins_live_meeting_topics_and_rejects_foreign_keys():
         ws.xadd("proc:meeting:99", {"note": "{}"})
     with pytest.raises(ValueError):
         ws.set("proc:meeting:99:cursor", "1-0")
+
+
+def test_nova_bedrock_workspace_supports_agent_reach_and_readonly_global(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from llm import agent_reach, bedrock_workspace
+    from control_plane.dispatch import _has_workspace_byo_model, overlay_model_config
+
+    gdir = tmp_path / "_global"
+    (gdir / "kg").mkdir(parents=True)
+    (gdir / "kg" / "guide.md").write_text("# Global Guide\nShared content.", encoding="utf-8")
+    pdir = tmp_path / "5"
+    (pdir / "kg").mkdir(parents=True)
+
+    monkeypatch.setenv("TINA_AGENT_REACH_URL", "http://agent-reach.tina-staging.local:8080")
+    monkeypatch.setenv("TINA_UNIT_TOOLS", json.dumps(["reach.web.search", "reach.github.read"]))
+    monkeypatch.setenv("TINA_MOUNTS", json.dumps([
+        {"slug": "_global", "path": str(gdir), "role": "global", "write": False},
+        {"slug": "personal", "path": str(pdir), "role": "private", "write": True},
+    ]))
+
+    reach_calls = []
+    monkeypatch.setattr(
+        agent_reach, "query",
+        lambda ch, act, txt, **_: (reach_calls.append((ch, act, txt)), {"ok": True, "items": [{"title": "TINA", "url": "https://example.com", "text": "result"}]})[1],
+    )
+
+    turn_calls = []
+
+    class FakeClient:
+        def converse(self, **req):
+            turn_calls.append(req)
+            if len(turn_calls) == 1:
+                return {"stopReason": "tool_use", "output": {"message": {"role": "assistant", "content": [
+                    {"toolUse": {"toolUseId": "t1", "name": "reach_web_search", "input": {"query": "TINA AWS"}}},
+                    {"toolUse": {"toolUseId": "t2", "name": "read_wiki", "input": {"workspace": "_global", "path": "kg/guide.md"}}},
+                ]}}}
+            return {"stopReason": "end_turn", "output": {"message": {"role": "assistant", "content": [
+                {"text": "Found web result and global guide."},
+            ]}}}
+
+    monkeypatch.setattr(bedrock_workspace, "BedrockConverseCompletion", lambda **_: SimpleNamespace(client=FakeClient()))
+    harness = bedrock_workspace.BedrockWorkspaceHarness()
+    harness.prepare(pdir)
+    events = list(harness.run_turn(pdir, "<!--tina:user-input-below-->search TINA", allowed_tools=("Read", "Write"), model="amazon.nova-lite-v1:0"))
+    assert any(e.get("type") == "tool-call" and e.get("tool") == "reach_web_search" for e in events)
+    assert any(e.get("type") == "done" and e.get("ok") is True for e in events)
+    assert reach_calls == [("web", "search", "TINA AWS")]
+    tool_names = [t["toolSpec"]["name"] for t in turn_calls[0]["toolConfig"]["tools"]]
+    assert "reach_web_search" in tool_names and "reach_github_read" in tool_names
+
+    # Verify custom HTTPS + anthropic API key overlay cleanly into claude-code runner
+    env_custom: dict[str, str] = {}
+    overlay_model_config(env_custom, {"mode": "custom", "base_url": "https://openrouter.ai/api/v1", "api_key": "or-key"})
+    assert env_custom["TINA_RUNNER"] == "claude-code" and env_custom["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api/v1"
+    env_anth: dict[str, str] = {}
+    overlay_model_config(env_anth, {"mode": "anthropic", "api_key": "sk-ant-test"})
+    assert env_anth["TINA_RUNNER"] == "claude-code" and env_anth["ANTHROPIC_API_KEY"] == "sk-ant-test"
+    assert _has_workspace_byo_model({"mode": "anthropic", "api_key": "sk-ant-test"}) is True

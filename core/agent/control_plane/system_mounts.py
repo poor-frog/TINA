@@ -66,32 +66,106 @@ _IDENTITY_STUB = (
 )
 
 
+_GLOBAL_README = (
+    "# TINA Global Knowledge Workspace (`_global`)\n\n"
+    "Kho tài liệu chuẩn dùng chung toàn hệ thống (READ-ONLY) cho mọi tài khoản TINA.\n"
+    "Các agent đọc trực tiếp quy tắc ứng xử (`CLAUDE.md`), tài liệu hướng dẫn (`docs/`),\n"
+    "và mẫu email (`mail/`) từ đây nhưng không bao giờ ghi đè.\n"
+)
+
+_GLOBAL_CLAUDE_MD = (
+    "# TINA Platform Global Guidelines (`_global`)\n\n"
+    "- Đây là không gian tri thức hệ thống dùng chung (read-only) được gắn tự động vào mọi phiên làm việc.\n"
+    "- Luôn trả lời trung thực, bám sát nguồn trích dẫn từ cuộc họp, Personal/Shared Wiki và tài liệu `_global`.\n"
+    "- Ưu tiên ngôn ngữ của người dùng (Tiếng Việt / Tiếng Anh song ngữ tự nhiên).\n"
+    "- Không bao giờ cố chỉnh sửa tệp trong `/workspaces/_global` — mọi ghi chú mới đều lưu ở Personal hoặc Shared Wiki.\n"
+)
+
+_GLOBAL_HANDBOOK_MD = (
+    "# Hướng dẫn sử dụng TINA Workspace & Knowledge Wiki\n\n"
+    "## Kiến trúc 3 tầng mount\n"
+    "1. `_global` (Read-Only): Tài liệu mẫu và chuẩn vận hành dùng chung toàn nền tảng.\n"
+    "2. Personal & Shared Wiki (Read-Write theo phân quyền): Kho tri thức nhóm/cá nhân lưu bền vững trên S3 + KMS.\n"
+    "3. `_system` (Private Read-Write): Lịch sử hội thoại, cấu hình và ngữ cảnh riêng tư theo từng tài khoản.\n\n"
+    "## Khả năng chính\n"
+    "- Hỏi đáp trực tiếp trong cuộc họp qua giọng nói (`\"Tina ơi\"`) hoặc tab Meeting Knowledge.\n"
+    "- Tra cứu web công khai và kho mã nguồn GitHub qua Agent Reach (`reach.web.*`, `reach.github.*`).\n"
+    "- Quản lý nhiều Wiki, chia sẻ theo vai trò (owner/contributor/viewer) và đồng bộ GitHub.\n"
+)
+
+_GLOBAL_MAIL_FOLLOWUP = (
+    "# Mẫu Email Tổng Kết Cuộc Họp\n\n"
+    "Chào mọi người,\n\n"
+    "Dưới đây là tóm tắt các quyết định và đầu việc chính đã thống nhất trong cuộc họp:\n\n"
+    "- **Quyết định chính**: {{decisions}}\n"
+    "- **Việc cần làm**: {{action_items}}\n"
+    "- **Mục cần làm rõ tiếp**: {{open_questions}}\n\n"
+    "Trân trọng,\nTINA Meeting Assistant\n"
+)
+
+
+def ensure_global_workspace(path: str | Path) -> Path:
+    """Create-if-absent the platform-owned read-only `_global` git repository (idempotent)."""
+    target = Path(path)
+    if (target / ".git").exists():
+        return target
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "docs").mkdir(parents=True, exist_ok=True)
+    (target / "mail").mkdir(parents=True, exist_ok=True)
+    files = {
+        target / "README.md": _GLOBAL_README,
+        target / "CLAUDE.md": _GLOBAL_CLAUDE_MD,
+        target / "docs" / "tina-handbook.md": _GLOBAL_HANDBOOK_MD,
+        target / "mail" / "follow-up.md": _GLOBAL_MAIL_FOLLOWUP,
+    }
+    for fp, content in files.items():
+        if not fp.exists():
+            fp.write_text(content, encoding="utf-8")
+    env = scrubbed_git_env()
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.email", "platform@tina"),
+        ("config", "user.name", "tina-platform"),
+    ):
+        subprocess.run(["git", *args], cwd=str(target), check=True, capture_output=True, text=True, env=env)
+    subprocess.run(["git", "add", "-A"], cwd=str(target), check=True, capture_output=True, text=True, env=env)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "global system workspace seed", "--allow-empty"],
+        cwd=str(target), check=True, capture_output=True, text=True, env=env,
+    )
+    return target
+
+
 def global_mount(settings, root: str) -> Optional[dict]:
     """The GLOBAL SYSTEM tier (``_global``) — READ-ONLY, mounted into every worker when configured and
     present. Returns the mount dict, or None (SKIP + log) when the knob is unset or the path is absent.
 
     Source is the platform-operated _global repo/dir named by ``settings.global_system_workspace_path``
-    (env ``GLOBAL_SYSTEM_WORKSPACE_PATH``). ``path`` is that source bound at ``<root>/_global`` — an
-    OUT-OF-STORE mount, so the runtime gives it its OWN read-only bind (source→target). Mount HEAD; a
-    pinned ref (``GLOBAL_SYSTEM_WORKSPACE_REF``) is carried through as the mount ``ref`` for the backend
-    to check out on materialization (default: whatever the repo's HEAD is)."""
+    (env ``GLOBAL_SYSTEM_WORKSPACE_PATH``). When the source lives outside ``root`` (local Docker bind),
+    ``source`` is included so the runtime binds it read-only; when it lives in-store at ``<root>/_global``
+    (S3 ephemeral workspace), ``source`` is omitted so the sync sidecar hydrates ``_global`` from S3."""
     src = (getattr(settings, "global_system_workspace_path", "") or "").strip()
     if not src:
         logger.info("no GLOBAL_SYSTEM_WORKSPACE_PATH configured — skipping the _global system mount")
         return None
-    if not Path(src).exists():
+    src_path = Path(src)
+    if not src_path.exists():
         logger.warning("GLOBAL_SYSTEM_WORKSPACE_PATH=%s does not exist — skipping the _global system mount", src)
         return None
     ref = (getattr(settings, "global_system_workspace_ref", "") or "").strip() or None
-    return {
+    target_path = Path(root) / GLOBAL_SLUG
+    in_store = src_path.resolve() == target_path.resolve()
+    mount = {
         "slug": GLOBAL_SLUG,
-        "source": src,                       # the platform-owned repo/dir on the host (the bind SOURCE)
         "path": f"{root}/{GLOBAL_SLUG}",     # where it lands in the worker (the bind TARGET)
         "ref": ref,                          # pinned ref, or None = mount HEAD
         "role": "global",
         "write": False,                      # READ-ONLY — agents never write _global (bound :ro)
         "primary": False,
     }
+    if not in_store:
+        mount["source"] = src                # the platform-owned repo/dir on the host (the bind SOURCE)
+    return mount
 
 
 def pilot_allows(subject: str, pilot_env: Optional[str] = None) -> bool:

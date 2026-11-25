@@ -41,6 +41,11 @@ DEFAULT_ALLOWLIST: tuple[str, ...] = (
     "cloudcode-pa.googleapis.com",
     "api.groq.com",
     "api.deepseek.com",
+    "openrouter.ai",
+    "api.together.xyz",
+    "api.fireworks.ai",
+    "api.mistral.ai",
+    "api.x.ai",
     # GitHub (git clone / push / pull / release archives)
     "github.com",
     "api.github.com",

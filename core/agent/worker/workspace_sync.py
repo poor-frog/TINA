@@ -85,14 +85,38 @@ class SyncCoordinator:
     def drain_after_turn(self) -> bool:
         return bool(self.token_expires_at and (self.token_expires_at - time.time()) <= _DRAIN_BUFFER_SEC)
 
+    @staticmethod
+    def _enforce_readonly(mpath: Path) -> None:
+        """Enforce kernel read-only permissions for non-root worker uid when sync runs as root."""
+        if not hasattr(os, "geteuid") or os.geteuid() != 0 or not mpath.exists():
+            return
+        for root_dir, dirnames, filenames in os.walk(mpath):
+            rp = Path(root_dir)
+            for fname in filenames:
+                try:
+                    os.chmod(rp / fname, 0o444)
+                except OSError:
+                    pass
+            for dname in dirnames:
+                try:
+                    os.chmod(rp / dname, 0o555)
+                except OSError:
+                    pass
+        try:
+            os.chmod(mpath, 0o555)
+        except OSError:
+            pass
+
     def bootstrap(self) -> None:
         """Initial parallel pull of every granted mount into ephemeral SSD."""
         def _pull_one(item: tuple[Path, str, str, bool]) -> tuple[str, SyncState]:
-            mpath, prefix, kind, _writable = item
+            mpath, prefix, kind, writable = item
             state, _changed = pull_workspace(
                 self.s3, self.bucket, prefix, kind, mpath, tmp_dir=self.tmp_dir,
             )
             mpath.parent.mkdir(parents=True, exist_ok=True)
+            if not writable:
+                self._enforce_readonly(mpath)
             return str(mpath), state
 
         with self._lock:

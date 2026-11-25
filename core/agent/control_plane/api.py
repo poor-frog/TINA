@@ -1038,6 +1038,18 @@ def create_app(
                 s3_store.compact_bloated_system_snapshots()
         except Exception:  # noqa: BLE001
             logger.warning("startup S3 system compaction skipped", exc_info=True)
+        global_src = (getattr(settings, "global_system_workspace_path", "") or "").strip() if settings else ""
+        if global_src:
+            gpath = Path(global_src)
+            if gpath.resolve() == (wsr.root / system_mounts.GLOBAL_SLUG).resolve():
+                try:
+                    with s3_store.distributed_lock("s3-global-seed", timeout=60.0):
+                        s3_store.ensure_synced(gpath, force=True)
+                        if not (gpath / ".git").exists():
+                            system_mounts.ensure_global_workspace(gpath)
+                            s3_store.push_if_changed(gpath, actor="system", force=True)
+                except Exception:  # noqa: BLE001
+                    logger.warning("startup S3 _global workspace hydration skipped", exc_info=True)
 
         @app.middleware("http")
         async def _s3_workspace_sync_middleware(request: Request, call_next):

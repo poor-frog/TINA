@@ -40,6 +40,10 @@ def validate_dynamic_mounts(owner: str, mounts: dict[str, bool], cwd: str) -> No
         parts = path.split("/")[1:]
         if any(not part or part.startswith(".") or part == ".." for part in parts):
             raise ValueError("Workspace mounts forbid dot-prefixed or traversal components")
+        if path == "/workspaces/_global":
+            if write is not False:
+                raise ValueError("Global system workspace mount must be read-only")
+            continue
         if path in (system, home):
             continue
         if attached_re.fullmatch(path):
