@@ -54,9 +54,56 @@ def _store_provider_issue(redis_url: str, turn: dict, issue: str | None) -> None
         log.warning("ChatGPT plan status could not be recorded")
 
 
-def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False) -> str:
-    if not payload.get("voice_turn") or source.get("use_sandbox_agent"):
-        raise HTTPException(409, "The staging voice completion requires a current transcript-only turn")
+_VOICE_MODEL_ENV_KEYS = (
+    "TINA_LLM_PROVIDER",
+    "TINA_LLM_MODEL",
+    "TINA_LLM_BASE_URL",
+    "TINA_LLM_API_KEY",
+    "OPENAI_API_KEY",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "AWS_BEARER_TOKEN_BEDROCK",
+)
+
+
+def resolve_voice_model_env(model_config: dict | None, *, allowlist: str = "", subject: str = "") -> dict[str, str]:
+    """Translate a subject's Settings -> Models config into CompletionPort env vars for voice."""
+    if not isinstance(model_config, dict):
+        return {}
+    mode = (model_config.get("mode") or "").strip()
+    if not mode or mode in ("openai-subscription", "antigravity"):
+        return {}
+    from control_plane.dispatch import overlay_model_config
+    staged: dict[str, str] = {}
+    overlay_model_config(staged, model_config, allowlist=allowlist, subject=subject)
+    chosen_model = (staged.get("TINA_MEETING_MODEL") or staged.get("TINA_LLM_MODEL") or "").strip()
+    if mode == "bedrock" and not (staged.get("AWS_BEARER_TOKEN_BEDROCK") or "").strip():
+        result: dict[str, str] = {"TINA_LLM_PROVIDER": "bedrock-converse"}
+        if chosen_model:
+            result["TINA_LLM_MODEL"] = chosen_model
+        for region_key in ("AWS_REGION", "AWS_DEFAULT_REGION"):
+            if staged.get(region_key):
+                result[region_key] = staged[region_key]
+        return result
+    provider = (staged.get("TINA_LLM_PROVIDER") or "").strip()
+    if not provider:
+        return {}
+    if mode in ("groq", "deepseek", "gemini", "openai-api") and not (staged.get("TINA_LLM_API_KEY") or "").strip():
+        return {}
+    if mode == "custom" and not (staged.get("TINA_LLM_BASE_URL") or "").strip():
+        return {}
+    result = {key: staged[key] for key in _VOICE_MODEL_ENV_KEYS if staged.get(key)}
+    if chosen_model:
+        result["TINA_LLM_MODEL"] = chosen_model
+    return result
+
+
+def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,
+             model_env: dict[str, str] | None = None) -> str:
+    if not payload.get("voice_turn"):
+        raise HTTPException(409, "The staging voice completion requires a current live voice turn")
+    if source.get("use_sandbox_agent"):
+        raise HTTPException(409, "Sandbox voice agent is unavailable on local completion workers; use Direct LLM")
     deadline = time.time() + 45
     if type(source.get("retrieval_deadline_ms")) is int:
         deadline = min(deadline, source["retrieval_deadline_ms"] / 1000)
@@ -85,24 +132,28 @@ def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False)
             env.update(ACCESS_TOKEN=token, TINA_LLM_PROVIDER="chatgpt-plan", TINA_CHATGPT_VOICE_PILOT="1",
                        TINA_LLM_MODEL=os.environ["TINA_CHATGPT_VOICE_MODEL"])
             env.pop("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", None)
+        elif model_env:
+            for key, value in model_env.items():
+                if key in _VOICE_MODEL_ENV_KEYS and value:
+                    env[key] = value
+            if env.get("TINA_LLM_PROVIDER") != "bedrock-converse":
+                env.pop("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", None)
         remaining = deadline - time.time()
         if remaining <= 0:
             raise HTTPException(504, "Voice retrieval timed out")
         result = subprocess.run(
             [sys.executable, "-m", "worker.meeting_voice_local"],
             input=json.dumps(payload, ensure_ascii=False), text=True, encoding="utf-8",
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE if chatgpt_plan else subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             cwd="/tmp", env=env,
             timeout=remaining,
         )
     except subprocess.TimeoutExpired as exc:
-        if chatgpt_plan:
-            _log_worker_timings(exc.stderr)
+        _log_worker_timings(exc.stderr)
         raise HTTPException(504, "Voice completion timed out") from exc
     finally:
         _slots.release()
-    if chatgpt_plan:
-        _log_worker_timings(result.stderr)
+    _log_worker_timings(result.stderr)
     if chatgpt_plan and "TINA_CHATGPT_PLAN_USAGE_LIMIT" in result.stderr.splitlines():
         log.warning("ChatGPT plan usage limit reached for the staging voice pilot")
         _store_provider_issue(redis_url, payload["voice_turn"], "usage_limit")

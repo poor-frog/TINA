@@ -1045,13 +1045,23 @@ def create_app(
             sync_prefixes = (
                 "/api/workspace", "/api/sessions", "/api/routines",
                 "/api/chat", "/api/models", "/invocations",
+                "/api/internal/meeting-voice",
             )
             if not path.startswith(sync_prefixes) or path.startswith("/api/workspace/git-token"):
                 return await call_next(request)
+            if path.startswith("/api/internal/meeting-voice"):
+                expected_secret = os.environ.get("TINA_INTERNAL_API_SECRET", "")
+                supplied_secret = request.headers.get("x-internal-secret", "")
+                if not expected_secret or not hmac.compare_digest(expected_secret.encode(), supplied_secret.encode()):
+                    return await call_next(request)
 
             method = request.method.upper()
+            is_voice_write = (
+                path.startswith("/api/internal/meeting-voice/")
+                and (path.endswith("/task-flow") or path.endswith("/decision-flow"))
+            )
             is_write = method in ("POST", "PUT", "PATCH", "DELETE") and (
-                path.startswith("/api/workspace") or path.startswith("/api/routines")
+                path.startswith("/api/workspace") or path.startswith("/api/routines") or is_voice_write
             )
             subject = (request.headers.get("x-user-id") or "").strip()
             if not subject and settings is not None:
@@ -1405,9 +1415,15 @@ def create_app(
             elif sandbox_voice:
                 raise HTTPException(409, 'Current voice turn required for sandbox')
             if os.environ.get('TINA_MEETING_VOICE_LOCAL_COMPLETION') == '1' and str(source.get('mode', '')).startswith('voice'):
-                from control_plane.meeting_voice_completion import complete
+                from control_plane.meeting_voice_completion import complete, resolve_voice_model_env
+                chatgpt_plan = getattr(request.state, 'chatgpt_voice_pilot', False)
+                model_env = None if chatgpt_plan else resolve_voice_model_env(
+                    dispatcher.resolve_model_config(subject),
+                    allowlist=settings.model_allowlist if settings else "",
+                    subject=subject,
+                )
                 return complete(payload, source, redis_url,
-                                chatgpt_plan=getattr(request.state, 'chatgpt_voice_pilot', False))
+                                chatgpt_plan=chatgpt_plan, model_env=model_env)
         if target_language is not None:
             payload["target_language"] = target_language
         inline = prefix + json.dumps(payload, ensure_ascii=False)

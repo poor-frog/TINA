@@ -29,6 +29,7 @@ Parameters:
   McpGatewayTargetGroupArn: {Type: String, Default: ''}
   McpOriginSecurityGroupId: {Type: String, Default: ''}
   VoicePilotRoom: {Type: String, Default: '', AllowedPattern: '(|[a-z]{3}-[a-z]{4}-[a-z]{3}(,[a-z]{3}-[a-z]{4}-[a-z]{3})?)'}
+  VoicePilotUserIds: {Type: String, Default: '', AllowedPattern: '(|[*]|[0-9]+(,[0-9]+)*)'}
   GatewayExtensionOrigins: {Type: String, Default: ''}
 
 Conditions:
@@ -49,10 +50,14 @@ Conditions:
     - !Not [!Equals [!Ref McpUrl, '']]
     - !Not [!Equals [!Ref McpGatewayTargetGroupArn, '']]
     - !Not [!Equals [!Ref McpOriginSecurityGroupId, '']]
+  HasVoicePilotRoom: !Not [!Equals [!Ref VoicePilotRoom, '']]
+  HasVoicePilotUsers: !Not [!Equals [!Ref VoicePilotUserIds, '']]
   WithVoicePilot: !And
     - !Condition WithVoice
     - !Condition WithAgentApi
-    - !Not [!Equals [!Ref VoicePilotRoom, '']]
+    - !Or
+      - !Condition HasVoicePilotRoom
+      - !Condition HasVoicePilotUsers
 
 Resources:
   CoreLogs:
@@ -276,7 +281,9 @@ Resources:
             - !If [WithLiveKitAudio, {Name: TINA_LIVEKIT_AUDIO, Value: '1'}, !Ref 'AWS::NoValue']
             - !If [WithAgentApi, {Name: AGENT_API_URL, Value: !Ref AgentApiUrl}, !Ref 'AWS::NoValue']
             - !If [WithVoicePilot, {Name: TINA_MEETING_VOICE, Value: '1'}, !Ref 'AWS::NoValue']
-            - !If [WithVoicePilot, {Name: TINA_MEETING_VOICE_PILOT_ROOM, Value: !Ref VoicePilotRoom}, !Ref 'AWS::NoValue']
+            - !If [WithVoicePilot, {Name: TINA_MEETING_VOICE_AGENT_BACKEND, Value: completion}, !Ref 'AWS::NoValue']
+            - !If [HasVoicePilotRoom, {Name: TINA_MEETING_VOICE_PILOT_ROOM, Value: !Ref VoicePilotRoom}, !Ref 'AWS::NoValue']
+            - !If [HasVoicePilotUsers, {Name: TINA_MEETING_VOICE_PILOT_USER_IDS, Value: !Ref VoicePilotUserIds}, !Ref 'AWS::NoValue']
             - !If [WithVoicePilot, {Name: TINA_VOICE_TURN_SHADOW, Value: '0'}, !Ref 'AWS::NoValue']
           Secrets:
             - {Name: DB_PASSWORD, ValueFrom: !Ref CoreDbPassword}

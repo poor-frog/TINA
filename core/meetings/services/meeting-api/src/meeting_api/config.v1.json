@@ -860,6 +860,20 @@
       "secret": true,
       "targets": [],
       "description": "Optional shared LiveKit HMAC secret injected by AWS staging for audio bridge capability signing when LiveKit uses an independent secret from INTERNAL_API_SECRET."
+    },
+    {
+      "key": "TINA_MEETING_VOICE_PILOT_USER_IDS",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Optional comma-separated user IDs (or *) allowed to enable meeting voice assistant across Google Meet rooms without pinning a single room code."
+    },
+    {
+      "key": "TINA_MEETING_VOICE_AGENT_BACKEND",
+      "class": "defaulted",
+      "default": "sandbox",
+      "targets": [],
+      "description": "Default voice answer backend seeded on new rooms when not in transcript-only mode: 'sandbox' (CLI harness) or 'completion' (direct CompletionPort)."
     }
   ],
   "capabilities": {

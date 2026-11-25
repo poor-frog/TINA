@@ -180,13 +180,17 @@ Resources:
       Policies:
         - !If
           - WithVoiceCompletion
-          - PolicyName: InvokeNovaLite
+          - PolicyName: InvokeVoiceBedrockModels
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
                 - Effect: Allow
                   Action: bedrock:InvokeModel
-                  Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-lite-v1:0'
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-lite-v1:0'
+                    - !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/anthropic.claude-*'
+                    - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.anthropic.claude-*'
+                    - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/global.anthropic.claude-*'
           - !Ref 'AWS::NoValue'
         - !If
           - WithWorkspaceChatGPT
@@ -482,6 +486,7 @@ Resources:
             - !If [WithWorkspace, {Name: TINA_POST_MEETING_ECS_DRAFT, Value: '1'}, !Ref 'AWS::NoValue']
             - !If [WithWorkspace, {Name: TINA_DRAFT_PILOT_USER_IDS, Value: !Ref DraftPilotUserIds}, !Ref 'AWS::NoValue']
             - !If [WithAgentReach, {Name: TINA_AGENT_REACH_URL, Value: !Ref AgentReachUrl}, !Ref 'AWS::NoValue']
+            - !If [WithAgentReach, {Name: TINA_CHAT_TOOLBELT, Value: '["reach.web.search","reach.web.read","reach.github.search","reach.github.read"]'}, !Ref 'AWS::NoValue']
             - !If [WithVoiceCompletion, {Name: TINA_MEETING_VOICE_LOCAL_COMPLETION, Value: '1'}, !Ref 'AWS::NoValue']
             - !If [WithVoiceCompletion, {Name: TINA_LLM_PROVIDER, Value: bedrock-converse}, !Ref 'AWS::NoValue']
             - !If [WithVoiceCompletion, {Name: TINA_LLM_MODEL, Value: 'amazon.nova-lite-v1:0'}, !Ref 'AWS::NoValue']

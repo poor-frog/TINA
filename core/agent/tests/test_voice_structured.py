@@ -330,3 +330,66 @@ def test_bedrock_converse_complete_structured_enforces_tool_choice_and_keeps_com
 
     with pytest.raises(LLMResponseError):
         BedrockConverseCompletion(client=MissingToolClient()).complete_structured('synthetic', system='voice', schema=schema)
+
+
+def test_resolve_voice_model_env_and_local_completion_model_isolation(monkeypatch):
+    from control_plane import meeting_voice_completion
+
+    # OpenAI API BYO model -> openai-responses, strips AWS IAM credentials from subprocess
+    openai_env = meeting_voice_completion.resolve_voice_model_env(
+        {'mode': 'openai-api', 'api_key': 'sk-test-key', 'model': 'gpt-5', 'meeting_model': 'gpt-5-mini'},
+    )
+    assert openai_env['TINA_LLM_PROVIDER'] == 'openai-responses'
+    assert openai_env['TINA_LLM_MODEL'] == 'gpt-5-mini'
+    assert openai_env['TINA_LLM_API_KEY'] == 'sk-test-key'
+
+    # Groq BYO model -> openai-compat
+    groq_env = meeting_voice_completion.resolve_voice_model_env(
+        {'mode': 'groq', 'api_key': 'gsk-test-key', 'model': 'openai/gpt-oss-20b'},
+    )
+    assert groq_env['TINA_LLM_PROVIDER'] == 'openai-compat'
+    assert groq_env['TINA_LLM_MODEL'] == 'openai/gpt-oss-20b'
+
+    # Bedrock IAM role (no bearer api_key) -> bedrock-converse, keeps AWS IAM credentials
+    monkeypatch.setenv('TINA_WORKSPACE_PILOT_USER_IDS', '*')
+    bedrock_iam = meeting_voice_completion.resolve_voice_model_env(
+        {'mode': 'bedrock', 'region': 'us-east-1', 'model': 'us.anthropic.claude-sonnet-4-6'},
+    )
+    assert bedrock_iam == {
+        'TINA_LLM_PROVIDER': 'bedrock-converse',
+        'TINA_LLM_MODEL': 'us.anthropic.claude-sonnet-4-6',
+        'AWS_REGION': 'us-east-1',
+        'AWS_DEFAULT_REGION': 'us-east-1',
+    }
+
+    # Bedrock Bearer token -> anthropic, strips AWS IAM credentials
+    bedrock_bearer = meeting_voice_completion.resolve_voice_model_env(
+        {'mode': 'bedrock', 'region': 'us-east-1', 'api_key': 'bearer-tok', 'model': 'anthropic.claude-3-5-sonnet'},
+    )
+    assert bedrock_bearer['TINA_LLM_PROVIDER'] == 'anthropic'
+    assert bedrock_bearer['AWS_BEARER_TOKEN_BEDROCK'] == 'bearer-tok'
+
+    # Subscription mode without Secrets Manager pilot falls back to deployment default ({})
+    assert meeting_voice_completion.resolve_voice_model_env({'mode': 'openai-subscription'}) == {}
+
+    # Verify subprocess credential isolation in complete()
+    monkeypatch.setenv('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI', '/v2/credentials/test')
+    monkeypatch.setenv('TINA_LLM_PROVIDER', 'bedrock-converse')
+    monkeypatch.setenv('TINA_LLM_MODEL', 'amazon.nova-lite-v1:0')
+    seen_envs = []
+
+    def fake_run(*_, env, **kwargs):
+        seen_envs.append(dict(env))
+        return SimpleNamespace(stderr='', stdout='{"claims":[]}', returncode=0)
+
+    monkeypatch.setattr(meeting_voice_completion.subprocess, 'run', fake_run)
+    payload = {'request_id': 'voice-model-test', 'voice_turn': {'meeting_id': 1, 'holder': 's:1'}}
+    meeting_voice_completion.complete(payload, {'mode': 'voice'}, 'redis://fixture', model_env=openai_env)
+    assert seen_envs[0]['TINA_LLM_PROVIDER'] == 'openai-responses'
+    assert seen_envs[0]['TINA_LLM_MODEL'] == 'gpt-5-mini'
+    assert 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI' not in seen_envs[0]
+
+    meeting_voice_completion.complete(payload, {'mode': 'voice'}, 'redis://fixture', model_env=bedrock_iam)
+    assert seen_envs[1]['TINA_LLM_PROVIDER'] == 'bedrock-converse'
+    assert seen_envs[1]['TINA_LLM_MODEL'] == 'us.anthropic.claude-sonnet-4-6'
+    assert seen_envs[1]['AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'] == '/v2/credentials/test'

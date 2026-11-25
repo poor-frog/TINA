@@ -242,3 +242,81 @@ def test_workspace_store_compaction_secrets_and_migration(tmp_path):
     assert counts["git"] == 2 and counts["invites"] == 1
     counts2 = store.migrate_from_efs(efs)
     assert counts2["git"] == 0 and counts2["skipped"] >= 2
+
+
+def test_s3_middleware_hydrates_meeting_voice_reads_and_pushes_draft_writes(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from fastapi.testclient import TestClient
+    from control_plane.api import create_app
+    from control_plane.workspace_reader import WorkspaceReader
+
+    monkeypatch.setenv("TINA_INTERNAL_API_SECRET", "voice-internal-secret")
+    monkeypatch.setenv("TINA_WORKSPACE_STORAGE", "s3")
+    monkeypatch.setenv("TINA_S3_WORKSPACE_BUCKET", "ws-bucket")
+
+    events = []
+
+    class StubStore:
+        def __init__(self, root):
+            self.root = root
+
+        def compact_bloated_system_snapshots(self):
+            return {"compacted": 0}
+
+        @contextmanager
+        def distributed_lock(self, key, **_kw):
+            events.append(("lock", key))
+            yield
+
+        def sync_subject_workspaces(self, subject, *, memberships=(), include_system=False, force=False):
+            events.append(("sync", subject, force))
+
+        def push_attach_state(self, subject):
+            events.append(("push_attach", subject))
+
+        def push_if_changed(self, path, *, actor=None, protect_policy=False):
+            events.append(("push", path.name, actor))
+
+    store = StubStore(tmp_path)
+    (tmp_path / "7").mkdir()
+    monkeypatch.setattr("control_plane.workspace_store.S3WorkspaceStore.from_env", classmethod(lambda cls, *args, **kw: store))
+    app = create_app(None, reader=WorkspaceReader(tmp_path))
+    events.clear()
+
+    app.router.routes[:] = [
+        route for route in app.router.routes
+        if getattr(route, "path", None) != "/api/internal/meeting-voice/{meeting_id}/task-flow"
+    ]
+
+    @app.post("/api/internal/meeting-voice/{meeting_id}/sources-probe")
+    def _voice_read_probe(meeting_id: int):
+        return {"ok": True}
+
+    @app.post("/api/internal/meeting-voice/{meeting_id}/task-flow")
+    def _voice_write_probe(meeting_id: int):
+        return {"ok": True}
+
+    client = TestClient(app)
+
+    # Unauthenticated request must NOT trigger S3 hydration
+    client.post("/api/internal/meeting-voice/42/sources-probe", headers={"X-User-Id": "7"})
+    assert events == []
+
+    # Authenticated voice read hydrates lazily (force=False) without distributed lock or push
+    r = client.post(
+        "/api/internal/meeting-voice/42/sources-probe",
+        headers={"X-User-Id": "7", "X-Internal-Secret": "voice-internal-secret"},
+    )
+    assert r.status_code == 200
+    assert events == [("sync", "7", False)]
+
+    # Authenticated voice task-flow write locks, force-syncs, and pushes back to S3
+    events.clear()
+    r = client.post(
+        "/api/internal/meeting-voice/42/task-flow",
+        headers={"X-User-Id": "7", "X-Internal-Secret": "voice-internal-secret"},
+    )
+    assert r.status_code == 200
+    assert ("lock", "subject:7") in events
+    assert ("sync", "7", True) in events
+    assert ("push", "7", "7") in events

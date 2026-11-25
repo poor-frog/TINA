@@ -23,7 +23,7 @@ _WORKSPACE_ALLOWED_ENV_FIELDS = frozenset({
     "TINA_CHAT_SESSION", "TINA_RUNNER", "TINA_CODEX_AUTH_MODE",
     "TINA_AGENT_MODEL", "TINA_AGENT_EFFORT",
     "TINA_LLM_PROVIDER", "TINA_LLM_MODEL", "TINA_LLM_BASE_URL", "TINA_LLM_API_KEY",
-    "TINA_PRINCIPAL_NAME", "TINA_PRINCIPAL_EMAIL", "TINA_AGENT_REACH_URL",
+    "TINA_PRINCIPAL_NAME", "TINA_PRINCIPAL_EMAIL", "TINA_AGENT_REACH_URL", "TINA_UNIT_TOOLS",
     "ACCESS_TOKEN", "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
     "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
@@ -66,6 +66,29 @@ def _validate_workspace_runner(env: dict[str, str], *, allow_multi_provider: boo
             return
         raise ValueError("Staging workspace Antigravity runner requires a Gemini API key")
     raise ValueError("Unsupported staging workspace runner")
+
+
+_SAFE_ECS_UNIT_TOOLS = frozenset({
+    "reach.web.search",
+    "reach.web.read",
+    "reach.github.search",
+    "reach.github.read",
+})
+
+
+def _allowed_workspace_unit_tools(env: dict[str, str], *, native_nova: bool) -> str:
+    if native_nova or not (env.get("TINA_AGENT_REACH_URL") or "").strip():
+        return "[]"
+    try:
+        requested = json.loads(env.get("TINA_UNIT_TOOLS") or "[]")
+    except (TypeError, ValueError):
+        return "[]"
+    if not isinstance(requested, list):
+        return "[]"
+    granted = list(dict.fromkeys(
+        name for name in requested if isinstance(name, str) and name in _SAFE_ECS_UNIT_TOOLS
+    ))
+    return json.dumps(granted)
 
 
 def _workspace_idle_timeout_sec() -> str:
@@ -257,8 +280,9 @@ class ECSBackend:
                 env.setdefault("HOME", f"/workspaces/_system/{task.owner}")
                 if env.get("TINA_RUNNER") == "codex" and env.get("TINA_CODEX_AUTH_MODE") == "chatgpt-plan":
                     env.setdefault("TINA_AGENT_MODEL", "gpt-6-luna")
+                unit_tools = _allowed_workspace_unit_tools(env, native_nova=native_nova)
                 env.update(TINA_IDLE_TIMEOUT_SEC=_workspace_idle_timeout_sec(), TINA_WORKSPACE_STREAM_SIDECAR="1",
-                           TINA_WORKSPACE_SYNC_SIDECAR="1", TINA_UNIT_TOOLS="[]")
+                           TINA_WORKSPACE_SYNC_SIDECAR="1", TINA_UNIT_TOOLS=unit_tools)
             else:
                 use_pinned = env.get("CLAUDE_CODE_USE_BEDROCK") != "1"
                 task = None

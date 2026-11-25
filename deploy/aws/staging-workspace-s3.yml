@@ -26,8 +26,10 @@ Parameters:
   VpcCidr: {Type: String, Default: '10.42.0.0/16'}
   S3PrefixListId: {Type: String, Default: 'pl-63a5400a'}
   EgressAllowlist: {Type: String, Default: ''}
+  AgentReachSecurityGroupId: {Type: String, Default: ''}
 
 Conditions:
+  WithAgentReach: !Not [!Equals [!Ref AgentReachSecurityGroupId, '']]
   WithEgressProxy: !And
     - !Equals [!Ref EnableEgressProxy, 'true']
     - !Not [!Equals [!Ref ProxyImage, '']]
@@ -277,6 +279,20 @@ Resources:
           - WithEgressProxy
           - {IpProtocol: tcp, FromPort: 3128, ToPort: 3128, DestinationSecurityGroupId: !GetAtt EgressProxySecurityGroup.GroupId}
           - !Ref 'AWS::NoValue'
+        - !If
+          - WithAgentReach
+          - {IpProtocol: tcp, FromPort: 8080, ToPort: 8080, DestinationSecurityGroupId: !Ref AgentReachSecurityGroupId}
+          - !Ref 'AWS::NoValue'
+
+  AgentReachIngressFromWorkers:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: WithAgentReach
+    Properties:
+      GroupId: !Ref AgentReachSecurityGroupId
+      SourceSecurityGroupId: !GetAtt EphemeralWorkspaceSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
 
   EgressProxyIngressFromWorkers:
     Type: AWS::EC2::SecurityGroupIngress

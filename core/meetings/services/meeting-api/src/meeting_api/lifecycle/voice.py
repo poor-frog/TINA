@@ -255,14 +255,27 @@ class VoiceState(BaseModel):
     kws: KwsStatus | None = None
 
 
-def new_meeting_voice_policy(*, transcript_only=False):
+def voice_pilot_rooms() -> set[str]:
+    return set(os.environ.get('TINA_MEETING_VOICE_PILOT_ROOM', '').replace(',', ' ').split())
+
+
+def voice_pilot_user_allowed(user_id: int | str) -> bool:
+    raw = os.environ.get('TINA_MEETING_VOICE_PILOT_USER_IDS', '').strip()
+    if not raw:
+        return True
+    allowed = {entry.strip() for entry in raw.split(',') if entry.strip()}
+    return '*' in allowed or str(user_id) in allowed
+
+
+def new_meeting_voice_policy(*, transcript_only=False, agent_backend=None):
     """Seed new capable rooms; saved policies and document grants remain owner-controlled."""
     if transcript_only:
         return VoicePolicy(enabled=True, include_transcript=True, noise_suppression=True,
                            engine='livekit', agent_backend='completion').model_dump()
+    backend = agent_backend or ('completion' if os.environ.get('TINA_MEETING_VOICE_AGENT_BACKEND') == 'completion' else 'sandbox')
     return VoicePolicy(enabled=True,include_transcript=True,include_workspace_wiki=True,noise_suppression=True,
                        allow_general_knowledge=True,allow_web_search=True,auto_web_search=True,
-                       engine='livekit',agent_backend='sandbox').model_dump()
+                       engine='livekit',agent_backend=backend).model_dump()
 
 
 def policy_of(row):

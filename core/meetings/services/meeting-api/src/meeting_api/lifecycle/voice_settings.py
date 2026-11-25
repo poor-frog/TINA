@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, Header, HTTPException, Response
 
 from .stop_router import _resolve_user_id
-from .voice import new_meeting_voice_policy
+from .voice import new_meeting_voice_policy, voice_pilot_rooms, voice_pilot_user_allowed
 
 PREVIEW_TEXT = 'Xin chào, tôi là TINA. Tôi sẵn sàng hỗ trợ cuộc họp của bạn.'
 
@@ -85,10 +85,10 @@ def build_voice_settings_router(redis, client_factory=httpx.AsyncClient, repo=No
                 wake['sessions'].append({'meeting_id':row['id'], 'status':status})
             statuses = {r['status'] for r in wake['sessions']}
             if statuses: wake['status'] = next((s for s in ['failed','unknown','starting','off','ready'] if s in statuses))
-        voice_pilot_rooms = set(os.environ.get('TINA_MEETING_VOICE_PILOT_ROOM', '').replace(',', ' ').split())
         return {'wake':wake,
-                'new_meeting_policy':new_meeting_voice_policy(transcript_only=bool(voice_pilot_rooms)),
-                'voice_pipeline_configured':os.environ.get('TINA_MEETING_VOICE', '').lower() in ('1','true','yes','on'),
+                'new_meeting_policy':new_meeting_voice_policy(transcript_only=bool(voice_pilot_rooms())),
+                'voice_pipeline_configured':(os.environ.get('TINA_MEETING_VOICE', '').lower() in ('1','true','yes','on')
+                                             and voice_pilot_user_allowed(user)),
                 'default_prepare_new_bots':bool(url), 'tts':tts,'noise_filter':noise_filter}
 
     @router.post('/bots/voice/preview')

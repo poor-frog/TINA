@@ -144,3 +144,24 @@ def test_ecs_backend_honors_workspace_idle_timeout_env(monkeypatch):
     assert _workspace_idle_timeout_sec() == "600"
     monkeypatch.setenv("RUNTIME_WORKSPACE_IDLE_TIMEOUT_SEC", "invalid")
     assert _workspace_idle_timeout_sec() == "300"
+
+
+def test_ecs_backend_filters_safe_agent_reach_tools():
+    from runtime_kernel.ecs_backend import _allowed_workspace_unit_tools
+
+    # Without Agent Reach URL or on Nova Lite, toolbelt stays empty.
+    assert _allowed_workspace_unit_tools(
+        {"TINA_UNIT_TOOLS": '["reach.web.search","calendar.write"]'}, native_nova=False,
+    ) == "[]"
+    assert _allowed_workspace_unit_tools(
+        {"TINA_AGENT_REACH_URL": "http://agent-reach.tina-staging.local:8080",
+         "TINA_UNIT_TOOLS": '["reach.web.search"]'}, native_nova=True,
+    ) == "[]"
+
+    # With Agent Reach URL on general S3 worker, only safe public reach.* tools pass through.
+    granted = json.loads(_allowed_workspace_unit_tools(
+        {"TINA_AGENT_REACH_URL": "http://agent-reach.tina-staging.local:8080",
+         "TINA_UNIT_TOOLS": '["reach.web.search","calendar.create","reach.github.read","reach.web.search"]'},
+        native_nova=False,
+    ))
+    assert granted == ["reach.web.search", "reach.github.read"]

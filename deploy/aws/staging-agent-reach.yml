@@ -104,4 +104,5 @@ Outputs:
   ServiceName: {Value: !GetAtt AgentReach.Name}
   AgentReachUrl: {Value: 'http://agent-reach.tina-staging.local:8080'}
   AgentReachClientSecurityGroupId: {Value: !GetAtt AgentApiClients.GroupId}
+  IngressSecurityGroupId: {Value: !GetAtt Ingress.GroupId}
   LogGroupName: {Value: !Ref Logs}

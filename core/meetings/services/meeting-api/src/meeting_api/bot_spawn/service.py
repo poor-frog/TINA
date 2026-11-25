@@ -495,9 +495,11 @@ async def request_bot(
         pref = (bot_context.get('voice') or {}).get('prepare_new_bots')
         context_available = bool(bot_context) or not os.getenv('ADMIN_API_URL', '').strip()
         voice_agent_enabled = context_available and bool(os.getenv('TTS_SERVICE_URL', '').strip()) and pref is not False
-    voice_pilot_rooms = set(os.getenv("TINA_MEETING_VOICE_PILOT_ROOM", "").replace(",", " ").split())
+    from ..lifecycle.voice import voice_pilot_rooms as _voice_pilot_rooms, voice_pilot_user_allowed
+    voice_pilot_rooms = _voice_pilot_rooms()
     voice_assistant_capable = bool(
         voice_agent_enabled and platform == "google_meet" and env_flag("TINA_MEETING_VOICE", False)
+        and voice_pilot_user_allowed(user_id)
         and (not voice_pilot_rooms or native_meeting_id in voice_pilot_rooms)
     )
     configured = _transcription_from_context(bot_context)
