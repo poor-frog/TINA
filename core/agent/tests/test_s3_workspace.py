@@ -94,6 +94,37 @@ def _init_git_repo(path: Path, files: dict[str, str], remote_url: str | None = N
         subprocess.run(["git", "-C", str(path), "remote", "add", "origin", remote_url], check=True)
 
 
+def test_unrelated_wiki_write_preserves_newer_chat_history(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from control_plane.api import create_app
+    from control_plane.dispatch import Dispatcher
+    from control_plane.workspace_reader import WorkspaceReader
+    from shared.config import load_settings
+
+    bucket, prefix = "test", "users/42/system"
+    s3 = FakeS3()
+    worker = tmp_path / "worker"
+    history = worker / ".claude" / "tina-bedrock" / "thread.json"
+    history.parent.mkdir(parents=True)
+    history.write_text(json.dumps(["first turn"]))
+    prior, _ = push_workspace(s3, bucket, prefix, "tar", worker, SyncState(prefix=prefix, kind="tar"))
+
+    root = tmp_path / "workspaces"
+    store = S3WorkspaceStore(s3=s3, bucket=bucket, root=root)
+    client_reader = WorkspaceReader(str(root))
+    monkeypatch.setattr(S3WorkspaceStore, "from_env", lambda *args, **kwargs: store)
+    app = create_app(Dispatcher(load_settings(), None, None), reader=client_reader)
+    headers = {"x-user-id": "42"}
+    with TestClient(app) as client:
+        assert client.get("/api/sessions", headers=headers).status_code == 200
+        history.write_text(json.dumps(["first turn", "second turn"]))
+        latest, _ = push_workspace(s3, bucket, prefix, "tar", worker, prior)
+        assert client.post("/api/workspace/shared/new", headers=headers, json={"name": "Synthetic Wiki"}).status_code == 201
+
+    assert s3.head_object(Bucket=bucket, Key=f"{prefix}/head.json")["ETag"] == latest.etag
+
+
 def test_canonical_s3_prefix_mapping(tmp_path):
     root = tmp_path / "workspaces"
     root.mkdir()

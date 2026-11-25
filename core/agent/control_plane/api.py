@@ -1147,7 +1147,8 @@ def create_app(
             def _post_push(before_shared: set[str]) -> None:
                 s3_store.push_attach_state(subject)
                 targets: list[Path] = [wsr.root / subject]
-                if include_sys or (wsr.root / "_system" / subject).exists():
+                # Workspace writes must not publish a cached copy of the worker's chat history.
+                if path == "/api/workspace/init":
                     targets.append(wsr.root / "_system" / subject)
                 att_dir = wsr.root / "_attached" / subject
                 if att_dir.is_dir():
