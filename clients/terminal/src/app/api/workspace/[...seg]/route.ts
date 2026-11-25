@@ -38,21 +38,22 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ seg: string
   }
 }
 
-export async function POST(req: NextRequest, ctx: { params: Promise<{ seg: string[] }> }) {
-  const { seg } = await ctx.params;
+async function forwardWrite(req: NextRequest, seg: string[], method: "POST" | "PUT" | "DELETE") {
   const refused = await refusedResponse(seg);
   if (refused) return refused;
   try {
     const apiKey = await resolveApiKey();
-    const upstream = await fetch(`${GATEWAY_URL}/agent/workspace/${seg.join("/")}${req.nextUrl.search}`, {
-      method: "POST",
-      body: req.body,
-      headers: {
-        "Content-Type": req.headers.get("Content-Type") ?? "",
-        ...(apiKey ? { "X-API-Key": apiKey } : {}),
-      },
-      duplex: "half",
-    } as RequestInit & { duplex: "half" });
+    const headers: Record<string, string> = apiKey ? { "X-API-Key": apiKey } : {};
+    const init: RequestInit & { duplex?: "half" } = { method, headers, cache: "no-store" };
+    if (method !== "DELETE") {
+      headers["Content-Type"] = req.headers.get("Content-Type") ?? "";
+      init.body = req.body;
+      init.duplex = "half";
+    }
+    const upstream = await fetch(`${GATEWAY_URL}/agent/workspace/${seg.join("/")}${req.nextUrl.search}`, init);
+    if (upstream.status === 204 || upstream.status === 205 || upstream.status === 304) {
+      return new Response(null, { status: upstream.status, headers: { "Cache-Control": "no-cache" } });
+    }
     return new Response(await upstream.text(), {
       status: upstream.status,
       headers: { "Content-Type": upstream.headers.get("Content-Type") || "application/json" },
@@ -64,4 +65,19 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ seg: strin
       headers: { "Content-Type": "application/json" },
     });
   }
+}
+
+export async function POST(req: NextRequest, ctx: { params: Promise<{ seg: string[] }> }) {
+  const { seg } = await ctx.params;
+  return forwardWrite(req, seg, "POST");
+}
+
+export async function PUT(req: NextRequest, ctx: { params: Promise<{ seg: string[] }> }) {
+  const { seg } = await ctx.params;
+  return forwardWrite(req, seg, "PUT");
+}
+
+export async function DELETE(req: NextRequest, ctx: { params: Promise<{ seg: string[] }> }) {
+  const { seg } = await ctx.params;
+  return forwardWrite(req, seg, "DELETE");
 }

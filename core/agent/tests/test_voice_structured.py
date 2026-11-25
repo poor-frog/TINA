@@ -261,3 +261,72 @@ def test_voice_uses_completion_port_even_when_chat_runner_is_codex(monkeypatch,m
         'request_id':'api-only','text':json.dumps(source)})}})
     assert calls and events[0]['type']=='message-delta' and events[-1]['type']=='turn-complete'
     if mode=='voice':assert VERIFY_SYSTEM in calls and json.loads(events[0]['text'])['verification']==['approved']
+
+
+def test_bedrock_converse_complete_structured_enforces_tool_choice_and_keeps_complete_plain(monkeypatch):
+    from llm.bedrock_converse import BedrockConverseCompletion, _STRUCTURED_TOOL_NAME
+    from llm.errors import LLMAuthError, LLMResponseError
+
+    seen = []
+
+    class FakeClient:
+        def converse(self, **request):
+            seen.append(request)
+            if 'toolConfig' in request:
+                return {
+                    'stopReason': 'tool_use',
+                    'output': {'message': {'content': [
+                        {'toolUse': {'toolUseId': 't1', 'name': _STRUCTURED_TOOL_NAME,
+                                     'input': {'claims': [{'text': 'Lan làm demo.', 'source_ids': ['s0']}],
+                                               'clarification': None, 'follow_up': None, 'tool_calls': None}}},
+                    ]}},
+                    'usage': {'inputTokens': 12, 'outputTokens': 18},
+                }
+            return {
+                'stopReason': 'end_turn',
+                'output': {'message': {'content': [{'text': 'plain reply'}]}},
+                'usage': {'inputTokens': 5, 'outputTokens': 3},
+            }
+
+    monkeypatch.setenv('TINA_LLM_MODEL', 'amazon.nova-lite-v1:0')
+    adapter = BedrockConverseCompletion(client=FakeClient())
+    schema = voice_schema('answer', [{'id': 's0'}])
+    structured = adapter.complete_structured('Ai làm demo?', system='voice', schema=schema)
+    assert json.loads(structured.text)['claims'][0]['source_ids'] == ['s0']
+    assert structured.usage == {'input_tokens': 12, 'output_tokens': 18}
+    assert seen[0]['toolConfig']['toolChoice'] == {'tool': {'name': _STRUCTURED_TOOL_NAME}}
+    assert seen[0]['toolConfig']['tools'][0]['toolSpec']['inputSchema'] == {'json': schema}
+
+    plain = adapter.complete('ordinary task')
+    assert plain.text == 'plain reply' and 'toolConfig' not in seen[1]
+
+    class UnsupportedClient:
+        def converse(self, **request):
+            exc = RuntimeError('validation failed')
+            exc.response = {
+                'ResponseMetadata': {'HTTPStatusCode': 400},
+                'Error': {'Code': 'ValidationException', 'Message': 'This model does not support toolChoice.'},
+            }
+            raise exc
+
+    with pytest.raises(LLMStructuredOutputUnsupported):
+        BedrockConverseCompletion(client=UnsupportedClient()).complete_structured('synthetic', system='voice', schema=schema)
+
+    class AuthErrorClient:
+        def converse(self, **request):
+            exc = RuntimeError('denied')
+            exc.response = {
+                'ResponseMetadata': {'HTTPStatusCode': 403},
+                'Error': {'Code': 'AccessDeniedException', 'Message': 'Access denied'},
+            }
+            raise exc
+
+    with pytest.raises(LLMAuthError):
+        BedrockConverseCompletion(client=AuthErrorClient()).complete_structured('synthetic', system='voice', schema=schema)
+
+    class MissingToolClient:
+        def converse(self, **request):
+            return {'stopReason': 'end_turn', 'output': {'message': {'content': [{'text': 'unstructured'}]}}}
+
+    with pytest.raises(LLMResponseError):
+        BedrockConverseCompletion(client=MissingToolClient()).complete_structured('synthetic', system='voice', schema=schema)

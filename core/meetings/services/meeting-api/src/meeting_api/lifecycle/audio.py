@@ -8,6 +8,8 @@ from fastapi import APIRouter, Header, HTTPException
 
 
 def audio_key():
+    explicit=os.environ.get('LIVEKIT_API_SECRET','')
+    if explicit: return explicit.encode()
     secret=os.environ.get('INTERNAL_API_SECRET','')
     if not secret: raise ValueError('Internal service secret is required for audio bridge')
     return hmac.new(secret.encode(),b'tina-livekit-server:v1','sha256').hexdigest().encode()

@@ -132,6 +132,15 @@ def test_ecs_backend_s3_ephemeral_isolates_sts_creds_to_sync_sidecar():
     assert "AWS_SESSION_TOKEN" not in worker_env
     assert "REDIS_URL" not in worker_env
     assert "TINA_WORKSPACE_SYNC_SIDECAR=1" in worker_env
+    assert "TINA_IDLE_TIMEOUT_SEC=300" in worker_env
     assert "AWS_ACCESS_KEY_ID=ASIA_TEMP_KEY" in sync_env
     assert "AWS_SESSION_TOKEN=SESSION_TEMP_TOKEN" in sync_env
     assert "TINA_S3_BUCKET=tina-ws-bucket" in sync_env
+
+
+def test_ecs_backend_honors_workspace_idle_timeout_env(monkeypatch):
+    monkeypatch.setenv("RUNTIME_WORKSPACE_IDLE_TIMEOUT_SEC", "600")
+    from runtime_kernel.ecs_backend import _workspace_idle_timeout_sec
+    assert _workspace_idle_timeout_sec() == "600"
+    monkeypatch.setenv("RUNTIME_WORKSPACE_IDLE_TIMEOUT_SEC", "invalid")
+    assert _workspace_idle_timeout_sec() == "300"

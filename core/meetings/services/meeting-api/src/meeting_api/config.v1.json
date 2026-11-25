@@ -852,6 +852,16 @@
         "helm"
       ],
       "description": "Optional internal self-hosted LiveKit Agents pilot. Empty keeps TINA native voice; per-room owner opt-in is required."
+    },
+    {
+      "key": "LIVEKIT_API_SECRET",
+      "class": "defaulted",
+      "default": "",
+      "targets": [
+        "compose",
+        "helm"
+      ],
+      "description": "Optional shared LiveKit HMAC secret for audio bridge capability signing when LiveKit uses an independent secret from INTERNAL_API_SECRET."
     }
   ],
   "capabilities": {

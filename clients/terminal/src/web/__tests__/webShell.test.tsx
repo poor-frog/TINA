@@ -340,16 +340,21 @@ describe("WebShell production UI (Option A & Option B)", () => {
 
   function mockEnvironment({
     admin,
+    workspacePilot,
     liveAssistState = { configured: false, enabled: false, can_configure: true, readonly: false, revision: 0, items: [] },
   }: {
     admin: boolean;
+    workspacePilot?: boolean;
     liveAssistState?: Record<string, unknown>;
   }) {
     let currentState = { ...liveAssistState };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/api/auth/me")) {
-        return new Response(JSON.stringify({ user: { name: "Sarup Banskota", email: "sarup@tina.local" } }), { status: 200 });
+        return new Response(JSON.stringify({
+          user: { name: "Sarup Banskota", email: "sarup@tina.local" },
+          ...(typeof workspacePilot === "boolean" ? { workspacePilot } : {}),
+        }), { status: 200 });
       }
       if (url.includes("/api/admin/me")) {
         return new Response(admin ? JSON.stringify({ ok: true }) : "{}", { status: admin ? 200 : 404 });
@@ -715,5 +720,23 @@ describe("WebShell production UI (Option A & Option B)", () => {
     expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("checkbox", { name: /I have read this warning/i }));
     expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("unlocks Ask Tina in WebShell for authorized workspace-pilot users and hides it for non-pilot users", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TERMINAL_MODE", "workspace-pilot");
+    try {
+      mockEnvironment({ admin: false, workspacePilot: true });
+      const { unmount } = render(<WebShell />);
+      expect(await screen.findByRole("button", { name: "Ask Tina" })).toBeTruthy();
+      unmount();
+
+      mockEnvironment({ admin: false, workspacePilot: false });
+      render(<WebShell />);
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: "Ask Tina" })).toBeNull();
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

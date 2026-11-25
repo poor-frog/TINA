@@ -68,6 +68,13 @@ def _validate_workspace_runner(env: dict[str, str], *, allow_multi_provider: boo
     raise ValueError("Unsupported staging workspace runner")
 
 
+def _workspace_idle_timeout_sec() -> str:
+    raw = (os.environ.get("RUNTIME_WORKSPACE_IDLE_TIMEOUT_SEC") or "").strip()
+    if raw.isdigit() and 60 <= int(raw) <= 3600:
+        return raw
+    return "300"
+
+
 def _encode_dotenv(env: dict[str, str]) -> bytes:
     if any(
         not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
@@ -250,7 +257,7 @@ class ECSBackend:
                 env.setdefault("HOME", f"/workspaces/_system/{task.owner}")
                 if env.get("TINA_RUNNER") == "codex" and env.get("TINA_CODEX_AUTH_MODE") == "chatgpt-plan":
                     env.setdefault("TINA_AGENT_MODEL", "gpt-6-luna")
-                env.update(TINA_IDLE_TIMEOUT_SEC="120", TINA_WORKSPACE_STREAM_SIDECAR="1",
+                env.update(TINA_IDLE_TIMEOUT_SEC=_workspace_idle_timeout_sec(), TINA_WORKSPACE_STREAM_SIDECAR="1",
                            TINA_WORKSPACE_SYNC_SIDECAR="1", TINA_UNIT_TOOLS="[]")
             else:
                 use_pinned = env.get("CLAUDE_CODE_USE_BEDROCK") != "1"
@@ -275,7 +282,7 @@ class ECSBackend:
                 env = {k: v for k, v in env.items() if k in _WORKSPACE_ALLOWED_ENV_FIELDS and v != ""}
                 if env.get("TINA_RUNNER") == "codex" and env.get("TINA_CODEX_AUTH_MODE") == "chatgpt-plan":
                     env.setdefault("TINA_AGENT_MODEL", "gpt-6-luna")
-                env.update(TINA_IDLE_TIMEOUT_SEC="120",
+                env.update(TINA_IDLE_TIMEOUT_SEC=_workspace_idle_timeout_sec(),
                            TINA_WORKSPACE_STREAM_SIDECAR="1", TINA_UNIT_TOOLS="[]")
         elif env.get("TINA_POST_MEETING_DRAFT") == "1":
             required = {"TINA_POST_MEETING_DRAFT", "TINA_START", "TINA_CHAT_SESSION", "TINA_UNIT_OUT_TOPIC"}

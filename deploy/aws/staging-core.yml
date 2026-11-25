@@ -23,6 +23,7 @@ Parameters:
   TtsTokenArn: {Type: String, Default: ''}
   TtsProfileKeyArn: {Type: String, Default: ''}
   LiveKitAgentUrl: {Type: String, Default: ''}
+  LiveKitSecretArn: {Type: String, Default: ''}
   AgentApiUrl: {Type: String, Default: ''}
   McpUrl: {Type: String, Default: ''}
   McpGatewayTargetGroupArn: {Type: String, Default: ''}
@@ -40,6 +41,9 @@ Conditions:
     - !Not [!Equals [!Ref TtsTokenArn, '']]
     - !Not [!Equals [!Ref TtsProfileKeyArn, '']]
     - !Not [!Equals [!Ref LiveKitAgentUrl, '']]
+  WithLiveKitAudio: !And
+    - !Condition WithVoice
+    - !Not [!Equals [!Ref LiveKitSecretArn, '']]
   WithAgentApi: !Not [!Equals [!Ref AgentApiUrl, '']]
   WithMcp: !And
     - !Not [!Equals [!Ref McpUrl, '']]
@@ -126,6 +130,7 @@ Resources:
                   - !If [WithTranscription, !Ref TranscriptionTokenArn, !Ref 'AWS::NoValue']
                   - !If [WithVoice, !Ref TtsTokenArn, !Ref 'AWS::NoValue']
                   - !If [WithVoice, !Ref TtsProfileKeyArn, !Ref 'AWS::NoValue']
+                  - !If [WithLiveKitAudio, !Ref LiveKitSecretArn, !Ref 'AWS::NoValue']
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -268,6 +273,7 @@ Resources:
               - !Ref AWS::NoValue
             - !If [WithVoice, {Name: TTS_SERVICE_URL, Value: !Ref TtsUrl}, !Ref 'AWS::NoValue']
             - !If [WithVoice, {Name: LIVEKIT_AGENT_URL, Value: !Ref LiveKitAgentUrl}, !Ref 'AWS::NoValue']
+            - !If [WithLiveKitAudio, {Name: TINA_LIVEKIT_AUDIO, Value: '1'}, !Ref 'AWS::NoValue']
             - !If [WithAgentApi, {Name: AGENT_API_URL, Value: !Ref AgentApiUrl}, !Ref 'AWS::NoValue']
             - !If [WithVoicePilot, {Name: TINA_MEETING_VOICE, Value: '1'}, !Ref 'AWS::NoValue']
             - !If [WithVoicePilot, {Name: TINA_MEETING_VOICE_PILOT_ROOM, Value: !Ref VoicePilotRoom}, !Ref 'AWS::NoValue']
@@ -283,6 +289,7 @@ Resources:
               - !Ref AWS::NoValue
             - !If [WithVoice, {Name: TTS_API_TOKEN, ValueFrom: !Ref TtsTokenArn}, !Ref 'AWS::NoValue']
             - !If [WithVoice, {Name: TINA_TTS_PROFILE_KEY, ValueFrom: !Ref TtsProfileKeyArn}, !Ref 'AWS::NoValue']
+            - !If [WithLiveKitAudio, {Name: LIVEKIT_API_SECRET, ValueFrom: !Ref LiveKitSecretArn}, !Ref 'AWS::NoValue']
           Command:
             - python
             - -c

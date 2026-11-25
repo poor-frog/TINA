@@ -1096,7 +1096,7 @@ def create_app(
             # e.g. /api/workspace/<wid>/leave|unshare|share-enable|archive or /api/workspace/shared/<wid>/active
             if len(parts) >= 4 and parts[0] == "api" and parts[1] == "workspace":
                 cand = parts[3] if parts[2] == "shared" and len(parts) >= 5 else parts[2]
-                if (cand and cand not in ("tree", "file", "search", "git", "init", "active", "attached",
+                if (cand and cand not in ("tree", "file", "search", "document", "git", "init", "active", "attached",
                                           "shared", "purpose", "new", "upload", "activate", "deactivate",
                                           "rename", "swap", "publish", "push", "pull", "members", "invites",
                                           "meeting-knowledge")

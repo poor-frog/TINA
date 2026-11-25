@@ -85,8 +85,9 @@ def build_voice_settings_router(redis, client_factory=httpx.AsyncClient, repo=No
                 wake['sessions'].append({'meeting_id':row['id'], 'status':status})
             statuses = {r['status'] for r in wake['sessions']}
             if statuses: wake['status'] = next((s for s in ['failed','unknown','starting','off','ready'] if s in statuses))
+        voice_pilot_rooms = set(os.environ.get('TINA_MEETING_VOICE_PILOT_ROOM', '').replace(',', ' ').split())
         return {'wake':wake,
-                'new_meeting_policy':new_meeting_voice_policy(),
+                'new_meeting_policy':new_meeting_voice_policy(transcript_only=bool(voice_pilot_rooms)),
                 'voice_pipeline_configured':os.environ.get('TINA_MEETING_VOICE', '').lower() in ('1','true','yes','on'),
                 'default_prepare_new_bots':bool(url), 'tts':tts,'noise_filter':noise_filter}
 

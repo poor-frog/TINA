@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveApiKey } from "../../proxyAuth";
 import { refusedInMeetingsMode } from "../../proxyMode";
+import { canUseWorkspacePilot } from "../../auth/workspacePilot";
 
 export const dynamic = "force-dynamic";
 const GATEWAY_URL = (process.env.GATEWAY_URL || "http://127.0.0.1:18056").replace(/\/$/, "");
@@ -12,8 +13,8 @@ const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate" } as c
  *  shows the list before Save); it is forwarded once and never stored or echoed. Omitting it makes
  *  agent-api use the saved effective key for that provider. Never log the body. */
 export async function POST(request: Request) {
-  // Meetings-only mode refuses the agent branch at the edge (same rule as the catch-all proxy).
-  if (refusedInMeetingsMode("models/catalog")) {
+  // Meetings-only / workspace-pilot gate: refuse unauthorized requests at the edge.
+  if (refusedInMeetingsMode("models/catalog") || !(await canUseWorkspacePilot("models/catalog"))) {
     return NextResponse.json(
       { error: "not_found", detail: "agent endpoints are disabled in meetings mode" },
       { status: 404, headers: NO_STORE },

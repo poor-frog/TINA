@@ -39,6 +39,14 @@ async def test_service_metadata_is_authenticated_safe_and_reports_the_actual_voi
     assert requests[0].headers['X-API-Key']=='synthetic-secret'
 
 
+async def test_service_metadata_reports_transcript_only_policy_when_pilot_room_is_set(settings, monkeypatch):
+    client, _, _ = settings
+    monkeypatch.setenv('TINA_MEETING_VOICE_PILOT_ROOM', 'abc-defg-hij')
+    r = await client.get('/bots/voice/services', headers={'X-User-Id': '7'})
+    from meeting_api.lifecycle.voice import new_meeting_voice_policy
+    assert r.json()['new_meeting_policy'] == new_meeting_voice_policy(transcript_only=True)
+
+
 async def test_services_reports_selected_filter_without_forwarding_tts_key_to_livekit(monkeypatch):
     monkeypatch.setenv('LIVEKIT_AGENT_URL','http://livekit.test')
     monkeypatch.setenv('TTS_SERVICE_URL','http://tts.test');monkeypatch.setenv('TTS_API_TOKEN','synthetic-secret')

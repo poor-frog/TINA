@@ -185,4 +185,5 @@ Outputs:
   LiveKitUrl: {Value: 'ws://voice.tina-staging.local:7880'}
   TtsTokenArn: {Value: !Ref TtsToken}
   TtsProfileKeyArn: {Value: !Ref TtsProfileKey}
+  LiveKitSecretArn: {Value: !Ref LiveKitSecret}
   LogGroupName: {Value: !Ref Logs}

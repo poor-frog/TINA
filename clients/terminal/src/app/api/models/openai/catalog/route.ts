@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 import { resolveApiKey } from "../../../proxyAuth";
+import { refusedInMeetingsMode } from "../../../proxyMode";
+import { canUseWorkspacePilot } from "../../../auth/workspacePilot";
 
 export const dynamic = "force-dynamic";
 const GATEWAY_URL = (process.env.GATEWAY_URL || "http://127.0.0.1:18056").replace(/\/$/, "");
 const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate" } as const;
 
 export async function GET() {
+  if (refusedInMeetingsMode("models/openai/catalog") || !(await canUseWorkspacePilot("models/openai/catalog"))) {
+    return NextResponse.json(
+      { error: "not_found", detail: "agent endpoints are disabled in meetings mode" },
+      { status: 404, headers: NO_STORE },
+    );
+  }
   try {
     const apiKey = await resolveApiKey();
     const upstream = await fetch(`${GATEWAY_URL}/agent/models/openai/catalog`, {
