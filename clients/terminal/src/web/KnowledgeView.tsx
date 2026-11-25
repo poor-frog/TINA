@@ -1,12 +1,12 @@
 "use client";
-/** KnowledgeView — Full Knowledge Hub v2 for TINA's Production Web UI (`/?nav=knowledge`).
- *  Unifies Personal & Extra workspaces, Shared Team Wikis (owner/contributor direct editing & uploads),
- *  and the read-only `_global` Platform Guide with:
- *  - Inline Ask Tina Copilot Drawer (1-click Summarize / Extract Tasks / Suggest Links + auto-refresh)
- *  - Split-Preview Markdown Editor with formatting toolbar, `[[` wikilink autocomplete, and Unsaved guard
- *  - Reading Outline (H2/H3 TOC), live Backlinks, Meeting Provenance, and Cross-Workspace Full-Text Search
- *  - URL Deep-Linking (`?nav=knowledge&ws=&doc=&tab=`) + Obsidian Back/Forward history (`Alt+← / Alt+→`)
- *  - Drag-and-Drop file uploads, Entity-Lane Knowledge Graph (Pan/Fit/1-hop/Orphans), and GitHub Sync. */
+/** KnowledgeView — Notion-style Non-Tech Knowledge Hub (v3) for TINA's Production Web UI (`/?nav=knowledge`).
+ *  - Compact Workspace Picker dropdown (`My Space`, Team Spaces, `Templates & Guides`, `+ Create new space`)
+ *  - Single Unified Smart Search (filters titles immediately + searches content seamlessly)
+ *  - Clean Topic-Based Sidebar (`Overview`, `Connections Map`, `Pages & Notes`, `Meeting Notes`,
+ *    `Projects`, `People`, `Tasks`, `Uploaded Files`) with zero developer jargon by default
+ *  - Friendly Library Overview home screen + clean single-bar Page Reader + YAML-free Page Editor
+ *  - Inline Ask Tina Copilot drawer, Connections Map, Drag-and-Drop file uploads, Activity & Settings
+ *    (with collapsible `Advanced · GitHub Sync`), and a subtle `Developer view` switch (OFF by default). */
 import {
   useCallback,
   useEffect,
@@ -22,6 +22,23 @@ import { WebIcon } from "./Icons";
 import { KnowledgeGraphCanvas } from "./KnowledgeGraphCanvas";
 import { KnowledgeCopilotDrawer } from "./KnowledgeCopilotDrawer";
 import { KnowledgeDocEditor } from "./KnowledgeDocEditor";
+import {
+  CATEGORY_BY_ID,
+  LIBRARY_CATEGORIES,
+  buildFriendlyMovePath,
+  buildNewPageTemplate,
+  categorizePath,
+  fileExtensionBadge,
+  friendlyPageTitle,
+  friendlyRoleLabel,
+  friendlyWorkspaceLabel,
+  isUploadedOrNonMarkdown,
+  parseDocumentClean,
+  sectionFromPath,
+  visibleHumanMetadata,
+  type LibraryCategory,
+  type NewPageKind,
+} from "./knowledgeFriendly";
 import { MdxDoc } from "../ui-kit/MdxDoc";
 import {
   DocMetaContext,
@@ -77,15 +94,16 @@ import {
 import styles from "./knowledgeView.module.css";
 
 type KnowledgeTab = "documents" | "graph" | "sync";
-type EntityFilter = "all" | "meeting" | "person" | "project" | "task" | "docs";
 
 interface WorkspaceEntry {
   id: string;
   slug?: string;
   slotSlug?: string;
+  rawName: string;
   name: string;
   kind: "personal" | "extra" | "shared" | "global";
   role?: string;
+  roleLabel: string;
   mounted: boolean;
   readOnly: boolean;
 }
@@ -118,6 +136,17 @@ export interface KnowledgeDeepLink {
   tab?: KnowledgeTab;
 }
 
+const DEV_VIEW_STORAGE_KEY = "tina.knowledge.devView";
+
+function readInitialDevView(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(DEV_VIEW_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function buildTree(paths: string[]): TreeNode[] {
   const root: TreeNode = { name: "", path: "", isDir: true, children: [] };
   for (const raw of [...paths].sort()) {
@@ -141,17 +170,6 @@ function buildTree(paths: string[]): TreeNode[] {
   return sortNodes(root.children);
 }
 
-function parseFrontmatter(text: string): { fm: Array<[string, string]>; body: string } {
-  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!m) return { fm: [], body: text };
-  const fm: Array<[string, string]> = [];
-  for (const line of m[1].split(/\r?\n/)) {
-    const idx = line.indexOf(":");
-    if (idx > 0) fm.push([line.slice(0, idx).trim(), line.slice(idx + 1).trim()]);
-  }
-  return { fm, body: m[2] };
-}
-
 function extractHeadings(markdown: string): OutlineHeading[] {
   const headings: OutlineHeading[] = [];
   let inFence = false;
@@ -167,33 +185,6 @@ function extractHeadings(markdown: string): OutlineHeading[] {
     }
   }
   return headings;
-}
-
-function matchesEntityFilter(path: string, filter: EntityFilter): boolean {
-  if (filter === "all") return true;
-  if (filter === "meeting") return path.startsWith("kg/entities/meeting/") || path.startsWith("wiki/meetings/");
-  if (filter === "person") return path.startsWith("kg/entities/person/");
-  if (filter === "project") return path.startsWith("kg/entities/project/");
-  if (filter === "task") return path.startsWith("kg/entities/task/");
-  if (filter === "docs") {
-    return (
-      path === "README.md" ||
-      path === "CLAUDE.md" ||
-      path.startsWith("docs/") ||
-      path.startsWith("wiki/") ||
-      path.startsWith("notes/") ||
-      path.startsWith("mail/")
-    );
-  }
-  return true;
-}
-
-function pickInitialDoc(files: string[]): string | null {
-  if (!files.length) return null;
-  for (const preferred of ["README.md", "docs/tina-handbook.md", "kg/index.md"]) {
-    if (files.includes(preferred)) return preferred;
-  }
-  return files.find((f) => f.endsWith(".md")) ?? files[0] ?? null;
 }
 
 function renderDiffLines(diff: string): ReactNode {
@@ -219,38 +210,6 @@ function renderDiffLines(diff: string): ReactNode {
   });
 }
 
-function newDocTemplate(kind: string, title: string): { path: string; content: string } {
-  const cleanTitle = title.trim() || "Untitled";
-  const slug =
-    cleanTitle
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "untitled";
-  const today = new Date().toISOString().slice(0, 10);
-  if (kind === "person") {
-    return {
-      path: `kg/entities/person/${slug}.md`,
-      content: `---\nid: person/${slug}\ntype: person\ntitle: ${cleanTitle}\nupdated: ${today}\n---\n\n# ${cleanTitle}\n\n## Role\n\n## Related projects\n`,
-    };
-  }
-  if (kind === "project") {
-    return {
-      path: `kg/entities/project/${slug}.md`,
-      content: `---\nid: project/${slug}\ntype: project\ntitle: ${cleanTitle}\nstatus: active\nupdated: ${today}\n---\n\n# ${cleanTitle}\n\n## Goals\n\n## Key decisions\n`,
-    };
-  }
-  if (kind === "wiki") {
-    return {
-      path: `wiki/${slug}.md`,
-      content: `# ${cleanTitle}\n\nCreated ${today}.\n`,
-    };
-  }
-  return {
-    path: `notes/${slug}.md`,
-    content: `# ${cleanTitle}\n\n`,
-  };
-}
-
 function readUrlDeepLink(): KnowledgeDeepLink {
   if (typeof window === "undefined") return {};
   const sp = new URLSearchParams(window.location.search);
@@ -273,7 +232,8 @@ function syncKnowledgeUrl(wsSlug: string | undefined, docPath: string | null, ta
   else url.searchParams.delete("ws");
   if (docPath) url.searchParams.set("doc", docPath);
   else url.searchParams.delete("doc");
-  url.searchParams.set("tab", tab);
+  if (tab !== "documents" || docPath) url.searchParams.set("tab", tab);
+  else url.searchParams.delete("tab");
   const next = `${url.pathname}?${url.searchParams.toString()}${url.hash}`;
   if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== next) {
     try {
@@ -290,6 +250,18 @@ function resolveWorkspaceIdBySlug(workspaces: WorkspaceEntry[], wsParam?: string
   const match = workspaces.find((w) => w.slug === wsParam || w.slotSlug === wsParam || w.id === wsParam);
   return match?.id ?? null;
 }
+
+const NEW_PAGE_CARDS: ReadonlyArray<{
+  kind: NewPageKind;
+  title: string;
+  desc: string;
+  icon: "fileText" | "edit" | "layers" | "user";
+}> = [
+  { kind: "wiki", title: "Page", desc: "Guide, spec, or shared doc", icon: "fileText" },
+  { kind: "notes", title: "Quick Note", desc: "Scratchpad, ideas, or draft", icon: "edit" },
+  { kind: "project", title: "Project", desc: "Goals, milestones & decisions", icon: "layers" },
+  { kind: "person", title: "Person", desc: "Profile, role & meeting links", icon: "user" },
+];
 
 export function KnowledgeView({
   onAskTina,
@@ -309,33 +281,47 @@ export function KnowledgeView({
     bootLink.ws || bootLink.doc || bootLink.tab ? bootLink : null,
   );
 
-  // ── Workspaces state ─────────────────────────────────────────────────
+  // ── Developer view preference (OFF by default) ───────────────────────
+  const [devView, setDevView] = useState<boolean>(readInitialDevView);
+  const toggleDevView = useCallback(() => {
+    setDevView((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(DEV_VIEW_STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore storage errors */
+      }
+      return next;
+    });
+  }, []);
+
+  // ── Workspaces & Picker state ────────────────────────────────────────
   const [attached, setAttached] = useState<AttachedWorkspaces>({ active: null, slots: {} });
   const [activeSet, setActiveSet] = useState<ActiveMount[]>([]);
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [hasGlobal, setHasGlobal] = useState(false);
   const [selectedWsId, setSelectedWsId] = useState<string>("personal");
   const [wsLoading, setWsLoading] = useState(true);
+  const [wsMenuOpen, setWsMenuOpen] = useState(false);
+  const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
 
-  // Create workspace inline form
+  // Create space modal
   const [createWsOpen, setCreateWsOpen] = useState(false);
   const [newWsName, setNewWsName] = useState("");
   const [newWsShared, setNewWsShared] = useState(false);
 
-  // ── Tree, Search & Filter state ──────────────────────────────────────
+  // ── Library & Unified Search state ───────────────────────────────────
   const [files, setFiles] = useState<string[]>([]);
   const [treeLoading, setTreeLoading] = useState(false);
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set(["kg", "kg/entities", "docs", "wiki"]));
-  const [entityFilter, setEntityFilter] = useState<EntityFilter>("all");
+  const [collapsedCats, setCollapsedCats] = useState<Set<LibraryCategory>>(() => new Set());
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchMode, setSearchMode] = useState<"files" | "content">("files");
-  const [searchAllWorkspaces, setSearchAllWorkspaces] = useState(false);
+  const [searchAllSpaces, setSearchAllSpaces] = useState(false);
   const [contentHits, setContentHits] = useState<CrossSearchHit[]>([]);
-  const [contentSearchStatus, setContentSearchStatus] = useState("");
   const [searchingContent, setSearchingContent] = useState(false);
 
-  // ── Main pane tabs, Document, Copilot & History state ────────────────
+  // ── Main pane navigation, Document, Copilot & History state ──────────
   const [activeTab, setActiveTab] = useState<KnowledgeTab>(bootLink.tab ?? "documents");
   const [selectedPath, setSelectedPath] = useState<string | null>(bootLink.doc ?? null);
   const [doc, setDoc] = useState<WorkspaceDocument | null>(null);
@@ -345,11 +331,12 @@ export function KnowledgeView({
   const [commitOnSave, setCommitOnSave] = useState(true);
   const [commitMsg, setCommitMsg] = useState("");
   const [copilotOpen, setCopilotOpen] = useState(false);
+  const [copilotSeedPrompt, setCopilotSeedPrompt] = useState<string | null>(null);
   const [graphRefreshKey, setGraphRefreshKey] = useState(0);
   const [backlinks, setBacklinks] = useState<WorkspaceSearchHit[]>([]);
   const [backlinksLoading, setBacklinksLoading] = useState(false);
 
-  // Obsidian-style Back / Forward history stack
+  // Reading history stack (Back / Forward)
   const [navHistory, setNavHistory] = useState<HistoryEntry[]>([]);
   const [navIndex, setNavIndex] = useState<number>(-1);
   const navigatingHistoryRef = useRef(false);
@@ -358,22 +345,26 @@ export function KnowledgeView({
   const [dragActive, setDragActive] = useState(false);
   const dragDepthRef = useRef(0);
 
-  // ── Modals: Create Doc & Move Doc ────────────────────────────────────
+  // ── Modals: Create Page & Rename/Move Page ───────────────────────────
   const [newDocOpen, setNewDocOpen] = useState(false);
-  const [newDocKind, setNewDocKind] = useState<"notes" | "wiki" | "person" | "project">("wiki");
+  const [newDocKind, setNewDocKind] = useState<NewPageKind>("wiki");
   const [newDocTitle, setNewDocTitle] = useState("");
   const [newDocCustomPath, setNewDocCustomPath] = useState("");
 
   const [moveOpen, setMoveOpen] = useState(false);
+  const [moveName, setMoveName] = useState("");
+  const [moveSection, setMoveSection] = useState<"wiki" | "notes" | "project" | "person" | "task">("wiki");
   const [moveDest, setMoveDest] = useState("");
   const [moveUpdateLinks, setMoveUpdateLinks] = useState(true);
   const [movePreview, setMovePreview] = useState<DocumentMovePreview | null>(null);
 
-  // ── History, Sync & Workspace Management state ───────────────────────
+  // ── Activity, Settings & Advanced GitHub Sync state ──────────────────
   const [gitState, setGitState] = useState<GitState | null>(null);
   const [remoteStatus, setRemoteStatus] = useState<GitRemoteStatus | null>(null);
   const [gitToken, setGitToken] = useState<SavedGitToken>({ set: false, masked: null });
+  const [advancedSyncOpen, setAdvancedSyncOpen] = useState(false);
   const [expandedSha, setExpandedSha] = useState<string | null>(null);
+  const [showDiffSha, setShowDiffSha] = useState<string | null>(null);
   const [diffsBySha, setDiffsBySha] = useState<Record<string, string>>({});
   const [purpose, setPurpose] = useState("");
   const [purposeDraft, setPurposeDraft] = useState("");
@@ -389,17 +380,46 @@ export function KnowledgeView({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docProseRef = useRef<HTMLDivElement>(null);
 
+  // Automatically expand Advanced GitHub Sync when Developer view is enabled
+  useEffect(() => {
+    if (devView) setAdvancedSyncOpen(true);
+  }, [devView]);
+
+  // Close popovers on Escape or outside click
+  useEffect(() => {
+    if (!wsMenuOpen && !pageMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setWsMenuOpen(false);
+        setPageMenuOpen(false);
+      }
+    };
+    const onClick = () => {
+      setWsMenuOpen(false);
+      setPageMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("click", onClick);
+    };
+  }, [wsMenuOpen, pageMenuOpen]);
+
   const workspaces = useMemo<WorkspaceEntry[]>(() => {
     const entries: WorkspaceEntry[] = [];
     const primaryMount = activeSet.find((m) => m.primary);
     const seedSlug = attached.active ?? "seed";
     const seedMeta = attached.slots[seedSlug];
+    const personalRaw = seedMeta?.name || primaryMount?.name || "Personal";
     entries.push({
       id: "personal",
       slug: undefined,
       slotSlug: seedSlug,
-      name: seedMeta?.name || primaryMount?.name || "Personal",
+      rawName: personalRaw,
+      name: friendlyWorkspaceLabel(personalRaw, "personal"),
       kind: "personal",
+      roleLabel: friendlyRoleLabel(undefined, "personal"),
       mounted: Boolean(primaryMount) || activeSet.length === 0,
       readOnly: false,
     });
@@ -408,12 +428,15 @@ export function KnowledgeView({
     for (const [slotSlug, meta] of Object.entries(attached.slots)) {
       if (meta.archived || slotSlug === seedSlug || slotSlug === "seed-prev" || sharedIds.has(slotSlug)) continue;
       const isMounted = activeSet.some((m) => m.slug === slotSlug && m.role !== "shared");
+      const raw = meta.name || meta.repo || slotSlug;
       entries.push({
         id: `extra:${slotSlug}`,
         slug: slotSlug,
         slotSlug,
-        name: meta.name || meta.repo || slotSlug,
+        rawName: raw,
+        name: friendlyWorkspaceLabel(raw, "extra"),
         kind: "extra",
+        roleLabel: friendlyRoleLabel(undefined, "extra"),
         mounted: isMounted,
         readOnly: false,
       });
@@ -425,9 +448,11 @@ export function KnowledgeView({
         id: `shared:${mem.workspace_id}`,
         slug: mem.workspace_id,
         slotSlug: mem.workspace_id,
-        name: mem.workspace_id,
+        rawName: mem.workspace_id,
+        name: friendlyWorkspaceLabel(mem.workspace_id, "shared"),
         kind: "shared",
         role: mem.role,
+        roleLabel: friendlyRoleLabel(mem.role, "shared"),
         mounted: isMounted,
         readOnly: mem.role !== "owner" && mem.role !== "contributor",
       });
@@ -438,9 +463,11 @@ export function KnowledgeView({
         id: "global",
         slug: "_global",
         slotSlug: "_global",
-        name: "Platform Guide (_global)",
+        rawName: "Platform Guide (_global)",
+        name: friendlyWorkspaceLabel("Platform Guide", "global"),
         kind: "global",
         role: "read-only",
+        roleLabel: friendlyRoleLabel("read-only", "global"),
         mounted: true,
         readOnly: true,
       });
@@ -454,12 +481,11 @@ export function KnowledgeView({
     [workspaces, selectedWsId],
   );
 
-  // Unsaved draft guard helper
   const isUnsaved = editing && doc !== null && draft !== doc.content;
   const confirmDiscardDraft = useCallback((): boolean => {
     if (!isUnsaved) return true;
     if (typeof window === "undefined") return true;
-    return window.confirm("You have unsaved Markdown changes. Discard them?");
+    return window.confirm("You have unsaved changes. Discard them?");
   }, [isUnsaved]);
 
   // ── Apply external deep-link (e.g. from Cmd+K Global Search) ─────────
@@ -512,7 +538,7 @@ export function KnowledgeView({
     syncKnowledgeUrl(activeWs.slug, selectedPath, activeTab);
   }, [wsLoading, activeWs, selectedPath, activeTab]);
 
-  // Record Obsidian reading history whenever (ws, path) settles
+  // Record Back / Forward reading history whenever a page opens
   useEffect(() => {
     if (!activeWs || !selectedPath) return;
     if (navigatingHistoryRef.current) {
@@ -547,7 +573,7 @@ export function KnowledgeView({
     [navIndex, navHistory, confirmDiscardDraft],
   );
 
-  // Alt+Left / Alt+Right keyboard shortcuts for Back / Forward
+  // Alt+Left / Alt+Right shortcuts for Back / Forward
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.altKey && e.key === "ArrowLeft" && canGoBack) {
@@ -562,20 +588,17 @@ export function KnowledgeView({
     return () => window.removeEventListener("keydown", onKey);
   }, [canGoBack, canGoForward, goHistory]);
 
-  // ── Load file tree & metadata for selected workspace ─────────────────
+  // ── Load file list & space metadata ──────────────────────────────────
   const loadTreeAndMeta = useCallback(async (ws: WorkspaceEntry, keepSelection = true) => {
     setTreeLoading(true);
     setError(null);
     setContentHits([]);
-    setContentSearchStatus("");
     try {
       const opts = ws.slug ? { slug: ws.slug } : undefined;
       const [treeFiles, wsPurpose] = await Promise.all([
         listWorkspaceTree(opts),
         ws.kind === "global"
-          ? Promise.resolve(
-              "Platform-wide read-only guidelines, handbook, and email templates mounted into every TINA session.",
-            )
+          ? Promise.resolve("Built-in starter guides, handbooks, and email templates available across every space.")
           : readWorkspacePurpose(opts).catch(() => ""),
       ]);
       setFiles(treeFiles);
@@ -583,7 +606,7 @@ export function KnowledgeView({
       setPurposeDraft(wsPurpose);
       setRenameDraft(ws.name);
       setPublishRepoName(
-        `tina-${ws.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "knowledge"}`,
+        `tina-${ws.rawName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "knowledge"}`,
       );
       const pendingDoc = pendingDeepLinkRef.current?.doc;
       if (pendingDoc && treeFiles.includes(pendingDoc)) {
@@ -592,7 +615,7 @@ export function KnowledgeView({
       } else {
         setSelectedPath((prev) => {
           if (keepSelection && prev && treeFiles.includes(prev)) return prev;
-          return pickInitialDoc(treeFiles);
+          return null; // Land on the friendly Library Overview!
         });
       }
     } catch (err) {
@@ -609,6 +632,7 @@ export function KnowledgeView({
     setEditing(false);
     setInviteLink(null);
     setExpandedSha(null);
+    setShowDiffSha(null);
     setDiffsBySha({});
     void loadTreeAndMeta(activeWs, Boolean(pendingDeepLinkRef.current?.doc));
   }, [activeWs?.id, activeWs?.slug]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -650,30 +674,35 @@ export function KnowledgeView({
     void loadDocument(selectedPath, activeWs?.slug);
   }, [selectedPath, activeWs?.slug, loadDocument]);
 
-  // ── Compute live Backlinks for open document ─────────────────────────
-  const parsedDoc = useMemo(() => (doc ? parseFrontmatter(doc.content) : null), [doc]);
+  // ── Parsed document, TOC outline, meeting provenance & backlinks ─────
+  const parsedDoc = useMemo(
+    () => (doc && selectedPath ? parseDocumentClean(doc.content, selectedPath) : null),
+    [doc, selectedPath],
+  );
   const outlineHeadings = useMemo(
-    () => (parsedDoc ? extractHeadings(parsedDoc.body) : []),
+    () => (parsedDoc ? extractHeadings(parsedDoc.bodyWithoutLeadingH1) : []),
+    [parsedDoc],
+  );
+  const humanMeta = useMemo(
+    () => (parsedDoc ? visibleHumanMetadata(parsedDoc.fieldMap) : []),
     [parsedDoc],
   );
   const sourceMeetingId = useMemo(() => {
     if (!selectedPath) return null;
     const pathMatch = /^wiki\/meetings\/(\d+)\//.exec(selectedPath);
     if (pathMatch) return pathMatch[1];
-    const fmRow = parsedDoc?.fm.find(([k]) => k.toLowerCase() === "meeting_id");
-    if (fmRow && /^\d+$/.test(fmRow[1].replace(/['"]/g, ""))) return fmRow[1].replace(/['"]/g, "");
+    const fmMeeting = parsedDoc?.fieldMap.meeting_id;
+    if (fmMeeting && /^\d+$/.test(fmMeeting)) return fmMeeting;
     return null;
   }, [selectedPath, parsedDoc]);
 
   useEffect(() => {
-    if (!selectedPath || !activeWs || activeTab !== "documents") {
+    if (!selectedPath || !activeWs || activeTab !== "documents" || isUploadedOrNonMarkdown(selectedPath)) {
       setBacklinks([]);
       return;
     }
-    const fmTitle = parsedDoc?.fm.find(([k]) => k.toLowerCase() === "title")?.[1]?.replace(/^['"]|['"]$/g, "").trim();
-    const stem = (selectedPath.split("/").pop() ?? "").replace(/\.md$/i, "");
-    const queryTerm = fmTitle || stem;
-    if (!queryTerm || queryTerm.length < 2 || queryTerm.toLowerCase() === "readme") {
+    const queryTerm = parsedDoc?.explicitTitle || (selectedPath.split("/").pop() ?? "").replace(/\.md$/i, "");
+    if (!queryTerm || queryTerm.length < 2 || queryTerm.toLowerCase() === "readme" || queryTerm === "Space Home") {
       setBacklinks([]);
       return;
     }
@@ -701,7 +730,55 @@ export function KnowledgeView({
     };
   }, [selectedPath, activeWs, activeTab, parsedDoc]);
 
-  // ── Load Git history & remote sync when on History & Sync tab ────────
+  // ── Unified Smart Search (debounced full-text + instant title filter) ─
+  const executeContentSearch = useCallback(
+    async (rawQuery: string, allSpaces: boolean) => {
+      const q = rawQuery.trim();
+      if (q.length < 2 || !activeWs) {
+        setContentHits([]);
+        setSearchingContent(false);
+        return;
+      }
+      setSearchingContent(true);
+      try {
+        const targets = allSpaces ? workspaces : [activeWs];
+        const settled = await Promise.all(
+          targets.map(async (ws) => {
+            try {
+              const res = await searchWorkspaceContent(q, ws.slug ? { slug: ws.slug } : undefined);
+              return res.hits.map<CrossSearchHit>((h) => ({ ...h, wsId: ws.id, wsName: ws.name }));
+            } catch {
+              return [] as CrossSearchHit[];
+            }
+          }),
+        );
+        const dedup = new Map<string, CrossSearchHit>();
+        for (const hit of settled.flat()) {
+          const key = `${hit.wsId}:${hit.path}`;
+          if (!dedup.has(key)) dedup.set(key, hit);
+        }
+        setContentHits([...dedup.values()].slice(0, 40));
+      } finally {
+        setSearchingContent(false);
+      }
+    },
+    [activeWs, workspaces],
+  );
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setContentHits([]);
+      setSearchingContent(false);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void executeContentSearch(q, searchAllSpaces);
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery, searchAllSpaces, executeContentSearch]);
+
+  // ── Load Activity & GitHub Sync when on Activity & Settings view ─────
   const loadGitAndSync = useCallback(async (ws: WorkspaceEntry) => {
     const opts = ws.slug ? { slug: ws.slug } : undefined;
     const [g, rs, tok] = await Promise.all([
@@ -722,7 +799,7 @@ export function KnowledgeView({
     }
   }, [activeTab, activeWs, loadGitAndSync]);
 
-  // Auto-refresh callback triggered when Ask Tina Copilot commits edits
+  // Refresh after inline Ask Tina commits edits
   const handleWorkspaceMutated = useCallback(() => {
     if (!activeWs) return;
     invalidateDocLinkCaches();
@@ -742,7 +819,7 @@ export function KnowledgeView({
           { path: selectedPath ?? undefined, slug: targetSlug },
         );
         if (!resolved) {
-          setError(`Document not found: ${detail.wikilink || detail.path || ""}`);
+          setError(`Page not found: ${detail.wikilink || detail.path || ""}`);
           return;
         }
         if (resolved.slug && resolved.slug !== activeWs?.slug) {
@@ -756,17 +833,37 @@ export function KnowledgeView({
     [activeWs?.slug, selectedPath, workspaces, confirmDiscardDraft],
   );
 
-  // ── Tree filtering ───────────────────────────────────────────────────
-  const visibleFiles = useMemo(() => {
-    const needle = searchMode === "files" ? searchQuery.trim().toLowerCase() : "";
-    return files.filter((f) => {
-      if (!matchesEntityFilter(f, entityFilter)) return false;
-      if (needle && !f.toLowerCase().includes(needle)) return false;
-      return true;
-    });
-  }, [files, entityFilter, searchMode, searchQuery]);
+  // ── Library grouping (non-tech mode) & raw tree (developer view) ─────
+  const userVisibleFiles = useMemo(
+    () => (devView ? files : files.filter((f) => categorizePath(f) !== "system")),
+    [files, devView],
+  );
 
-  const treeNodes = useMemo(() => buildTree(visibleFiles), [visibleFiles]);
+  const groupedLibrary = useMemo(() => {
+    const map = new Map<LibraryCategory, string[]>();
+    for (const cat of LIBRARY_CATEGORIES) map.set(cat.id, []);
+    for (const f of userVisibleFiles) {
+      const cat = categorizePath(f);
+      if (cat === "system") continue;
+      map.set(cat, [...(map.get(cat) ?? []), f]);
+    }
+    return LIBRARY_CATEGORIES.map((meta) => ({
+      meta,
+      items: (map.get(meta.id) ?? []).sort((a, b) =>
+        friendlyPageTitle(a).localeCompare(friendlyPageTitle(b)),
+      ),
+    })).filter((g) => g.items.length > 0);
+  }, [userVisibleFiles]);
+
+  const titleMatches = useMemo(() => {
+    const needle = searchQuery.trim().toLowerCase();
+    if (!needle) return [];
+    return userVisibleFiles
+      .filter((f) => friendlyPageTitle(f).toLowerCase().includes(needle) || f.toLowerCase().includes(needle))
+      .slice(0, 12);
+  }, [userVisibleFiles, searchQuery]);
+
+  const treeNodes = useMemo(() => buildTree(files), [files]);
 
   const toggleDir = (dirPath: string) => {
     setExpandedDirs((prev) => {
@@ -777,41 +874,29 @@ export function KnowledgeView({
     });
   };
 
-  // ── Full-text content search (current workspace OR all workspaces) ───
-  const runContentSearch = async (e?: FormEvent) => {
-    e?.preventDefault();
-    const q = searchQuery.trim();
-    if (!q || !activeWs) return;
-    setSearchingContent(true);
-    setContentSearchStatus(searchAllWorkspaces ? "Searching all workspaces…" : "Searching…");
-    try {
-      const targets = searchAllWorkspaces ? workspaces : [activeWs];
-      const settled = await Promise.all(
-        targets.map(async (ws) => {
-          try {
-            const res = await searchWorkspaceContent(q, ws.slug ? { slug: ws.slug } : undefined);
-            return {
-              bounded: res.bounded,
-              hits: res.hits.map<CrossSearchHit>((h) => ({ ...h, wsId: ws.id, wsName: ws.name })),
-            };
-          } catch {
-            return { bounded: false, hits: [] as CrossSearchHit[] };
-          }
-        }),
-      );
-      const merged = settled.flatMap((r) => r.hits).slice(0, 60);
-      const anyBounded = settled.some((r) => r.bounded);
-      setContentHits(merged);
-      setContentSearchStatus(
-        `${merged.length} match${merged.length === 1 ? "" : "es"}${searchAllWorkspaces ? ` across ${targets.length} workspaces` : ""}${anyBounded ? " (limit reached)" : ""}`,
-      );
-    } catch (err) {
-      setContentHits([]);
-      setContentSearchStatus(presentError(err).headline);
-    } finally {
-      setSearchingContent(false);
-    }
+  const toggleCategory = (cat: LibraryCategory) => {
+    setCollapsedCats((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
   };
+
+  const openPage = useCallback(
+    (path: string, targetWsId?: string) => {
+      if (!confirmDiscardDraft()) return;
+      if (targetWsId && targetWsId !== activeWs?.id) {
+        pendingDeepLinkRef.current = { doc: path };
+        setSelectedWsId(targetWsId);
+      }
+      setEditing(false);
+      setSelectedPath(path);
+      setActiveTab("documents");
+      setMobileRailOpen(false);
+    },
+    [activeWs?.id, confirmDiscardDraft],
+  );
 
   // ── Document mutations ───────────────────────────────────────────────
   const handleSaveDoc = useCallback(async () => {
@@ -820,13 +905,14 @@ export function KnowledgeView({
     setError(null);
     setNotice(null);
     try {
+      const titleLabel = friendlyPageTitle(selectedPath, draft);
       const res = await saveWorkspaceDocument({
         path: selectedPath,
         content: draft,
         expected_sha256: doc.sha256 || null,
         slug: activeWs.slug,
-        commit: commitOnSave,
-        commit_message: commitMsg || `Update ${selectedPath}`,
+        commit: devView ? commitOnSave : true,
+        commit_message: (devView && commitMsg.trim()) || `Update ${titleLabel}`,
       });
       setDoc({ content: draft, sha256: res.sha256, writable: true });
       setEditing(false);
@@ -834,24 +920,24 @@ export function KnowledgeView({
       invalidateDocLinkCaches();
       setGraphRefreshKey((k) => k + 1);
       setNotice(
-        res.commit
+        devView && res.commit
           ? `Saved & committed (${res.commit.slice(0, 7)})`
-          : res.commit_error || "Saved to workspace.",
+          : res.commit_error || "Saved your changes.",
       );
     } catch (err) {
       setError(presentError(err).headline);
     } finally {
       setBusy(false);
     }
-  }, [selectedPath, doc, activeWs, draft, commitOnSave, commitMsg]);
+  }, [selectedPath, doc, activeWs, draft, devView, commitOnSave, commitMsg]);
 
   const handleCreateDoc = async (e: FormEvent) => {
     e.preventDefault();
     if (!activeWs || activeWs.readOnly) return;
-    const tpl = newDocTemplate(newDocKind, newDocTitle);
-    const targetPath = (newDocCustomPath.trim() || tpl.path).replace(/^\/+/, "");
+    const tpl = buildNewPageTemplate(newDocKind, newDocTitle);
+    const targetPath = (devView && newDocCustomPath.trim() ? newDocCustomPath.trim() : tpl.path).replace(/^\/+/, "");
     if (!targetPath.endsWith(".md")) {
-      setError("Document path must end with .md");
+      setError("Page path must end with .md");
       return;
     }
     setBusy(true);
@@ -864,7 +950,7 @@ export function KnowledgeView({
         expected_sha256: null,
         slug: activeWs.slug,
         commit: true,
-        commit_message: `Create ${targetPath}`,
+        commit_message: `Create ${newDocTitle.trim() || friendlyPageTitle(targetPath)}`,
       });
       invalidateDocLinkCaches();
       setGraphRefreshKey((k) => k + 1);
@@ -874,7 +960,7 @@ export function KnowledgeView({
       await loadTreeAndMeta(activeWs, true);
       setActiveTab("documents");
       setSelectedPath(targetPath);
-      setNotice(`Created ${targetPath}`);
+      setNotice(`Created "${newDocTitle.trim() || friendlyPageTitle(targetPath)}".`);
     } catch (err) {
       setError(presentError(err).headline);
     } finally {
@@ -882,14 +968,28 @@ export function KnowledgeView({
     }
   };
 
+  const openMoveDialog = () => {
+    if (!selectedPath) return;
+    setPageMenuOpen(false);
+    setMoveName(friendlyPageTitle(selectedPath, doc?.content));
+    setMoveSection(sectionFromPath(selectedPath));
+    setMoveDest(selectedPath);
+    setMovePreview(null);
+    setMoveOpen(true);
+  };
+
+  const effectiveMoveDest = devView
+    ? moveDest.trim()
+    : buildFriendlyMovePath(moveSection, moveName || "Untitled");
+
   const handlePreviewMove = async () => {
-    if (!selectedPath || !doc?.sha256 || !moveDest.trim() || !activeWs) return;
+    if (!selectedPath || !doc?.sha256 || !effectiveMoveDest || !activeWs) return;
     setBusy(true);
     setError(null);
     try {
       const preview = await previewMoveWorkspaceDocument({
         path: selectedPath,
-        destination: moveDest.trim(),
+        destination: effectiveMoveDest,
         expected_sha256: doc.sha256,
         slug: activeWs.slug,
         update_links: moveUpdateLinks,
@@ -903,18 +1003,29 @@ export function KnowledgeView({
   };
 
   const handleConfirmMove = async () => {
-    if (!selectedPath || !doc?.sha256 || !moveDest.trim() || !activeWs) return;
+    if (!selectedPath || !doc?.sha256 || !effectiveMoveDest || !activeWs) return;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
+      let plan = movePreview;
+      // In non-tech mode, automatically preview + apply in one single click!
+      if (!devView && moveUpdateLinks && !plan) {
+        plan = await previewMoveWorkspaceDocument({
+          path: selectedPath,
+          destination: effectiveMoveDest,
+          expected_sha256: doc.sha256,
+          slug: activeWs.slug,
+          update_links: true,
+        });
+      }
       const res = await moveWorkspaceDocument({
         path: selectedPath,
-        destination: moveDest.trim(),
+        destination: effectiveMoveDest,
         expected_sha256: doc.sha256,
         slug: activeWs.slug,
-        update_links: moveUpdateLinks && Boolean(movePreview),
-        expected_plan: movePreview?.fingerprint ?? null,
+        update_links: moveUpdateLinks && Boolean(plan),
+        expected_plan: plan?.fingerprint ?? null,
       });
       invalidateDocLinkCaches();
       setGraphRefreshKey((k) => k + 1);
@@ -924,8 +1035,8 @@ export function KnowledgeView({
       setSelectedPath(res.path);
       setNotice(
         res.updated_links
-          ? `Moved to ${res.path} and updated ${res.updated_links} wikilink(s).`
-          : `Moved to ${res.path}.`,
+          ? `Moved to "${friendlyPageTitle(res.path)}" and updated ${res.updated_links} link(s).`
+          : `Moved to "${friendlyPageTitle(res.path)}".`,
       );
     } catch (err) {
       setError(presentError(err).headline);
@@ -936,7 +1047,9 @@ export function KnowledgeView({
 
   const handleDeleteDoc = async () => {
     if (!selectedPath || !doc?.sha256 || !doc.writable || !activeWs) return;
-    if (typeof window !== "undefined" && !window.confirm(`Delete ${selectedPath}? This cannot be undone.`)) return;
+    setPageMenuOpen(false);
+    const label = friendlyPageTitle(selectedPath, doc.content);
+    if (typeof window !== "undefined" && !window.confirm(`Delete "${label}"? This cannot be undone.`)) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -948,7 +1061,7 @@ export function KnowledgeView({
       });
       invalidateDocLinkCaches();
       setGraphRefreshKey((k) => k + 1);
-      setNotice(`Deleted ${selectedPath}`);
+      setNotice(`Deleted "${label}".`);
       await loadTreeAndMeta(activeWs, false);
     } catch (err) {
       setError(presentError(err).headline);
@@ -967,7 +1080,7 @@ export function KnowledgeView({
         const res = await uploadWorkspaceFiles(fileList, activeWs.slug ? { slug: activeWs.slug } : undefined);
         invalidateDocLinkCaches();
         await loadTreeAndMeta(activeWs, true);
-        setNotice(`Uploaded ${res.files.length} file(s) to ${activeWs.name}/uploads/.`);
+        setNotice(`Uploaded ${res.files.length} file(s) to ${activeWs.name}.`);
       } catch (err) {
         setError(presentError(err).headline);
       } finally {
@@ -1011,7 +1124,7 @@ export function KnowledgeView({
     if (dropped.length) void performUpload(dropped);
   };
 
-  // ── Workspace & GitHub Sync mutations ────────────────────────────────
+  // ── Space & GitHub Sync mutations ────────────────────────────────────
   const runAction = async (fn: () => Promise<void>, ok?: string) => {
     setBusy(true);
     setError(null);
@@ -1042,7 +1155,9 @@ export function KnowledgeView({
       }
       setNewWsName("");
       setCreateWsOpen(false);
-    }, `Created ${newWsShared ? "shared" : "private"} workspace "${label}".`);
+      setActiveTab("documents");
+      setSelectedPath(null);
+    }, `Created ${newWsShared ? "team" : "private"} space "${label}".`);
   };
 
   const handleToggleMount = (ws: WorkspaceEntry) => {
@@ -1056,21 +1171,28 @@ export function KnowledgeView({
       }
       invalidateDocLinkCaches();
       await loadWorkspaces();
-    }, ws.mounted ? `Unmounted "${ws.name}" from Agent context.` : `Mounted "${ws.name}" into Agent context.`);
+    }, ws.mounted ? `Paused Tina access for "${ws.name}".` : `Tina can now read "${ws.name}".`);
   };
 
-  const handleToggleCommitDiff = async (sha: string) => {
+  const loadDiffIfNeeded = async (sha: string) => {
+    if (diffsBySha[sha] || !activeWs) return;
+    try {
+      const res = await readWorkspaceGitDiff({ sha, slug: activeWs.slug });
+      setDiffsBySha((prev) => ({ ...prev, [sha]: res.diff || "(no diff)" }));
+    } catch (err) {
+      setDiffsBySha((prev) => ({ ...prev, [sha]: `Could not load details: ${presentError(err).headline}` }));
+    }
+  };
+
+  const handleToggleCommitRow = async (sha: string) => {
     if (expandedSha === sha) {
       setExpandedSha(null);
       return;
     }
     setExpandedSha(sha);
-    if (diffsBySha[sha] || !activeWs) return;
-    try {
-      const res = await readWorkspaceGitDiff({ sha, slug: activeWs.slug });
-      setDiffsBySha((prev) => ({ ...prev, [sha]: res.diff || "(empty diff)" }));
-    } catch (err) {
-      setDiffsBySha((prev) => ({ ...prev, [sha]: `Failed to load diff: ${presentError(err).headline}` }));
+    if (devView) {
+      setShowDiffSha(sha);
+      await loadDiffIfNeeded(sha);
     }
   };
 
@@ -1084,11 +1206,10 @@ export function KnowledgeView({
     match?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   };
 
-  // ── Recursive Tree Renderer ──────────────────────────────────────────
-  const renderTree = (nodes: TreeNode[], depth = 0): ReactNode =>
+  const renderRawTree = (nodes: TreeNode[], depth = 0): ReactNode =>
     nodes.map((node) => {
       if (node.isDir) {
-        const isOpen = Boolean(searchQuery.trim()) || entityFilter !== "all" || expandedDirs.has(node.path);
+        const isOpen = expandedDirs.has(node.path);
         return (
           <div key={node.path}>
             <button
@@ -1103,7 +1224,7 @@ export function KnowledgeView({
               <span className={styles.treeLabel}>{node.name}</span>
               <span className={styles.treeCount}>{node.children.length}</span>
             </button>
-            {isOpen && renderTree(node.children, depth + 1)}
+            {isOpen && renderRawTree(node.children, depth + 1)}
           </div>
         );
       }
@@ -1114,12 +1235,7 @@ export function KnowledgeView({
           type="button"
           className={`${styles.treeRow} ${isSelected ? styles.treeRowActive : ""}`}
           style={{ paddingLeft: 22 + depth * 14 }}
-          onClick={() => {
-            if (!confirmDiscardDraft()) return;
-            setSelectedPath(node.path);
-            setActiveTab("documents");
-            setMobileRailOpen(false);
-          }}
+          onClick={() => openPage(node.path)}
         >
           <WebIcon name="fileText" size={13} />
           <span className={styles.treeLabel} title={node.path}>
@@ -1129,7 +1245,25 @@ export function KnowledgeView({
       );
     });
 
-  const showOutlineRail = !editing && !copilotOpen && (outlineHeadings.length > 0 || backlinks.length > 0 || backlinksLoading);
+  const isSearching = searchQuery.trim().length > 0;
+  const openPageCategory = selectedPath ? CATEGORY_BY_ID[categorizePath(selectedPath)] : null;
+  const openPageTitle = selectedPath ? parsedDoc?.displayTitle || friendlyPageTitle(selectedPath) : null;
+  const isFilePreview = Boolean(selectedPath && isUploadedOrNonMarkdown(selectedPath));
+  const showOutlineRail =
+    Boolean(selectedPath) &&
+    !editing &&
+    !copilotOpen &&
+    !isFilePreview &&
+    (outlineHeadings.length > 0 || backlinks.length > 0 || backlinksLoading);
+
+  const privateSpaces = workspaces.filter((w) => w.kind === "personal" || w.kind === "extra");
+  const teamSpaces = workspaces.filter((w) => w.kind === "shared");
+  const globalSpace = workspaces.find((w) => w.kind === "global");
+  const recentCards = useMemo(() => userVisibleFiles.slice(0, 8), [userVisibleFiles]);
+  const entityCount = useMemo(
+    () => files.filter((f) => /^kg\/entities\/[^/]+\/[^/]+\.md$/i.test(f)).length,
+    [files],
+  );
 
   return (
     <div
@@ -1144,7 +1278,7 @@ export function KnowledgeView({
         type="file"
         multiple
         hidden
-        aria-label="Upload workspace files"
+        aria-label="Upload files"
         onChange={handleUploadChange}
       />
 
@@ -1152,127 +1286,150 @@ export function KnowledgeView({
         <div className={styles.dropOverlay} aria-hidden="true">
           <div className={styles.dropBadge}>
             <WebIcon name="upload" size={20} />
-            <span>Drop files to upload into {activeWs.name}/uploads/</span>
+            <span>Drop files to add them to {activeWs.name}</span>
           </div>
         </div>
       )}
 
-      {/* ── Left Navigator Rail ── */}
-      <aside className={`${styles.rail} ${mobileRailOpen ? styles.railOpen : ""}`} aria-label="Knowledge navigator">
-        <div className={styles.railSection}>
-          <div className={styles.railSectionHead}>
-            <span>Workspaces</span>
-            <div className={styles.railHeadActions}>
-              <button
-                type="button"
-                className={styles.tinyBtn}
-                onClick={() => setCreateWsOpen((v) => !v)}
-                aria-label="New workspace"
+      {/* ── Left Notion-Style Library Sidebar ── */}
+      <aside className={`${styles.rail} ${mobileRailOpen ? styles.railOpen : ""}`} aria-label="Knowledge library">
+        {/* Compact Workspace Switcher Dropdown */}
+        <div className={styles.railTop}>
+          <div className={styles.wsPickerWrap} onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className={styles.wsPickerBtn}
+              aria-haspopup="menu"
+              aria-expanded={wsMenuOpen}
+              aria-label={`Switch space, current space ${activeWs?.name || "My Space"}`}
+              onClick={() => setWsMenuOpen((v) => !v)}
+            >
+              <span
+                className={`${styles.wsAvatar} ${
+                  activeWs?.kind === "global"
+                    ? styles.wsAvatarGlobal
+                    : activeWs?.kind === "shared"
+                      ? styles.wsAvatarShared
+                      : ""
+                }`}
               >
-                <WebIcon name="plus" size={12} />
-                <span>New</span>
-              </button>
-            </div>
-          </div>
+                <WebIcon
+                  name={
+                    activeWs?.kind === "global"
+                      ? "bookOpen"
+                      : activeWs?.kind === "shared"
+                        ? "users"
+                        : "layers"
+                  }
+                  size={13}
+                />
+              </span>
+              <span className={styles.wsPickerText}>
+                <span className={styles.wsPickerName}>{activeWs?.name || "My Space"}</span>
+                <span className={styles.wsPickerMeta}>{activeWs?.roleLabel || "Private"}</span>
+              </span>
+              <WebIcon name="chevronDown" size={14} />
+            </button>
 
-          <div className={styles.wsList} aria-label="Workspaces list">
-            {workspaces.map((ws) => {
-              const active = ws.id === activeWs?.id;
-              return (
+            {wsMenuOpen && (
+              <div className={styles.wsDropdown} role="menu" aria-label="Spaces menu">
+                <div className={styles.wsDropdownGroup}>Private</div>
+                {privateSpaces.map((ws) => (
+                  <button
+                    key={ws.id}
+                    type="button"
+                    role="menuitem"
+                    aria-current={ws.id === activeWs?.id ? "true" : undefined}
+                    className={`${styles.wsDropdownItem} ${ws.id === activeWs?.id ? styles.wsDropdownItemActive : ""}`}
+                    onClick={() => {
+                      if (!confirmDiscardDraft()) return;
+                      setSelectedWsId(ws.id);
+                      setActiveTab("documents");
+                      setSelectedPath(null);
+                      setWsMenuOpen(false);
+                      setMobileRailOpen(false);
+                    }}
+                  >
+                    <span className={`${styles.wsDot} ${ws.mounted ? styles.wsDotMounted : ""}`} />
+                    <span className={styles.wsName}>{ws.name}</span>
+                    {ws.id === activeWs?.id && <WebIcon name="check" size={13} />}
+                  </button>
+                ))}
+
+                {teamSpaces.length > 0 && (
+                  <>
+                    <div className={styles.wsDropdownGroup}>Team Spaces</div>
+                    {teamSpaces.map((ws) => (
+                      <button
+                        key={ws.id}
+                        type="button"
+                        role="menuitem"
+                        aria-current={ws.id === activeWs?.id ? "true" : undefined}
+                        className={`${styles.wsDropdownItem} ${ws.id === activeWs?.id ? styles.wsDropdownItemActive : ""}`}
+                        onClick={() => {
+                          if (!confirmDiscardDraft()) return;
+                          setSelectedWsId(ws.id);
+                          setActiveTab("documents");
+                          setSelectedPath(null);
+                          setWsMenuOpen(false);
+                          setMobileRailOpen(false);
+                        }}
+                      >
+                        <span className={`${styles.wsDot} ${ws.mounted ? styles.wsDotMounted : ""}`} />
+                        <span className={styles.wsName}>{ws.name}</span>
+                        <span className={`${styles.wsTag} ${styles.wsTagShared}`}>{ws.roleLabel}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+
+                {globalSpace && (
+                  <>
+                    <div className={styles.wsDropdownGroup}>Library</div>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      aria-current={globalSpace.id === activeWs?.id ? "true" : undefined}
+                      className={`${styles.wsDropdownItem} ${globalSpace.id === activeWs?.id ? styles.wsDropdownItemActive : ""}`}
+                      onClick={() => {
+                        if (!confirmDiscardDraft()) return;
+                        setSelectedWsId(globalSpace.id);
+                        setActiveTab("documents");
+                        setSelectedPath(null);
+                        setWsMenuOpen(false);
+                        setMobileRailOpen(false);
+                      }}
+                    >
+                      <span className={`${styles.wsDot} ${styles.wsDotGlobal}`} />
+                      <span className={styles.wsName}>{globalSpace.name}</span>
+                      <span className={`${styles.wsTag} ${styles.wsTagGlobal}`}>View only</span>
+                    </button>
+                  </>
+                )}
+
+                <div className={styles.wsDropdownDivider} />
                 <button
-                  key={ws.id}
                   type="button"
-                  aria-current={active ? "true" : undefined}
-                  className={`${styles.wsRow} ${active ? styles.wsRowActive : ""}`}
+                  role="menuitem"
+                  className={styles.wsDropdownAction}
                   onClick={() => {
-                    if (!confirmDiscardDraft()) return;
-                    setSelectedWsId(ws.id);
-                    setMobileRailOpen(false);
+                    setWsMenuOpen(false);
+                    setCreateWsOpen(true);
                   }}
                 >
-                  <span
-                    className={`${styles.wsDot} ${
-                      ws.kind === "global"
-                        ? styles.wsDotGlobal
-                        : ws.mounted
-                          ? styles.wsDotMounted
-                          : ""
-                    }`}
-                  />
-                  <span className={styles.wsName}>{ws.name}</span>
-                  {ws.kind === "global" && (
-                    <span className={`${styles.wsTag} ${styles.wsTagGlobal}`}>RO</span>
-                  )}
-                  {ws.kind === "shared" && (
-                    <span className={`${styles.wsTag} ${styles.wsTagShared}`}>{ws.role || "shared"}</span>
-                  )}
-                </button>
-              );
-            })}
-            {wsLoading && <span className={styles.cardSub}>Loading workspaces…</span>}
-          </div>
-
-          {createWsOpen && (
-            <form onSubmit={handleCreateWorkspace} className={styles.createWsForm}>
-              <input
-                type="text"
-                className={styles.input}
-                placeholder="Workspace name…"
-                aria-label="New workspace name"
-                value={newWsName}
-                onChange={(e) => setNewWsName(e.target.value)}
-                autoFocus
-              />
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--tw-text-3)" }}>
-                <input
-                  type="checkbox"
-                  checked={newWsShared}
-                  onChange={(e) => setNewWsShared(e.target.checked)}
-                />
-                <span>Shared team workspace</span>
-              </label>
-              <div className={styles.inlineForm}>
-                <button type="submit" className={`${styles.btn} ${styles.btnPrimary}`} disabled={busy || !newWsName.trim()}>
-                  Create
-                </button>
-                <button type="button" className={styles.btn} onClick={() => setCreateWsOpen(false)}>
-                  Cancel
+                  <WebIcon name="plus" size={13} />
+                  <span>Create new space</span>
                 </button>
               </div>
-            </form>
-          )}
-        </div>
-
-        <div className={styles.railSection}>
-          <div className={styles.railSectionHead}>
-            <span>Files ({files.length})</span>
-            <div className={styles.railHeadActions}>
-              <button
-                type="button"
-                className={styles.tinyBtn}
-                disabled={activeWs?.readOnly}
-                title={activeWs?.readOnly ? "Read-only workspace" : "Create Markdown document"}
-                onClick={() => setNewDocOpen(true)}
-              >
-                <WebIcon name="plus" size={12} />
-                <span>Doc</span>
-              </button>
-              <button
-                type="button"
-                className={styles.tinyBtn}
-                disabled={activeWs?.readOnly}
-                title={activeWs?.readOnly ? "Read-only workspace" : "Upload files (or drag & drop anywhere)"}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <WebIcon name="upload" size={12} />
-              </button>
-            </div>
+            )}
           </div>
 
+          {/* Single Unified Smart Search */}
           <form
+            className={styles.searchForm}
             onSubmit={(e) => {
               e.preventDefault();
-              if (searchMode === "content") void runContentSearch();
+              void executeContentSearch(searchQuery, searchAllSpaces);
             }}
           >
             <div className={styles.searchBox}>
@@ -1280,7 +1437,7 @@ export function KnowledgeView({
               <input
                 type="search"
                 aria-label="Search knowledge"
-                placeholder={searchMode === "files" ? "Filter filenames…" : "Full-text search…"}
+                placeholder="Search pages & content…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -1291,212 +1448,314 @@ export function KnowledgeView({
                   onClick={() => {
                     setSearchQuery("");
                     setContentHits([]);
-                    setContentSearchStatus("");
                   }}
                 >
                   <WebIcon name="close" size={12} />
                 </button>
               )}
             </div>
-            <div className={styles.searchModeRow}>
-              <div className={styles.railHeadActions}>
-                <button
-                  type="button"
-                  className={`${styles.chip} ${searchMode === "files" ? styles.chipActive : ""}`}
-                  onClick={() => setSearchMode("files")}
-                >
-                  Filenames
-                </button>
-                <button
-                  type="button"
-                  className={`${styles.chip} ${searchMode === "content" ? styles.chipActive : ""}`}
-                  onClick={() => setSearchMode("content")}
-                >
-                  Full-text
-                </button>
-              </div>
-              {searchMode === "content" && (
-                <button
-                  type="submit"
-                  className={styles.tinyBtn}
-                  disabled={!searchQuery.trim() || searchingContent}
-                >
-                  {searchingContent ? "…" : "Go"}
-                </button>
-              )}
-            </div>
-            {searchMode === "content" && (
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 11.5, color: "var(--tw-text-3)" }}>
+            {isSearching && (
+              <label className={styles.searchScopeToggle}>
                 <input
                   type="checkbox"
-                  checked={searchAllWorkspaces}
-                  onChange={(e) => setSearchAllWorkspaces(e.target.checked)}
+                  checked={searchAllSpaces}
+                  onChange={(e) => setSearchAllSpaces(e.target.checked)}
                 />
-                <span>Search all workspaces</span>
+                <span>Search all spaces</span>
               </label>
             )}
           </form>
 
-          {searchMode === "files" && (
-            <div className={styles.chipRow}>
-              {(
-                [
-                  ["all", "All"],
-                  ["meeting", "Meetings"],
-                  ["person", "People"],
-                  ["project", "Projects"],
-                  ["task", "Tasks"],
-                  ["docs", "Docs"],
-                ] as const
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={`${styles.chip} ${entityFilter === id ? styles.chipActive : ""}`}
-                  onClick={() => setEntityFilter(id)}
-                >
-                  {label}
-                </button>
-              ))}
+          {/* Primary Actions Row */}
+          {!activeWs?.readOnly && (
+            <div className={styles.railPrimaryActions}>
+              <button
+                type="button"
+                className={`${styles.btn} ${styles.btnPrimary}`}
+                style={{ flex: 1, justifyContent: "center" }}
+                onClick={() => {
+                  setNewDocKind("wiki");
+                  setNewDocOpen(true);
+                }}
+              >
+                <WebIcon name="plus" size={13} />
+                <span>New page</span>
+              </button>
+              <button
+                type="button"
+                className={styles.btn}
+                title="Upload files (or drag and drop anywhere)"
+                aria-label="Upload file"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <WebIcon name="upload" size={13} />
+              </button>
             </div>
           )}
         </div>
 
+        {/* Navigation & Library Tree */}
         <div className={styles.treeWrap}>
-          {searchMode === "content" ? (
-            <>
-              {contentSearchStatus && (
-                <div className={styles.cardSub} style={{ padding: "4px 6px 8px" }} role="status">
-                  {contentSearchStatus}
-                </div>
+          {isSearching ? (
+            <div className={styles.searchResultsWrap}>
+              {titleMatches.length > 0 && (
+                <>
+                  <div className={styles.railGroupTitle}>Matching pages</div>
+                  {titleMatches.map((path) => {
+                    const cat = CATEGORY_BY_ID[categorizePath(path)];
+                    return (
+                      <button
+                        key={`title:${path}`}
+                        type="button"
+                        className={styles.treeRow}
+                        onClick={() => openPage(path)}
+                      >
+                        <WebIcon name={cat.icon} size={13} />
+                        <span className={styles.treeLabel}>{friendlyPageTitle(path)}</span>
+                        <span className={styles.treeCount}>{cat.singular}</span>
+                      </button>
+                    );
+                  })}
+                </>
               )}
+
+              <div className={styles.railGroupTitle} style={{ marginTop: titleMatches.length ? 10 : 0 }}>
+                {searchingContent ? "Searching inside pages…" : `Inside pages (${contentHits.length})`}
+              </div>
               {contentHits.map((hit) => (
                 <button
                   key={`${hit.wsId}:${hit.path}:${hit.line}`}
                   type="button"
                   className={styles.searchHit}
-                  onClick={() => {
-                    if (!confirmDiscardDraft()) return;
-                    if (hit.wsId !== activeWs?.id) {
-                      pendingDeepLinkRef.current = { doc: hit.path };
-                      setSelectedWsId(hit.wsId);
-                    }
-                    setSelectedPath(hit.path);
-                    setActiveTab("documents");
-                    setMobileRailOpen(false);
-                  }}
+                  onClick={() => openPage(hit.path, hit.wsId)}
                 >
                   <span className={styles.searchHitMeta}>
                     <span className={styles.treeLabel}>
-                      {searchAllWorkspaces ? `[${hit.wsName}] ${hit.path}` : hit.path}
+                      {searchAllSpaces ? `${hit.wsName} · ${friendlyPageTitle(hit.path)}` : friendlyPageTitle(hit.path)}
                     </span>
-                    <span>L{hit.line}</span>
+                    {devView && <span>L{hit.line}</span>}
                   </span>
                   <span className={styles.searchHitText}>{hit.text}</span>
                 </button>
               ))}
-              {!contentHits.length && !contentSearchStatus && (
+              {!searchingContent && titleMatches.length === 0 && contentHits.length === 0 && (
                 <p className={styles.cardSub} style={{ padding: "8px 6px" }}>
-                  Press Enter or Go to search inside Markdown files{searchAllWorkspaces ? " across all workspaces" : ` of ${activeWs?.name}`}.
+                  No pages or text matched “{searchQuery.trim()}”.
+                </p>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* Top Space Views */}
+              <div className={styles.railQuickNav}>
+                <button
+                  type="button"
+                  className={`${styles.treeRow} ${activeTab === "documents" && !selectedPath ? styles.treeRowActive : ""}`}
+                  onClick={() => {
+                    if (!confirmDiscardDraft()) return;
+                    setActiveTab("documents");
+                    setSelectedPath(null);
+                    setEditing(false);
+                    setMobileRailOpen(false);
+                  }}
+                >
+                  <WebIcon name="home" size={14} />
+                  <span className={styles.treeLabel}>Overview</span>
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.treeRow} ${activeTab === "graph" ? styles.treeRowActive : ""}`}
+                  onClick={() => {
+                    if (!confirmDiscardDraft()) return;
+                    setActiveTab("graph");
+                    setMobileRailOpen(false);
+                  }}
+                >
+                  <WebIcon name="network" size={14} />
+                  <span className={styles.treeLabel}>Connections Map</span>
+                  {entityCount > 0 && <span className={styles.treeCount}>{entityCount}</span>}
+                </button>
+              </div>
+
+              <div className={styles.railDivider} />
+
+              {treeLoading || wsLoading ? (
+                <p className={styles.cardSub} style={{ padding: "10px 8px" }}>
+                  Loading library…
+                </p>
+              ) : devView ? (
+                <>
+                  <div className={styles.railGroupTitle}>
+                    <span>Raw files ({files.length})</span>
+                    <span className={styles.devPill}>Dev</span>
+                  </div>
+                  {treeNodes.length ? (
+                    renderRawTree(treeNodes)
+                  ) : (
+                    <p className={styles.cardSub} style={{ padding: "8px 6px" }}>
+                      No files in this space.
+                    </p>
+                  )}
+                </>
+              ) : groupedLibrary.length > 0 ? (
+                groupedLibrary.map(({ meta, items }) => {
+                  const collapsed = collapsedCats.has(meta.id);
+                  return (
+                    <div key={meta.id} className={styles.catGroup}>
+                      <button
+                        type="button"
+                        className={styles.catHeader}
+                        aria-expanded={!collapsed}
+                        onClick={() => toggleCategory(meta.id)}
+                      >
+                        <WebIcon name={collapsed ? "chevronRight" : "chevronDown"} size={11} />
+                        <span className={styles.treeLabel}>{meta.label}</span>
+                        <span className={styles.treeCount}>{items.length}</span>
+                      </button>
+                      {!collapsed &&
+                        items.map((path) => {
+                          const isSelected = selectedPath === path && activeTab === "documents";
+                          return (
+                            <button
+                              key={path}
+                              type="button"
+                              className={`${styles.treeRow} ${isSelected ? styles.treeRowActive : ""}`}
+                              style={{ paddingLeft: 18 }}
+                              onClick={() => openPage(path)}
+                            >
+                              <WebIcon name={meta.icon} size={13} />
+                              <span className={styles.treeLabel}>{friendlyPageTitle(path)}</span>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  );
+                })
+              ) : (
+                <p className={styles.cardSub} style={{ padding: "10px 8px" }}>
+                  No pages yet. Click “New page” to get started.
                 </p>
               )}
             </>
-          ) : treeLoading ? (
-            <p className={styles.cardSub} style={{ padding: "10px 8px" }}>
-              Loading files…
-            </p>
-          ) : treeNodes.length ? (
-            renderTree(treeNodes)
-          ) : (
-            <p className={styles.cardSub} style={{ padding: "10px 8px" }}>
-              No matching files in this workspace.
-            </p>
           )}
+        </div>
+
+        {/* Pinned Sidebar Footer: Activity & Settings + Subtle Developer View Switch */}
+        <div className={styles.railFooter}>
+          <button
+            type="button"
+            className={`${styles.treeRow} ${activeTab === "sync" ? styles.treeRowActive : ""}`}
+            onClick={() => {
+              if (!confirmDiscardDraft()) return;
+              setActiveTab("sync");
+              setMobileRailOpen(false);
+            }}
+          >
+            <WebIcon name="sliders" size={14} />
+            <span className={styles.treeLabel}>Activity &amp; Settings</span>
+          </button>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={devView}
+            className={styles.devSwitchRow}
+            onClick={toggleDevView}
+            title="Show raw file paths, Markdown/YAML, and Git details"
+          >
+            <span className={styles.devSwitchLabel}>
+              <WebIcon name="terminal" size={12} />
+              <span>Developer view</span>
+            </span>
+            <span className={`${styles.switchTrack} ${devView ? styles.switchTrackOn : ""}`} aria-hidden="true">
+              <span className={styles.switchThumb} />
+            </span>
+          </button>
         </div>
       </aside>
 
-      {/* ── Main Content Area ── */}
+      {/* ── Main Content Stage (Single Clean Top Bar!) ── */}
       <section className={styles.main}>
-        <header className={styles.header}>
-          <div className={styles.headerLeft}>
+        <header className={styles.topBar}>
+          <div className={styles.topBarLeft}>
             <button
               type="button"
               className={styles.mobileRailBtn}
-              aria-label="Toggle workspace files"
+              aria-label="Toggle library sidebar"
               onClick={() => setMobileRailOpen((v) => !v)}
             >
               <WebIcon name="sidebar" size={15} />
             </button>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <h2 className={styles.wsTitle}>{activeWs?.name || "Knowledge"}</h2>
-                {activeWs?.kind === "global" ? (
-                  <span className={`${styles.wsTag} ${styles.wsTagGlobal}`}>Platform · Read-Only</span>
-                ) : activeWs?.kind === "shared" ? (
-                  <span className={`${styles.wsTag} ${styles.wsTagShared}`}>Shared · {activeWs.role || "member"}</span>
-                ) : (
-                  <span className={styles.wsTag}>Personal S3 + KMS</span>
-                )}
-                {activeWs && activeWs.kind !== "global" && (
-                  <button
-                    type="button"
-                    className={styles.tinyBtn}
-                    disabled={busy}
-                    onClick={() => handleToggleMount(activeWs)}
-                    title="Toggle whether AI agents mount this workspace automatically"
-                  >
-                    <span className={`${styles.wsDot} ${activeWs.mounted ? styles.wsDotMounted : ""}`} />
-                    <span>{activeWs.mounted ? "Mounted in Agent" : "Parked (Click to mount)"}</span>
-                  </button>
-                )}
-              </div>
-              {purpose && <p className={styles.wsPurpose}>{purpose}</p>}
-            </div>
-          </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <div className={styles.tabs} role="tablist" aria-label="Knowledge mode">
+            <div className={styles.historyBtns}>
               <button
                 type="button"
-                role="tab"
-                aria-selected={activeTab === "documents"}
-                className={`${styles.tabBtn} ${activeTab === "documents" ? styles.tabBtnActive : ""}`}
+                className={styles.iconGhostBtn}
+                aria-label="Back in reading history"
+                title="Back (Alt+←)"
+                disabled={!canGoBack}
+                onClick={() => goHistory(-1)}
+              >
+                <WebIcon name="arrowLeft" size={13} />
+              </button>
+              <button
+                type="button"
+                className={styles.iconGhostBtn}
+                aria-label="Forward in reading history"
+                title="Forward (Alt+→)"
+                disabled={!canGoForward}
+                onClick={() => goHistory(1)}
+              >
+                <WebIcon name="chevronRight" size={13} />
+              </button>
+            </div>
+
+            <nav className={styles.humanBreadcrumb} aria-label="Location">
+              <button
+                type="button"
+                className={styles.crumbBtn}
                 onClick={() => {
                   if (!confirmDiscardDraft()) return;
                   setActiveTab("documents");
+                  setSelectedPath(null);
+                  setEditing(false);
                 }}
               >
-                <WebIcon name="fileText" size={14} />
-                <span>Documents</span>
+                {activeWs?.name || "My Space"}
               </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === "graph"}
-                className={`${styles.tabBtn} ${activeTab === "graph" ? styles.tabBtnActive : ""}`}
-                onClick={() => {
-                  if (!confirmDiscardDraft()) return;
-                  setActiveTab("graph");
-                }}
-              >
-                <WebIcon name="network" size={14} />
-                <span>Knowledge Graph</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === "sync"}
-                className={`${styles.tabBtn} ${activeTab === "sync" ? styles.tabBtnActive : ""}`}
-                onClick={() => {
-                  if (!confirmDiscardDraft()) return;
-                  setActiveTab("sync");
-                }}
-              >
-                <WebIcon name="gitBranch" size={14} />
-                <span>History &amp; Sync</span>
-              </button>
-            </div>
 
+              {activeTab === "graph" && (
+                <>
+                  <span className={styles.crumbSep}>/</span>
+                  <span className={styles.crumbCurrent}>Connections Map</span>
+                </>
+              )}
+
+              {activeTab === "sync" && (
+                <>
+                  <span className={styles.crumbSep}>/</span>
+                  <span className={styles.crumbCurrent}>Activity &amp; Settings</span>
+                </>
+              )}
+
+              {activeTab === "documents" && selectedPath && (
+                <>
+                  {openPageCategory && (
+                    <>
+                      <span className={styles.crumbSep}>/</span>
+                      <span className={styles.crumbSection}>{openPageCategory.label}</span>
+                    </>
+                  )}
+                  <span className={styles.crumbSep}>/</span>
+                  <span className={styles.crumbCurrent} title={devView ? selectedPath : openPageTitle || undefined}>
+                    {devView ? selectedPath : openPageTitle}
+                  </span>
+                </>
+              )}
+            </nav>
+          </div>
+
+          <div className={styles.topBarActions}>
             <button
               type="button"
               className={`${styles.btn} ${copilotOpen ? styles.btnPrimary : ""}`}
@@ -1504,8 +1763,88 @@ export function KnowledgeView({
               onClick={() => setCopilotOpen((v) => !v)}
             >
               <WebIcon name="tinaAsk" size={14} />
-              <span>Copilot</span>
+              <span>Ask Tina</span>
             </button>
+
+            {activeTab === "documents" && selectedPath && doc?.writable && !editing && !isFilePreview && (
+              <button
+                type="button"
+                className={`${styles.btn} ${styles.btnPrimary}`}
+                onClick={() => {
+                  setDraft(doc.content);
+                  setEditing(true);
+                }}
+              >
+                <WebIcon name="edit" size={13} />
+                <span>Edit</span>
+              </button>
+            )}
+
+            {activeTab === "documents" && selectedPath && (
+              <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className={styles.iconGhostBtn}
+                  aria-label="Page actions"
+                  aria-haspopup="menu"
+                  aria-expanded={pageMenuOpen}
+                  onClick={() => setPageMenuOpen((v) => !v)}
+                >
+                  <WebIcon name="moreHorizontal" size={16} />
+                </button>
+                {pageMenuOpen && (
+                  <div className={styles.pageMenu} role="menu" aria-label="Page options">
+                    {doc?.writable && !isFilePreview && (
+                      <button type="button" role="menuitem" className={styles.pageMenuItem} onClick={openMoveDialog}>
+                        <WebIcon name="folder" size={13} />
+                        <span>Rename or move</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={styles.pageMenuItem}
+                      onClick={() => {
+                        setPageMenuOpen(false);
+                        if (typeof window !== "undefined") {
+                          void navigator.clipboard?.writeText(window.location.href);
+                          setNotice("Copied page link to clipboard.");
+                        }
+                      }}
+                    >
+                      <WebIcon name="copy" size={13} />
+                      <span>Copy link</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={styles.pageMenuItem}
+                      onClick={() => {
+                        setPageMenuOpen(false);
+                        setActiveTab("sync");
+                      }}
+                    >
+                      <WebIcon name="clock" size={13} />
+                      <span>View version history</span>
+                    </button>
+                    {doc?.writable && (
+                      <>
+                        <div className={styles.wsDropdownDivider} />
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className={`${styles.pageMenuItem} ${styles.pageMenuDanger}`}
+                          onClick={() => void handleDeleteDoc()}
+                        >
+                          <WebIcon name="trash" size={13} />
+                          <span>Delete page</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </header>
 
@@ -1530,135 +1869,295 @@ export function KnowledgeView({
           </div>
         )}
 
-        {/* ── TAB 1: DOCUMENTS ── */}
+        {/* ── VIEW 1: LIBRARY OVERVIEW OR PAGE READER / EDITOR ── */}
         {activeTab === "documents" && (
           <div className={styles.docPane}>
-            {selectedPath ? (
-              <>
-                <div className={styles.docToolbar}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                    <button
-                      type="button"
-                      className={styles.tinyBtn}
-                      aria-label="Back in reading history"
-                      title="Back (Alt+←)"
-                      disabled={!canGoBack}
-                      onClick={() => goHistory(-1)}
-                    >
-                      <WebIcon name="arrowLeft" size={12} />
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.tinyBtn}
-                      aria-label="Forward in reading history"
-                      title="Forward (Alt+→)"
-                      disabled={!canGoForward}
-                      onClick={() => goHistory(1)}
-                    >
-                      <WebIcon name="chevronRight" size={12} />
-                    </button>
-                    <div className={styles.breadcrumb} title={selectedPath}>
-                      <WebIcon name="fileText" size={13} />
-                      <span>{selectedPath}</span>
-                      {doc && (
-                        <span className={styles.wsTag} style={{ marginLeft: 6 }}>
-                          {doc.writable ? "Editable" : "Read-only"}
+            {!selectedPath ? (
+              /* ── NOTION-STYLE LIBRARY OVERVIEW DASHBOARD ── */
+              <div className={styles.docScroll}>
+                <div className={styles.overviewWrap}>
+                  <div className={styles.overviewHero}>
+                    <div>
+                      <div className={styles.overviewBadges}>
+                        <span
+                          className={`${styles.wsTag} ${
+                            activeWs?.kind === "global"
+                              ? styles.wsTagGlobal
+                              : activeWs?.kind === "shared"
+                                ? styles.wsTagShared
+                                : ""
+                          }`}
+                        >
+                          {activeWs?.kind === "global"
+                            ? "Built-in · View only"
+                            : activeWs?.kind === "shared"
+                              ? `Team space · ${activeWs.roleLabel}`
+                              : "Private space"}
                         </span>
-                      )}
+                        {activeWs && activeWs.kind !== "global" && (
+                          <button
+                            type="button"
+                            className={styles.tinaAccessPill}
+                            disabled={busy}
+                            onClick={() => handleToggleMount(activeWs)}
+                            title="Choose whether Tina can read and cite pages from this space"
+                          >
+                            <span className={`${styles.wsDot} ${activeWs.mounted ? styles.wsDotMounted : ""}`} />
+                            <span>{activeWs.mounted ? "Tina can read this space" : "Tina access paused"}</span>
+                          </button>
+                        )}
+                      </div>
+                      <h1 className={styles.overviewTitle}>{activeWs?.name || "My Space"}</h1>
+                      <p className={styles.overviewSub}>
+                        {purpose ||
+                          "Your central library for notes, meeting summaries, projects, and reference files."}
+                      </p>
                     </div>
                   </div>
-                  <div className={styles.docActions}>
-                    {sourceMeetingId && onOpenMeeting && (
+
+                  {/* Quick Action Cards */}
+                  <div className={styles.quickActionGrid}>
+                    {!activeWs?.readOnly && (
                       <button
                         type="button"
-                        className={styles.btn}
-                        onClick={() => onOpenMeeting(sourceMeetingId)}
+                        className={styles.quickActionCard}
+                        onClick={() => {
+                          setNewDocKind("wiki");
+                          setNewDocOpen(true);
+                        }}
                       >
-                        <WebIcon name="video" size={13} />
-                        <span>Open meeting</span>
+                        <span className={styles.quickActionIcon}>
+                          <WebIcon name="plus" size={18} />
+                        </span>
+                        <span className={styles.quickActionTitle}>Create a page</span>
+                        <span className={styles.quickActionDesc}>Start a note, guide, project, or person page</span>
                       </button>
                     )}
+
+                    {!activeWs?.readOnly && (
+                      <button
+                        type="button"
+                        className={styles.quickActionCard}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <span className={styles.quickActionIcon}>
+                          <WebIcon name="upload" size={18} />
+                        </span>
+                        <span className={styles.quickActionTitle}>Upload a file</span>
+                        <span className={styles.quickActionDesc}>Add PDFs, docs, or drop files anywhere here</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
-                      className={styles.btn}
+                      className={styles.quickActionCard}
                       onClick={() => setCopilotOpen(true)}
                     >
-                      <WebIcon name="tinaAsk" size={13} />
-                      <span>Ask Tina</span>
+                      <span className={styles.quickActionIcon}>
+                        <WebIcon name="tinaAsk" size={18} />
+                      </span>
+                      <span className={styles.quickActionTitle}>Ask Tina anything</span>
+                      <span className={styles.quickActionDesc}>Summarize pages, find decisions, or draft notes</span>
                     </button>
-                    {doc?.writable && !editing && (
-                      <>
-                        <button
-                          type="button"
-                          className={`${styles.btn} ${styles.btnPrimary}`}
-                          onClick={() => {
-                            setDraft(doc.content);
-                            setEditing(true);
-                          }}
-                        >
-                          <WebIcon name="edit" size={13} />
-                          <span>Edit</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.btn}
-                          onClick={() => {
-                            setMoveDest(selectedPath);
-                            setMovePreview(null);
-                            setMoveOpen(true);
-                          }}
-                        >
-                          <span>Move</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`${styles.btn} ${styles.btnDanger}`}
-                          onClick={handleDeleteDoc}
-                          disabled={busy}
-                        >
-                          <WebIcon name="trash" size={13} />
-                        </button>
-                      </>
+                  </div>
+
+                  {/* Library Pages Grid */}
+                  <div className={styles.overviewSection}>
+                    <div className={styles.overviewSectionHead}>
+                      <h2>Pages in {activeWs?.name || "this space"}</h2>
+                      <span className={styles.cardSub}>{userVisibleFiles.length} item(s)</span>
+                    </div>
+
+                    {recentCards.length > 0 ? (
+                      <div className={styles.pageCardGrid}>
+                        {recentCards.map((path) => {
+                          const cat = CATEGORY_BY_ID[categorizePath(path)];
+                          return (
+                            <button
+                              key={path}
+                              type="button"
+                              className={styles.pageCard}
+                              onClick={() => openPage(path)}
+                            >
+                              <div className={styles.pageCardTop}>
+                                <span className={styles.pageCardIcon}>
+                                  <WebIcon name={cat.icon} size={15} />
+                                </span>
+                                <span className={styles.wsTag}>{cat.singular}</span>
+                              </div>
+                              <div className={styles.pageCardTitle}>{friendlyPageTitle(path)}</div>
+                              {devView && <div className={styles.pageCardPath}>{path}</div>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className={styles.emptyCard}>
+                        <WebIcon name="bookOpen" size={24} />
+                        <h3>This space is ready for your first page</h3>
+                        <p>
+                          Create a note, upload a document, or record a meeting and Tina will organize your knowledge
+                          here automatically.
+                        </p>
+                        {!activeWs?.readOnly && (
+                          <button
+                            type="button"
+                            className={`${styles.btn} ${styles.btnPrimary}`}
+                            onClick={() => setNewDocOpen(true)}
+                          >
+                            <WebIcon name="plus" size={14} />
+                            <span>Create your first page</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Explore Shortcuts */}
+                  <div className={styles.exploreGrid}>
+                    <button
+                      type="button"
+                      className={styles.exploreCard}
+                      onClick={() => setActiveTab("graph")}
+                    >
+                      <WebIcon name="network" size={18} />
+                      <div>
+                        <div className={styles.exploreTitle}>Connections Map</div>
+                        <div className={styles.exploreDesc}>
+                          See how your people, projects, and meetings connect ({entityCount} items)
+                        </div>
+                      </div>
+                    </button>
+
+                    {hasGlobal && activeWs?.kind !== "global" && (
+                      <button
+                        type="button"
+                        className={styles.exploreCard}
+                        onClick={() => {
+                          setSelectedWsId("global");
+                          setSelectedPath(null);
+                        }}
+                      >
+                        <WebIcon name="bookOpen" size={18} />
+                        <div>
+                          <div className={styles.exploreTitle}>Templates &amp; Guides</div>
+                          <div className={styles.exploreDesc}>
+                            Browse built-in handbooks and ready-to-use templates
+                          </div>
+                        </div>
+                      </button>
                     )}
                   </div>
                 </div>
-
-                <div className={styles.docBodySplit}>
-                  <div className={styles.docScroll}>
-                    <div className={styles.docInner} style={editing ? { maxWidth: 1120 } : undefined}>
-                      {docLoading ? (
-                        <p className={styles.cardSub}>Loading document…</p>
-                      ) : editing && doc ? (
-                        <KnowledgeDocEditor
+              </div>
+            ) : (
+              /* ── CLEAN PAGE READER / EDITOR / UPLOADED FILE VIEW ── */
+              <div className={styles.docBodySplit}>
+                <div className={styles.docScroll}>
+                  <div className={styles.docInner} style={editing ? { maxWidth: 960 } : undefined}>
+                    {docLoading ? (
+                      <p className={styles.cardSub}>Opening page…</p>
+                    ) : isFilePreview ? (
+                      <div className={styles.fileCard}>
+                        <div className={styles.fileCardHead}>
+                          <div className={styles.fileExtBadge}>{fileExtensionBadge(selectedPath)}</div>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <h1 className={styles.pageTitle} style={{ fontSize: 24, margin: 0 }}>
+                              {friendlyPageTitle(selectedPath)}
+                            </h1>
+                            <p className={styles.cardSub} style={{ marginTop: 4 }}>
+                              Uploaded to {activeWs?.name}. Tina can read this file to answer questions or write
+                              summaries for you.
+                            </p>
+                            {devView && <div className={styles.devPathLine}>{selectedPath}</div>}
+                          </div>
+                        </div>
+                        <div className={styles.inlineForm}>
+                          <button
+                            type="button"
+                            className={`${styles.btn} ${styles.btnPrimary}`}
+                            onClick={() => {
+                              setCopilotSeedPrompt(
+                                `Summarize the uploaded file "${friendlyPageTitle(selectedPath)}" (${selectedPath}) and list its key takeaways.`,
+                              );
+                              setCopilotOpen(true);
+                            }}
+                          >
+                            <WebIcon name="tinaAsk" size={14} />
+                            <span>Ask Tina to summarize this file</span>
+                          </button>
+                        </div>
+                        {doc?.content && (
+                          <div className={styles.filePreviewBox}>
+                            <div className={styles.outlineHead}>File preview</div>
+                            <pre className={styles.filePreviewPre}>{doc.content.slice(0, 8000)}</pre>
+                          </div>
+                        )}
+                      </div>
+                    ) : editing && doc ? (
+                      <KnowledgeDocEditor
+                        path={selectedPath}
+                        slug={activeWs?.slug}
+                        initialContent={doc.content}
+                        draft={draft}
+                        onDraftChange={setDraft}
+                        files={files}
+                        busy={busy}
+                        devView={devView}
+                        commitOnSave={commitOnSave}
+                        onCommitOnSaveChange={setCommitOnSave}
+                        commitMsg={commitMsg}
+                        onCommitMsgChange={setCommitMsg}
+                        onSave={() => void handleSaveDoc()}
+                        onCancel={() => {
+                          if (!confirmDiscardDraft()) return;
+                          setEditing(false);
+                          setDraft(doc.content);
+                        }}
+                        onNavigateDoc={handleDocNavigate}
+                      />
+                    ) : doc && parsedDoc ? (
+                      <>
+                        <MeetingWikiSourceStatus
                           path={selectedPath}
                           slug={activeWs?.slug}
-                          initialContent={doc.content}
-                          draft={draft}
-                          onDraftChange={setDraft}
-                          files={files}
-                          busy={busy}
-                          commitOnSave={commitOnSave}
-                          onCommitOnSaveChange={setCommitOnSave}
-                          commitMsg={commitMsg}
-                          onCommitMsgChange={setCommitMsg}
-                          onSave={() => void handleSaveDoc()}
-                          onCancel={() => {
-                            if (!confirmDiscardDraft()) return;
-                            setEditing(false);
-                            setDraft(doc.content);
-                          }}
-                          onNavigateDoc={handleDocNavigate}
+                          content={doc.content}
                         />
-                      ) : doc && parsedDoc ? (
-                        <>
-                          <MeetingWikiSourceStatus
-                            path={selectedPath}
-                            slug={activeWs?.slug}
-                            content={doc.content}
-                          />
-                          {parsedDoc.fm.length > 0 && (
-                            <div className={styles.frontmatter} aria-label="Document metadata">
-                              {parsedDoc.fm.map(([k, v], i) => (
+
+                        {/* Clean Notion-Style Page Header */}
+                        <div className={styles.pageHeader}>
+                          <div className={styles.pageMetaRow}>
+                            {openPageCategory && (
+                              <span className={styles.categoryPill}>
+                                <WebIcon name={openPageCategory.icon} size={12} />
+                                <span>{openPageCategory.singular}</span>
+                              </span>
+                            )}
+                            {!doc.writable && <span className={styles.wsTag}>View only</span>}
+                            {humanMeta.map((m) => (
+                              <span key={m.label} className={styles.humanMetaPill}>
+                                <span className={styles.humanMetaLabel}>{m.label}</span>
+                                <span>{m.value}</span>
+                              </span>
+                            ))}
+                            {sourceMeetingId && onOpenMeeting && (
+                              <button
+                                type="button"
+                                className={styles.tinyBtn}
+                                onClick={() => onOpenMeeting(sourceMeetingId)}
+                              >
+                                <WebIcon name="video" size={12} />
+                                <span>Open source meeting</span>
+                              </button>
+                            )}
+                          </div>
+
+                          <h1 className={styles.pageTitle}>{parsedDoc.displayTitle}</h1>
+
+                          {devView && (
+                            <div className={styles.devMetaBar} aria-label="Developer metadata">
+                              <span className={styles.devPathLine}>{selectedPath}</span>
+                              {parsedDoc.fields.map(([k, v], i) => (
                                 <span key={`${k}-${i}`} className={styles.fmItem}>
                                   <span className={styles.fmKey}>{k}</span>
                                   <span className={styles.fmVal}>{v}</span>
@@ -1666,99 +2165,80 @@ export function KnowledgeView({
                               ))}
                             </div>
                           )}
-                          <div ref={docProseRef} className={styles.docProse}>
-                            <DocNavContext.Provider value={handleDocNavigate}>
-                              <DocMetaContext.Provider value={{ path: selectedPath, slug: activeWs?.slug }}>
-                                <MdxDoc>{parsedDoc.body}</MdxDoc>
-                              </DocMetaContext.Provider>
-                            </DocNavContext.Provider>
-                          </div>
-                        </>
+                        </div>
+
+                        <div ref={docProseRef} className={styles.docProse}>
+                          <DocNavContext.Provider value={handleDocNavigate}>
+                            <DocMetaContext.Provider value={{ path: selectedPath, slug: activeWs?.slug }}>
+                              <MdxDoc>{parsedDoc.bodyWithoutLeadingH1}</MdxDoc>
+                            </DocMetaContext.Provider>
+                          </DocNavContext.Provider>
+                        </div>
+                      </>
+                    ) : (
+                      <p className={styles.cardSub}>This page could not be opened.</p>
+                    )}
+                  </div>
+                </div>
+
+                {showOutlineRail && (
+                  <aside className={styles.outlineRail} aria-label="Page outline and mentions">
+                    {outlineHeadings.length > 0 && (
+                      <div className={styles.outlineSection}>
+                        <div className={styles.outlineHead}>On this page</div>
+                        {outlineHeadings.map((h, i) => (
+                          <button
+                            key={`${h.text}-${i}`}
+                            type="button"
+                            className={`${styles.outlineItem} ${h.level === 3 ? styles.outlineSub : ""}`}
+                            onClick={() => scrollToHeading(h.text)}
+                          >
+                            {h.text}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className={styles.outlineSection}>
+                      <div className={styles.outlineHead}>Mentioned in ({backlinks.length})</div>
+                      {backlinksLoading ? (
+                        <span className={styles.cardSub}>Checking links…</span>
+                      ) : backlinks.length === 0 ? (
+                        <span className={styles.cardSub}>No other pages link here yet.</span>
                       ) : (
-                        <p className={styles.cardSub}>Document could not be loaded.</p>
+                        backlinks.map((bl) => (
+                          <button
+                            key={`${bl.path}:${bl.line}`}
+                            type="button"
+                            className={styles.inspectorLinkRow}
+                            onClick={() => openPage(bl.path)}
+                          >
+                            <WebIcon name="link" size={12} />
+                            <span className={styles.treeLabel}>{friendlyPageTitle(bl.path)}</span>
+                          </button>
+                        ))
                       )}
                     </div>
-                  </div>
-
-                  {showOutlineRail && (
-                    <aside className={styles.outlineRail} aria-label="Document outline and backlinks">
-                      {outlineHeadings.length > 0 && (
-                        <div className={styles.outlineSection}>
-                          <div className={styles.outlineHead}>On this page</div>
-                          {outlineHeadings.map((h, i) => (
-                            <button
-                              key={`${h.text}-${i}`}
-                              type="button"
-                              className={`${styles.outlineItem} ${h.level === 3 ? styles.outlineSub : ""}`}
-                              onClick={() => scrollToHeading(h.text)}
-                            >
-                              {h.text}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className={styles.outlineSection}>
-                        <div className={styles.outlineHead}>Backlinks ({backlinks.length})</div>
-                        {backlinksLoading ? (
-                          <span className={styles.cardSub}>Checking links…</span>
-                        ) : backlinks.length === 0 ? (
-                          <span className={styles.cardSub}>No incoming [[wikilinks]].</span>
-                        ) : (
-                          backlinks.map((bl) => (
-                            <button
-                              key={`${bl.path}:${bl.line}`}
-                              type="button"
-                              className={styles.inspectorLinkRow}
-                              onClick={() => setSelectedPath(bl.path)}
-                            >
-                              <WebIcon name="link" size={12} />
-                              <span className={styles.treeLabel} title={bl.path}>
-                                {bl.path.split("/").pop()?.replace(/\.md$/i, "") || bl.path}
-                              </span>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </aside>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div className={styles.emptyState}>
-                <WebIcon name="bookOpen" size={28} />
-                <h3>Select or create a document</h3>
-                <p>
-                  Browse your workspace Markdown files on the left, drop files here to upload, explore the Knowledge
-                  Graph, or read the Platform Guide (<code>_global</code>).
-                </p>
-                {activeWs && !activeWs.readOnly && (
-                  <button
-                    type="button"
-                    className={`${styles.btn} ${styles.btnPrimary}`}
-                    onClick={() => setNewDocOpen(true)}
-                  >
-                    <WebIcon name="plus" size={14} />
-                    <span>New Markdown doc</span>
-                  </button>
+                  </aside>
                 )}
               </div>
             )}
           </div>
         )}
 
-        {/* ── TAB 2: KNOWLEDGE GRAPH ── */}
+        {/* ── VIEW 2: CONNECTIONS MAP ── */}
         {activeTab === "graph" && activeWs && (
           <KnowledgeGraphCanvas
             slug={activeWs.slug}
             workspaceName={activeWs.name}
             isReadOnly={activeWs.readOnly}
+            devView={devView}
             externalRefreshKey={graphRefreshKey}
-            onOpenDocument={(path) => {
-              setSelectedPath(path);
-              setActiveTab("documents");
+            onOpenDocument={(path) => openPage(path)}
+            onAskTina={(prompt) => {
+              setCopilotSeedPrompt(prompt);
+              setCopilotOpen(true);
             }}
-            onAskTina={(prompt) => onAskTina(prompt, "send")}
             onCreateEntity={() => {
               setNewDocKind("project");
               setNewDocOpen(true);
@@ -1766,141 +2246,44 @@ export function KnowledgeView({
           />
         )}
 
-        {/* ── TAB 3: HISTORY & SYNC ── */}
+        {/* ── VIEW 3: ACTIVITY & SETTINGS ── */}
         {activeTab === "sync" && activeWs && (
           <div className={styles.syncScroll}>
             <div className={styles.syncGrid}>
               {activeWs.kind !== "global" ? (
                 <>
-                  <section className={styles.card}>
-                    <div className={styles.cardHead}>
-                      <div>
-                        <h3 className={styles.cardTitle}>
-                          <WebIcon name="github" size={16} />
-                          <span>GitHub Sync</span>
-                        </h3>
-                        <p className={styles.cardSub}>
-                          {remoteStatus?.has_home
-                            ? `Connected to ${remoteStatus.url} (${remoteStatus.branch || "main"}) · ${remoteStatus.ahead} ahead / ${remoteStatus.behind} behind`
-                            : "Publish this workspace to GitHub or sync with an existing repository."}
-                        </p>
-                      </div>
-                      <div className={styles.inlineForm}>
-                        <span className={styles.wsTag}>
-                          {gitToken.set ? `Token saved (${gitToken.masked})` : "No GitHub token"}
-                        </span>
-                        {onOpenGitHubSettings && (
-                          <button type="button" className={styles.btn} onClick={onOpenGitHubSettings}>
-                            <span>Manage token</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {remoteStatus?.has_home ? (
-                      <div className={styles.inlineForm}>
-                        <button
-                          type="button"
-                          className={styles.btn}
-                          disabled={busy}
-                          onClick={() =>
-                            void runAction(async () => {
-                              const r = await pullWorkspace({ slug: activeWs.slug });
-                              await loadGitAndSync(activeWs);
-                              await loadTreeAndMeta(activeWs, true);
-                              setNotice(r.updated ? `Pulled ${r.head_sha.slice(0, 7)} from ${r.remote}.` : "Already up to date.");
-                            })
-                          }
-                        >
-                          <WebIcon name="download" size={13} />
-                          <span>Pull</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`${styles.btn} ${styles.btnPrimary}`}
-                          disabled={busy}
-                          onClick={() =>
-                            void runAction(async () => {
-                              const r = await pushWorkspace({ slug: activeWs.slug });
-                              await loadGitAndSync(activeWs);
-                              setNotice(`Pushed ${r.head_sha.slice(0, 7)} to ${r.url}.`);
-                            })
-                          }
-                        >
-                          <WebIcon name="upload" size={13} />
-                          <span>Push</span>
-                        </button>
-                        {remoteStatus.url && (
-                          <a
-                            href={remoteStatus.url.replace(/\.git$/, "")}
-                            target="_blank"
-                            rel="noreferrer"
-                            className={styles.btn}
-                          >
-                            <WebIcon name="externalLink" size={13} />
-                            <span>Open on GitHub</span>
-                          </a>
-                        )}
-                      </div>
-                    ) : (
-                      <form
-                        className={styles.inlineForm}
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          if (!publishRepoName.trim()) return;
-                          void runAction(async () => {
-                            const r = await publishWorkspace(
-                              publishRepoName.trim(),
-                              publishPrivate,
-                              undefined,
-                              undefined,
-                              activeWs.slug,
-                            );
-                            await loadGitAndSync(activeWs);
-                            setNotice(`Published to ${r.repo_url}`);
-                          });
-                        }}
-                      >
-                        <input
-                          type="text"
-                          className={styles.input}
-                          style={{ maxWidth: 260 }}
-                          aria-label="GitHub repository name"
-                          placeholder="tina-knowledge"
-                          value={publishRepoName}
-                          onChange={(e) => setPublishRepoName(e.target.value)}
-                        />
-                        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-                          <input
-                            type="checkbox"
-                            checked={publishPrivate}
-                            onChange={(e) => setPublishPrivate(e.target.checked)}
-                          />
-                          <span>Private repo</span>
-                        </label>
-                        <button
-                          type="submit"
-                          className={`${styles.btn} ${styles.btnPrimary}`}
-                          disabled={busy || !publishRepoName.trim()}
-                        >
-                          <WebIcon name="github" size={13} />
-                          <span>Publish to GitHub</span>
-                        </button>
-                      </form>
-                    )}
-                  </section>
-
+                  {/* Card 1: Space Info & AI Access */}
                   <section className={styles.card}>
                     <div className={styles.cardHead}>
                       <div>
                         <h3 className={styles.cardTitle}>
                           <WebIcon name="sliders" size={15} />
-                          <span>Workspace Settings &amp; Sharing</span>
+                          <span>Space Settings</span>
                         </h3>
                         <p className={styles.cardSub}>
-                          Describe this workspace’s purpose so AI agents automatically route notes here.
+                          Describe what belongs in this space so Tina organizes notes and answers accurately.
                         </p>
                       </div>
+                    </div>
+
+                    <div className={styles.settingToggleRow}>
+                      <div>
+                        <div className={styles.settingLabel}>Let Tina read this space</div>
+                        <div className={styles.cardSub}>
+                          When on, Tina automatically searches pages here during meetings and chat.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={activeWs.mounted}
+                        aria-label="Let Tina read this space"
+                        className={`${styles.switchTrack} ${activeWs.mounted ? styles.switchTrackOn : ""}`}
+                        disabled={busy}
+                        onClick={() => handleToggleMount(activeWs)}
+                      >
+                        <span className={styles.switchThumb} />
+                      </button>
                     </div>
 
                     <form
@@ -1913,20 +2296,20 @@ export function KnowledgeView({
                             activeWs.slug ? { slug: activeWs.slug } : undefined,
                           );
                           setPurpose(saved);
-                        }, "Workspace purpose updated.");
+                        }, "Saved space description.");
                       }}
                     >
                       <input
                         type="text"
                         className={styles.input}
                         style={{ flex: 1, minWidth: 220 }}
-                        aria-label="Workspace purpose"
-                        placeholder="e.g., Product roadmap, customer specs, and weekly sync decisions"
+                        aria-label="Space description"
+                        placeholder="e.g., Product roadmap, team notes, and weekly decisions"
                         value={purposeDraft}
                         onChange={(e) => setPurposeDraft(e.target.value)}
                       />
                       <button type="submit" className={styles.btn} disabled={busy}>
-                        Save purpose
+                        Save description
                       </button>
                     </form>
 
@@ -1938,27 +2321,42 @@ export function KnowledgeView({
                           void runAction(async () => {
                             await renameWorkspace(activeWs.slotSlug!, renameDraft.trim());
                             await loadWorkspaces();
-                          }, "Workspace renamed.");
+                          }, "Space renamed.");
                         }}
                       >
                         <input
                           type="text"
                           className={styles.input}
                           style={{ maxWidth: 260 }}
-                          aria-label="Workspace display name"
+                          aria-label="Space name"
                           value={renameDraft}
                           onChange={(e) => setRenameDraft(e.target.value)}
                         />
                         <button type="submit" className={styles.btn} disabled={busy}>
-                          Rename
+                          Rename space
                         </button>
                       </form>
                     )}
+                  </section>
+
+                  {/* Card 2: Share with Team */}
+                  <section className={styles.card}>
+                    <div className={styles.cardHead}>
+                      <div>
+                        <h3 className={styles.cardTitle}>
+                          <WebIcon name="users" size={15} />
+                          <span>Share with Team</span>
+                        </h3>
+                        <p className={styles.cardSub}>
+                          Invite teammates to read, edit, and collaborate on pages in this space.
+                        </p>
+                      </div>
+                    </div>
 
                     <div className={styles.inlineForm}>
                       <button
                         type="button"
-                        className={styles.btn}
+                        className={`${styles.btn} ${styles.btnPrimary}`}
                         disabled={busy}
                         onClick={() =>
                           void runAction(async () => {
@@ -1979,11 +2377,11 @@ export function KnowledgeView({
                             });
                             const origin = typeof window !== "undefined" ? window.location.origin : "";
                             setInviteLink(`${origin}/?invite=${encodeURIComponent(minted.token)}`);
-                          }, "Share invite link generated (valid 7 days).")
+                          }, "Share invite link created (valid 7 days).")
                         }
                       >
                         <WebIcon name="share" size={13} />
-                        <span>Mint share link</span>
+                        <span>Create share link</span>
                       </button>
 
                       {activeWs.kind === "extra" && activeWs.slotSlug && (
@@ -2000,7 +2398,7 @@ export function KnowledgeView({
                               }, `Archived "${activeWs.name}".`)
                             }
                           >
-                            Archive
+                            Archive space
                           </button>
                           <button
                             type="button"
@@ -2009,7 +2407,7 @@ export function KnowledgeView({
                             onClick={() => {
                               if (
                                 typeof window !== "undefined" &&
-                                !window.confirm(`Permanently delete workspace "${activeWs.name}"?`)
+                                !window.confirm(`Permanently delete "${activeWs.name}"?`)
                               ) {
                                 return;
                               }
@@ -2021,7 +2419,7 @@ export function KnowledgeView({
                             }}
                           >
                             <WebIcon name="trash" size={13} />
-                            <span>Delete workspace</span>
+                            <span>Delete space</span>
                           </button>
                         </>
                       )}
@@ -2035,7 +2433,7 @@ export function KnowledgeView({
                           className={styles.input}
                           style={{ flex: 1 }}
                           value={inviteLink}
-                          aria-label="Workspace invite URL"
+                          aria-label="Share invite link"
                         />
                         <button
                           type="button"
@@ -2055,34 +2453,33 @@ export function KnowledgeView({
               ) : (
                 <section className={styles.card}>
                   <h3 className={styles.cardTitle}>
-                    <WebIcon name="shield" size={15} />
-                    <span>Platform Read-Only Workspace (_global)</span>
+                    <WebIcon name="bookOpen" size={15} />
+                    <span>Templates &amp; Guides (View only)</span>
                   </h3>
                   <p className={styles.cardSub}>
-                    This workspace is maintained centrally by TINA on KMS-encrypted S3 and mounted read-only into every
-                    user’s AI agent session. Editing and GitHub sync are disabled.
+                    This built-in library contains shared handbooks and templates managed by your organization. Tina
+                    reads these guides automatically across every space.
                   </p>
                 </section>
               )}
 
+              {/* Card 3: Recent Activity */}
               <section className={styles.card}>
                 <div className={styles.cardHead}>
                   <div>
                     <h3 className={styles.cardTitle}>
                       <WebIcon name="clock" size={15} />
-                      <span>Revision History</span>
+                      <span>Recent Activity</span>
                     </h3>
                     <p className={styles.cardSub}>
                       {gitState
-                        ? `Branch ${gitState.branch} · ${gitState.commits.length} recent commit(s)`
-                        : "Loading Git history…"}
+                        ? devView
+                          ? `Branch ${gitState.branch} · ${gitState.commits.length} recent commit(s)`
+                          : `${gitState.commits.length} recent update(s) saved in this space`
+                        : "Loading recent updates…"}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className={styles.btn}
-                    onClick={() => void loadGitAndSync(activeWs)}
-                  >
+                  <button type="button" className={styles.btn} onClick={() => void loadGitAndSync(activeWs)}>
                     <WebIcon name="refresh" size={13} />
                     <span>Refresh</span>
                   </button>
@@ -2091,155 +2488,356 @@ export function KnowledgeView({
                 <div className={styles.commitList}>
                   {(gitState?.commits ?? []).map((commit) => {
                     const open = expandedSha === commit.sha;
+                    const diffVisible = devView || showDiffSha === commit.sha;
+                    const actor =
+                      commit.kind === "member"
+                        ? commit.author || "Teammate"
+                        : commit.kind === "system"
+                          ? "Tina"
+                          : "You";
                     return (
                       <div key={commit.sha} className={styles.commitCard}>
                         <button
                           type="button"
                           className={styles.commitHead}
-                          onClick={() => void handleToggleCommitDiff(commit.sha)}
+                          onClick={() => void handleToggleCommitRow(commit.sha)}
                           aria-expanded={open}
                         >
                           <span className={styles.treeLabel}>{commit.msg}</span>
                           <span className={styles.commitMeta}>
-                            <span>{commit.kind === "member" ? commit.author || "member" : commit.kind || "you"}</span>
-                            <span className={styles.sha}>{commit.sha.slice(0, 7)}</span>
+                            <span>{actor}</span>
+                            {devView && <span className={styles.sha}>{commit.sha.slice(0, 7)}</span>}
                             <span>{commit.when}</span>
                           </span>
                         </button>
                         {open && (
-                          <div>
+                          <div className={styles.commitBody}>
                             {commit.files && commit.files.length > 0 && (
-                              <div className={styles.chipRow} style={{ padding: "6px 12px", marginTop: 0 }}>
+                              <div className={styles.chipRow} style={{ padding: "8px 12px", marginTop: 0 }}>
                                 {commit.files.map((fp) => (
                                   <button
                                     key={fp}
                                     type="button"
                                     className={styles.chip}
-                                    onClick={() => {
-                                      setSelectedPath(fp);
-                                      setActiveTab("documents");
-                                    }}
+                                    onClick={() => openPage(fp)}
                                   >
-                                    {fp}
+                                    {devView ? fp : friendlyPageTitle(fp)}
                                   </button>
                                 ))}
                               </div>
                             )}
-                            <pre className={styles.diffPre}>
-                              {diffsBySha[commit.sha]
-                                ? renderDiffLines(diffsBySha[commit.sha])
-                                : "Loading diff…"}
-                            </pre>
+                            {!diffVisible ? (
+                              <div style={{ padding: "0 12px 10px" }}>
+                                <button
+                                  type="button"
+                                  className={styles.tinyBtn}
+                                  onClick={() => {
+                                    setShowDiffSha(commit.sha);
+                                    void loadDiffIfNeeded(commit.sha);
+                                  }}
+                                >
+                                  Show technical diff
+                                </button>
+                              </div>
+                            ) : (
+                              <pre className={styles.diffPre}>
+                                {diffsBySha[commit.sha]
+                                  ? renderDiffLines(diffsBySha[commit.sha])
+                                  : "Loading diff…"}
+                              </pre>
+                            )}
                           </div>
                         )}
                       </div>
                     );
                   })}
                   {gitState && gitState.commits.length === 0 && (
-                    <p className={styles.cardSub}>No commits yet in this workspace.</p>
+                    <p className={styles.cardSub}>No saved updates yet in this space.</p>
                   )}
                 </div>
               </section>
+
+              {/* Card 4: Collapsible Advanced · GitHub Sync */}
+              {activeWs.kind !== "global" && (
+                <section className={styles.card}>
+                  <button
+                    type="button"
+                    className={styles.accordionBtn}
+                    aria-expanded={advancedSyncOpen}
+                    onClick={() => setAdvancedSyncOpen((v) => !v)}
+                  >
+                    <div style={{ textAlign: "left" }}>
+                      <h3 className={styles.cardTitle}>
+                        <WebIcon name="github" size={15} />
+                        <span>Advanced · GitHub Sync</span>
+                      </h3>
+                      <p className={styles.cardSub} style={{ marginTop: 2 }}>
+                        {remoteStatus?.has_home
+                          ? `Connected to ${remoteStatus.url} (${remoteStatus.ahead} ahead / ${remoteStatus.behind} behind)`
+                          : "Optional: back up or sync this space with a GitHub repository."}
+                      </p>
+                    </div>
+                    <WebIcon name={advancedSyncOpen ? "chevronUp" : "chevronDown"} size={15} />
+                  </button>
+
+                  {advancedSyncOpen && (
+                    <div className={styles.accordionBody}>
+                      <div className={styles.inlineForm}>
+                        <span className={styles.wsTag}>
+                          {gitToken.set ? `GitHub connected (${gitToken.masked})` : "No GitHub token"}
+                        </span>
+                        {onOpenGitHubSettings && (
+                          <button type="button" className={styles.btn} onClick={onOpenGitHubSettings}>
+                            <span>Manage GitHub token</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {remoteStatus?.has_home ? (
+                        <div className={styles.inlineForm}>
+                          <button
+                            type="button"
+                            className={styles.btn}
+                            disabled={busy}
+                            onClick={() =>
+                              void runAction(async () => {
+                                const r = await pullWorkspace({ slug: activeWs.slug });
+                                await loadGitAndSync(activeWs);
+                                await loadTreeAndMeta(activeWs, true);
+                                setNotice(
+                                  r.updated
+                                    ? `Pulled latest updates from GitHub (${r.head_sha.slice(0, 7)}).`
+                                    : "Already up to date with GitHub.",
+                                );
+                              })
+                            }
+                          >
+                            <WebIcon name="download" size={13} />
+                            <span>Pull from GitHub</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`${styles.btn} ${styles.btnPrimary}`}
+                            disabled={busy}
+                            onClick={() =>
+                              void runAction(async () => {
+                                const r = await pushWorkspace({ slug: activeWs.slug });
+                                await loadGitAndSync(activeWs);
+                                setNotice(`Pushed updates to GitHub (${r.head_sha.slice(0, 7)}).`);
+                              })
+                            }
+                          >
+                            <WebIcon name="upload" size={13} />
+                            <span>Push to GitHub</span>
+                          </button>
+                          {remoteStatus.url && (
+                            <a
+                              href={remoteStatus.url.replace(/\.git$/, "")}
+                              target="_blank"
+                              rel="noreferrer"
+                              className={styles.btn}
+                            >
+                              <WebIcon name="externalLink" size={13} />
+                              <span>Open repository</span>
+                            </a>
+                          )}
+                        </div>
+                      ) : (
+                        <form
+                          className={styles.inlineForm}
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            if (!publishRepoName.trim()) return;
+                            void runAction(async () => {
+                              const r = await publishWorkspace(
+                                publishRepoName.trim(),
+                                publishPrivate,
+                                undefined,
+                                undefined,
+                                activeWs.slug,
+                              );
+                              await loadGitAndSync(activeWs);
+                              setNotice(`Published to ${r.repo_url}`);
+                            });
+                          }}
+                        >
+                          <input
+                            type="text"
+                            className={styles.input}
+                            style={{ maxWidth: 260 }}
+                            aria-label="GitHub repository name"
+                            placeholder="tina-knowledge"
+                            value={publishRepoName}
+                            onChange={(e) => setPublishRepoName(e.target.value)}
+                          />
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+                            <input
+                              type="checkbox"
+                              checked={publishPrivate}
+                              onChange={(e) => setPublishPrivate(e.target.checked)}
+                            />
+                            <span>Private repository</span>
+                          </label>
+                          <button
+                            type="submit"
+                            className={`${styles.btn} ${styles.btnPrimary}`}
+                            disabled={busy || !publishRepoName.trim()}
+                          >
+                            <WebIcon name="github" size={13} />
+                            <span>Publish to GitHub</span>
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
             </div>
           </div>
         )}
       </section>
 
-      {/* ── Right Docked Ask Tina Copilot Drawer (P0.1) ── */}
+      {/* ── Right Docked Inline Ask Tina Drawer ── */}
       {activeWs && (
         <KnowledgeCopilotDrawer
           open={copilotOpen}
           workspaceName={activeWs.name}
           slug={activeWs.slug}
           docPath={selectedPath}
+          docTitle={openPageTitle}
           isReadOnly={activeWs.readOnly}
+          devView={devView}
+          initialPrompt={copilotSeedPrompt}
+          onConsumeInitialPrompt={() => setCopilotSeedPrompt(null)}
           onClose={() => setCopilotOpen(false)}
           onWorkspaceMutated={handleWorkspaceMutated}
           onOpenFullAsk={(prompt) => onAskTina(prompt, "draft")}
         />
       )}
 
-      {/* ── Create Document Modal ── */}
+      {/* ── Modal 1: Create New Page ── */}
       {newDocOpen && (
         <div
           className={styles.modalBackdrop}
           role="dialog"
           aria-modal="true"
-          aria-label="Create Markdown document"
+          aria-label="Create new page"
           onClick={() => setNewDocOpen(false)}
         >
           <form className={styles.modalCard} onClick={(e) => e.stopPropagation()} onSubmit={handleCreateDoc}>
-            <h3 className={styles.modalTitle}>Create Markdown document</h3>
-            <div className={styles.chipRow} style={{ marginTop: 0 }}>
-              {(
-                [
-                  ["wiki", "Wiki Page"],
-                  ["notes", "Note"],
-                  ["project", "Project Entity"],
-                  ["person", "Person Entity"],
-                ] as const
-              ).map(([kind, label]) => (
+            <h3 className={styles.modalTitle}>Create a new page</h3>
+            <p className={styles.cardSub}>Choose a template and give your page a clear name.</p>
+            <div className={styles.templateCardGrid}>
+              {NEW_PAGE_CARDS.map((card) => (
                 <button
-                  key={kind}
+                  key={card.kind}
                   type="button"
-                  className={`${styles.chip} ${newDocKind === kind ? styles.chipActive : ""}`}
-                  onClick={() => setNewDocKind(kind)}
+                  className={`${styles.templateCard} ${newDocKind === card.kind ? styles.templateCardActive : ""}`}
+                  onClick={() => setNewDocKind(card.kind)}
                 >
-                  {label}
+                  <WebIcon name={card.icon} size={16} />
+                  <span className={styles.templateCardTitle}>{card.title}</span>
+                  <span className={styles.templateCardDesc}>{card.desc}</span>
                 </button>
               ))}
             </div>
             <input
               type="text"
               className={styles.input}
-              placeholder="Document title (e.g., Q4 Architecture Plan)"
-              aria-label="Document title"
+              placeholder="Page title (e.g., Q4 Product Plan)"
+              aria-label="Page title"
               value={newDocTitle}
               onChange={(e) => setNewDocTitle(e.target.value)}
               autoFocus
             />
-            <input
-              type="text"
-              className={styles.input}
-              placeholder={newDocTemplate(newDocKind, newDocTitle || "untitled").path}
-              aria-label="Custom document path"
-              value={newDocCustomPath}
-              onChange={(e) => setNewDocCustomPath(e.target.value)}
-            />
+            {devView && (
+              <input
+                type="text"
+                className={styles.input}
+                placeholder={buildNewPageTemplate(newDocKind, newDocTitle || "untitled").path}
+                aria-label="Custom file path"
+                value={newDocCustomPath}
+                onChange={(e) => setNewDocCustomPath(e.target.value)}
+              />
+            )}
             <div className={styles.inlineForm} style={{ justifyContent: "flex-end" }}>
               <button type="button" className={styles.btn} onClick={() => setNewDocOpen(false)}>
                 Cancel
               </button>
-              <button type="submit" className={`${styles.btn} ${styles.btnPrimary}`} disabled={busy || !newDocTitle.trim()}>
-                {busy ? "Creating…" : "Create document"}
+              <button
+                type="submit"
+                className={`${styles.btn} ${styles.btnPrimary}`}
+                disabled={busy || !newDocTitle.trim()}
+              >
+                {busy ? "Creating…" : "Create page"}
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* ── Move / Rename Document Modal ── */}
+      {/* ── Modal 2: Rename or Move Page ── */}
       {moveOpen && selectedPath && (
         <div
           className={styles.modalBackdrop}
           role="dialog"
           aria-modal="true"
-          aria-label="Move or rename document"
+          aria-label="Rename or move page"
           onClick={() => setMoveOpen(false)}
         >
           <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-            <h3 className={styles.modalTitle}>Move or rename document</h3>
-            <p className={styles.cardSub}>Current: {selectedPath}</p>
-            <input
-              type="text"
-              className={styles.input}
-              aria-label="Destination path"
-              value={moveDest}
-              onChange={(e) => {
-                setMoveDest(e.target.value);
-                setMovePreview(null);
-              }}
-            />
+            <h3 className={styles.modalTitle}>Rename or move page</h3>
+            {devView ? (
+              <>
+                <p className={styles.cardSub}>Current path: {selectedPath}</p>
+                <input
+                  type="text"
+                  className={styles.input}
+                  aria-label="Destination path"
+                  value={moveDest}
+                  onChange={(e) => {
+                    setMoveDest(e.target.value);
+                    setMovePreview(null);
+                  }}
+                />
+              </>
+            ) : (
+              <>
+                <label className={styles.fieldLabel}>
+                  <span>Page name</span>
+                  <input
+                    type="text"
+                    className={styles.input}
+                    aria-label="New page name"
+                    value={moveName}
+                    onChange={(e) => {
+                      setMoveName(e.target.value);
+                      setMovePreview(null);
+                    }}
+                    autoFocus
+                  />
+                </label>
+                <label className={styles.fieldLabel}>
+                  <span>Section</span>
+                  <select
+                    className={styles.input}
+                    aria-label="Destination section"
+                    value={moveSection}
+                    onChange={(e) => {
+                      setMoveSection(e.target.value as "wiki" | "notes" | "project" | "person" | "task");
+                      setMovePreview(null);
+                    }}
+                  >
+                    <option value="wiki">Pages &amp; Notes</option>
+                    <option value="notes">Quick Notes</option>
+                    <option value="project">Projects</option>
+                    <option value="person">People</option>
+                    <option value="task">Tasks</option>
+                  </select>
+                </label>
+              </>
+            )}
+
             <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
               <input
                 type="checkbox"
@@ -2249,9 +2847,10 @@ export function KnowledgeView({
                   setMovePreview(null);
                 }}
               />
-              <span>Automatically update [[wikilinks]] across workspace</span>
+              <span>Automatically update links from other pages</span>
             </label>
-            {movePreview && (
+
+            {devView && movePreview && (
               <div className={styles.card} style={{ padding: "10px 12px" }}>
                 <span className={styles.cardSub}>
                   Preview ready: {movePreview.changes.length} file(s) will have links updated.
@@ -2263,15 +2862,16 @@ export function KnowledgeView({
                 ))}
               </div>
             )}
+
             <div className={styles.inlineForm} style={{ justifyContent: "flex-end" }}>
               <button type="button" className={styles.btn} onClick={() => setMoveOpen(false)}>
                 Cancel
               </button>
-              {moveUpdateLinks && !movePreview ? (
+              {devView && moveUpdateLinks && !movePreview ? (
                 <button
                   type="button"
                   className={`${styles.btn} ${styles.btnPrimary}`}
-                  disabled={busy || !moveDest.trim() || moveDest.trim() === selectedPath}
+                  disabled={busy || !effectiveMoveDest || effectiveMoveDest === selectedPath}
                   onClick={() => void handlePreviewMove()}
                 >
                   Preview link updates
@@ -2280,14 +2880,67 @@ export function KnowledgeView({
                 <button
                   type="button"
                   className={`${styles.btn} ${styles.btnPrimary}`}
-                  disabled={busy || !moveDest.trim() || moveDest.trim() === selectedPath}
+                  disabled={busy || !effectiveMoveDest || effectiveMoveDest === selectedPath}
                   onClick={() => void handleConfirmMove()}
                 >
-                  Confirm move
+                  {busy ? "Moving…" : "Save changes"}
                 </button>
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Modal 3: Create New Space ── */}
+      {createWsOpen && (
+        <div
+          className={styles.modalBackdrop}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Create new space"
+          onClick={() => setCreateWsOpen(false)}
+        >
+          <form className={styles.modalCard} onClick={(e) => e.stopPropagation()} onSubmit={handleCreateWorkspace}>
+            <h3 className={styles.modalTitle}>Create a new space</h3>
+            <p className={styles.cardSub}>Keep a private library for yourself or start a shared space with your team.</p>
+            <div className={styles.templateCardGrid}>
+              <button
+                type="button"
+                className={`${styles.templateCard} ${!newWsShared ? styles.templateCardActive : ""}`}
+                onClick={() => setNewWsShared(false)}
+              >
+                <WebIcon name="user" size={16} />
+                <span className={styles.templateCardTitle}>Private Space</span>
+                <span className={styles.templateCardDesc}>Only visible to you</span>
+              </button>
+              <button
+                type="button"
+                className={`${styles.templateCard} ${newWsShared ? styles.templateCardActive : ""}`}
+                onClick={() => setNewWsShared(true)}
+              >
+                <WebIcon name="users" size={16} />
+                <span className={styles.templateCardTitle}>Team Space</span>
+                <span className={styles.templateCardDesc}>Invite teammates to edit</span>
+              </button>
+            </div>
+            <input
+              type="text"
+              className={styles.input}
+              placeholder="Space name (e.g., Product Team)"
+              aria-label="New space name"
+              value={newWsName}
+              onChange={(e) => setNewWsName(e.target.value)}
+              autoFocus
+            />
+            <div className={styles.inlineForm} style={{ justifyContent: "flex-end" }}>
+              <button type="button" className={styles.btn} onClick={() => setCreateWsOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" className={`${styles.btn} ${styles.btnPrimary}`} disabled={busy || !newWsName.trim()}>
+                {busy ? "Creating…" : "Create space"}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

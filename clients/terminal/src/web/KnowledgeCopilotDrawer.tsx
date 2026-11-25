@@ -1,9 +1,10 @@
 "use client";
-/** KnowledgeCopilotDrawer — Inline Ask Tina AI Copilot panel docked beside the open Knowledge document.
- *  Streams live SSE turns via `streamChatTurn` grounded on the active document & workspace, provides
- *  one-click Summarize / Extract Tasks / Suggest Links actions, and auto-refreshes the workspace on commit. */
+/** KnowledgeCopilotDrawer — Friendly inline Ask Tina AI side panel docked beside the Knowledge Hub.
+ *  Streams live SSE answers grounded on the open page or space, offers 1-click Summarize / Find action items /
+ *  Suggest links actions, supports seeded prompts from uploaded files or Connections Map, and auto-refreshes on save. */
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
+import { friendlyPageTitle } from "./knowledgeFriendly";
 import { Markdown } from "../ui-kit/Markdown";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
 import styles from "./knowledgeView.module.css";
@@ -27,7 +28,11 @@ export function KnowledgeCopilotDrawer({
   workspaceName,
   slug,
   docPath,
+  docTitle,
   isReadOnly,
+  devView = false,
+  initialPrompt,
+  onConsumeInitialPrompt,
   onClose,
   onWorkspaceMutated,
   onOpenFullAsk,
@@ -36,7 +41,11 @@ export function KnowledgeCopilotDrawer({
   workspaceName: string;
   slug?: string;
   docPath: string | null;
+  docTitle?: string | null;
   isReadOnly: boolean;
+  devView?: boolean;
+  initialPrompt?: string | null;
+  onConsumeInitialPrompt?: () => void;
   onClose: () => void;
   onWorkspaceMutated: () => void;
   onOpenFullAsk?: (prompt: string) => void;
@@ -88,8 +97,8 @@ export function KnowledgeCopilotDrawer({
       abortRef.current = controller;
 
       const groundedPrompt = docPath
-        ? `[Context: Workspace "${workspaceName}"${slug ? ` (slug: ${slug})` : ""}, open document "${docPath}"${isReadOnly ? " (read-only)" : ""}]\n\n${prompt}`
-        : `[Context: Workspace "${workspaceName}"${slug ? ` (slug: ${slug})` : ""}]\n\n${prompt}`;
+        ? `[Context: Space "${workspaceName}"${slug ? ` (slug: ${slug})` : ""}, open page "${docPath}"${isReadOnly ? " (view-only)" : ""}]\n\n${prompt}`
+        : `[Context: Space "${workspaceName}"${slug ? ` (slug: ${slug})` : ""}]\n\n${prompt}`;
 
       try {
         await streamChatTurn(
@@ -132,14 +141,14 @@ export function KnowledgeCopilotDrawer({
             onRejected: () => {
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === agentId ? { ...m, error: "Workspace governance rejected this edit." } : m,
+                  m.id === agentId ? { ...m, error: "This space does not allow that change." } : m,
                 ),
               );
             },
             onModelFailure: (reply) => {
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === agentId ? { ...m, error: reply || "Model inference failed." } : m,
+                  m.id === agentId ? { ...m, error: reply || "Tina could not complete that response." } : m,
                 ),
               );
             },
@@ -160,6 +169,14 @@ export function KnowledgeCopilotDrawer({
     [docPath, workspaceName, slug, isReadOnly, session, onWorkspaceMutated],
   );
 
+  // Auto-send seeded prompts (e.g., "Ask Tina to summarize this file" or from Connections Map)
+  useEffect(() => {
+    if (!open || !initialPrompt) return;
+    const text = initialPrompt;
+    onConsumeInitialPrompt?.();
+    void sendPrompt(text);
+  }, [open, initialPrompt, onConsumeInitialPrompt, sendPrompt]);
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!input.trim() || busy) return;
@@ -170,17 +187,17 @@ export function KnowledgeCopilotDrawer({
 
   if (!open) return null;
 
-  const targetLabel = docPath ? docPath.split("/").pop() || docPath : workspaceName;
+  const targetLabel = docTitle || (docPath ? friendlyPageTitle(docPath) : workspaceName);
 
   return (
-    <aside className={styles.copilotDrawer} aria-label="Ask Tina Knowledge Copilot">
+    <aside className={styles.copilotDrawer} aria-label="Ask Tina assistant">
       <div className={styles.copilotHead}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
-          <WebIcon name="tinaAsk" size={15} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <WebIcon name="tinaAsk" size={16} />
           <div style={{ minWidth: 0 }}>
-            <div className={styles.copilotTitle}>Ask Tina Copilot</div>
-            <div className={styles.copilotSub} title={docPath || workspaceName}>
-              Grounded on {targetLabel}
+            <div className={styles.copilotTitle}>Ask Tina</div>
+            <div className={styles.copilotSub} title={devView && docPath ? docPath : targetLabel}>
+              {docPath ? `Reading ${targetLabel}` : `Space · ${workspaceName}`}
             </div>
           </div>
         </div>
@@ -189,11 +206,11 @@ export function KnowledgeCopilotDrawer({
             <button
               type="button"
               className={styles.tinyBtn}
-              title="Open full-page Ask Tina"
+              title="Open full-screen Ask Tina"
               onClick={() =>
                 onOpenFullAsk(
                   docPath
-                    ? `Help me work on "${docPath}" in ${workspaceName}.`
+                    ? `Help me work on "${targetLabel}" in ${workspaceName}.`
                     : `Help me explore ${workspaceName}.`,
                 )
               }
@@ -204,7 +221,7 @@ export function KnowledgeCopilotDrawer({
           <button
             type="button"
             className={styles.tinyBtn}
-            title="New conversation"
+            title="Start a new chat"
             onClick={() => {
               abortRef.current?.abort();
               setMessages([]);
@@ -213,7 +230,7 @@ export function KnowledgeCopilotDrawer({
           >
             <WebIcon name="refresh" size={12} />
           </button>
-          <button type="button" className={styles.tinyBtn} aria-label="Close Copilot" onClick={onClose}>
+          <button type="button" className={styles.tinyBtn} aria-label="Close Ask Tina" onClick={onClose}>
             <WebIcon name="close" size={12} />
           </button>
         </div>
@@ -227,12 +244,12 @@ export function KnowledgeCopilotDrawer({
           onClick={() =>
             void sendPrompt(
               docPath
-                ? `Summarize "${docPath}" in bullet points with the main decisions, facts, and open questions.`
-                : `Give me an overview of the key knowledge pages in ${workspaceName}.`,
+                ? `Summarize "${targetLabel}" in clear bullet points with key decisions and open questions.`
+                : `Give me an overview of the most important pages in ${workspaceName}.`,
             )
           }
         >
-          Summarize
+          {docPath ? "Summarize page" : "Summarize space"}
         </button>
         <button
           type="button"
@@ -241,12 +258,12 @@ export function KnowledgeCopilotDrawer({
           onClick={() =>
             void sendPrompt(
               docPath
-                ? `Extract concrete action items and owners from "${docPath}"${isReadOnly ? " (do not modify read-only files)" : ""}.`
+                ? `List all action items and owners mentioned in "${targetLabel}"${isReadOnly ? " (do not modify view-only pages)" : ""}.`
                 : `List open tasks and follow-ups across ${workspaceName}.`,
             )
           }
         >
-          Extract Tasks
+          Find action items
         </button>
         <button
           type="button"
@@ -255,12 +272,12 @@ export function KnowledgeCopilotDrawer({
           onClick={() =>
             void sendPrompt(
               docPath
-                ? `Suggest relevant [[wikilinks]] to connect "${docPath}" with other entities and recommend clarity improvements.`
-                : `Suggest which pages in ${workspaceName} should be linked together in the Knowledge Graph.`,
+                ? `Suggest related pages in ${workspaceName} to link with "${targetLabel}" and ways to make this page clearer.`
+                : `Suggest which pages in ${workspaceName} are related and should be connected.`,
             )
           }
         >
-          Suggest Links
+          Suggest links
         </button>
       </div>
 
@@ -269,8 +286,8 @@ export function KnowledgeCopilotDrawer({
           <div className={styles.copilotEmpty}>
             <WebIcon name="sparkleSmall" size={20} />
             <p>
-              Ask questions about <strong>{targetLabel}</strong>, compare with meeting notes, or ask Tina to draft
-              edits — updates refresh here automatically.
+              Ask anything about <strong>{targetLabel}</strong>, compare with past meetings, or ask Tina to draft
+              updates — changes appear here automatically.
             </p>
           </div>
         )}
@@ -283,7 +300,7 @@ export function KnowledgeCopilotDrawer({
               <div>{m.text}</div>
             ) : (
               <>
-                {m.ops && m.ops.length > 0 && (
+                {devView && m.ops && m.ops.length > 0 && (
                   <div className={styles.copilotOps}>
                     {m.ops.map((op, i) => (
                       <span key={`${op}-${i}`} className={styles.wsTag}>
@@ -298,13 +315,17 @@ export function KnowledgeCopilotDrawer({
                   </div>
                 ) : !m.error ? (
                   <span className={styles.cardSub}>
-                    {phase === "working" ? "Thinking & reading workspace…" : "Connecting to TINA agent…"}
+                    {phase === "working" ? "Reading your library…" : "Thinking…"}
                   </span>
                 ) : null}
                 {m.commit && (
                   <div className={styles.copilotCommit}>
                     <WebIcon name="check" size={12} />
-                    <span>Updated workspace ({m.commit.slice(0, 7)}) — refreshed</span>
+                    <span>
+                      {devView
+                        ? `Updated workspace (${m.commit.slice(0, 7)}) — refreshed`
+                        : "Updated space · refreshed"}
+                    </span>
                   </div>
                 )}
                 {m.error && <div className={styles.copilotErr}>{m.error}</div>}
@@ -319,7 +340,7 @@ export function KnowledgeCopilotDrawer({
         <textarea
           className={styles.copilotInput}
           rows={2}
-          aria-label="Ask Tina about this document"
+          aria-label="Ask Tina a question"
           placeholder={`Ask Tina about ${targetLabel}…`}
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -332,7 +353,7 @@ export function KnowledgeCopilotDrawer({
         />
         <div className={styles.copilotComposerBar}>
           <span className={styles.cardSub} style={{ fontSize: 11 }}>
-            {busy ? (phase ? `Status: ${phase}` : "Running…") : "Enter to send · Shift+Enter newline"}
+            {busy ? "Tina is writing…" : "Enter to send · Shift+Enter new line"}
           </span>
           {busy ? (
             <button

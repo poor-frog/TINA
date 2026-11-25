@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { KnowledgeView } from "../KnowledgeView";
+import {
+  friendlyPageTitle,
+  parseDocumentClean,
+  slugifyTitle,
+  stripUploadHash,
+  updateCleanDocumentBody,
+  updateCleanDocumentTitle,
+} from "../knowledgeFriendly";
 import type { ChatStreamCallbacks } from "../../surfaces/chatStream";
 
 const mockStreamChatTurn = vi.fn();
@@ -17,12 +25,18 @@ vi.mock("../../surfaces/chatStream", () => ({
   streamChatTurn: (...args: unknown[]) => mockStreamChatTurn(...args),
 }));
 
-function mockFetchRoutes() {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+function mockFetchRoutes(onSaveDocument?: (payload: Record<string, unknown>) => void) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const method = (init?.method || "GET").toUpperCase();
     const json = (body: unknown, status = 200) =>
       new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
+    if (url.includes("/api/workspace/document") && (method === "PUT" || method === "POST")) {
+      const payload = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+      onSaveDocument?.(payload);
+      return json({ path: payload.path, sha256: "f".repeat(64), commit: "1234567890" });
+    }
     if (url.includes("/api/workspace/attached")) {
       return json({ active: "seed", slots: { seed: { repo: null, ref: null, name: "Personal" } } });
     }
@@ -45,9 +59,11 @@ function mockFetchRoutes() {
       return json({
         files: [
           "README.md",
+          "CLAUDE.md",
           "kg/entities/person/alice.md",
           "kg/entities/project/tina.md",
           "kg/entities/topic/orphan-topic.md",
+          "uploads/0123456789abcdef-Q4-Report.pdf",
         ],
       });
     }
@@ -70,7 +86,7 @@ function mockFetchRoutes() {
     }
     if (url.includes("/api/workspace/document") && url.includes("alice.md")) {
       return json({
-        content: "---\nid: person/alice\ntype: person\ntitle: Alice Nguyen\n---\n\n## Role\nWorks on [[TINA]].",
+        content: "---\nid: person/alice\ntype: person\ntitle: Alice Nguyen\ntags:\n  - design\n  - q4\n---\n\n## Role\nWorks on [[TINA]].",
         sha256: "b".repeat(64),
         writable: true,
       });
@@ -111,8 +127,13 @@ function mockFetchRoutes() {
     }
     if (url.includes("/api/workspace/git-remote-status")) {
       return json({
-        has_home: true, remote: "origin", url: "https://github.com/org/tina-wiki.git",
-        branch: "main", tracked: true, ahead: 1, behind: 0,
+        has_home: true,
+        remote: "origin",
+        url: "https://github.com/org/tina-wiki.git",
+        branch: "main",
+        tracked: true,
+        ahead: 1,
+        behind: 0,
       });
     }
     if (url.includes("/api/workspace/git-token")) {
@@ -132,8 +153,33 @@ function mockFetchRoutes() {
   });
 }
 
-describe("KnowledgeView v2 (Production Web Knowledge Hub)", () => {
+describe("knowledgeFriendly helpers", () => {
+  it("normalizes Vietnamese diacritics into clean slugs and strips upload hashes", () => {
+    expect(slugifyTitle("Kế hoạch Quý 4 & Đánh giá")).toBe("ke-hoach-quy-4-danh-gia");
+    expect(stripUploadHash("0123456789abcdef-Q4-Report.pdf")).toBe("Q4-Report.pdf");
+    expect(friendlyPageTitle("uploads/0123456789abcdef-Q4-Report.pdf")).toBe("Q4-Report.pdf");
+    expect(friendlyPageTitle("kg/entities/person/alice-nguyen.md")).toBe("Alice Nguyen");
+  });
+
+  it("edits title and body cleanly while preserving multi-line YAML frontmatter", () => {
+    const raw = "---\nid: person/alice\ntype: person\ntitle: Alice Nguyen\ntags:\n  - design\n  - q4\n---\n\n## Role\nOriginal body.";
+    const parsed = parseDocumentClean(raw, "kg/entities/person/alice.md");
+    expect(parsed.displayTitle).toBe("Alice Nguyen");
+    expect(parsed.bodyWithoutLeadingH1).toBe("## Role\nOriginal body.");
+
+    const withNewTitle = updateCleanDocumentTitle(raw, "kg/entities/person/alice.md", "Alice T. Nguyen");
+    const withNewBody = updateCleanDocumentBody(withNewTitle, "kg/entities/person/alice.md", "## Role\nUpdated body.");
+    expect(withNewBody).toContain("id: person/alice");
+    expect(withNewBody).toContain("type: person");
+    expect(withNewBody).toContain("title: Alice T. Nguyen");
+    expect(withNewBody).toContain("tags:\n  - design\n  - q4");
+    expect(withNewBody).toContain("Updated body.");
+  });
+});
+
+describe("KnowledgeView v3 (Notion-Style Non-Tech Knowledge Hub)", () => {
   beforeEach(() => {
+    window.localStorage.removeItem("tina.knowledge.devView");
     window.history.replaceState({}, "", "/?nav=knowledge");
     mockStreamChatTurn.mockReset();
     mockFetchRoutes();
@@ -144,110 +190,151 @@ describe("KnowledgeView v2 (Production Web Knowledge Hub)", () => {
     vi.restoreAllMocks();
   });
 
-  it("loads Personal, editable Shared owner workspace, and read-only _global Platform Guide with TOC outline", async () => {
+  it("opens on the clean Library Overview hiding technical paths, and switches spaces via the Space Picker", async () => {
     render(<KnowledgeView onAskTina={vi.fn()} />);
 
+    // Friendly Library Overview home screen loads with clean titles & stripped upload hash
     await waitFor(() => {
-      expect(screen.getByTestId("mdx-doc").textContent).toContain("Welcome to TINA Knowledge Hub");
+      expect(screen.getByRole("heading", { name: "My Space" })).toBeTruthy();
+      expect(screen.getByText("Create a page")).toBeTruthy();
+      expect(screen.getAllByText("Q4-Report.pdf").length).toBeGreaterThan(0);
     });
 
-    // Reading Outline (TOC) renders H2/H3 headings
-    expect(screen.getByText("On this page")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Architecture" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Next Steps" })).toBeTruthy();
+    // Technical plumbing files & raw extensions are hidden by default
+    expect(screen.queryByText("CLAUDE.md")).toBeNull();
+    expect(screen.queryByText("kg/entities/person/alice.md")).toBeNull();
 
-    // Shared owner workspace enables Edit & New Doc
-    const sharedBtn = await screen.findByRole("button", { name: /team-alpha/i });
-    fireEvent.click(sharedBtn);
+    // Open Space Picker dropdown & switch to Team Alpha (editable)
+    fireEvent.click(screen.getByRole("button", { name: /Switch space/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Team Alpha/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Team Alpha" })).toBeTruthy();
+    });
+    // Open a page in Team Alpha and verify Edit is enabled for Owner
+    fireEvent.click(screen.getAllByRole("button", { name: /Team Notes/i })[0]);
     await waitFor(() => {
       expect(screen.getByTestId("mdx-doc").textContent).toContain("Shared notes editable");
+      expect(screen.getByRole("button", { name: /^Edit$/i })).toBeTruthy();
     });
-    expect(screen.getByRole("button", { name: /^Edit$/i })).toBeTruthy();
 
-    // Switching to _global hides Edit and marks Read-Only
-    const globalBtn = await screen.findByRole("button", { name: /Platform Guide \(_global\)/i });
-    fireEvent.click(globalBtn);
+    // Switch to Templates & Guides (_global) — view-only with no Edit button
+    fireEvent.click(screen.getByRole("button", { name: /Switch space/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Templates & Guides/i }));
     await waitFor(() => {
-      expect(screen.getByText(/Platform · Read-Only/i)).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Templates & Guides" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: /TINA Handbook/i })[0]);
+    await waitFor(() => {
       expect(screen.getByTestId("mdx-doc").textContent).toContain("Shared platform guide.");
     });
     expect(screen.queryByRole("button", { name: /^Edit$/i })).toBeNull();
   });
 
-  it("supports inline Ask Tina Copilot drawer with 1-click Summarize and workspace refresh on commit", async () => {
+  it("hides YAML frontmatter in Clean Editor while preserving entity metadata transparently on save", async () => {
+    const savedPayloads: Array<Record<string, unknown>> = [];
+    vi.restoreAllMocks();
+    mockFetchRoutes((p) => savedPayloads.push(p));
+
+    render(<KnowledgeView onAskTina={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: /Alice/i }).length).toBeGreaterThan(0);
+    });
+
+    // Open Alice page from sidebar
+    fireEvent.click(screen.getAllByRole("button", { name: /Alice/i })[0]);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Alice Nguyen" })).toBeTruthy();
+      expect(screen.getByText("On this page")).toBeTruthy();
+    });
+    // Raw YAML developer metadata bar is hidden when Developer view is OFF
+    expect(screen.queryByLabelText("Developer metadata")).toBeNull();
+
+    // Enter Clean Editor
+    fireEvent.click(screen.getByRole("button", { name: /^Edit$/i }));
+    const bodyEditor = screen.getByLabelText(/Page content editor/i) as HTMLTextAreaElement;
+    expect(bodyEditor.value).not.toContain("---");
+    expect(bodyEditor.value).not.toContain("id: person/alice");
+
+    // Edit title + body with [[ autocomplete & save
+    fireEvent.change(screen.getByLabelText(/^Page title$/i), { target: { value: "Alice T. Nguyen" } });
+    const nextBody = `${bodyEditor.value}\nSee [[ti`;
+    fireEvent.change(bodyEditor, { target: { value: nextBody, selectionStart: nextBody.length } });
+    expect(screen.getByText(/● Unsaved/i)).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByRole("listbox", { name: /Page link suggestions/i })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    await waitFor(() => {
+      expect(savedPayloads.length).toBe(1);
+    });
+    const content = String(savedPayloads[0].content);
+    expect(content).toContain("id: person/alice");
+    expect(content).toContain("type: person");
+    expect(content).toContain("title: Alice T. Nguyen");
+    expect(content).toContain("tags:\n  - design\n  - q4");
+  });
+
+  it("supports inline Ask Tina drawer with friendly wording and auto-refresh on update", async () => {
     mockStreamChatTurn.mockImplementation(async (_req: unknown, cbs: ChatStreamCallbacks) => {
-      cbs.onDelta("Executive summary of README.md");
+      cbs.onDelta("Clear executive summary.");
       cbs.onCommit("deadbeef1234");
       return { sawVisibleOutput: true, terminal: true, aborted: false };
     });
 
     render(<KnowledgeView onAskTina={vi.fn()} />);
     await waitFor(() => {
-      expect(screen.getByTestId("mdx-doc")).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "My Space" })).toBeTruthy();
     });
 
     fireEvent.click(screen.getByRole("button", { name: /^Ask Tina$/i }));
-    expect(screen.getByLabelText(/Ask Tina Knowledge Copilot/i)).toBeTruthy();
+    expect(screen.getByLabelText(/Ask Tina assistant/i)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /^Summarize$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Summarize space/i }));
     await waitFor(() => {
-      expect(screen.getByText(/Executive summary of README\.md/i)).toBeTruthy();
-      expect(screen.getByText(/Updated workspace \(deadbee\)/i)).toBeTruthy();
+      expect(screen.getByText(/Clear executive summary/i)).toBeTruthy();
+      expect(screen.getByText(/Updated space · refreshed/i)).toBeTruthy();
     });
   });
 
-  it("provides Split-Preview Markdown editor with [[ wikilink autocomplete and Unsaved badge", async () => {
+  it("humanizes Connections Map (Unlinked, Focus selected, Fit) and supports Back/Forward reading history", async () => {
     render(<KnowledgeView onAskTina={vi.fn()} />);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /^Edit$/i })).toBeTruthy();
+      expect(screen.getAllByRole("button", { name: /Space Home/i }).length).toBeGreaterThan(0);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /^Edit$/i }));
-    const textarea = screen.getByLabelText(/Markdown editor/i) as HTMLTextAreaElement;
-    // Split preview renders MdxDoc alongside editor by default
-    expect(screen.getByTestId("mdx-doc")).toBeTruthy();
-
-    const nextText = `${textarea.value}\nSee [[ali`;
-    fireEvent.change(textarea, { target: { value: nextText, selectionStart: nextText.length } });
-    // Trigger cursor update + check Unsaved badge & autocomplete suggestion
-    expect(screen.getByText(/● Unsaved/i)).toBeTruthy();
+    // Open Space Home first so history has a first page
+    fireEvent.click(screen.getAllByRole("button", { name: /Space Home/i })[0]);
     await waitFor(() => {
-      expect(screen.getByRole("listbox", { name: /Wikilink suggestions/i })).toBeTruthy();
-      expect(screen.getByRole("option", { name: /alice/i })).toBeTruthy();
+      expect(screen.getByTestId("mdx-doc").textContent).toContain("Welcome to TINA Knowledge Hub");
     });
-  });
 
-  it("upgrades Knowledge Graph with Orphans filter, Focus 1-hop, Fit to View, and Back/Forward history", async () => {
-    render(<KnowledgeView onAskTina={vi.fn()} />);
+    // Open Connections Map from sidebar
+    fireEvent.click(screen.getByRole("button", { name: /Connections Map/i }));
     await waitFor(() => {
-      expect(screen.getByTestId("mdx-doc")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Alice Nguyen \(Person\)/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Standalone Topic \(Topic\)/i })).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: /Knowledge Graph/i }));
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Alice Nguyen \(person\)/i })).toBeTruthy();
-      expect(screen.getByRole("button", { name: /Standalone Topic \(topic\)/i })).toBeTruthy();
-    });
+    // Unlinked filter isolates standalone items
+    fireEvent.click(screen.getByRole("button", { name: /Unlinked \(1\)/i }));
+    expect(screen.getByRole("button", { name: /Standalone Topic \(Topic\)/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Alice Nguyen \(Person\)/i })).toBeNull();
 
-    // Orphan filter isolates unlinked nodes
-    fireEvent.click(screen.getByRole("button", { name: /Orphans \(1\)/i }));
-    expect(screen.getByRole("button", { name: /Standalone Topic \(topic\)/i })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Alice Nguyen \(person\)/i })).toBeNull();
-
-    // Reset to All, select Alice, test Focus 1-hop & Fit button
+    // Focus selected isolates Alice + TINA
     fireEvent.click(screen.getByRole("button", { name: /^All \(3\)$/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Alice Nguyen \(person\)/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Focus 1-hop/i }));
-    expect(screen.getByRole("button", { name: /TINA \(project\)/i })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Standalone Topic \(topic\)/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Alice Nguyen \(Person\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Focus selected/i }));
+    expect(screen.getByRole("button", { name: /TINA \(Project\)/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Standalone Topic \(Topic\)/i })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /Fit to view/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Open document/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Open page/i }));
     await waitFor(() => {
       expect(screen.getByTestId("mdx-doc").textContent).toContain("Works on [[TINA]].");
     });
 
-    // Back button returns to README.md
+    // Back returns to Space Home
     const backBtn = screen.getByRole("button", { name: /Back in reading history/i });
     expect((backBtn as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(backBtn);
@@ -256,26 +343,39 @@ describe("KnowledgeView v2 (Production Web Knowledge Hub)", () => {
     });
   });
 
-  it("supports cross-workspace Full-text search and History & Sync diff inspection", async () => {
+  it("provides Unified Smart Search, collapses GitHub Sync by default, and reveals raw paths/diffs in Developer view", async () => {
     render(<KnowledgeView onAskTina={vi.fn()} />);
     await waitFor(() => {
-      expect(screen.getByTestId("mdx-doc")).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "My Space" })).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Full-text/i }));
-    fireEvent.click(screen.getByLabelText(/Search all workspaces/i));
-    fireEvent.change(screen.getByLabelText(/Search knowledge/i), { target: { value: "TINA" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Go$/i }));
+    // Unified smart search searches titles + content across all spaces without mode toggles
+    const searchInput = screen.getByLabelText(/Search knowledge/i);
+    fireEvent.change(searchInput, { target: { value: "TINA" } });
+    fireEvent.click(screen.getByLabelText(/Search all spaces/i));
+    fireEvent.submit(searchInput.closest("form")!);
 
     await waitFor(() => {
-      expect(screen.getByText(/across 3 workspaces/i)).toBeTruthy();
       expect(screen.getByText(/TINA platform handbook/i)).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: /History & Sync/i }));
+    // Clear search & open Activity & Settings
+    fireEvent.click(screen.getByRole("button", { name: /Clear search/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Activity & Settings/i }));
     await waitFor(() => {
-      expect(screen.getByText(/Token saved \(••••9f2a\)/i)).toBeTruthy();
       expect(screen.getByText(/Add Alice entity/i)).toBeTruthy();
+    });
+
+    // Advanced GitHub Sync is collapsed by default for non-tech users
+    expect(screen.queryByText(/GitHub connected/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced · GitHub Sync/i }));
+    expect(screen.getByText(/GitHub connected \(••••9f2a\)/i)).toBeTruthy();
+
+    // Turning ON Developer view reveals raw file tree (CLAUDE.md), commit SHA, and unified diff
+    fireEvent.click(screen.getByRole("switch", { name: /Developer view/i }));
+    await waitFor(() => {
+      expect(screen.getByText("CLAUDE.md")).toBeTruthy();
+      expect(screen.getByText("abc1234")).toBeTruthy();
     });
 
     fireEvent.click(screen.getByText(/Add Alice entity/i));

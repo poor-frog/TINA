@@ -1,10 +1,10 @@
 "use client";
-/** KnowledgeGraphCanvas — Upgraded Entity-Lane Knowledge Graph for the Production Web UI.
- *  Reuses `buildWorkspaceGraph` (entity Markdown files under `kg/entities/<type>/` connected via `[[wikilinks]]`),
- *  adding entity-type filter chips, Fit-to-View zoom, click-drag Pan, Focus 1-hop neighborhood isolation,
- *  Orphan-node filtering, directional link highlighting, and one-click document opening. */
+/** KnowledgeGraphCanvas — Human-friendly Connections Map for TINA's Production Web UI.
+ *  Reuses `buildWorkspaceGraph`, presenting clean topic lanes (People, Projects, Meetings, Tasks, Topics),
+ *  Unlinked & Focus selected filters, Fit-to-View zoom, click-drag Pan, and one-click page opening. */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent } from "react";
 import { WebIcon } from "./Icons";
+import { friendlyEntityLaneLabel, friendlyEntityType } from "./knowledgeFriendly";
 import { listWorkspaceTree, readWorkspaceFile } from "../surfaces/workspaceApi";
 import { presentError } from "../surfaces/apiClient";
 import {
@@ -56,13 +56,16 @@ function edgePath(from: Position, to: Position): string {
 
 function nodeMatches(node: WorkspaceGraphEntity, needle: string): boolean {
   if (!needle) return true;
-  return `${node.title} ${node.id} ${node.type} ${node.path}`.toLocaleLowerCase().includes(needle);
+  return `${node.title} ${node.id} ${node.type} ${friendlyEntityType(node.type)} ${node.path}`
+    .toLocaleLowerCase()
+    .includes(needle);
 }
 
 export function KnowledgeGraphCanvas({
   slug,
   workspaceName,
   isReadOnly,
+  devView = false,
   externalRefreshKey = 0,
   onOpenDocument,
   onAskTina,
@@ -71,6 +74,7 @@ export function KnowledgeGraphCanvas({
   slug?: string;
   workspaceName: string;
   isReadOnly: boolean;
+  devView?: boolean;
   externalRefreshKey?: number;
   onOpenDocument: (path: string) => void;
   onAskTina: (prompt: string) => void;
@@ -86,8 +90,8 @@ export function KnowledgeGraphCanvas({
   const [refreshKey, setRefreshKey] = useState(0);
   const [query, setQuery] = useState("");
   const [activeType, setActiveType] = useState<string>("all");
-  const [orphansOnly, setOrphansOnly] = useState(false);
-  const [focusOneHop, setFocusOneHop] = useState(false);
+  const [unlinkedOnly, setUnlinkedOnly] = useState(false);
+  const [focusSelected, setFocusSelected] = useState(false);
   const [zoom, setZoom] = useState<number>(1);
   const [panning, setPanning] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -99,8 +103,8 @@ export function KnowledgeGraphCanvas({
     setGraph(null);
     setSelectedPath(null);
     setActiveType("all");
-    setOrphansOnly(false);
-    setFocusOneHop(false);
+    setUnlinkedOnly(false);
+    setFocusSelected(false);
     void (async () => {
       const paths = (await listWorkspaceTree(slug ? { slug } : undefined)).filter((p) => ENTITY_PATH.test(p));
       const files: WorkspaceGraphFile[] = [];
@@ -141,20 +145,20 @@ export function KnowledgeGraphCanvas({
     return deg;
   }, [graph]);
 
-  const orphanCount = useMemo(
+  const unlinkedCount = useMemo(
     () => (graph?.nodes ?? []).filter((n) => (degreeMap.get(n.path) ?? 0) === 0).length,
     [graph, degreeMap],
   );
 
-  const oneHopSet = useMemo(() => {
-    if (!focusOneHop || !selectedPath) return null;
+  const neighborSet = useMemo(() => {
+    if (!focusSelected || !selectedPath) return null;
     const set = new Set<string>([selectedPath]);
     for (const edge of graph?.edges ?? []) {
       if (edge.from === selectedPath) set.add(edge.to);
       if (edge.to === selectedPath) set.add(edge.from);
     }
     return set;
-  }, [focusOneHop, selectedPath, graph]);
+  }, [focusSelected, selectedPath, graph]);
 
   const allTypes = useMemo(() => {
     const counts = new Map<string, number>();
@@ -167,10 +171,10 @@ export function KnowledgeGraphCanvas({
   const visibleNodes = useMemo(() => {
     let nodes = graph?.nodes ?? [];
     if (activeType !== "all") nodes = nodes.filter((n) => n.type === activeType);
-    if (orphansOnly) nodes = nodes.filter((n) => (degreeMap.get(n.path) ?? 0) === 0);
-    if (oneHopSet) nodes = nodes.filter((n) => oneHopSet.has(n.path));
+    if (unlinkedOnly) nodes = nodes.filter((n) => (degreeMap.get(n.path) ?? 0) === 0);
+    if (neighborSet) nodes = nodes.filter((n) => neighborSet.has(n.path));
     return nodes;
-  }, [graph, activeType, orphansOnly, degreeMap, oneHopSet]);
+  }, [graph, activeType, unlinkedOnly, degreeMap, neighborSet]);
 
   const needle = query.trim().toLocaleLowerCase();
   const matchingPaths = useMemo(
@@ -180,13 +184,13 @@ export function KnowledgeGraphCanvas({
 
   useEffect(() => {
     if (!visibleNodes.length) {
-      if (!focusOneHop) setSelectedPath(null);
+      if (!focusSelected) setSelectedPath(null);
       return;
     }
     if (!selectedPath || !visibleNodes.some((n) => n.path === selectedPath)) {
       setSelectedPath([...matchingPaths][0] ?? visibleNodes[0]?.path ?? null);
     }
-  }, [visibleNodes, matchingPaths, selectedPath, focusOneHop]);
+  }, [visibleNodes, matchingPaths, selectedPath, focusSelected]);
 
   const lanes = useMemo(() => {
     const byType = new Map<string, WorkspaceGraphEntity[]>();
@@ -282,14 +286,14 @@ export function KnowledgeGraphCanvas({
   };
 
   return (
-    <section className={styles.graphShell} aria-label="Knowledge graph">
+    <section className={styles.graphShell} aria-label="Connections map">
       <div className={styles.graphToolbar}>
-        <div className={styles.searchBox} style={{ width: 200 }}>
+        <div className={styles.searchBox} style={{ width: 210 }}>
           <WebIcon name="search" size={14} />
           <input
             type="search"
-            aria-label="Filter graph entities"
-            placeholder="Filter entities…"
+            aria-label="Filter connections map"
+            placeholder="Find a person, project…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -298,10 +302,10 @@ export function KnowledgeGraphCanvas({
         <div className={styles.chipRow} style={{ marginTop: 0 }}>
           <button
             type="button"
-            className={`${styles.chip} ${activeType === "all" && !orphansOnly ? styles.chipActive : ""}`}
+            className={`${styles.chip} ${activeType === "all" && !unlinkedOnly ? styles.chipActive : ""}`}
             onClick={() => {
               setActiveType("all");
-              setOrphansOnly(false);
+              setUnlinkedOnly(false);
             }}
           >
             All ({graph?.nodes.length ?? 0})
@@ -313,40 +317,40 @@ export function KnowledgeGraphCanvas({
               className={`${styles.chip} ${activeType === type ? styles.chipActive : ""}`}
               onClick={() => {
                 setActiveType(type);
-                setOrphansOnly(false);
+                setUnlinkedOnly(false);
               }}
             >
-              {type} ({count})
+              {friendlyEntityLaneLabel(type)} ({count})
             </button>
           ))}
           <button
             type="button"
-            className={`${styles.chip} ${orphansOnly ? styles.chipActive : ""}`}
+            className={`${styles.chip} ${unlinkedOnly ? styles.chipActive : ""}`}
             onClick={() => {
-              setOrphansOnly((v) => !v);
-              setFocusOneHop(false);
+              setUnlinkedOnly((v) => !v);
+              setFocusSelected(false);
             }}
-            title="Show entities with zero incoming or outgoing wikilinks"
+            title="Show pages that aren't linked to anything yet"
           >
-            Orphans ({orphanCount})
+            Unlinked ({unlinkedCount})
           </button>
           <button
             type="button"
-            className={`${styles.chip} ${focusOneHop ? styles.chipActive : ""}`}
+            className={`${styles.chip} ${focusSelected ? styles.chipActive : ""}`}
             disabled={!selectedPath}
             onClick={() => {
-              setFocusOneHop((v) => !v);
-              setOrphansOnly(false);
+              setFocusSelected((v) => !v);
+              setUnlinkedOnly(false);
             }}
-            title="Isolate the selected entity and its direct 1-hop neighbors"
+            title="Focus on the selected item and its direct connections"
           >
-            Focus 1-hop
+            Focus selected
           </button>
         </div>
 
         <div className={styles.graphZoom}>
           <span className={styles.graphStats}>
-            {visibleNodes.length} entities · {visibleEdges.length} links
+            {visibleNodes.length} items · {visibleEdges.length} connections
           </span>
           <button
             type="button"
@@ -392,16 +396,22 @@ export function KnowledgeGraphCanvas({
         </div>
       </div>
 
+      {!loading && !error && Boolean(graph?.nodes.length) && (
+        <div className={styles.graphHintBar}>
+          Click any card to highlight its connections · Double-click to open the page · Drag the background to pan.
+        </div>
+      )}
+
       {loading ? (
         <div className={styles.emptyState} role="status">
           <WebIcon name="network" size={26} />
-          <h3>Building knowledge graph…</h3>
-          <p>Scanning entity pages and [[wikilinks]] in {workspaceName}.</p>
+          <h3>Mapping connections…</h3>
+          <p>Finding people, projects, and related pages in {workspaceName}.</p>
         </div>
       ) : error ? (
         <div className={styles.emptyState} role="alert">
           <WebIcon name="alertTriangle" size={26} />
-          <h3>Could not load knowledge graph</h3>
+          <h3>Could not load connections map</h3>
           <p>{error}</p>
           <button type="button" className={styles.btn} onClick={() => setRefreshKey((k) => k + 1)}>
             Try again
@@ -410,15 +420,16 @@ export function KnowledgeGraphCanvas({
       ) : !graph?.nodes.length ? (
         <div className={styles.emptyState}>
           <WebIcon name="network" size={28} />
-          <h3>No entity pages yet in {workspaceName}</h3>
+          <h3>No connected pages yet in {workspaceName}</h3>
           <p>
-            Entity Markdown files under <code>kg/entities/&lt;type&gt;/</code> connected by{" "}
-            <code>[[wikilinks]]</code> appear here automatically after meetings or edits.
+            {devView
+              ? "Entity Markdown files under kg/entities/<type>/ linked via [[wikilinks]] appear here automatically."
+              : "As you add People, Projects, or Meeting Notes and link them together, Tina maps all their relationships here automatically."}
           </p>
           {!isReadOnly && onCreateEntity && (
             <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={onCreateEntity}>
               <WebIcon name="plus" size={14} />
-              <span>Create first entity</span>
+              <span>Create a project page</span>
             </button>
           )}
         </div>
@@ -440,7 +451,7 @@ export function KnowledgeGraphCanvas({
                 viewBox={`0 0 ${rawWidth} ${rawHeight}`}
                 style={{ transform: `scale(${zoom})` }}
                 role="img"
-                aria-label={`${workspaceName} knowledge graph with ${visibleNodes.length} entities`}
+                aria-label={`${workspaceName} connections map with ${visibleNodes.length} items`}
               >
                 <defs>
                   <marker
@@ -473,7 +484,7 @@ export function KnowledgeGraphCanvas({
                     <g key={lane.type}>
                       <circle cx={42 + laneIdx * LANE_STEP} cy={28} r={4} fill={accent} />
                       <text x={52 + laneIdx * LANE_STEP} y={32} className={styles.laneHeader}>
-                        {lane.type} ({lane.nodes.length})
+                        {friendlyEntityLaneLabel(lane.type)} ({lane.nodes.length})
                       </text>
                     </g>
                   );
@@ -506,6 +517,8 @@ export function KnowledgeGraphCanvas({
                   const dimmed = Boolean(needle && !matchingPaths.has(node.path));
                   const accent = TYPE_ACCENTS[node.type] ?? "#91d7be";
                   const label = node.title.length > 22 ? `${node.title.slice(0, 21)}…` : node.title;
+                  const typeLabel = friendlyEntityType(node.type);
+                  const degree = degreeMap.get(node.path) ?? 0;
                   return (
                     <g
                       key={node.path}
@@ -516,7 +529,7 @@ export function KnowledgeGraphCanvas({
                       onDoubleClick={() => onOpenDocument(node.path)}
                       role="button"
                       tabIndex={0}
-                      aria-label={`${node.title} (${node.type})`}
+                      aria-label={`${node.title} (${typeLabel})`}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
@@ -530,7 +543,7 @@ export function KnowledgeGraphCanvas({
                         {label}
                       </text>
                       <text x={14} y={37} className={styles.nodeMeta}>
-                        {node.type} · {degreeMap.get(node.path) ?? 0} links
+                        {typeLabel} · {degree} {degree === 1 ? "connection" : "connections"}
                       </text>
                     </g>
                   );
@@ -539,13 +552,13 @@ export function KnowledgeGraphCanvas({
             </div>
           </div>
 
-          <aside className={styles.graphInspector} aria-label="Selected entity details">
+          <aside className={styles.graphInspector} aria-label="Selected item details">
             {selected ? (
               <>
                 <div>
-                  <span className={styles.wsTag}>{selected.type}</span>
+                  <span className={styles.wsTag}>{friendlyEntityType(selected.type)}</span>
                   <h3 className={styles.inspectorTitle}>{selected.title}</h3>
-                  <div className={styles.inspectorPath}>{selected.path}</div>
+                  {devView && <div className={styles.inspectorPath}>{selected.path}</div>}
                 </div>
 
                 <div className={styles.inlineForm}>
@@ -555,13 +568,15 @@ export function KnowledgeGraphCanvas({
                     onClick={() => onOpenDocument(selected.path)}
                   >
                     <WebIcon name="fileText" size={14} />
-                    <span>Open document</span>
+                    <span>Open page</span>
                   </button>
                   <button
                     type="button"
                     className={styles.btn}
                     onClick={() =>
-                      onAskTina(`Summarize what we know about "${selected.title}" (${selected.path}) and its related meetings or tasks.`)
+                      onAskTina(
+                        `Summarize what we know about "${selected.title}" and its related meetings, people, or tasks.`,
+                      )
                     }
                   >
                     <WebIcon name="tinaAsk" size={14} />
@@ -570,9 +585,9 @@ export function KnowledgeGraphCanvas({
                 </div>
 
                 <div className={styles.inspectorGroup}>
-                  <div className={styles.inspectorGroupTitle}>Links to ({linksTo.length})</div>
+                  <div className={styles.inspectorGroupTitle}>References ({linksTo.length})</div>
                   {linksTo.length === 0 ? (
-                    <span className={styles.cardSub}>No outgoing wikilinks.</span>
+                    <span className={styles.cardSub}>Does not reference other pages yet.</span>
                   ) : (
                     linksTo.map((target) => (
                       <button
@@ -581,22 +596,22 @@ export function KnowledgeGraphCanvas({
                         className={styles.inspectorLinkRow}
                         onClick={() => {
                           setActiveType("all");
-                          setOrphansOnly(false);
+                          setUnlinkedOnly(false);
                           setSelectedPath(target.path);
                         }}
                       >
                         <WebIcon name="link" size={12} />
                         <span className={styles.treeLabel}>{target.title}</span>
-                        <span className={styles.wsTag}>{target.type}</span>
+                        <span className={styles.wsTag}>{friendlyEntityType(target.type)}</span>
                       </button>
                     ))
                   )}
                 </div>
 
                 <div className={styles.inspectorGroup}>
-                  <div className={styles.inspectorGroupTitle}>Linked from ({linkedFrom.length})</div>
+                  <div className={styles.inspectorGroupTitle}>Mentioned in ({linkedFrom.length})</div>
                   {linkedFrom.length === 0 ? (
-                    <span className={styles.cardSub}>No incoming wikilinks.</span>
+                    <span className={styles.cardSub}>Not mentioned by other pages yet.</span>
                   ) : (
                     linkedFrom.map((source) => (
                       <button
@@ -605,20 +620,20 @@ export function KnowledgeGraphCanvas({
                         className={styles.inspectorLinkRow}
                         onClick={() => {
                           setActiveType("all");
-                          setOrphansOnly(false);
+                          setUnlinkedOnly(false);
                           setSelectedPath(source.path);
                         }}
                       >
                         <WebIcon name="link" size={12} />
                         <span className={styles.treeLabel}>{source.title}</span>
-                        <span className={styles.wsTag}>{source.type}</span>
+                        <span className={styles.wsTag}>{friendlyEntityType(source.type)}</span>
                       </button>
                     ))
                   )}
                 </div>
               </>
             ) : (
-              <p className={styles.cardSub}>Select a node to inspect its wikilinks and open its Markdown page.</p>
+              <p className={styles.cardSub}>Select a card on the map to explore its connections or open the page.</p>
             )}
           </aside>
         </div>

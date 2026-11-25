@@ -37,17 +37,19 @@ TINA Terminal workbench at `/terminal`.
 - **Ask Tina (`AskTinaView.tsx`)**: Full-page SSE assistant with real MCP Tool Approval cards
   (`/api/chat/approval`), Copy & Share response actions, searchable `/api/sessions` history,
   meeting pre-grounding, and real `/routine` prompt compilation.
-- **Knowledge Hub (`KnowledgeView.tsx` + `KnowledgeDocEditor.tsx` + `KnowledgeCopilotDrawer.tsx` + `KnowledgeGraphCanvas.tsx` + `knowledgeView.module.css`)**:
-  Full-page workspace Wiki and Knowledge Graph mounted directly at `/?nav=knowledge` (with URL
-  deep-linking `?nav=knowledge&ws=&doc=&tab=` and Obsidian-style Back/Forward reading history),
-  uniting Personal & Extra workspaces, Shared Team Wikis (owner/contributor direct editing, uploads,
-  Agent mount toggles & share invite minting), and the read-only `_global` Platform Guide. Includes
-  an inline Ask Tina Copilot drawer (one-click Summarize / Extract Tasks / Suggest Links + auto-refresh),
-  split-preview Markdown editor with `[[` wikilink autocomplete & unsaved-draft guard, reading Outline
-  (H2/H3 TOC) + live Backlinks, cross-workspace full-text search & `Cmd+K` Wiki search, Drag-and-Drop
-  file uploads, Meeting Source Provenance (`MeetingWikiSourceStatus`), entity-lane Knowledge Graph
-  (type filters, Fit-to-View zoom, click-drag Pan, Focus 1-hop, Orphan filter), Git history + unified
-  diff viewer, and GitHub Pull/Push/Publish sync.
+- **Knowledge Hub (`KnowledgeView.tsx` + `knowledgeFriendly.ts` + `KnowledgeDocEditor.tsx` + `KnowledgeCopilotDrawer.tsx` + `KnowledgeGraphCanvas.tsx` + `knowledgeView.module.css`)**:
+  Notion-style, non-tech-friendly Knowledge library mounted directly at `/?nav=knowledge` (with URL
+  deep-linking `?nav=knowledge&ws=&doc=&tab=` and Back/Forward reading history), uniting Private
+  spaces (`My Space`), Team Spaces (owner/contributor direct editing, uploads, AI access switch &
+  share invite links), and the read-only `Templates & Guides` (`_global`) library. Opens to a clean
+  **Library Overview** dashboard with compact Space Picker dropdown, single unified smart Search,
+  topic-based sidebar (`Pages & Notes`, `Meeting Notes`, `Projects`, `People`, `Tasks`, `Uploaded
+  Files`), single-bar reading view (with TOC Outline, `Mentioned in` backlinks, Meeting Source
+  Provenance, and Uploaded File summary cards), YAML-free clean Page Editor (lossless frontmatter
+  patching + Vietnamese-safe slugging + visual `Link page` picker + `[[` autocomplete), inline Ask
+  Tina drawer, humanized **Connections Map** (Fit-to-View, Pan, Focus selected, Unlinked filter),
+  and **Activity & Settings** with collapsible `Advanced · GitHub Sync`. Includes a subtle
+  `Developer view` toggle (OFF by default) to expose raw file trees, Markdown/YAML, and Git diffs.
 - **Personal / Team Settings (`SettingsView.tsx` + `WebModelsPanel.tsx` + `webModelsPanel.module.css`)**:
   Two-column hub with URL query sync (`?nav=settings&settingsWorkspace=personal|team&settingsSection=<id>`),
   Hallmark `modern-minimal` AI Provider & Auth flow (hairline-ruled provider matrix using official

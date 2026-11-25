@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { WebIcon } from "./Icons";
+import { friendlyPageTitle } from "./knowledgeFriendly";
 import type { MeetingMock } from "../surfaces/meetingModel";
 import { searchWorkspaceContent, type WorkspaceSearchHit } from "../surfaces/workspaceApi";
 import type { WebNavView } from "./Sidebar";
@@ -66,10 +67,10 @@ export function WebGlobalSearch({
     const timer = window.setTimeout(() => {
       void Promise.all([
         searchWorkspaceContent(q)
-          .then((r) => r.hits.map((h) => ({ ...h, wsSlug: undefined, wsLabel: "Personal" })))
+          .then((r) => r.hits.map((h) => ({ ...h, wsSlug: undefined, wsLabel: "My Space" })))
           .catch(() => []),
         searchWorkspaceContent(q, { slug: "_global" })
-          .then((r) => r.hits.map((h) => ({ ...h, wsSlug: "_global", wsLabel: "Platform Guide" })))
+          .then((r) => r.hits.map((h) => ({ ...h, wsSlug: "_global", wsLabel: "Templates & Guides" })))
           .catch(() => []),
       ]).then(([own, glob]) => {
         if (!alive) return;
@@ -131,8 +132,8 @@ export function WebGlobalSearch({
             },
             {
               id: "act:knowledge",
-              label: "Open Knowledge Hub",
-              detail: "Personal & Shared Wiki, Platform Guide (_global), Knowledge Graph & GitHub Sync",
+              label: "Open Knowledge",
+              detail: "My Space, Team Spaces, Templates & Guides, and Connections Map",
               kind: "action" as const,
               run: () => {
                 onNavigate("knowledge");
@@ -189,8 +190,8 @@ export function WebGlobalSearch({
 
     const knowledgeHits: SearchHit[] = wikiHits.map((h) => ({
       id: `kb:${h.wsSlug || "personal"}:${h.path}:${h.line}`,
-      label: h.path,
-      detail: `${h.wsLabel} · L${h.line}: ${h.text}`,
+      label: friendlyPageTitle(h.path),
+      detail: `${h.wsLabel} · ${h.text}`,
       kind: "knowledge",
       run: () => {
         if (onOpenKnowledgeDoc) onOpenKnowledgeDoc(h.path, h.wsSlug);
