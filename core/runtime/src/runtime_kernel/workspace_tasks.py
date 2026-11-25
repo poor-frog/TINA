@@ -68,6 +68,12 @@ def parse_workspace_request(workload, env):
         session = env.get('TINA_CHAT_SESSION', '')
         if not re.fullmatch(r'[A-Za-z0-9._-]{1,90}', session) or workload != f'agent-{owner}-chat-{session}':
             raise ValueError('Invalid workspace chat session')
+    elif trigger == 'transcription':
+        row_id = env.get('TINA_MEETING_NUMERIC_ID', '')
+        if (not re.fullmatch(r'[1-9][0-9]*', row_id)
+                or workload != f'agent-meet-{row_id}'
+                or env.get('TINA_TRANSCRIPT_STREAM') != f'tc:meeting:{row_id}'):
+            raise ValueError('Invalid live meeting workspace invocation')
     elif trigger != 'scheduled' or not re.fullmatch('agent-' + re.escape(owner) + '-scheduled-[a-f0-9]{10}', workload):
         raise ValueError('Invalid workspace invocation trigger')
     grants = json.loads(env['TINA_MOUNTS'])

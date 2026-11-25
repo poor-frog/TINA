@@ -141,3 +141,85 @@ def test_api_routes_dictation_polish_to_local_completion_pool_when_enabled(tmp_p
     assert resp.json() == {"polished_text": "Clean polished text."}
     assert calls[0]["task"] == "polish"
     assert calls[0]["model_env"]["TINA_LLM_PROVIDER"] == "openai-compat"
+
+
+def test_dispatcher_routes_canonical_notes_and_live_assist_to_background_pool_and_live_meeting_to_s3(tmp_path, monkeypatch):
+    from control_plane.dispatch import Dispatcher
+    from shared import units
+    from shared.config import Settings
+
+    monkeypatch.setenv("TINA_LOCAL_COMPLETION_POOL", "1")
+    monkeypatch.setenv("TINA_WORKSPACE_PILOT_USER_IDS", "*")
+    monkeypatch.setenv("TINA_WORKSPACE_STORAGE", "s3")
+    monkeypatch.setenv("TINA_WORKSPACE_BEDROCK_MODEL", "us.anthropic.claude-sonnet-4-6")
+
+    settings = Settings(
+        workspaces_dir=str(tmp_path),
+        redis_url="redis://127.0.0.1:6379/0",
+        dispatch_signing_key="a" * 32,
+        agent_profile="agent",
+    )
+
+    spawned = []
+    bg_calls = []
+
+    class FakeRuntime:
+        def spawn(self, uid, profile, env):
+            spawned.append((uid, profile, dict(env)))
+            return uid
+
+    class FakeIdentity:
+        def mint(self, *args, **kwargs):
+            return "tok"
+
+    class FakeModelResolver:
+        def resolve(self, subject):
+            return {}
+
+    monkeypatch.setattr(
+        local_completion, "dispatch_background_meeting_job",
+        lambda **kw: (bg_calls.append(kw), kw["unit_id"])[1],
+    )
+    dispatcher = Dispatcher(settings, FakeRuntime(), FakeIdentity(), model_config=FakeModelResolver())
+
+    # 1. Canonical processed notes -> background local completion pool (not Fargate)
+    inv_notes = units.make_dispatch(
+        subject="7", trigger="transcription",
+        start=units.entrypoint(inline=units.CANONICAL_NOTES_PREFIX + '{"meeting_id":42}'),
+        context={"kind": "meeting", "meeting": {"meeting_id": "42", "session_uid": "canonical-1", "platform": "google_meet"}},
+    )
+    uid_notes = dispatcher.dispatch(inv_notes, trusted_canonical_notes=True)
+    assert uid_notes == "agent-meet-canonical-1"
+    assert bg_calls[-1]["task"] == "canonical_notes"
+    assert not spawned
+
+    # 2. Live Assist meeting state -> background local completion pool (not Fargate)
+    inv_state = units.make_dispatch(
+        subject="7", trigger="transcription",
+        start=units.entrypoint(inline=units.MEETING_STATE_PREFIX + '{"meeting_id":42}'),
+        context={"kind": "meeting", "meeting": {"meeting_id": "42", "session_uid": "state-fast-1", "platform": "google_meet"}},
+    )
+    uid_state = dispatcher.dispatch(inv_state, trusted_meeting_state=True)
+    assert uid_state == "agent-meet-state-fast-1"
+    assert bg_calls[-1]["task"] == "meeting_state"
+    assert not spawned
+
+    # 3. Live Meeting Copilot -> S3 ephemeral workspace-agent on Fargate with bedrock-converse
+    inv_live = units.make_dispatch(
+        subject="7", trigger="transcription",
+        start=units.entrypoint(inline="Live copilot brief"),
+        context={"kind": "meeting", "meeting": {
+            "meeting_id": "42", "session_uid": "42", "numeric_meeting_id": "42",
+            "native_id": "abc-defg-hij", "platform": "google_meet",
+        }},
+    )
+    uid_live = dispatcher.dispatch(inv_live, trusted_live_meeting=True)
+    assert uid_live == "agent-meet-42"
+    assert len(spawned) == 1
+    _, profile, env = spawned[0]
+    assert profile == "workspace-agent"
+    assert env["TINA_WORKSPACE_STORAGE"] == "s3"
+    assert env["TINA_TRANSCRIPT_STREAM"] == "tc:meeting:42"
+    assert env["TINA_MEETING_NUMERIC_ID"] == "42"
+    assert env["TINA_LLM_PROVIDER"] == "bedrock-converse"
+    assert env["TINA_WORKSPACE_ATTEMPT"]

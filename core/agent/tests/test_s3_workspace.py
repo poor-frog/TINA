@@ -320,3 +320,29 @@ def test_s3_middleware_hydrates_meeting_voice_reads_and_pushes_draft_writes(tmp_
     assert ("lock", "subject:7") in events
     assert ("sync", "7", True) in events
     assert ("push", "7", "7") in events
+
+
+def test_workspace_stream_pins_live_meeting_topics_and_rejects_foreign_keys():
+    from worker.workspace_stream import WorkspaceStream, meeting_topics, topics
+
+    assert topics("7", "agent-meet-42") == ("unit:agent-meet-42:in", "unit:agent-meet-42:out")
+    assert meeting_topics("tc:meeting:42", "42") == ("tc:meeting:42", "proc:meeting:42", "proc:meeting:42:cursor")
+    with pytest.raises(ValueError):
+        meeting_topics("tc:meeting:99", "42")
+
+    seen = []
+    ws = WorkspaceStream("7", "agent-meet-42", transcript_stream="tc:meeting:42", meeting_numeric_id="42")
+    ws._request = lambda path, data: (seen.append((path, data)), [["tc:meeting:42", []]] if path == "meeting-read" else "1-0")[1]
+
+    assert ws.xread({"tc:meeting:42": "0"}, count=50, block=10) == [["tc:meeting:42", []]]
+    assert ws.xadd("proc:meeting:42", {"note": '{"id":"s1"}'}) == "1-0"
+    assert ws.set("proc:meeting:42:cursor", "1700-0") == "1-0"
+    assert [p for p, _ in seen] == ["meeting-read", "meeting-proc", "meeting-cursor"]
+
+    # Foreign meeting keys are rejected client-side before crossing loopback
+    with pytest.raises(ValueError):
+        ws.xread({"tc:meeting:99": "0"}, count=10, block=10)
+    with pytest.raises(ValueError):
+        ws.xadd("proc:meeting:99", {"note": "{}"})
+    with pytest.raises(ValueError):
+        ws.set("proc:meeting:99:cursor", "1-0")

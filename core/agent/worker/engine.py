@@ -1176,6 +1176,11 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
         run_discussion_review(client, out_topic, start)
         return
 
+    sync_client = None
+    if os.getenv("TINA_WORKSPACE_SYNC_SIDECAR") == "1":
+        from worker.workspace_sync import WorkspaceSyncClient
+        sync_client = WorkspaceSyncClient()
+
     transcript_stream = os.environ.get("TINA_TRANSCRIPT_STREAM")
     if transcript_stream:  # a live meeting dispatch — consume the transcript, emit cards
         # The GOVERNED, workspace-driven copilot config (agents/meeting.md) — loaded ONCE at meeting
@@ -1231,6 +1236,11 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
             if errors:
                 log.warning("agent-api worker: meeting envelope schema errors: %s", "; ".join(errors[:3]))
             persist_envelope(meeting_envelope_file, envelope, workspace=work)
+            if sync_client is not None:
+                try:
+                    sync_client.commit()
+                except Exception:  # noqa: BLE001 — beat mirror commit is best-effort
+                    log.warning("agent-api worker: meeting beat S3 sync commit failed", exc_info=True)
         # write_meeting_doc=false ⇒ no doc_turn (independent of `enabled`, which gates the live beats).
         doc_turn = None
         if cfg.write_meeting_doc and document_id is not None:
@@ -1238,36 +1248,43 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
                 work, cards, native=document_id, meeting_id=native, session_uid=session_uid,
                 platform=platform, date=date, title=title, model=cfg.model,
             )
-        serve_meeting(
-            client, transcript_stream=transcript_stream, out_topic=out_topic,
-            card_turn=lambda segs: meeting_card_turn(
-                work, segs, model=cfg.model, card_kinds=cfg.card_kinds, steering=cfg.steering,
-                polish_rules=cfg.polish_rules, tag_rules=cfg.tag_rules,
-            ),
-            idle_ms=idle_ms, beat_segments=cfg.cadence_segments,
-            doc_turn=doc_turn, enabled=cfg.enabled,
-            start_id=os.environ.get("TINA_TRANSCRIPT_START_ID", "0"),
-            # P0 (cross-tenant leak fix): BOTH the processed-notes stream AND its cursor key on the
-            # meetings-domain ROW id (TINA_MEETING_NUMERIC_ID) — unique per meeting run, so neither a
-            # re-sent bot on the same native link NOR a different tenant on the same link can ever
-            # mix/clobber/read another meeting's processed doc. The meeting-api db-writer (which knows
-            # its own row ids) drains proc:meeting:{row_id} into that meeting row's data JSONB (durable).
-            # The cursor is now a position in the ROW-KEYED transcript stream tc:meeting:{row_id} (each
-            # row has its own stream), so it too MUST be row-scoped — a shared native-keyed cursor would
-            # resume one row from another row's position (and leak progress across tenants).
-            proc_stream=f"proc:meeting:{row_id}",
-            cursor_key=f"proc:meeting:{row_id}:cursor",
-            on_proc_note=on_proc_note,
-            on_envelope=on_envelope,
-            # Provenance stamped on every processed-notes entry: what pipeline/provider/model
-            # produced this cleaned view — persisted verbatim into the durable view's `params`
-            # (meeting.data processed views) by the meeting-api db-writer (reproducibility).
-            proc_params={
-                "pipeline": "meeting-copilot/proc-notes", "version": 1,
-                "provider": os.environ.get("TINA_LLM_PROVIDER"),
-                "model": cfg.model or os.environ.get("TINA_LLM_MODEL"),
-            },
-        )
+        try:
+            serve_meeting(
+                client, transcript_stream=transcript_stream, out_topic=out_topic,
+                card_turn=lambda segs: meeting_card_turn(
+                    work, segs, model=cfg.model, card_kinds=cfg.card_kinds, steering=cfg.steering,
+                    polish_rules=cfg.polish_rules, tag_rules=cfg.tag_rules,
+                ),
+                idle_ms=idle_ms, beat_segments=cfg.cadence_segments,
+                doc_turn=doc_turn, enabled=cfg.enabled,
+                start_id=os.environ.get("TINA_TRANSCRIPT_START_ID", "0"),
+                # P0 (cross-tenant leak fix): BOTH the processed-notes stream AND its cursor key on the
+                # meetings-domain ROW id (TINA_MEETING_NUMERIC_ID) — unique per meeting run, so neither a
+                # re-sent bot on the same native link NOR a different tenant on the same link can ever
+                # mix/clobber/read another meeting's processed doc. The meeting-api db-writer (which knows
+                # its own row ids) drains proc:meeting:{row_id} into that meeting row's data JSONB (durable).
+                # The cursor is now a position in the ROW-KEYED transcript stream tc:meeting:{row_id} (each
+                # row has its own stream), so it too MUST be row-scoped — a shared native-keyed cursor would
+                # resume one row from another row's position (and leak progress across tenants).
+                proc_stream=f"proc:meeting:{row_id}",
+                cursor_key=f"proc:meeting:{row_id}:cursor",
+                on_proc_note=on_proc_note,
+                on_envelope=on_envelope,
+                # Provenance stamped on every processed-notes entry: what pipeline/provider/model
+                # produced this cleaned view — persisted verbatim into the durable view's `params`
+                # (meeting.data processed views) by the meeting-api db-writer (reproducibility).
+                proc_params={
+                    "pipeline": "meeting-copilot/proc-notes", "version": 1,
+                    "provider": os.environ.get("TINA_LLM_PROVIDER"),
+                    "model": cfg.model or os.environ.get("TINA_LLM_MODEL"),
+                },
+            )
+        finally:
+            if sync_client is not None:
+                try:
+                    sync_client.commit()
+                except Exception:  # noqa: BLE001
+                    log.exception("agent-api worker: final meeting S3 sync commit failed")
     else:  # chat / routine / event — run the entrypoint, then serve interactive messages
         trigger = os.environ.get("TINA_UNIT_TRIGGER", "message")
         if trigger in ("event", "transcription"):
@@ -1281,10 +1298,6 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
                           or "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch").split(",")
             turn_policy = {}
         session = os.environ.get("TINA_CHAT_SESSION") or DEFAULT_CHAT_SESSION
-        sync_client = None
-        if os.getenv("TINA_WORKSPACE_SYNC_SIDECAR") == "1":
-            from worker.workspace_sync import WorkspaceSyncClient
-            sync_client = WorkspaceSyncClient()
         serve(
             client, out_topic=out_topic, in_topic=os.environ["TINA_UNIT_IN_TOPIC"],
             turn=lambda prompt, approval_port=None: run_turn_over_workspace(

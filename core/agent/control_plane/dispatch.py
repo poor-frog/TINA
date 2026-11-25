@@ -194,6 +194,7 @@ def _apply_workspace_bedrock_defaults(env: dict[str, str], *, region: str = "", 
     env["TINA_RUNNER"] = "claude-code"
     env["CLAUDE_CODE_USE_BEDROCK"] = "1"
     env["TINA_CODEX_AUTH_MODE"] = ""
+    env["TINA_LLM_PROVIDER"] = "bedrock-converse"
     env["AWS_REGION"] = resolved_region
     env["AWS_DEFAULT_REGION"] = resolved_region
     env["TINA_AGENT_MODEL"] = target
@@ -694,9 +695,46 @@ class Dispatcher:
             self.dispatched.append(invocation)
         identity = invocation["identity"]
         uid = dispatch_id(invocation)
+        if (os.environ.get("TINA_LOCAL_COMPLETION_POOL") == "1"
+                and (trusted_canonical_notes or trusted_meeting_state)):
+            from control_plane.local_completion import dispatch_background_meeting_job
+            from control_plane.meeting_voice_completion import resolve_voice_model_env
+            inline = ((invocation.get("start") or {}).get("entrypoint") or {}).get("inline") or ""
+            subject = identity["subject"]
+            model_env = resolve_voice_model_env(
+                self.resolve_model_config(subject),
+                allowlist=self._settings.model_allowlist,
+                subject=subject,
+            )
+            ws_root = Path(self._settings.workspaces_dir)
+            ws_path = str(ws_root / subject)
+            s3_sync = None
+            if (trusted_canonical_notes and _s3_workspace_enabled(subject)
+                    and (os.getenv("TINA_S3_WORKSPACE_BUCKET") or "").strip()):
+                def _hydrate_owner(root=ws_root, subj=subject, rurl=self._settings.redis_url) -> None:
+                    from control_plane.workspace_store import S3WorkspaceStore
+                    store = S3WorkspaceStore.from_env(root, redis_url=rurl)
+                    if store is not None:
+                        store.sync_subject_workspaces(subj, include_system=False, force=False)
+                s3_sync = _hydrate_owner
+            return dispatch_background_meeting_job(
+                task="canonical_notes" if trusted_canonical_notes else "meeting_state",
+                unit_id=uid,
+                owner=subject,
+                inline=inline,
+                redis_url=self._settings.redis_url,
+                workspace_path=ws_path,
+                out_topic=output_topic(uid),
+                model_env=model_env,
+                s3_sync_owner=s3_sync,
+            )
         is_chat = invocation["trigger"] == "message" and not is_private_transcript_job(invocation)
+        is_live_meeting = trusted_live_meeting and invocation["trigger"] == "transcription"
         pilot = os.getenv("TINA_WORKSPACE_PILOT_USER_IDS")
-        workspace_turn = bool(pilot) and (is_chat or invocation["trigger"] == "scheduled")
+        workspace_turn = bool(pilot) and (
+            is_chat or invocation["trigger"] == "scheduled"
+            or (is_live_meeting and _s3_workspace_enabled(identity["subject"]))
+        )
         workspace_auth_mode: Optional[str] = None
         workspace_token: Optional[str] = None
         if workspace_turn and not pilot_allows(identity["subject"], pilot):
@@ -745,6 +783,7 @@ class Dispatcher:
         if workspace_turn:
             if workspace_auth_mode == "chatgpt-plan":
                 env.update(TINA_CODEX_AUTH_MODE="chatgpt-plan", TINA_RUNNER="codex",
+                           TINA_LLM_PROVIDER="chatgpt-plan", TINA_LLM_MODEL="gpt-6-luna",
                            TINA_AGENT_MODEL="gpt-6-luna", ACCESS_TOKEN=workspace_token or "")
             elif workspace_auth_mode == "bedrock-workspace":
                 env.update(TINA_RUNNER="bedrock-workspace", TINA_AGENT_MODEL=WORKSPACE_NOVA_MODEL)

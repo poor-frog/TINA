@@ -165,3 +165,80 @@ def test_ecs_backend_filters_safe_agent_reach_tools():
         native_nova=False,
     ))
     assert granted == ["reach.web.search", "reach.github.read"]
+
+
+def test_ecs_backend_launches_live_meeting_copilot_on_s3_ephemeral_worker():
+    ecs = Mock()
+
+    def describe_td(taskDefinition):
+        if taskDefinition == BOT_DEF:
+            return {"taskDefinition": {
+                "requiresCompatibilities": ["FARGATE"], "networkMode": "awsvpc",
+                "cpu": "2048", "memory": "4096",
+                "containerDefinitions": [{"name": "bot", "image": BOT_IMAGE}],
+            }}
+        return {"taskDefinition": {
+            "requiresCompatibilities": ["FARGATE"], "networkMode": "awsvpc",
+            "cpu": "1024", "memory": "2048",
+            "containerDefinitions": [
+                {"name": "init-perms", "image": WORKER_IMAGE, "essential": False},
+                {"name": "worker", "image": WORKER_IMAGE},
+                {"name": "sync", "image": WORKER_IMAGE},
+                {"name": "stream", "image": WORKER_IMAGE},
+            ],
+        }}
+
+    ecs.describe_task_definition.side_effect = describe_td
+    ecs.run_task.return_value = {"tasks": [{"taskArn": TASK_ARN, "lastStatus": "PROVISIONING"}]}
+    sts = Mock()
+    sts.assume_role.return_value = {"Credentials": {
+        "AccessKeyId": "ASIA_TEMP_KEY", "SecretAccessKey": "SECRET_TEMP_KEY",
+        "SessionToken": "SESSION_TEMP_TOKEN", "Expiration": datetime.now(timezone.utc) + timedelta(minutes=15),
+    }}
+    s3 = Mock()
+    cfg = S3WorkspaceConfig(
+        task_definition=EPH_DEF, security_group="sg-0123456789abcdef0",
+        broker_role_arn="arn:aws:iam::123456789012:role/BrokerRole",
+        bucket="tina-ws-bucket", kms_key_arn="arn:aws:kms:us-east-1:123456789012:key/data-key",
+    )
+    backend = ECSBackend(
+        ecs=ecs, s3=s3, cluster="tina", task_definition=BOT_DEF,
+        subnets=["subnet-1"], security_groups=["sg-app"], bucket="inv-bucket",
+        s3_workspace=S3WorkspaceLauncher(ecs=ecs, sts=sts, config=cfg),
+    )
+
+    uid = "agent-meet-42"
+    mounts = [
+        {"path": "/workspaces/_system/7", "write": True},
+        {"path": "/workspaces/7", "write": True},
+    ]
+    env = {
+        "TINA_WORKSPACE_ATTEMPT": "e" * 32,
+        "TINA_WORKSPACE_STORAGE": "s3",
+        "TINA_OWNER": "7",
+        "TINA_UNIT_ID": uid,
+        "TINA_UNIT_TRIGGER": "transcription",
+        "TINA_UNIT_IN_TOPIC": f"unit:{uid}:in",
+        "TINA_UNIT_OUT_TOPIC": f"unit:{uid}:out",
+        "TINA_WORKSPACE_PATH": "/workspaces/7",
+        "TINA_MOUNTS": json.dumps(mounts),
+        "TINA_RUNNER": "claude-code",
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "TINA_LLM_PROVIDER": "bedrock-converse",
+        "TINA_LLM_MODEL": "us.anthropic.claude-sonnet-4-6",
+        "TINA_TRANSCRIPT_STREAM": "tc:meeting:42",
+        "TINA_MEETING_NUMERIC_ID": "42",
+        "TINA_MEETING_ID": "abc-defg-hij",
+        "TINA_MEETING_PLATFORM": "google_meet",
+    }
+    handle = backend.start(uid, Runnable(image=WORKER_IMAGE, command=["python", "-m", "worker"]), env)
+    assert handle._impl == TASK_ARN
+    overrides = ecs.run_task.call_args.kwargs["overrides"]["containerOverrides"]
+    stream_override = next(o for o in overrides if o["name"] == "stream")
+    stream_env = {item["name"]: item["value"] for item in stream_override["environment"]}
+    assert stream_env["TINA_TRANSCRIPT_STREAM"] == "tc:meeting:42"
+    assert stream_env["TINA_MEETING_NUMERIC_ID"] == "42"
+    puts = {c.kwargs["Key"]: c.kwargs["Body"].decode() for c in s3.put_object.call_args_list}
+    worker_env = next(v for k, v in puts.items() if "/workspace/7/" in k)
+    assert "TINA_TRANSCRIPT_STREAM=tc:meeting:42" in worker_env
+    assert "TINA_LLM_PROVIDER=bedrock-converse" in worker_env

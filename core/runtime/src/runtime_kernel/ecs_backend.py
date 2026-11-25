@@ -24,6 +24,9 @@ _WORKSPACE_ALLOWED_ENV_FIELDS = frozenset({
     "TINA_AGENT_MODEL", "TINA_AGENT_EFFORT",
     "TINA_LLM_PROVIDER", "TINA_LLM_MODEL", "TINA_LLM_BASE_URL", "TINA_LLM_API_KEY",
     "TINA_PRINCIPAL_NAME", "TINA_PRINCIPAL_EMAIL", "TINA_AGENT_REACH_URL", "TINA_UNIT_TOOLS",
+    "TINA_TRANSCRIPT_STREAM", "TINA_TRANSCRIPT_START_ID", "TINA_MEETING_ID",
+    "TINA_MEETING_NUMERIC_ID", "TINA_MEETING_SESSION_UID", "TINA_MEETING_PLATFORM",
+    "TINA_MEETING_MODEL",
     "ACCESS_TOKEN", "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
     "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
@@ -264,11 +267,17 @@ class ECSBackend:
                 key = f"{self._prefix}workspace/{task.owner}/{attempt_token}.env"
                 sync_key = f"{self._prefix}workspace-sync/{task.owner}/{attempt_token}.env"
                 sync_payload = _encode_dotenv(sync_env)
+                stream_env = [
+                    {"name": "TINA_OWNER", "value": task.owner},
+                    {"name": "TINA_UNIT_ID", "value": workload_id},
+                ]
+                if env.get("TINA_UNIT_TRIGGER") == "transcription":
+                    stream_env.extend([
+                        {"name": "TINA_TRANSCRIPT_STREAM", "value": env["TINA_TRANSCRIPT_STREAM"]},
+                        {"name": "TINA_MEETING_NUMERIC_ID", "value": env["TINA_MEETING_NUMERIC_ID"]},
+                    ])
                 sidecar = [
-                    {"name": "stream", "environment": [
-                        {"name": "TINA_OWNER", "value": task.owner},
-                        {"name": "TINA_UNIT_ID", "value": workload_id},
-                    ]},
+                    {"name": "stream", "environment": stream_env},
                     {"name": "sync", "environmentFiles": [
                         {"type": "s3", "value": f"arn:{self.partition}:s3:::{self.bucket}/{sync_key}"},
                     ]},
@@ -284,6 +293,8 @@ class ECSBackend:
                 env.update(TINA_IDLE_TIMEOUT_SEC=_workspace_idle_timeout_sec(), TINA_WORKSPACE_STREAM_SIDECAR="1",
                            TINA_WORKSPACE_SYNC_SIDECAR="1", TINA_UNIT_TOOLS=unit_tools)
             else:
+                if env.get("TINA_UNIT_TRIGGER") == "transcription":
+                    raise ValueError("Live meeting workspace tasks require S3 ephemeral storage")
                 use_pinned = env.get("CLAUDE_CODE_USE_BEDROCK") != "1"
                 task = None
                 if use_pinned:

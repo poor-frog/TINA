@@ -29,7 +29,26 @@ class _LocalOutput:
 
 
 def run_job(task: str, inline: str) -> dict:
+    import os
+    from pathlib import Path
     from worker import engine
+
+    if task in ("canonical_notes", "meeting_state"):
+        import redis
+        client = redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+        try:
+            if task == "canonical_notes":
+                from worker.processed_notes import run as run_canonical_notes
+                run_canonical_notes(client, Path(os.environ["TINA_WORKSPACE_PATH"]), inline)
+                out_topic = os.environ.get("TINA_UNIT_OUT_TOPIC")
+                if out_topic:
+                    client.xadd(out_topic, {"event": json.dumps({"type": "turn-complete"})})
+            else:
+                from worker.live_assist import run as run_meeting_state
+                run_meeting_state(client, inline)
+        finally:
+            client.close()
+        return {"text": "ok", "complete": True}
 
     output = _LocalOutput()
     start = {"entrypoint": {"inline": inline}}

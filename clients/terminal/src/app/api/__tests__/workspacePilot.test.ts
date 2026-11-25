@@ -31,6 +31,9 @@ describe("workspace pilot", () => {
       expect(pilotRouteEnabled("workspace/meeting-knowledge/14/voice-drafts/d1/review")).toBe(stage !== "closed");
       expect(pilotRouteEnabled("dictation/polish")).toBe(stage !== "closed");
       expect(pilotRouteEnabled("dictation/translate")).toBe(stage !== "closed");
+      expect(pilotRouteEnabled("meeting/process")).toBe(stage !== "closed");
+      expect(pilotRouteEnabled("meeting/jitsi-hosts")).toBe(stage !== "closed");
+      expect(pilotRouteEnabled("meeting/relay-health")).toBe(stage !== "closed");
       expect(pilotRouteEnabled("meeting-translations/14")).toBe(stage !== "closed");
       expect(pilotRouteEnabled("discussion-reviews/14")).toBe(stage !== "closed");
       expect(pilotRouteEnabled("workspace/members")).toBe(["wiki", "routines"].includes(stage));
