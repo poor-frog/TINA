@@ -580,7 +580,7 @@
    "key": "RUNTIME_ECS_NOVA_WORKSPACE_OWNERS",
    "class": "defaulted",
    "default": "(unset — no subjects routed to Nova workspace task)",
-   "description": "Comma-separated owner IDs routed to the dedicated Nova workspace task definition.",
+   "description": "Comma-separated numeric owner IDs (or *) routed to the dedicated Nova workspace task definition.",
    "targets": []
   },
   {

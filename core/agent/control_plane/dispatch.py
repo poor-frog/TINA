@@ -178,8 +178,8 @@ WORKSPACE_NOVA_MODEL = "amazon.nova-lite-v1:0"
 
 
 def workspace_uses_nova(subject: str, config: dict) -> bool:
-    allow = os.getenv("TINA_WORKSPACE_BEDROCK_OWNER", "").split(",")
-    if subject not in allow or not pilot_allows(subject) or not _s3_workspace_enabled(subject):
+    owner_env = os.getenv("TINA_WORKSPACE_BEDROCK_OWNER", "")
+    if not pilot_allows(subject, owner_env) or not pilot_allows(subject) or not _s3_workspace_enabled(subject):
         return False
     mode = (config.get("mode") or "").strip()
     if mode == "bedrock" and config.get("model") == WORKSPACE_NOVA_MODEL and not config.get("api_key"):

@@ -764,12 +764,13 @@ describe("WebShell production UI (Option A & Option B)", () => {
     expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("unlocks Ask Tina in WebShell for authorized workspace-pilot users and hides it for non-pilot users", async () => {
+  it("unlocks Ask Tina in WebShell for authorized workspace-pilot users while keeping /terminal restricted to admins", async () => {
     vi.stubEnv("NEXT_PUBLIC_TERMINAL_MODE", "workspace-pilot");
     try {
       mockEnvironment({ admin: false, workspacePilot: true });
       const { unmount } = render(<WebShell />);
       expect(await screen.findByRole("button", { name: "Ask Tina" })).toBeTruthy();
+      expect(screen.queryByRole("link", { name: "Open TINA Terminal" })).toBeNull();
       unmount();
 
       mockEnvironment({ admin: false, workspacePilot: false });
@@ -777,6 +778,7 @@ describe("WebShell production UI (Option A & Option B)", () => {
       await waitFor(() => {
         expect(screen.queryByRole("button", { name: "Ask Tina" })).toBeNull();
       });
+      expect(screen.queryByRole("link", { name: "Open TINA Terminal" })).toBeNull();
     } finally {
       vi.unstubAllEnvs();
     }

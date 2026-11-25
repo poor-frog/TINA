@@ -13,6 +13,7 @@ export interface WebUser {
 export interface WebIdentityState {
   user: WebUser;
   isAdmin: boolean;
+  workspacePilot: boolean;
   canOpenTerminal: boolean;
   hideModelSettings: boolean;
   signOut: () => void;
@@ -94,7 +95,8 @@ export function useWebIdentity(): WebIdentityState {
   return {
     user,
     isAdmin,
-    canOpenTerminal: workspacePilotMode() ? workspacePilot : isAdmin || devFlag,
+    workspacePilot: workspacePilotMode() ? workspacePilot : true,
+    canOpenTerminal: isAdmin || devFlag,
     hideModelSettings: hideModels,
     signOut,
   };

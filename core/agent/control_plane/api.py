@@ -2042,7 +2042,7 @@ def create_app(
         # prepends land before `prompt`, hence before the sentinel too — so they're stripped as well.
         from control_plane.system_mounts import pilot_allows
         bedrock_workspace = pilot_allows(subject) and (
-            subject == os.getenv("TINA_WORKSPACE_BEDROCK_OWNER")
+            pilot_allows(subject, os.getenv("TINA_WORKSPACE_BEDROCK_OWNER", ""))
             or bool((os.getenv("TINA_WORKSPACE_BEDROCK_MODEL") or "").strip())
         )
         if body.prompt and prompt.endswith(body.prompt) and (len(prompt) > len(body.prompt) or bedrock_workspace):

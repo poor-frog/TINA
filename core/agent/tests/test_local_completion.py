@@ -296,6 +296,12 @@ def test_meeting_state_keeps_platform_provider_and_anthropic_without_key_falls_b
     assert spawned[-1][2]["TINA_LLM_PROVIDER"] == "bedrock-converse"
     assert spawned[-1][2]["TINA_LLM_MODEL"] == spawned[-1][2]["TINA_AGENT_MODEL"]
 
+    # Wildcard TINA_WORKSPACE_BEDROCK_OWNER="*" routes any numeric user without BYO/ChatGPT to Nova Lite
+    monkeypatch.setenv("TINA_WORKSPACE_BEDROCK_OWNER", "*")
+    from control_plane.dispatch import workspace_uses_nova
+    assert workspace_uses_nova("99", {}) is True
+    assert workspace_uses_nova("not-a-user", {}) is False
+
 
 def test_meeting_assistant_runs_via_local_completion_pool_with_strict_citations(monkeypatch):
     from shared.units import MEETING_KNOWLEDGE_PREFIX

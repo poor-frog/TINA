@@ -43,7 +43,7 @@ Parameters:
   EphemeralWorkspaceSecurityGroupId: {Type: String, Default: ''}
   NovaWorkspaceTaskDefinitionArn: {Type: String, Default: ''}
   NovaWorkspaceTaskRoleArn: {Type: String, Default: ''}
-  NovaWorkspaceOwnerIds: {Type: String, Default: '', AllowedPattern: '(|[1-9][0-9]*(,[1-9][0-9]*)*)'}
+  NovaWorkspaceOwnerIds: {Type: String, Default: '', AllowedPattern: '(|[*]|[1-9][0-9]*(,[1-9][0-9]*)*)'}
   WorkspaceS3BrokerRoleArn: {Type: String, Default: ''}
   WorkspaceS3Bucket: {Type: String, Default: ''}
   WorkspaceS3DataKeyArn: {Type: String, Default: ''}

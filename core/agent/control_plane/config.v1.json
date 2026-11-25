@@ -35,7 +35,7 @@
       "class": "defaulted",
       "default": "",
       "targets": [],
-      "description": "Optional specific staging subject routed to Bedrock workspace mode."
+      "description": "Optional comma-separated staging subjects (or *) routed to Bedrock Nova workspace mode."
     },
     {
       "key": "TINA_WORKSPACE_STORAGE",

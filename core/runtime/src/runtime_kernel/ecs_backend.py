@@ -191,9 +191,9 @@ class ECSBackend:
         if nova_task or nova_users:
             if (s3_cfg is None or not re.fullmatch(r"arn:[^:]+:ecs:[^:]+:[0-9]{12}:task-definition/[^:]+:[0-9]+", nova_task)
                     or nova_task.rsplit(":", 1)[0] == s3_cfg.task_definition.rsplit(":", 1)[0]
-                    or not re.fullmatch(r"[1-9][0-9]*(?:,[1-9][0-9]*)*", nova_users)):
+                    or not re.fullmatch(r"\*|[1-9][0-9]*(?:,[1-9][0-9]*)*", nova_users)):
                 raise ValueError("Invalid Nova S3 workspace configuration")
-            nova_owners = frozenset(nova_users.split(","))
+            nova_owners = frozenset(item.strip() for item in nova_users.split(",") if item.strip())
             nova_workspace = S3WorkspaceLauncher(
                 ecs=ecs, sts=boto3.client("sts"), config=replace(s3_cfg, task_definition=nova_task),
             )
@@ -254,7 +254,12 @@ class ECSBackend:
             )
             launcher = self.s3_workspace
             if native_nova:
-                if (not use_s3 or self.nova_workspace is None or env.get("TINA_OWNER") not in self.nova_owners
+                owner_id = env.get("TINA_OWNER") or ""
+                nova_allowed = (
+                    ("*" in self.nova_owners and owner_id.isdecimal())
+                    or owner_id in self.nova_owners
+                )
+                if (not use_s3 or self.nova_workspace is None or not nova_allowed
                         or env.get("TINA_UNIT_TRIGGER") != "message" or env.get("TINA_AGENT_MODEL") != _NOVA_MODEL):
                     raise ValueError("Nova is not authorized for this S3 workspace chat")
                 launcher = self.nova_workspace

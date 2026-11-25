@@ -275,3 +275,80 @@ def test_ecs_backend_launches_live_meeting_copilot_on_s3_ephemeral_worker():
     worker_env = next(v for k, v in puts.items() if "/workspace/7/" in k)
     assert "TINA_TRANSCRIPT_STREAM=tc:meeting:42" in worker_env
     assert "TINA_LLM_PROVIDER=bedrock-converse" in worker_env
+
+
+def test_ecs_backend_nova_wildcard_authorizes_any_numeric_owner(monkeypatch):
+    import pytest
+
+    nova_def = "arn:aws:ecs:us-east-1:123456789012:task-definition/tina-staging-ws-nova:8"
+    ecs = Mock()
+
+    def describe_td(taskDefinition):
+        if taskDefinition == BOT_DEF:
+            return {"taskDefinition": {
+                "requiresCompatibilities": ["FARGATE"], "networkMode": "awsvpc",
+                "cpu": "2048", "memory": "4096",
+                "containerDefinitions": [{"name": "bot", "image": BOT_IMAGE}],
+            }}
+        return {"taskDefinition": {
+            "requiresCompatibilities": ["FARGATE"], "networkMode": "awsvpc",
+            "cpu": "1024", "memory": "2048",
+            "containerDefinitions": [
+                {"name": "init-perms", "image": WORKER_IMAGE, "essential": False},
+                {"name": "worker", "image": WORKER_IMAGE},
+                {"name": "sync", "image": WORKER_IMAGE},
+                {"name": "stream", "image": WORKER_IMAGE},
+            ],
+        }}
+
+    ecs.describe_task_definition.side_effect = describe_td
+    ecs.run_task.return_value = {"tasks": [{"taskArn": TASK_ARN, "lastStatus": "PROVISIONING"}]}
+    sts = Mock()
+    sts.assume_role.return_value = {"Credentials": {
+        "AccessKeyId": "ASIA_TEMP_KEY", "SecretAccessKey": "SECRET_TEMP_KEY",
+        "SessionToken": "SESSION_TEMP_TOKEN", "Expiration": datetime.now(timezone.utc) + timedelta(minutes=15),
+    }}
+    s3 = Mock()
+    monkeypatch.setenv("RUNTIME_ECS_CLUSTER", "tina")
+    monkeypatch.setenv("RUNTIME_ECS_BOT_TASK_DEFINITION", BOT_DEF)
+    monkeypatch.setenv("RUNTIME_ECS_SUBNETS", "subnet-1")
+    monkeypatch.setenv("RUNTIME_ECS_SECURITY_GROUPS", "sg-app")
+    monkeypatch.setenv("RUNTIME_ECS_INVOCATION_BUCKET", "inv-bucket")
+    monkeypatch.setenv("RUNTIME_ECS_WORKSPACE_STORAGE", "s3")
+    monkeypatch.setenv("RUNTIME_ECS_EPHEMERAL_TASK_DEFINITION", EPH_DEF)
+    monkeypatch.setenv("RUNTIME_ECS_EPHEMERAL_SECURITY_GROUP", "sg-0123456789abcdef0")
+    monkeypatch.setenv("RUNTIME_ECS_WORKSPACE_S3_BROKER_ROLE_ARN", "arn:aws:iam::123456789012:role/BrokerRole")
+    monkeypatch.setenv("RUNTIME_ECS_WORKSPACE_S3_BUCKET", "tina-ws-bucket")
+    monkeypatch.setenv("RUNTIME_ECS_WORKSPACE_S3_KMS_KEY_ARN", "arn:aws:kms:us-east-1:123456789012:key/data-key")
+    monkeypatch.setenv("RUNTIME_ECS_NOVA_WORKSPACE_TASK_DEFINITION", nova_def)
+    monkeypatch.setenv("RUNTIME_ECS_NOVA_WORKSPACE_OWNERS", "*")
+
+    import boto3
+    monkeypatch.setattr(boto3, "client", lambda name: {"ecs": ecs, "sts": sts, "s3": s3}[name])
+    backend = ECSBackend.from_env()
+    assert "*" in backend.nova_owners
+
+    uid = "agent-99-chat-main"
+    env = {
+        "TINA_WORKSPACE_ATTEMPT": "f" * 32,
+        "TINA_WORKSPACE_STORAGE": "s3",
+        "TINA_OWNER": "99",
+        "TINA_UNIT_ID": uid,
+        "TINA_CHAT_SESSION": "main",
+        "TINA_UNIT_TRIGGER": "message",
+        "TINA_UNIT_IN_TOPIC": f"unit:{uid}:in",
+        "TINA_UNIT_OUT_TOPIC": f"unit:{uid}:out",
+        "TINA_WORKSPACE_PATH": "/workspaces/_system/99",
+        "TINA_MOUNTS": json.dumps([{"path": "/workspaces/_system/99", "write": True}]),
+        "TINA_RUNNER": "bedrock-workspace",
+        "TINA_LLM_PROVIDER": "bedrock-converse",
+        "TINA_LLM_MODEL": "amazon.nova-lite-v1:0",
+        "TINA_AGENT_MODEL": "amazon.nova-lite-v1:0",
+    }
+    handle = backend.start(uid, Runnable(image=WORKER_IMAGE, command=["python", "-m", "worker"]), env)
+    assert handle._impl == TASK_ARN
+    assert ecs.run_task.call_args.kwargs["taskDefinition"] == nova_def
+
+    # Non-numeric owner is still rejected even under wildcard
+    with pytest.raises(ValueError, match="Nova is not authorized"):
+        backend.start(uid, Runnable(image=WORKER_IMAGE, command=["python", "-m", "worker"]), {**env, "TINA_OWNER": "evil"})

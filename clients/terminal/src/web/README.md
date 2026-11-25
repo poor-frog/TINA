@@ -65,5 +65,7 @@ TINA Terminal workbench at `/terminal`.
   **Global Defaults** (Team) on `/` while keeping model controls available in `/terminal`. The Web
   **Voice Assistant** section mounts `<VoiceSettings voiceOnly />` so everyday users get a clean tactile
   voice-preset picker + preview without operator tabs (full Voice/Behavior/Meeting controls remain in `/terminal`).
-- **Dev/Admin bridge**: Shows an "Open TINA Terminal" shortcut only when `/api/admin/me` confirms
-  admin/dev access (or `NEXT_PUBLIC_SHOW_TERMINAL_SWITCH=1` / local dev override).
+- **Dev/Admin bridge**: Shows an "Open TINA Terminal" shortcut and permits `/terminal` routes only
+  when `/api/admin/me` (`requireAdmin()`) confirms administrator access (or `NEXT_PUBLIC_SHOW_TERMINAL_SWITCH=1`
+  / local dev override), independently of `WorkspacePilotUserIds` so non-admin users get full Web Chat,
+  Knowledge, Tasks, and Routines without exposing `/terminal`.

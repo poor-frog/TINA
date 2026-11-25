@@ -5,7 +5,7 @@ Metadata:
     AWSAgentToolkit: aws-cloudformation@3
 
 Parameters:
-  WorkspaceBedrockOwner: {Type: String, Default: '', AllowedPattern: '(|[1-9][0-9]*(,[1-9][0-9]*)*)'}
+  WorkspaceBedrockOwner: {Type: String, Default: '', AllowedPattern: '(|[*]|[1-9][0-9]*(,[1-9][0-9]*)*)'}
   ClusterName: {Type: String}
   VpcId: {Type: 'AWS::EC2::VPC::Id'}
   AppSubnetIds: {Type: 'List<AWS::EC2::Subnet::Id>'}
