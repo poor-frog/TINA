@@ -28,8 +28,10 @@ Parameters:
   McpGatewayTargetGroupArn: {Type: String, Default: ''}
   McpOriginSecurityGroupId: {Type: String, Default: ''}
   VoicePilotRoom: {Type: String, Default: '', AllowedPattern: '(|[a-z]{3}-[a-z]{4}-[a-z]{3}(,[a-z]{3}-[a-z]{4}-[a-z]{3})?)'}
+  GatewayExtensionOrigins: {Type: String, Default: ''}
 
 Conditions:
+  WithExtensionOrigins: !Not [!Equals [!Ref GatewayExtensionOrigins, '']]
   WithTranscription: !And
     - !Not [!Equals [!Ref TranscriptionUrl, '']]
     - !Not [!Equals [!Ref TranscriptionTokenArn, '']]
@@ -319,6 +321,7 @@ Resources:
           Environment:
             - !If [WithMcp, {Name: MCP_URL, Value: !Ref McpUrl}, !Ref 'AWS::NoValue']
             - !If [WithAgentApi, {Name: AGENT_API_URL, Value: !Ref AgentApiUrl}, !Ref 'AWS::NoValue']
+            - !If [WithExtensionOrigins, {Name: TINA_GATEWAY_EXTENSION_ORIGINS, Value: !Ref GatewayExtensionOrigins}, !Ref 'AWS::NoValue']
             - {Name: VALKEY_HOST, Value: !Ref ValkeyHost}
             - {Name: ADMIN_API_URL, Value: http://127.0.0.1:8001}
             - {Name: MEETING_API_URL, Value: http://127.0.0.1:8080}
