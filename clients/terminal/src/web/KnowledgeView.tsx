@@ -1260,9 +1260,9 @@ export function KnowledgeView({
   const teamSpaces = workspaces.filter((w) => w.kind === "shared");
   const globalSpace = workspaces.find((w) => w.kind === "global");
   const recentCards = useMemo(() => userVisibleFiles.slice(0, 8), [userVisibleFiles]);
-  const entityCount = useMemo(
-    () => files.filter((f) => /^kg\/entities\/[^/]+\/[^/]+\.md$/i.test(f)).length,
-    [files],
+  const mappablePageCount = useMemo(
+    () => userVisibleFiles.filter((f) => f.toLowerCase().endsWith(".md")).length,
+    [userVisibleFiles],
   );
 
   return (
@@ -1573,7 +1573,7 @@ export function KnowledgeView({
                 >
                   <WebIcon name="network" size={14} />
                   <span className={styles.treeLabel}>Connections Map</span>
-                  {entityCount > 0 && <span className={styles.treeCount}>{entityCount}</span>}
+                  {mappablePageCount > 0 && <span className={styles.treeCount}>{mappablePageCount}</span>}
                 </button>
               </div>
 
@@ -2024,7 +2024,7 @@ export function KnowledgeView({
                       <div>
                         <div className={styles.exploreTitle}>Connections Map</div>
                         <div className={styles.exploreDesc}>
-                          See how your people, projects, and meetings connect ({entityCount} items)
+                          Explore your glowing constellation of pages, people &amp; projects ({mappablePageCount} items)
                         </div>
                       </div>
                     </button>
@@ -2229,12 +2229,14 @@ export function KnowledgeView({
         {/* ── VIEW 2: CONNECTIONS MAP ── */}
         {activeTab === "graph" && activeWs && (
           <KnowledgeGraphCanvas
+            activeSpaceId={activeWs.id}
             slug={activeWs.slug}
             workspaceName={activeWs.name}
+            availableSpaces={workspaces.map((w) => ({ id: w.id, slug: w.slug, name: w.name }))}
             isReadOnly={activeWs.readOnly}
             devView={devView}
             externalRefreshKey={graphRefreshKey}
-            onOpenDocument={(path) => openPage(path)}
+            onOpenDocument={(path, wsId) => openPage(path, wsId)}
             onAskTina={(prompt) => {
               setCopilotSeedPrompt(prompt);
               setCopilotOpen(true);

@@ -1532,6 +1532,144 @@
   user-select: none;
 }
 
+.constellationWrap {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #04070c;
+}
+
+:global(html[data-theme="light"]) .constellationWrap {
+  background: #f4f7fb;
+}
+
+.constellationCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.constellationPointer {
+  cursor: pointer;
+}
+
+.constellationLegend {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 12;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-width: calc(100% - 28px);
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(8, 13, 21, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  backdrop-filter: blur(8px);
+}
+
+:global(html[data-theme="light"]) .constellationLegend {
+  background: rgba(255, 255, 255, 0.86);
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: rgba(226, 232, 240, 0.85);
+  transition: background 110ms ease, color 110ms ease;
+}
+
+:global(html[data-theme="light"]) .legendItem {
+  color: #334155;
+}
+
+.legendItem:hover,
+.legendItemActive {
+  background: rgba(103, 232, 249, 0.18);
+  color: #f8fafc;
+}
+
+:global(html[data-theme="light"]) .legendItem:hover,
+:global(html[data-theme="light"]) .legendItemActive {
+  background: rgba(14, 116, 144, 0.12);
+  color: #0f172a;
+}
+
+.legendDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.graphDisplayPopover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  width: 248px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  border: 1px solid var(--tw-line-strong);
+  background: var(--tw-card);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.48);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.displayGroupTitle {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--tw-text-4);
+}
+
+.displayToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--tw-text-2);
+  cursor: pointer;
+}
+
+.displaySlider {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--tw-text-3);
+}
+
+.displaySlider input[type="range"] {
+  width: 100%;
+  accent-color: var(--tw-mint);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .graphSvg {
   display: block;
   transform-origin: top left;

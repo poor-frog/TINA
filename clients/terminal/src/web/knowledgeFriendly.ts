@@ -254,6 +254,8 @@ export function friendlyEntityType(type: string): string {
     topic: "Topic",
     company: "Organization",
     organization: "Organization",
+    page: "Page",
+    tag: "Tag",
   };
   return map[lower] ?? humanizeSlug(type);
 }
@@ -269,6 +271,8 @@ export function friendlyEntityLaneLabel(type: string): string {
     topic: "Topics",
     company: "Organizations",
     organization: "Organizations",
+    page: "Pages",
+    tag: "Tags",
   };
   return map[lower] ?? humanizeSlug(type);
 }

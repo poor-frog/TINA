@@ -9,6 +9,13 @@ import {
   updateCleanDocumentBody,
   updateCleanDocumentTitle,
 } from "../knowledgeFriendly";
+import {
+  buildConstellationGraph,
+  computeFitCamera,
+  createInitialSimulation,
+  hitTestSimNode,
+  prewarmSimulation,
+} from "../constellationGraph";
 import type { ChatStreamCallbacks } from "../../surfaces/chatStream";
 
 const mockStreamChatTurn = vi.fn();
@@ -100,17 +107,32 @@ function mockFetchRoutes(onSaveDocument?: (payload: Record<string, unknown>) => 
     }
     if (url.includes("/api/workspace/file") && url.includes("alice.md")) {
       return json({
-        content: "---\nid: person/alice\ntype: person\ntitle: Alice Nguyen\n---\n\nWorks on [[TINA]].",
+        content: "---\nid: person/alice\ntype: person\ntitle: Alice Nguyen\ntags:\n  - design\n---\n\nWorks on [[TINA]].",
       });
     }
     if (url.includes("/api/workspace/file") && url.includes("tina.md")) {
       return json({
-        content: "---\nid: project/tina\ntype: project\ntitle: TINA\n---\n\nLed by [[Alice Nguyen]].",
+        content: "---\nid: project/tina\ntype: project\ntitle: TINA\ntags:\n  - design\n---\n\nLed by [[Alice Nguyen]].",
       });
     }
     if (url.includes("/api/workspace/file") && url.includes("orphan-topic.md")) {
       return json({
         content: "---\nid: topic/orphan\ntype: topic\ntitle: Standalone Topic\n---\n\nNo links yet.",
+      });
+    }
+    if (url.includes("/api/workspace/file") && url.includes("tina-handbook.md")) {
+      return json({
+        content: "# TINA Handbook\n\nOfficial guide referencing [[TINA]].",
+      });
+    }
+    if (url.includes("/api/workspace/file") && url.includes("team-notes.md")) {
+      return json({
+        content: "# Team Notes\n\nWeekly sync with [[Alice Nguyen]].",
+      });
+    }
+    if (url.includes("/api/workspace/file")) {
+      return json({
+        content: "# Personal Wiki\n\nWelcome to TINA Knowledge Hub. Review [[Alice Nguyen]].",
       });
     }
     if (url.includes("/api/workspace/search")) {
@@ -174,6 +196,41 @@ describe("knowledgeFriendly helpers", () => {
     expect(withNewBody).toContain("title: Alice T. Nguyen");
     expect(withNewBody).toContain("tags:\n  - design\n  - q4");
     expect(withNewBody).toContain("Updated body.");
+  });
+
+  it("builds Constellation graph with pages, markdown links, #tags (ignoring hex colors), and deterministic physics", () => {
+    const graph = buildConstellationGraph(
+      [
+        {
+          wsId: "personal",
+          wsName: "My Space",
+          path: "wiki/launch.md",
+          content: "# Launch Plan\n\nSee [Alice](../kg/entities/person/alice.md) #launch #fff\n```css\n#notatag\n```",
+        },
+        {
+          wsId: "personal",
+          wsName: "My Space",
+          path: "kg/entities/person/alice.md",
+          content: "---\nid: person/alice\ntype: person\ntitle: Alice Nguyen\ntags: [launch]\n---\n\nOwner of [[Launch Plan]].",
+        },
+      ],
+      { includePages: true, includeTags: true },
+    );
+
+    expect(graph.nodes.map((n) => n.title)).toContain("Launch Plan");
+    expect(graph.nodes.map((n) => n.title)).toContain("Alice Nguyen");
+    expect(graph.nodes.map((n) => n.title)).toContain("#launch");
+    expect(graph.nodes.map((n) => n.title)).not.toContain("#fff");
+    expect(graph.nodes.map((n) => n.title)).not.toContain("#notatag");
+    expect(graph.edges.some((e) => e.kind === "markdown")).toBe(true);
+    expect(graph.edges.some((e) => e.kind === "tag")).toBe(true);
+
+    const sim = createInitialSimulation(graph.nodes);
+    prewarmSimulation(sim, graph.edges, { repulsion: 2200, linkDistance: 96 }, 40);
+    const cam = computeFitCamera(sim, 800, 500);
+    const hub = sim.get(graph.nodes[0].id)!;
+    const hit = hitTestSimNode(sim, cam, hub.x * cam.scale + cam.tx, hub.y * cam.scale + cam.ty);
+    expect(hit).toBe(hub.id);
   });
 });
 
@@ -297,7 +354,7 @@ describe("KnowledgeView v3 (Notion-Style Non-Tech Knowledge Hub)", () => {
     });
   });
 
-  it("humanizes Connections Map (Unlinked, Focus selected, Fit) and supports Back/Forward reading history", async () => {
+  it("renders Constellation Graph with Display popover, All Spaces, Columns toggle, and Back/Forward reading history", async () => {
     render(<KnowledgeView onAskTina={vi.fn()} />);
     await waitFor(() => {
       expect(screen.getAllByRole("button", { name: /Space Home/i }).length).toBeGreaterThan(0);
@@ -309,20 +366,38 @@ describe("KnowledgeView v3 (Notion-Style Non-Tech Knowledge Hub)", () => {
       expect(screen.getByTestId("mdx-doc").textContent).toContain("Welcome to TINA Knowledge Hub");
     });
 
-    // Open Connections Map from sidebar
+    // Open Connections Map — defaults to Constellation mode including Pages & #tags
     fireEvent.click(screen.getByRole("button", { name: /Connections Map/i }));
     await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Constellation/i }).getAttribute("aria-pressed")).toBe("true");
       expect(screen.getByRole("button", { name: /Alice Nguyen \(Person\)/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Personal Wiki \(Page\)/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /#design \(Tag\)/i })).toBeTruthy();
       expect(screen.getByRole("button", { name: /Standalone Topic \(Topic\)/i })).toBeTruthy();
     });
+
+    // Display popover controls tags, pages, and All Spaces
+    fireEvent.click(screen.getByRole("button", { name: /^Display$/i }));
+    expect(screen.getByRole("dialog", { name: /Graph display settings/i })).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(/Show all spaces/i));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /TINA Handbook \(Page\)/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Team Notes \(Page\)/i })).toBeTruthy();
+    });
+
+    // Toggle back to current space and test Columns layout switch
+    fireEvent.click(screen.getByLabelText(/Show all spaces/i));
+    fireEvent.click(screen.getByRole("button", { name: /^Columns$/i }));
+    expect(await screen.findByRole("img", { name: /columns connections map/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Constellation$/i }));
 
     // Unlinked filter isolates standalone items
     fireEvent.click(screen.getByRole("button", { name: /Unlinked \(1\)/i }));
     expect(screen.getByRole("button", { name: /Standalone Topic \(Topic\)/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Alice Nguyen \(Person\)/i })).toBeNull();
 
-    // Focus selected isolates Alice + TINA
-    fireEvent.click(screen.getByRole("button", { name: /^All \(3\)$/i }));
+    // Focus selected isolates Alice + connected items
+    fireEvent.click(screen.getByRole("button", { name: /^All \(5\)$/i }));
     fireEvent.click(screen.getByRole("button", { name: /Alice Nguyen \(Person\)/i }));
     fireEvent.click(screen.getByRole("button", { name: /Focus selected/i }));
     expect(screen.getByRole("button", { name: /TINA \(Project\)/i })).toBeTruthy();

@@ -37,7 +37,7 @@ TINA Terminal workbench at `/terminal`.
 - **Ask Tina (`AskTinaView.tsx`)**: Full-page SSE assistant with real MCP Tool Approval cards
   (`/api/chat/approval`), Copy & Share response actions, searchable `/api/sessions` history,
   meeting pre-grounding, and real `/routine` prompt compilation.
-- **Knowledge Hub (`KnowledgeView.tsx` + `knowledgeFriendly.ts` + `KnowledgeDocEditor.tsx` + `KnowledgeCopilotDrawer.tsx` + `KnowledgeGraphCanvas.tsx` + `knowledgeView.module.css`)**:
+- **Knowledge Hub (`KnowledgeView.tsx` + `knowledgeFriendly.ts` + `constellationGraph.ts` + `KnowledgeDocEditor.tsx` + `KnowledgeCopilotDrawer.tsx` + `KnowledgeGraphCanvas.tsx` + `knowledgeView.module.css`)**:
   Notion-style, non-tech-friendly Knowledge library mounted directly at `/?nav=knowledge` (with URL
   deep-linking `?nav=knowledge&ws=&doc=&tab=` and Back/Forward reading history), uniting Private
   spaces (`My Space`), Team Spaces (owner/contributor direct editing, uploads, AI access switch &
@@ -47,9 +47,11 @@ TINA Terminal workbench at `/terminal`.
   Files`), single-bar reading view (with TOC Outline, `Mentioned in` backlinks, Meeting Source
   Provenance, and Uploaded File summary cards), YAML-free clean Page Editor (lossless frontmatter
   patching + Vietnamese-safe slugging + visual `Link page` picker + `[[` autocomplete), inline Ask
-  Tina drawer, humanized **Connections Map** (Fit-to-View, Pan, Focus selected, Unlinked filter),
-  and **Activity & Settings** with collapsible `Advanced · GitHub Sync`. Includes a subtle
-  `Developer view` toggle (OFF by default) to expose raw file trees, Markdown/YAML, and Git diffs.
+  Tina drawer, 60fps HTML5 Canvas **Constellation Knowledge Graph** (force-directed glowing star-map
+  default covering entities, regular pages, Markdown/`[[wikilinks]]`, `#tags`, and All Spaces, plus
+  a `Display` settings popover and optional **Columns** layout switcher), and **Activity & Settings**
+  with collapsible `Advanced · GitHub Sync`. Includes a subtle `Developer view` toggle (OFF by default)
+  to expose raw file trees, Markdown/YAML, and Git diffs.
 - **Personal / Team Settings (`SettingsView.tsx` + `WebModelsPanel.tsx` + `webModelsPanel.module.css`)**:
   Two-column hub with URL query sync (`?nav=settings&settingsWorkspace=personal|team&settingsSection=<id>`),
   Hallmark `modern-minimal` AI Provider & Auth flow (hairline-ruled provider matrix using official
