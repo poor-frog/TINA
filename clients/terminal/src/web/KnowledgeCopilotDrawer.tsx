@@ -242,9 +242,6 @@ export function KnowledgeCopilotDrawer({
         );
       } finally {
         if (mutatedInTurn && !commitSeen && !controller.signal.aborted) {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === agentId && !m.error ? { ...m, commit: m.commit || "saved" } : m)),
-          );
           onWorkspaceMutated();
         }
         abortRef.current = null;

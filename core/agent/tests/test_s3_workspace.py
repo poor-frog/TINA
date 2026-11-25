@@ -510,6 +510,71 @@ def test_nova_bedrock_workspace_supports_agent_reach_and_readonly_global(tmp_pat
     )
     assert allowed_after_web["created"] == "kg/web-summary.md"
 
+    # Regression tests for all 6 code-review findings:
+    # 1. Numeric private slug ("5") accepts "personal" alias seamlessly; cross-mount/unknown slugs rejected.
+    numeric_mounts = {
+        "_global": {"slug": "_global", "path": str(gdir), "role": "global", "write": False},
+        "5": {"slug": "5", "path": str(pdir), "role": "private", "write": True, "primary": True},
+    }
+    listed_alias = bedrock_workspace._wiki_tool(numeric_mounts, "list_wiki", {"workspace": "personal"}, "")
+    assert listed_alias["workspace"] == "5"
+    assert any(item["path"] == "kg/projects/acme.md" for item in listed_alias["files"])
+
+    # 2. Absolute path matching mount root (from mounts_preamble) normalizes cleanly, while cross-mount path fails.
+    abs_read = bedrock_workspace._wiki_tool(
+        numeric_mounts, "read_wiki", {"workspace": "5", "path": f"{pdir}/kg/projects/acme.md"}, "",
+    )
+    assert "Updated summary." in abs_read["text"]
+    with pytest.raises(ValueError):
+        bedrock_workspace._wiki_tool(
+            numeric_mounts, "read_wiki", {"workspace": "5", "path": "/workspaces/999/kg/projects/acme.md"}, "",
+        )
+
+    # 3. Vietnamese read-only words ("nghiên cứu", "lưu ý", "cấu tạo") do NOT false-positive as write intent.
+    for readonly_prompt in (
+        "Tìm trên web và nghiên cứu về AWS Bedrock giúp tôi",
+        "Đọc trang web này và lưu ý các rủi ro bảo mật",
+        "Giải thích cấu tạo của ECS Fargate",
+    ):
+        with pytest.raises(ValueError, match="external web content"):
+            bedrock_workspace._wiki_tool(
+                numeric_mounts,
+                "create_wiki",
+                {"workspace": "personal", "path": "kg/should-block.md", "text": "blocked"},
+                readonly_prompt,
+                external_taint=True,
+            )
+
+    # 4. update_wiki(mode='append') joins cleanly with exactly one blank line (never \n\n\n).
+    bedrock_workspace._wiki_tool(
+        numeric_mounts, "create_wiki",
+        {"workspace": "5", "path": "kg/append-nl.md", "text": "# Log\n\nLine 1.\n"},
+        "tạo trang log",
+    )
+    bedrock_workspace._wiki_tool(
+        numeric_mounts, "update_wiki",
+        {"workspace": "5", "path": "kg/append-nl.md", "mode": "append", "text": "Line 2."},
+        "thêm dòng mới",
+    )
+    assert (pdir / "kg" / "append-nl.md").read_text(encoding="utf-8") == "# Log\n\nLine 1.\n\nLine 2.\n"
+
+    # 5. stopReason == "max_tokens" preserves generated text instead of failing the turn.
+    class MaxTokensClient:
+        def converse(self, **req):
+            assert "'5' (private, writable)" in req["system"][0]["text"]
+            return {"stopReason": "max_tokens", "output": {"message": {"role": "assistant", "content": [
+                {"text": "Partial long Vietnamese summary that hit max_tokens."},
+            ]}}}
+
+    monkeypatch.setenv("TINA_MOUNTS", json.dumps([
+        {"slug": "_global", "path": str(gdir), "role": "global", "write": False},
+        {"slug": "5", "path": str(pdir), "role": "private", "write": True, "primary": True},
+    ]))
+    monkeypatch.setattr(bedrock_workspace, "BedrockConverseCompletion", lambda **_: SimpleNamespace(client=MaxTokensClient()))
+    max_tok_events = list(harness.run_turn(pdir, "<!--tina:user-input-below-->tóm tắt dài", allowed_tools=("Read",), model="amazon.nova-lite-v1:0"))
+    done_ev = next(e for e in max_tok_events if e.get("type") == "done")
+    assert done_ev["ok"] is True and "hit max_tokens" in done_ev["reply"]
+
     # Verify custom HTTPS + anthropic API key overlay cleanly into claude-code runner,
     # clearing stale credentials and setting Claude model aliases.
     env_custom: dict[str, str] = {

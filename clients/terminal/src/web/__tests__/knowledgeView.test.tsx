@@ -375,6 +375,18 @@ describe("KnowledgeView v3 (Notion-Style Non-Tech Knowledge Hub)", () => {
     const chatReq = mockStreamChatTurn.mock.calls[0]?.[0] as { context?: { surface?: unknown } };
     expect(typeof chatReq?.context?.surface).toBe("object");
     expect(chatReq?.context?.surface).not.toBeNull();
+
+    // Regression guard: denied/uncommitted write tool-call must NOT fabricate a green "Updated space" badge
+    mockStreamChatTurn.mockImplementationOnce(async (_req: unknown, cbs: ChatStreamCallbacks) => {
+      cbs.onTool?.("create_wiki");
+      cbs.onDelta("Write was denied in this space.");
+      return { sawVisibleOutput: true, terminal: true, aborted: false };
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Summarize space/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Write was denied in this space\./i)).toBeTruthy();
+    });
+    expect(screen.queryByText(/Updated space · refreshed/i)).toBeNull();
   });
 
   it("renders Constellation Graph with Display popover, All Spaces, Columns toggle, and Back/Forward reading history", async () => {
