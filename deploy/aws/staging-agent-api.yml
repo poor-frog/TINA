@@ -64,7 +64,7 @@ Parameters:
   DraftPilotUserIds:
     Type: String
     Default: ''
-    AllowedPattern: '(|[0-9]+(,[0-9]+)*)'
+    AllowedPattern: '(|[*]|[0-9]+(,[0-9]+)*)'
 
 Conditions:
   WithAgentReach: !And

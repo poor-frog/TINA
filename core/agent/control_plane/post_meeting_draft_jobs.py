@@ -40,8 +40,8 @@ def register(app, subject_of, list_workspaces, meeting_api_url, reader, read_tar
 
     def authorize(request, meeting_id):
         subject = subject_of(request)
-        allowed = {value.strip() for value in os.getenv('TINA_DRAFT_PILOT_USER_IDS', '').split(',')}
-        if not subject.isascii() or not subject.isdecimal() or subject not in allowed:
+        allowed = {value.strip() for value in os.getenv('TINA_DRAFT_PILOT_USER_IDS', '').split(',') if value.strip()}
+        if not subject.isascii() or not subject.isdecimal() or ('*' not in allowed and subject not in allowed):
             raise HTTPException(404, 'Draft pilot unavailable')
         row = meeting_get(meeting_api_url, subject, meeting_id, f'/meetings/{meeting_id}')
         if str(row.get('user_id')) != subject or (row.get('data') or {}).get('artifact_deletion'):

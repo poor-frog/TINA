@@ -55,3 +55,17 @@ def test_draft_job_deduplicates_and_checks_permissions_on_reload(tmp_path, monke
         assert saved.json()['job']['answer'] == answer
         shared.clear()
         assert client.get(url, headers=owner).json()['job'] is None
+
+
+def test_draft_job_allows_wildcard_pilot_users(tmp_path, monkeypatch):
+    app = FastAPI()
+    monkeypatch.setenv('TINA_DRAFT_PILOT_USER_IDS', '*')
+    monkeypatch.setattr(meeting_knowledge, 'meeting_get',
+                        lambda *_: {'status': 'completed', 'user_id': 99})
+    register(app, lambda request: request.headers['x-user-id'],
+             lambda _: [], '', WorkspaceReader(str(tmp_path)), lambda *_: tmp_path,
+             lambda *_: [], lambda *_, **__: '', lambda *_: [], lambda *_: {})
+    with TestClient(app) as client:
+        assert client.get('/api/workspace/meeting-knowledge/3/draft-job', headers={'x-user-id': '99'}).status_code == 200
+        monkeypatch.setenv('TINA_DRAFT_PILOT_USER_IDS', '')
+        assert client.get('/api/workspace/meeting-knowledge/3/draft-job', headers={'x-user-id': '99'}).status_code == 404

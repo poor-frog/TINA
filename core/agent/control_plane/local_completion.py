@@ -34,7 +34,7 @@ def _build_subprocess_env(model_env: dict[str, str] | None, *, extra: dict[str, 
         "PATH", "PYTHONPATH", "TINA_LLM_PROVIDER", "TINA_LLM_MODEL",
         "TINA_STATE_FAST_MODEL", "TINA_STATE_REASON_MODEL",
     ) if key in os.environ}
-    env.update(HOME="/tmp", **extra)
+    env.update(HOME="/tmp", TINA_LOCAL_COMPLETION_POOL="1", **extra)
     if model_env:
         for key, value in model_env.items():
             if key in _VOICE_MODEL_ENV_KEYS and value:

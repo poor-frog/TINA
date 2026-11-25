@@ -738,9 +738,9 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
         if mode in ('voice_plan','voice_source_intent'):
             provider_timeout = min(provider_timeout, voice_deadline-time.monotonic())
             if provider_timeout <= 0: raise TimeoutError('Voice retrieval budget exhausted')
-        provider = None if mode == 'meeting_assistant' else completion_from_env(timeout=provider_timeout)
+        use_local_assistant = mode == 'meeting_assistant' and os.environ.get('TINA_LOCAL_COMPLETION_POOL') == '1'
+        provider = None if (mode == 'meeting_assistant' and not use_local_assistant) else completion_from_env(timeout=provider_timeout)
         if mode == 'meeting_assistant':
-            from worker.voice_sandbox import complete as assistant_complete
             schema = {
                 'type': 'object', 'additionalProperties': False, 'required': ['claims'],
                 'properties': {'claims': {'type': 'array', 'items': {
@@ -750,8 +750,12 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                     }},
                 }}},
             }
-            text = assistant_complete(payload['text'], SYSTEM, schema, timeout=40,
-                                      current=check_current, meeting_assistant=True)
+            if use_local_assistant:
+                text = generate(provider, payload['text'], SYSTEM, schema, use_harness=False)
+            else:
+                from worker.voice_sandbox import complete as assistant_complete
+                text = assistant_complete(payload['text'], SYSTEM, schema, timeout=40,
+                                          current=check_current, meeting_assistant=True)
             validate_answer(text, answer_sources)
         elif mode == 'voice_summary_select':
             text = generate(completion_from_env(timeout=15), payload['text'], SELECT_SYSTEM)

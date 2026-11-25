@@ -41,6 +41,14 @@ describe("workspace pilot", () => {
       expect(pilotRouteEnabled("workspace/document")).toBe(["wiki", "routines"].includes(stage));
       expect(pilotRouteEnabled("workspace/document/move/preview")).toBe(["wiki", "routines"].includes(stage));
       expect(pilotRouteEnabled("workspace/document/delete")).toBe(["wiki", "routines"].includes(stage));
+      expect(pilotRouteEnabled("workspace/activate")).toBe(["wiki", "routines"].includes(stage));
+      expect(pilotRouteEnabled("workspace/deactivate")).toBe(["wiki", "routines"].includes(stage));
+      expect(pilotRouteEnabled("workspace/swap")).toBe(["wiki", "routines"].includes(stage));
+      expect(pilotRouteEnabled("workspace/rename")).toBe(["wiki", "routines"].includes(stage));
+      expect(pilotRouteEnabled("workspace/project-a/archive")).toBe(["wiki", "routines"].includes(stage));
+      expect(pilotRouteEnabled("workspace/project-a", "DELETE")).toBe(["wiki", "routines"].includes(stage));
+      expect(pilotRouteEnabled("workspace/project-a", "GET")).toBe(false);
+      expect(pilotRouteEnabled("workspace/git-token", "DELETE")).toBe(false);
       expect(pilotRouteEnabled("routines/daily/enabled")).toBe(stage === "routines");
       for (const path of ["internal/openai-auth", "workspace/git-token", "events", "workspace/../events"]) {
         expect(pilotRouteEnabled(path)).toBe(false);

@@ -295,3 +295,35 @@ def test_meeting_state_keeps_platform_provider_and_anthropic_without_key_falls_b
     assert spawned[-1][2]["TINA_RUNNER"] == "bedrock-workspace"
     assert spawned[-1][2]["TINA_LLM_PROVIDER"] == "bedrock-converse"
     assert spawned[-1][2]["TINA_LLM_MODEL"] == spawned[-1][2]["TINA_AGENT_MODEL"]
+
+
+def test_meeting_assistant_runs_via_local_completion_pool_with_strict_citations(monkeypatch):
+    from shared.units import MEETING_KNOWLEDGE_PREFIX
+    from worker import engine
+
+    monkeypatch.setenv("TINA_LOCAL_COMPLETION_POOL", "1")
+    monkeypatch.setenv("TINA_CHAT_SESSION", "meeting-knowledge-req-asst")
+    seen = []
+
+    class FakeStructuredProvider:
+        def complete_structured(self, prompt, *, system="", schema=None):
+            seen.append({"prompt": prompt, "system": system, "schema": schema})
+            return SimpleNamespace(text=json.dumps({
+                "claims": [{"text": "Lan phụ trách phần demo.", "source_ids": ["s0"]}],
+            }))
+
+    monkeypatch.setattr(engine, "completion_from_env", lambda **_: FakeStructuredProvider())
+    inline = MEETING_KNOWLEDGE_PREFIX + json.dumps({
+        "request_id": "req-asst",
+        "text": json.dumps({
+            "mode": "meeting_assistant",
+            "bounded": False,
+            "question": "Ai phụ trách demo?",
+            "sources": [{"id": "s0", "kind": "transcript", "quote": "Lan phụ trách demo."}],
+        }),
+    })
+    result = run_job("knowledge", inline)
+    assert result["complete"] is True
+    parsed = json.loads(result["text"])
+    assert parsed["claims"][0]["source_ids"] == ["s0"]
+    assert seen and seen[0]["schema"]["required"] == ["claims"]

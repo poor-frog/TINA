@@ -1437,7 +1437,6 @@ def create_app(
         if (os.environ.get("TINA_LOCAL_COMPLETION_POOL") == "1"
                 and not ecs_draft
                 and not knowledge_mode.startswith("voice")
-                and knowledge_mode != "meeting_assistant"
                 and not (task == "knowledge" and not ecs_draft and sandbox_voice)):
             from control_plane.local_completion import complete as run_local_completion
             from control_plane.meeting_voice_completion import resolve_voice_model_env
