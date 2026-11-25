@@ -291,7 +291,6 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
                   navigate("ask");
                 }}
                 onOpenCapture={openCapture}
-                onOpenCalendarSettings={openCalendarSettings}
               />
             )}
 

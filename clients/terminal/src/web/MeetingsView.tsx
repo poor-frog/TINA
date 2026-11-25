@@ -1,7 +1,7 @@
 "use client";
 /** MeetingsView — Upgraded Meetings Notebook with date grouping, multi-dimensional filter popover,
- *  row rename (POST /api/meetings/{id}/annotate), `•••` action menu (Ask TINA, Rename, Share,
- *  Copy link, Bot actions, Delete), and Split-Button Capture ▾. */
+ *  row rename (POST /api/meetings/{id}/annotate), and `•••` action menu (Ask TINA, Rename, Share,
+ *  Copy link, Bot actions, Delete). */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { WebAvatar } from "./Avatar";
 import { WebIcon } from "./Icons";
@@ -92,7 +92,6 @@ export function MeetingsView({
   onOpenMeeting,
   onAskMeeting,
   onOpenCapture,
-  onOpenCalendarSettings,
 }: {
   meetings: MeetingMock[];
   userName: string;
@@ -101,7 +100,6 @@ export function MeetingsView({
   onOpenMeeting: (meetingId: string) => void;
   onAskMeeting?: (meeting: MeetingMock) => void;
   onOpenCapture: (mode?: CaptureModalMode) => void;
-  onOpenCalendarSettings?: () => void;
 }) {
   const [channel, setChannel] = useState<ChannelFilter>("all");
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>("all");
@@ -118,7 +116,6 @@ export function MeetingsView({
   const [notice, setNotice] = useState<string | null>(null);
 
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const [captureMenuOpen, setCaptureMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<
     | { type: "rename"; meeting: MeetingMock; title: string }
     | { type: "delete"; meeting: MeetingMock }
@@ -129,7 +126,6 @@ export function MeetingsView({
   const [dialogError, setDialogError] = useState<string | null>(null);
 
   const filterPopRef = useRef<HTMLDivElement>(null);
-  const captureSplitRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -157,13 +153,11 @@ export function MeetingsView({
     const onOutside = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (filterPopRef.current && !filterPopRef.current.contains(target)) setFiltersOpen(false);
-      if (captureSplitRef.current && !captureSplitRef.current.contains(target)) setCaptureMenuOpen(false);
       if (openMenuId && !target?.closest("[data-meeting-menu]")) setOpenMenuId(null);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setFiltersOpen(false);
-        setCaptureMenuOpen(false);
         setOpenMenuId(null);
         setDialog(null);
       }
@@ -559,93 +553,6 @@ export function MeetingsView({
                 </div>
               </div>
             )}
-          </div>
-
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: wsConnected ? "var(--tw-mint)" : "var(--tw-text-4)" }}>
-              {wsConnected ? "Live sync" : "Reconnecting…"}
-            </span>
-            <button type="button" className="tina-web-btn-ghost" onClick={() => refreshMeetings()} title="Refresh meetings">
-              <WebIcon name="refresh" size={14} />
-            </button>
-
-            <div className="tina-web-capture-split" ref={captureSplitRef}>
-              <button
-                type="button"
-                className="tina-web-capture-main"
-                onClick={() => {
-                  setCaptureMenuOpen(false);
-                  onOpenCapture("live");
-                }}
-              >
-                <WebIcon name="plus" size={14} />
-                <span>Capture</span>
-              </button>
-              <button
-                type="button"
-                className="tina-web-capture-caret"
-                aria-label="Capture menu"
-                aria-haspopup="menu"
-                aria-expanded={captureMenuOpen}
-                onClick={() => setCaptureMenuOpen((v) => !v)}
-              >
-                <WebIcon name="chevronDown" size={13} />
-              </button>
-              {captureMenuOpen && (
-                <div className="tina-web-dropdown" role="menu" aria-label="Meetings capture options">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="tina-web-dropdown-item"
-                    onClick={() => {
-                      setCaptureMenuOpen(false);
-                      onOpenCapture("live");
-                    }}
-                  >
-                    <WebIcon name="broadcast" size={14} />
-                    <span>
-                      <strong>Join live meeting</strong>
-                      <small>Paste a meeting link to send bot now</small>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="tina-web-dropdown-item"
-                    onClick={() => {
-                      setCaptureMenuOpen(false);
-                      onOpenCapture("schedule");
-                    }}
-                  >
-                    <WebIcon name="calendarCheck" size={14} />
-                    <span>
-                      <strong>Plan / Schedule</strong>
-                      <small>Create an upcoming auto-join meeting</small>
-                    </span>
-                  </button>
-                  {onOpenCalendarSettings && (
-                    <>
-                      <div className="tina-web-dropdown-divider" />
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className="tina-web-dropdown-item"
-                        onClick={() => {
-                          setCaptureMenuOpen(false);
-                          onOpenCalendarSettings();
-                        }}
-                      >
-                        <WebIcon name="calendar" size={14} />
-                        <span>
-                          <strong>Connect Calendar</strong>
-                          <small>Manage Google &amp; ICS calendar auto-join</small>
-                        </span>
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
         </div>
 

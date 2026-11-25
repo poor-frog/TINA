@@ -497,6 +497,8 @@ describe("WebShell production UI (Option A & Option B)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
     expect((await screen.findAllByText("Live now")).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Yesterday")).toBeTruthy();
+    expect(screen.queryByText("Live sync")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Capture menu" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /Filters/i }));
     fireEvent.click(screen.getByRole("tab", { name: "Platform" }));

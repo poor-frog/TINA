@@ -1409,6 +1409,11 @@
   font-size: 13.5px;
 }
 
+.tina-web .tina-web-composer input:focus,
+.tina-web .tina-web-composer input:focus-visible {
+  outline: none;
+}
+
 .tina-web-composer input::placeholder {
   color: var(--tw-text-4);
 }

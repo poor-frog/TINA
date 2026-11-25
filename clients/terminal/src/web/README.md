@@ -22,8 +22,8 @@ TINA Terminal workbench at `/terminal`.
 - **Meetings Notebook (`MeetingsView.tsx` + `meetingsFilter.ts`)**: Date-grouped list (Live Now,
   Upcoming by day, Recorded by day), multi-dimensional Filter popover (date range, platform,
   participants, duration, recording), row `•••` action menu (Rename via `POST /api/meetings/{id}/annotate`,
-  Share session, Copy link, Ask TINA, Delete, bot actions), and Split-Button `Capture ▾` in both
-  `TopBar.tsx` and `MeetingsView.tsx`.
+  Share session, Copy link, Ask TINA, Delete, bot actions); global Split-Button `Capture ▾` lives in
+  `TopBar.tsx`.
 - **Meeting Workspace (`MeetingDetailView.tsx` + `MeetingSmartSearch.tsx` + `MeetingSidePanel.tsx` + `MeetingBottomPlayer.tsx` + `meetingDetail.module.css`)**:
   3-column + bottom-player detail workspace: dedicated breadcrumb top bar (`#My Meetings / <code> •••`,
   inline Rename, Share session, BotControls, Enable live assist), left **Smart Search** rail (real AI
