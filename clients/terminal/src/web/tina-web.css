@@ -1787,26 +1787,89 @@
 
 /* ---------- Ask Tina View ---------- */
 
+@keyframes tinaAskDotPulse {
+  0%, 80%, 100% {
+    opacity: 0.28;
+    transform: scale(0.82);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .tina-web-ask {
   flex: 1;
   min-height: 0;
   display: flex;
   overflow: hidden;
   background:
-    radial-gradient(ellipse 64% 40% at 32% 0%, rgba(23, 107, 91, 0.24), transparent 72%),
+    radial-gradient(ellipse 68% 36% at 52% 0%, rgba(23, 107, 91, 0.16), transparent 72%),
     var(--tw-bg);
 }
 
 .tina-web-ask-sessions {
-  flex: 0 0 256px;
-  width: 256px;
+  flex: 0 0 264px;
+  width: 264px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 14px 10px;
+  gap: 8px;
+  padding: 14px 12px;
   border-right: 1px solid var(--tw-line-soft);
-  background: rgba(255, 255, 255, 0.015);
-  overflow-y: auto;
+  background: var(--tw-chrome);
+  overflow: hidden;
+}
+
+.tina-web-ask-new-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 9px;
+  background: var(--tw-teal);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 2px 10px rgba(23, 107, 91, 0.28);
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.tina-web-ask-new-btn:hover {
+  background: var(--tw-teal-hover);
+  transform: translateY(-0.5px);
+}
+
+.tina-web-ask-search {
+  flex: none;
+}
+
+.tina-web .tina-web-ask-search input:focus,
+.tina-web .tina-web-ask-search input:focus-visible {
+  outline: none;
+}
+
+.tina-web-ask-clear-btn {
+  color: var(--tw-text-3);
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+}
+
+.tina-web-ask-clear-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--tw-text);
+}
+
+.tina-web-ask-sessions-empty {
+  padding: 12px 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--tw-text-4);
 }
 
 .tina-web-ask-main {
@@ -1821,94 +1884,437 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 28px 28px 20px;
+  padding: 32px 32px 24px;
 }
 
 .tina-web-ask-thread {
-  max-width: 760px;
+  max-width: 780px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 24px;
 }
 
+.tina-web-ask-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 56px 0;
+  color: var(--tw-text-3);
+  font-size: 13.5px;
+}
+
+/* Ask Tina Empty Hero & Starter Cards */
+.tina-web-ask-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 44px 0 20px;
+}
+
+.tina-web-ask-hero-badge {
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  background:
+    radial-gradient(circle at 28% 24%, rgba(181, 232, 209, 0.28), transparent 62%),
+    linear-gradient(145deg, rgba(23, 107, 91, 0.54), rgba(23, 59, 54, 0.74));
+  border: 1px solid rgba(145, 215, 190, 0.34);
+  color: var(--tw-mint-bright);
+  box-shadow: 0 12px 32px rgba(23, 107, 91, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.tina-web-ask-hero-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(23, 107, 91, 0.2);
+  border: 1px solid rgba(145, 215, 190, 0.24);
+  color: var(--tw-mint);
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 14px;
+}
+
+.tina-web-ask-hero-title {
+  margin: 0 0 8px;
+  font-family: var(--tw-font-display);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--tw-text);
+}
+
+.tina-web-ask-hero-sub {
+  margin: 0 0 28px;
+  max-width: 520px;
+  color: var(--tw-text-3);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.tina-web-ask-hero-sub code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--tw-card);
+  border: 1px solid var(--tw-line-soft);
+  color: var(--tw-mint);
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.tina-web-ask-starter-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tina-web-ask-starter-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 15px 16px;
+  border-radius: 13px;
+  border: 1px solid var(--tw-line-soft);
+  background: var(--tw-card);
+  text-align: left;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.tina-web-ask-starter-card:hover:not(:disabled) {
+  border-color: rgba(145, 215, 190, 0.38);
+  background: var(--tw-raised);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+}
+
+.tina-web-ask-starter-top {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.tina-web-ask-starter-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--tw-surface-teal);
+  border: 1px solid rgba(145, 215, 190, 0.22);
+  color: var(--tw-mint-bright);
+}
+
+.tina-web-ask-starter-tag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(145, 215, 190, 0.12);
+  border: 1px solid rgba(145, 215, 190, 0.22);
+  color: var(--tw-mint);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.tina-web-ask-starter-arrow {
+  margin-left: auto;
+  color: var(--tw-text-4);
+  display: inline-flex;
+  transition: transform 140ms ease, color 140ms ease;
+}
+
+.tina-web-ask-starter-card:hover:not(:disabled) .tina-web-ask-starter-arrow {
+  transform: translateX(2px);
+  color: var(--tw-mint);
+}
+
+.tina-web-ask-starter-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.tina-web-ask-starter-prompt {
+  font-size: 12.5px;
+  line-height: 1.48;
+  color: var(--tw-text-3);
+}
+
+/* Conversation Turns & Editorial Agent Replies */
 .tina-web-msg {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 
 .tina-web-msg.user {
   align-items: flex-end;
 }
 
+.tina-web-msg-context-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.tina-web-msg-context-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--tw-card);
+  border: 1px solid var(--tw-line-soft);
+  color: var(--tw-text-3);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
 .tina-web-msg-bubble {
-  max-width: 88%;
-  padding: 12px 15px;
-  border-radius: 12px;
+  max-width: 82%;
+  padding: 12px 16px;
+  border-radius: 16px;
   font-size: 14px;
-  line-height: 1.58;
+  line-height: 1.6;
 }
 
 .tina-web-msg.user .tina-web-msg-bubble {
-  background: rgba(23, 107, 91, 0.34);
-  border: 1px solid rgba(145, 215, 190, 0.25);
+  border-radius: 18px 18px 4px 18px;
+  background: linear-gradient(145deg, rgba(23, 107, 91, 0.44), rgba(23, 107, 91, 0.24));
+  border: 1px solid rgba(145, 215, 190, 0.26);
   color: var(--tw-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+}
+
+.tina-web-agent-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.tina-web-agent-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, rgba(23, 107, 91, 0.56), rgba(23, 107, 91, 0.22));
+  border: 1px solid rgba(145, 215, 190, 0.28);
+  color: var(--tw-mint-bright);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.tina-web-agent-name {
+  font-family: var(--tw-font-display);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.tina-web-agent-phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(23, 107, 91, 0.24);
+  border: 1px solid rgba(145, 215, 190, 0.24);
+  color: var(--tw-mint-bright);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.tina-web-agent-phase-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--tw-mint);
+  animation: tinaAskDotPulse 1.3s ease-in-out infinite;
+}
+
+.tina-web-agent-content {
+  padding-left: 37px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .tina-web-msg.agent .tina-web-msg-bubble {
   max-width: 100%;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 15px 18px;
+  border-radius: 4px 16px 16px 16px;
+  background: var(--tw-card);
+  border: 1px solid var(--tw-line-soft);
   color: var(--tw-text-2);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.16);
+}
+
+.tina-web-agent-prose {
+  font-size: 14px;
+  line-height: 1.68;
+  overflow-wrap: anywhere;
+  /* Bridge Markdown component CSS tokens to .tina-web dark/light theme */
+  --bg: var(--tw-bg);
+  --panel: var(--tw-chrome);
+  --panel2: var(--tw-raised);
+  --line: var(--tw-line);
+  --line2: var(--tw-line-strong);
+  --t1: var(--tw-text);
+  --t2: var(--tw-text-2);
+  --t3: var(--tw-text-3);
+  --accent: var(--tw-mint);
+  --blue: #7ab8f5;
+  --green: var(--tw-mint);
+  --danger: var(--tw-danger);
+}
+
+.tina-web-agent-prose > div > *:last-child {
+  margin-bottom: 0 !important;
+}
+
+.tina-web-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--tw-text-3);
+  font-size: 13.5px;
+  padding: 2px 0;
+}
+
+.tina-web-typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tina-web-typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tw-mint);
+  animation: tinaAskDotPulse 1.2s ease-in-out infinite;
+}
+
+.tina-web-typing-dots span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.tina-web-typing-dots span:nth-child(3) {
+  animation-delay: 0.36s;
 }
 
 .tina-web-ops-list {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .tina-web-op-chip {
-  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
   border-radius: 999px;
-  background: rgba(145, 215, 190, 0.1);
+  background: rgba(23, 107, 91, 0.2);
+  border: 1px solid rgba(145, 215, 190, 0.22);
   color: var(--tw-mint);
-  font-size: 11.5px;
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
+.tina-web-commit-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(23, 107, 91, 0.22);
+  border: 1px solid rgba(145, 215, 190, 0.26);
+  color: var(--tw-mint-bright);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.tina-web-msg-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: var(--tw-danger-bg);
+  border: 1px solid rgba(240, 141, 144, 0.3);
+  color: var(--tw-danger);
+  font-size: 12.5px;
+  line-height: 1.48;
+}
+
+/* Floating Unified Composer */
 .tina-web-ask-footer {
   flex: none;
-  padding: 14px 28px 24px;
-  border-top: 1px solid var(--tw-line-soft);
-  background: rgba(10, 11, 13, 0.85);
+  padding: 12px 32px 22px;
+  background: linear-gradient(180deg, transparent 0%, var(--tw-bg) 28%);
 }
 
 .tina-web-ask-form {
-  max-width: 760px;
+  max-width: 780px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.11);
+  gap: 8px;
+  padding: 12px 14px 10px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--tw-line);
   background: var(--tw-card);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.tina-web-ask-form:focus-within {
+  border-color: var(--tw-line-strong);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34);
 }
 
 .tina-web-ask-form textarea {
   width: 100%;
   min-height: 44px;
-  max-height: 160px;
-  resize: vertical;
+  max-height: 180px;
+  resize: none;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--tw-text);
   font-family: inherit;
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
+}
+
+.tina-web-ask-form textarea::placeholder {
+  color: var(--tw-text-4);
+}
+
+.tina-web .tina-web-ask-form textarea:focus,
+.tina-web .tina-web-ask-form textarea:focus-visible {
+  outline: none;
 }
 
 .tina-web-ask-bar {
@@ -1916,17 +2322,101 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--tw-line-soft);
+}
+
+.tina-web-ask-scope-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 290px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 8px;
+  border: 1px solid var(--tw-line-soft);
+  background: var(--tw-bg);
+  color: var(--tw-text-3);
 }
 
 .tina-web-ask-select {
-  height: 30px;
-  max-width: 260px;
-  padding: 0 8px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
+  min-width: 0;
+  max-width: 245px;
+  height: 100%;
+  border: 0;
+  background: transparent;
   color: var(--tw-text-2);
   font-size: 12.5px;
+  outline: none;
+  cursor: pointer;
+}
+
+.tina-web .tina-web-ask-select:focus-visible {
+  outline: none;
+}
+
+.tina-web-ask-bar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.tina-web-ask-live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(23, 107, 91, 0.2);
+  color: var(--tw-mint);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.tina-web-ask-send-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 9px;
+  background: var(--tw-teal);
+  color: #ffffff;
+  font-size: 12.5px;
+  font-weight: 600;
+  box-shadow: 0 2px 10px rgba(23, 107, 91, 0.34);
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.tina-web-ask-send-btn:hover:not(:disabled) {
+  background: var(--tw-teal-hover);
+  transform: translateY(-0.5px);
+}
+
+.tina-web-ask-send-btn:disabled {
+  background: var(--tw-raised);
+  color: var(--tw-text-4);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.tina-web-ask-stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 9px;
+  background: var(--tw-danger-bg);
+  border: 1px solid rgba(240, 141, 144, 0.34);
+  color: var(--tw-danger);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.tina-web-ask-stop-btn:hover {
+  background: rgba(240, 141, 144, 0.22);
 }
 
 /* ---------- Modal & Command Palette ---------- */
@@ -3449,30 +3939,40 @@ html[data-theme="light"] .tina-web-row-menu-item:hover:not(:disabled) {
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 7px 10px;
-  border-radius: 7px;
+  padding: 8px 9px;
+  border-radius: 9px;
+  border: 1px solid transparent;
   color: var(--tw-text-2);
   text-align: left;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
-.tina-web-session-row svg {
+.tina-web-session-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.04);
   color: var(--tw-text-3);
 }
 
 .tina-web-session-row:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.05);
   color: var(--tw-text);
 }
 
 .tina-web-session-row.active {
-  background: rgba(23, 107, 91, 0.24);
-  color: var(--tw-mint);
+  background: rgba(23, 107, 91, 0.22);
+  border-color: rgba(145, 215, 190, 0.24);
+  color: var(--tw-mint-bright);
 }
 
-.tina-web-session-row.active svg {
-  color: var(--tw-mint);
+.tina-web-session-row.active .tina-web-session-icon {
+  background: rgba(23, 107, 91, 0.42);
+  color: var(--tw-mint-bright);
 }
 
 .tina-web-session-copy {
@@ -3500,9 +4000,7 @@ html[data-theme="light"] .tina-web-row-menu-item:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--tw-line-soft);
+  padding-left: 2px;
 }
 
 .tina-web-msg-action-btn {
@@ -3511,24 +4009,91 @@ html[data-theme="light"] .tina-web-row-menu-item:hover:not(:disabled) {
   gap: 5px;
   height: 26px;
   padding: 0 9px;
-  border-radius: 6px;
-  border: 1px solid var(--tw-line);
+  border-radius: 7px;
+  border: 1px solid transparent;
   background: transparent;
-  color: var(--tw-text-3);
+  color: var(--tw-text-4);
   font-size: 12px;
+  font-weight: 500;
   transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
 }
 
 .tina-web-msg-action-btn:hover {
-  border-color: rgba(145, 215, 190, 0.34);
-  background: rgba(23, 107, 91, 0.16);
-  color: var(--tw-mint);
+  border-color: var(--tw-line-soft);
+  background: var(--tw-card);
+  color: var(--tw-text);
 }
 
 .tina-web-msg-feedback {
   margin-left: 4px;
   font-size: 11.5px;
   color: var(--tw-mint);
+}
+
+/* Light theme polish for Ask Tina */
+html[data-theme="light"] .tina-web .tina-web-ask {
+  background:
+    radial-gradient(ellipse 68% 36% at 52% 0%, rgba(23, 107, 91, 0.08), transparent 72%),
+    var(--tw-bg);
+}
+
+html[data-theme="light"] .tina-web .tina-web-ask-hero-badge,
+html[data-theme="light"] .tina-web .tina-web-agent-avatar {
+  background: linear-gradient(145deg, rgba(23, 107, 91, 0.16), rgba(23, 107, 91, 0.08));
+  border-color: rgba(23, 107, 91, 0.24);
+  color: #0f4c41;
+  box-shadow: 0 6px 18px rgba(23, 107, 91, 0.1);
+}
+
+html[data-theme="light"] .tina-web .tina-web-ask-hero-pill,
+html[data-theme="light"] .tina-web .tina-web-agent-phase,
+html[data-theme="light"] .tina-web .tina-web-commit-pill,
+html[data-theme="light"] .tina-web .tina-web-op-chip,
+html[data-theme="light"] .tina-web .tina-web-ask-starter-icon,
+html[data-theme="light"] .tina-web .tina-web-ask-starter-tag,
+html[data-theme="light"] .tina-web .tina-web-ask-live-pill {
+  background: rgba(23, 107, 91, 0.1);
+  border-color: rgba(23, 107, 91, 0.22);
+  color: #0f4c41;
+}
+
+html[data-theme="light"] .tina-web .tina-web-msg.user .tina-web-msg-bubble {
+  background: rgba(23, 107, 91, 0.12);
+  border-color: rgba(23, 107, 91, 0.24);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+}
+
+html[data-theme="light"] .tina-web .tina-web-msg.agent .tina-web-msg-bubble {
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+}
+
+html[data-theme="light"] .tina-web .tina-web-agent-prose {
+  --blue: #1d4ed8;
+  --accent: var(--tw-teal);
+  --green: var(--tw-teal);
+}
+
+html[data-theme="light"] .tina-web .tina-web-ask-form {
+  box-shadow: 0 8px 26px rgba(15, 23, 42, 0.09);
+}
+
+html[data-theme="light"] .tina-web .tina-web-session-icon {
+  background: rgba(15, 23, 42, 0.05);
+}
+
+html[data-theme="light"] .tina-web .tina-web-session-row:hover {
+  background: rgba(15, 23, 42, 0.05);
+}
+
+html[data-theme="light"] .tina-web .tina-web-session-row.active {
+  background: rgba(23, 107, 91, 0.12);
+  border-color: rgba(23, 107, 91, 0.24);
+  color: #0f4c41;
+}
+
+html[data-theme="light"] .tina-web .tina-web-session-row.active .tina-web-session-icon {
+  background: rgba(23, 107, 91, 0.18);
+  color: #0f4c41;
 }
 
 .tina-web-approval-stack {
@@ -3698,8 +4263,14 @@ html[data-theme="light"] .tina-web-row-menu-item:hover:not(:disabled) {
   .tina-web-home-inner { padding: 24px 16px 124px; }
   .tina-web-pa-grid { grid-template-columns: 1fr; }
   .tina-web-page-wrap { padding: 18px 16px 48px; }
+  .tina-web-ask-scroll { padding: 20px 16px 16px; }
+  .tina-web-ask-footer { padding: 10px 16px 16px; }
+  .tina-web-ask-starter-grid { grid-template-columns: 1fr; }
+  .tina-web-agent-content { padding-left: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tina-web-home::before { animation: none; }
+  .tina-web-home::before,
+  .tina-web-agent-phase-dot,
+  .tina-web-typing-dots span { animation: none; }
 }

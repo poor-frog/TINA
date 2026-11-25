@@ -554,11 +554,16 @@ describe("WebShell production UI (Option A & Option B)", () => {
     expect(screen.getByText("Pricing Review")).toBeTruthy();
     expect(screen.queryByText("Q4 Rollout Checklist")).toBeNull();
 
-    // Send a prompt -> renders Tool Approval card + Copy/Share buttons
+    // Send a prompt with leading [Context: ...] -> renders clean context pill + Tool Approval card + Copy/Share buttons
     const composer = screen.getByLabelText("Message Ask Tina");
-    fireEvent.change(composer, { target: { value: "Schedule follow-up review" } });
+    fireEvent.change(composer, {
+      target: { value: '[Context: Space "My Space"]\n\nSchedule follow-up review' },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
+    expect(await screen.findByText("Space · My Space")).toBeTruthy();
+    expect(screen.getByText("Schedule follow-up review")).toBeTruthy();
+    expect(screen.queryByText(/\[Context:/)).toBeNull();
     expect(await screen.findByText("Create follow-up calendar invite")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Approve once/i }));
 

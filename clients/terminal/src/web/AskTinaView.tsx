@@ -1,9 +1,9 @@
 "use client";
 /** AskTinaView — Full-page Production AI Assistant backed by TINA's resumable SSE `/api/chat`,
  *  MCP Tool Approval cards (`/api/chat/approval`), real `/routine` prompt compilation, Copy/Share
- *  message actions, and searchable `/api/sessions` history. */
+ *  message actions, parsed context pills, and searchable `/api/sessions` history. */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { WebIcon } from "./Icons";
+import { WebIcon, type WebIconName } from "./Icons";
 import { Markdown } from "../ui-kit/Markdown";
 import { startStreamingDictation, type StreamingDictation } from "../ui-kit/micDictation";
 import { listSessions, sessionHistory, type SessionSummary } from "../surfaces/sessionsApi";
@@ -25,10 +25,34 @@ interface ChatMessage {
 
 export type AskTinaPrompt = { text: string; mode: "send" | "draft"; meetingId?: string };
 
-const STARTERS = [
-  "Summarize key decisions and action items from my latest meeting.",
-  "What tasks are still open across my meetings?",
-  "/routine Every weekday at 9:00 AM, prepare a short daily meeting brief.",
+interface StarterCard {
+  id: string;
+  icon: WebIconName;
+  title: string;
+  prompt: string;
+  badge?: string;
+}
+
+const STARTERS: StarterCard[] = [
+  {
+    id: "brief",
+    icon: "fileText",
+    title: "Latest meeting brief",
+    prompt: "Summarize key decisions and action items from my latest meeting.",
+  },
+  {
+    id: "tasks",
+    icon: "listChecks",
+    title: "Open follow-ups",
+    prompt: "What tasks are still open across my meetings?",
+  },
+  {
+    id: "routine",
+    icon: "skills",
+    title: "Schedule a routine",
+    badge: "/routine",
+    prompt: "/routine Every weekday at 9:00 AM, prepare a short daily meeting brief.",
+  },
 ];
 
 function newSessionId(): string {
@@ -45,6 +69,38 @@ function formatSessionStamp(iso?: string | null): string {
   const diffHrs = Math.floor(diffMin / 60);
   if (diffHrs < 24) return `${diffHrs}h ago`;
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** Extract leading `[Context: ...]` metadata prepended by Knowledge/Meeting deep-links
+ *  into human-friendly chips so raw bracket headers never clutter user chat bubbles. */
+function parseUserContext(raw: string): { badges: string[]; body: string } {
+  const match = raw.match(/^\s*\[Context:\s*([^\]]+)\]\s*(?:\r?\n)+([\s\S]*)$/);
+  if (!match) return { badges: [], body: raw };
+  const meta = match[1].trim();
+  const body = match[2].trim();
+  if (!body) return { badges: [], body: raw };
+
+  const badges: string[] = [];
+  const spaceMatch = meta.match(/Space\s+"([^"]+)"/i);
+  if (spaceMatch) badges.push(`Space · ${spaceMatch[1]}`);
+  const pageMatch = meta.match(/open page\s+"([^"]+)"/i);
+  if (pageMatch) {
+    const file = pageMatch[1].split("/").pop() || pageMatch[1];
+    badges.push(file);
+  }
+  if (badges.length === 0) {
+    badges.push(meta.replace(/\s*\(slug:[^)]*\)/gi, "").trim());
+  }
+  return { badges, body };
+}
+
+function agentPhaseLabel(phase: ChatPhase | null, hasText: boolean): string {
+  if (hasText) return "Writing…";
+  if (phase === "connecting") return "Starting agent…";
+  if (phase === "reconnecting") return "Reconnecting…";
+  if (phase === "working") return "Working…";
+  if (phase === "stalled") return "Still working…";
+  return "Thinking…";
 }
 
 export function AskTinaView({
@@ -73,6 +129,7 @@ export function AskTinaView({
   const historyRef = useRef<AbortController | null>(null);
   const dictRef = useRef<StreamingDictation | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<ChatMessage[]>(messages);
   messagesRef.current = messages;
 
@@ -99,6 +156,14 @@ export function AskTinaView({
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
   }, [messages, phase]);
+
+  // Smooth auto-growing composer textarea up to 180px
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+  }, [draft]);
 
   const filteredSessions = useMemo(() => {
     const q = sessionQuery.trim().toLowerCase();
@@ -434,20 +499,21 @@ export function AskTinaView({
     void sendMessage(text);
   };
 
+  const lastMessageId = messages[messages.length - 1]?.id;
+
   return (
     <div className="tina-web-ask">
       <aside className="tina-web-ask-sessions" aria-label="Chat sessions">
         <button
           type="button"
-          className="tina-web-btn-primary"
-          style={{ width: "100%", justifyContent: "center", marginBottom: 8 }}
+          className="tina-web-ask-new-btn"
           onClick={() => switchSession(newSessionId())}
         >
-          <WebIcon name="plus" size={14} />
+          <WebIcon name="plus" size={15} />
           <span>New conversation</span>
         </button>
 
-        <label className="tina-web-settings-search" style={{ marginBottom: 8 }}>
+        <label className="tina-web-settings-search tina-web-ask-search">
           <WebIcon name="search" size={14} />
           <input
             type="search"
@@ -460,8 +526,8 @@ export function AskTinaView({
             <button
               type="button"
               aria-label="Clear chat search"
+              className="tina-web-ask-clear-btn"
               onClick={() => setSessionQuery("")}
-              style={{ color: "var(--tw-text-3)", display: "grid", placeItems: "center" }}
             >
               <WebIcon name="close" size={12} />
             </button>
@@ -484,7 +550,9 @@ export function AskTinaView({
                 className={`tina-web-session-row ${activeSession === s.session ? "active" : ""}`}
                 onClick={() => void openSession(s.session)}
               >
-                <WebIcon name="tinaAsk" size={14} />
+                <span className="tina-web-session-icon" aria-hidden="true">
+                  <WebIcon name="tinaAsk" size={13} />
+                </span>
                 <span className="tina-web-session-copy">
                   <strong>{s.title || s.session}</strong>
                   {stamp && <small>{stamp}</small>}
@@ -494,7 +562,7 @@ export function AskTinaView({
           })}
 
           {filteredSessions.length === 0 && (
-            <div style={{ padding: "8px 10px", fontSize: 12.5, color: "var(--tw-text-4)" }}>
+            <div className="tina-web-ask-sessions-empty">
               {sessions.length === 0
                 ? "Conversations appear here after your first question."
                 : "No conversations match that search."}
@@ -507,140 +575,192 @@ export function AskTinaView({
         <div className="tina-web-ask-scroll">
           <div className="tina-web-ask-thread">
             {sessionError && (
-              <div
-                role="alert"
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 8,
-                  background: "var(--tw-danger-bg)",
-                  color: "var(--tw-danger)",
-                  fontSize: 13,
-                }}
-              >
-                {sessionError}
+              <div role="alert" className="tina-web-msg-error">
+                <WebIcon name="alertTriangle" size={15} />
+                <span>{sessionError}</span>
               </div>
             )}
 
-            {messages.length === 0 ? (
-              <div style={{ padding: "48px 0 16px" }}>
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                    color: "var(--tw-mint)",
-                    fontSize: 12.5,
-                    marginBottom: 10,
-                  }}
-                >
-                  <WebIcon name="tinaAsk" size={16} />
-                  <span>Ask Tina · Grounded in your meetings &amp; workspace</span>
+            {historyLoading ? (
+              <div className="tina-web-ask-loading" role="status">
+                <span className="tina-web-typing-dots" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <span>Loading conversation…</span>
+              </div>
+            ) : messages.length === 0 ? (
+              <div className="tina-web-ask-hero">
+                <div className="tina-web-ask-hero-badge" aria-hidden="true">
+                  <WebIcon name="tinaAsk" size={24} />
                 </div>
-                <h1 style={{ margin: "0 0 8px", fontFamily: "var(--tw-font-display)", fontSize: 26, fontWeight: 500 }}>
-                  What would you like to know?
-                </h1>
-                <p style={{ margin: "0 0 24px", color: "var(--tw-text-3)", fontSize: 14 }}>
-                  Ask across past meetings, draft follow-ups, create tasks, or schedule a recurring <code>/routine</code>.
+                <div className="tina-web-ask-hero-pill">
+                  <WebIcon name="sparkleSmall" size={13} />
+                  <span>Grounded in your meetings &amp; workspace</span>
+                </div>
+                <h1 className="tina-web-ask-hero-title">What would you like to know?</h1>
+                <p className="tina-web-ask-hero-sub">
+                  Ask across past meetings, draft follow-ups, create tasks, or schedule a recurring{" "}
+                  <code>/routine</code>.
                 </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+
+                <div className="tina-web-ask-starter-grid">
                   {STARTERS.map((s) => (
                     <button
-                      key={s}
+                      key={s.id}
                       type="button"
-                      className="tina-web-btn-ghost"
-                      style={{
-                        justifyContent: "flex-start",
-                        height: "auto",
-                        padding: "10px 14px",
-                        textAlign: "left",
-                        whiteSpace: "normal",
-                      }}
+                      className="tina-web-ask-starter-card"
                       disabled={historyLoading}
-                      onClick={() => (s.startsWith("/routine") ? setDraft(s) : void sendMessage(s))}
+                      onClick={() => (s.prompt.startsWith("/routine") ? setDraft(s.prompt) : void sendMessage(s.prompt))}
                     >
-                      {s}
+                      <span className="tina-web-ask-starter-top">
+                        <span className="tina-web-ask-starter-icon" aria-hidden="true">
+                          <WebIcon name={s.icon} size={16} />
+                        </span>
+                        {s.badge && <code className="tina-web-ask-starter-tag">{s.badge}</code>}
+                        <span className="tina-web-ask-starter-arrow" aria-hidden="true">
+                          <WebIcon name="chevronRight" size={14} />
+                        </span>
+                      </span>
+                      <span className="tina-web-ask-starter-title">{s.title}</span>
+                      <span className="tina-web-ask-starter-prompt">{s.prompt}</span>
                     </button>
                   ))}
                 </div>
               </div>
             ) : (
-              messages.map((msg) => (
-                <div key={msg.id} className={`tina-web-msg ${msg.role}`}>
-                  <div className="tina-web-msg-bubble">
-                    {msg.ops && msg.ops.length > 0 && (
-                      <div className="tina-web-ops-list">
-                        {msg.ops.map((op, i) => (
-                          <span key={`${op}-${i}`} className="tina-web-op-chip">
-                            {op}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+              messages.map((msg) => {
+                if (msg.role === "user") {
+                  const parsed = parseUserContext(msg.text);
+                  return (
+                    <div key={msg.id} className="tina-web-msg user">
+                      {parsed.badges.length > 0 && (
+                        <div className="tina-web-msg-context-row" aria-label="Message context">
+                          {parsed.badges.map((badge, idx) => (
+                            <span key={`${badge}-${idx}`} className="tina-web-msg-context-pill">
+                              <WebIcon name={badge.startsWith("Space") ? "layers" : "fileText"} size={11} />
+                              <span>{badge}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <div className="tina-web-msg-bubble">{parsed.body}</div>
+                    </div>
+                  );
+                }
 
-                    {msg.text ? (
-                      msg.role === "agent" ? <Markdown>{msg.text}</Markdown> : msg.text
-                    ) : !msg.approvals?.length ? (
-                      <span style={{ color: "var(--tw-text-4)" }}>
-                        {phase === "reconnecting" ? "Reconnecting to agent…" : "Thinking…"}
+                const isStreamingThis = busy && msg.id === lastMessageId;
+
+                return (
+                  <div key={msg.id} className="tina-web-msg agent">
+                    <div className="tina-web-agent-head">
+                      <span className="tina-web-agent-avatar" aria-hidden="true">
+                        <WebIcon name="tinaAsk" size={14} />
                       </span>
-                    ) : null}
+                      <span className="tina-web-agent-name">Tina</span>
+                      {isStreamingThis && (
+                        <span className="tina-web-agent-phase">
+                          <span className="tina-web-agent-phase-dot" aria-hidden="true" />
+                          <span>{agentPhaseLabel(phase, Boolean(msg.text))}</span>
+                        </span>
+                      )}
+                    </div>
 
-                    {msg.approvals && msg.approvals.length > 0 && (
-                      <div className="tina-web-approval-stack">
-                        {msg.approvals.map((approval) => (
-                          <WebToolApprovalCard
-                            key={approval.approval_id}
-                            approval={approval}
-                            onDecision={(id, decision) => void respondToApproval(id, decision)}
-                          />
-                        ))}
-                      </div>
-                    )}
+                    <div className="tina-web-agent-content">
+                      <div className="tina-web-msg-bubble">
+                        {msg.ops && msg.ops.length > 0 && (
+                          <div className="tina-web-ops-list">
+                            {msg.ops.map((op, i) => (
+                              <span key={`${op}-${i}`} className="tina-web-op-chip">
+                                <WebIcon name="zap" size={11} />
+                                <span>{op}</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
 
-                    {msg.commit && (
-                      <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--tw-mint)" }}>
-                        ✓ Workspace updated ({msg.commit.slice(0, 7)})
-                      </div>
-                    )}
+                        {msg.text ? (
+                          <div className="tina-web-agent-prose">
+                            <Markdown>{msg.text}</Markdown>
+                          </div>
+                        ) : !msg.approvals?.length && !msg.error ? (
+                          <div className="tina-web-thinking" role="status">
+                            <span className="tina-web-typing-dots" aria-hidden="true">
+                              <span />
+                              <span />
+                              <span />
+                            </span>
+                            <span>
+                              {phase === "reconnecting"
+                                ? "Reconnecting to agent…"
+                                : phase === "working"
+                                  ? "Reading your workspace…"
+                                  : "Thinking…"}
+                            </span>
+                          </div>
+                        ) : null}
 
-                    {msg.error && (
-                      <div role="alert" style={{ marginTop: 8, fontSize: 12.5, color: "var(--tw-danger)" }}>
-                        {msg.error}
-                      </div>
-                    )}
+                        {msg.approvals && msg.approvals.length > 0 && (
+                          <div className="tina-web-approval-stack">
+                            {msg.approvals.map((approval) => (
+                              <WebToolApprovalCard
+                                key={approval.approval_id}
+                                approval={approval}
+                                onDecision={(id, decision) => void respondToApproval(id, decision)}
+                              />
+                            ))}
+                          </div>
+                        )}
 
-                    {msg.role === "agent" && msg.text && (
-                      <div className="tina-web-msg-actions" role="group" aria-label="Response actions">
-                        <button
-                          type="button"
-                          className="tina-web-msg-action-btn"
-                          aria-label={actionFeedback[msg.id] === "Copied" ? "Copied" : "Copy response"}
-                          title="Copy response"
-                          onClick={() => void copyMessage(msg.id, msg.text)}
-                        >
-                          <WebIcon name={actionFeedback[msg.id] === "Copied" ? "check" : "copy"} size={13} />
-                          <span>Copy</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="tina-web-msg-action-btn"
-                          aria-label="Share response"
-                          title="Share response"
-                          onClick={() => void shareMessage(msg.id, msg.text)}
-                        >
-                          <WebIcon name="share" size={13} />
-                          <span>Share</span>
-                        </button>
-                        {actionFeedback[msg.id] && (
-                          <span role="status" className="tina-web-msg-feedback">
-                            {actionFeedback[msg.id]}
-                          </span>
+                        {msg.commit && (
+                          <div className="tina-web-commit-pill">
+                            <WebIcon name="check" size={12} />
+                            <span>Workspace updated ({msg.commit.slice(0, 7)})</span>
+                          </div>
+                        )}
+
+                        {msg.error && (
+                          <div role="alert" className="tina-web-msg-error">
+                            <WebIcon name="alertTriangle" size={14} />
+                            <span>{msg.error}</span>
+                          </div>
                         )}
                       </div>
-                    )}
+
+                      {msg.text && !isStreamingThis && (
+                        <div className="tina-web-msg-actions" role="group" aria-label="Response actions">
+                          <button
+                            type="button"
+                            className="tina-web-msg-action-btn"
+                            aria-label={actionFeedback[msg.id] === "Copied" ? "Copied" : "Copy response"}
+                            title="Copy response"
+                            onClick={() => void copyMessage(msg.id, msg.text)}
+                          >
+                            <WebIcon name={actionFeedback[msg.id] === "Copied" ? "check" : "copy"} size={13} />
+                            <span>{actionFeedback[msg.id] === "Copied" ? "Copied" : "Copy"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="tina-web-msg-action-btn"
+                            aria-label="Share response"
+                            title="Share response"
+                            onClick={() => void shareMessage(msg.id, msg.text)}
+                          >
+                            <WebIcon name="share" size={13} />
+                            <span>Share</span>
+                          </button>
+                          {actionFeedback[msg.id] && actionFeedback[msg.id] !== "Copied" && (
+                            <span role="status" className="tina-web-msg-feedback">
+                              {actionFeedback[msg.id]}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
             <div ref={endRef} />
           </div>
@@ -649,6 +769,8 @@ export function AskTinaView({
         <div className="tina-web-ask-footer">
           <form className="tina-web-ask-form" onSubmit={onSubmit}>
             <textarea
+              ref={composerRef}
+              rows={1}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -661,30 +783,41 @@ export function AskTinaView({
               aria-label="Message Ask Tina"
             />
             <div className="tina-web-ask-bar">
-              <select
-                className="tina-web-ask-select"
-                aria-label="Ground on meeting"
-                value={selectedMeetingId}
-                onChange={(e) => setSelectedMeetingId(e.target.value)}
-              >
-                <option value="">All workspace &amp; meetings</option>
-                {meetings.slice(0, 20).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    Meeting: {m.title_custom || m.title}
-                  </option>
-                ))}
-              </select>
+              <div className="tina-web-ask-scope-wrap">
+                <WebIcon name={selectedMeetingId ? "video" : "layers"} size={13} />
+                <select
+                  className="tina-web-ask-select"
+                  aria-label="Ground on meeting"
+                  value={selectedMeetingId}
+                  onChange={(e) => setSelectedMeetingId(e.target.value)}
+                >
+                  <option value="">All workspace &amp; meetings</option>
+                  {meetings.slice(0, 20).map((m) => (
+                    <option key={m.id} value={m.id}>
+                      Meeting: {m.title_custom || m.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div className="tina-web-ask-bar-right">
                 {phase && (
-                  <span style={{ fontSize: 12, color: "var(--tw-mint)" }}>
-                    {phase === "connecting" ? "Starting agent…" : phase === "reconnecting" ? "Reconnecting…" : "Working…"}
+                  <span className="tina-web-ask-live-pill">
+                    <span className="tina-web-agent-phase-dot" aria-hidden="true" />
+                    <span>
+                      {phase === "connecting"
+                        ? "Starting agent…"
+                        : phase === "reconnecting"
+                          ? "Reconnecting…"
+                          : "Working…"}
+                    </span>
                   </span>
                 )}
                 <button
                   type="button"
                   className={`tina-web-icon-btn ${dictating ? "recording" : ""}`}
                   aria-label={dictating ? "Stop dictation" : "Voice input"}
+                  title={dictating ? "Stop dictation" : "Dictate with microphone"}
                   onClick={() => void toggleMic()}
                 >
                   <WebIcon name="mic" size={16} />
@@ -692,15 +825,20 @@ export function AskTinaView({
                 {busy ? (
                   <button
                     type="button"
-                    className="tina-web-btn-ghost"
+                    className="tina-web-ask-stop-btn"
                     onClick={() => abortRef.current?.abort()}
                   >
                     <WebIcon name="stop" size={13} />
                     <span>Stop</span>
                   </button>
                 ) : (
-                  <button type="submit" className="tina-web-btn-primary" disabled={!draft.trim() || historyLoading}>
-                    <WebIcon name="sendUp" size={14} />
+                  <button
+                    type="submit"
+                    className="tina-web-ask-send-btn"
+                    aria-label="Send"
+                    disabled={!draft.trim() || historyLoading}
+                  >
+                    <WebIcon name="sendUp" size={14} strokeWidth={2.2} />
                     <span>Send</span>
                   </button>
                 )}
