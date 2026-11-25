@@ -190,6 +190,12 @@ def test_ecs_backend_filters_safe_agent_reach_tools():
     _validate_workspace_runner({"TINA_RUNNER": "claude-code", "CLAUDE_CODE_OAUTH_TOKEN": "tok"}, allow_multi_provider=True)
     _validate_workspace_runner({"TINA_RUNNER": "claude-code", "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic", "ANTHROPIC_AUTH_TOKEN": "sk-ds"}, allow_multi_provider=True)
     _validate_workspace_runner({"TINA_RUNNER": "claude-code", "ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1"}, allow_multi_provider=True)
+    import pytest
+    with pytest.raises(ValueError, match="HTTPS"):
+        _validate_workspace_runner(
+            {"TINA_RUNNER": "claude-code", "ANTHROPIC_BASE_URL": "http://insecure.local/v1", "ANTHROPIC_AUTH_TOKEN": "sk-key"},
+            allow_multi_provider=True,
+        )
     assert host_allowed("api.deepseek.com", DEFAULT_ALLOWLIST)
     assert host_allowed("openrouter.ai", DEFAULT_ALLOWLIST)
 

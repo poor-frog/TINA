@@ -14,6 +14,9 @@ from llm.errors import LLMError
 _MAX_BYTES = 16000
 _SESSION = re.compile(r"bedrock-[a-f0-9]{32}")
 _PATH = re.compile(r"kg/(?:[A-Za-z0-9_-]+/){0,8}[A-Za-z0-9_-][A-Za-z0-9._-]*\.md")
+_GLOBAL_PATH = re.compile(
+    r"(?:README\.md|CLAUDE\.md|(?:kg|docs|mail)/(?:[A-Za-z0-9_-]+/){0,8}[A-Za-z0-9_-][A-Za-z0-9._-]*\.md)"
+)
 
 
 @contextmanager
@@ -32,9 +35,10 @@ def _wiki_parent(root, relative):
 def _wiki_tool(mounts, name, args, user_input):
     mount = mounts.get(args["workspace"])
     relative = args["path"]
-    if mount is None or not isinstance(relative, str) or not _PATH.fullmatch(relative):
-        raise ValueError("Use a mounted wiki and a Markdown path under kg/.")
     writing = name == "create_wiki"
+    allowed_re = _GLOBAL_PATH if (mount and mount.get("role") == "global" and not writing) else _PATH
+    if mount is None or not isinstance(relative, str) or not allowed_re.fullmatch(relative):
+        raise ValueError("Use a mounted wiki and an allowed Markdown path.")
     if writing and (mount.get("write") is not True or
                     user_input.split(maxsplit=2)[:2] != ["/wiki-create", f"{args['workspace']}:{relative}"]):
         raise ValueError("A writable mount and an explicit /wiki-create workspace:path request are required.")
@@ -139,7 +143,11 @@ class BedrockWorkspaceHarness:
                   if m.get("role") in ("private", "shared", "global")}
         tools = []
         if "Read" in allowed_tools:
-            tools.append(_tool_spec("read_wiki", "Read one Markdown file from an authorized workspace.", []))
+            tools.append(_tool_spec(
+                "read_wiki",
+                "Read one Markdown file from an authorized workspace (kg/*.md, or README.md / CLAUDE.md / docs/*.md / mail/*.md in _global).",
+                [],
+            ))
         if "Write" in allowed_tools:
             tools.append(_tool_spec("create_wiki", "Create a new Markdown file only when the user requests that exact path.", ["text"]))
         reach_specs = _reach_tool_specs()

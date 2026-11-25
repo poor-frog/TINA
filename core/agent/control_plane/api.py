@@ -1119,11 +1119,25 @@ def create_app(
                     extra_shared.add(qv)
             if invite_target_ws:
                 extra_shared.add(invite_target_ws)
+            if method == "POST" and path in (
+                "/api/workspace/push", "/api/workspace/pull", "/api/workspace/publish",
+            ):
+                try:
+                    raw = await request.body()
+                    parsed = json.loads(raw) if raw else {}
+                    bslug = str(parsed.get("slug") or "").strip() if isinstance(parsed, dict) else ""
+                    if (bslug and bslug not in ("seed", "seed-prev")
+                            and not bslug.startswith(".") and not bslug.startswith("_")
+                            and not bslug.isdecimal()):
+                        extra_shared.add(bslug)
+                except Exception:  # noqa: BLE001
+                    pass
             parts = path.strip("/").split("/")
             # e.g. /api/workspace/<wid>/leave|unshare|share-enable|archive or /api/workspace/shared/<wid>/active
             if len(parts) >= 4 and parts[0] == "api" and parts[1] == "workspace":
                 cand = parts[3] if parts[2] == "shared" and len(parts) >= 5 else parts[2]
-                if (cand and cand not in ("tree", "file", "search", "document", "git", "init", "active", "attached",
+                if (cand and cand not in ("tree", "file", "search", "document", "git", "git-token",
+                                          "git-remote-status", "init", "active", "attached",
                                           "shared", "purpose", "new", "upload", "activate", "deactivate",
                                           "rename", "swap", "publish", "push", "pull", "members", "invites",
                                           "meeting-knowledge")

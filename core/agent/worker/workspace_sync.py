@@ -86,22 +86,52 @@ class SyncCoordinator:
         return bool(self.token_expires_at and (self.token_expires_at - time.time()) <= _DRAIN_BUFFER_SEC)
 
     @staticmethod
-    def _enforce_readonly(mpath: Path) -> None:
-        """Enforce kernel read-only permissions for non-root worker uid when sync runs as root."""
-        if not hasattr(os, "geteuid") or os.geteuid() != 0 or not mpath.exists():
+    def _restore_writable(mpath: Path) -> None:
+        """Restore owner write bits top-down before replacing a read-only mount tree."""
+        if not mpath.exists() or mpath.is_symlink():
             return
-        for root_dir, dirnames, filenames in os.walk(mpath):
+        try:
+            os.chmod(mpath, 0o755)
+        except OSError:
+            pass
+        for root_dir, dirnames, filenames in os.walk(mpath, topdown=True, followlinks=False):
+            rp = Path(root_dir)
+            for dname in dirnames:
+                dp = rp / dname
+                if not dp.is_symlink():
+                    try:
+                        os.chmod(dp, 0o755)
+                    except OSError:
+                        pass
+            for fname in filenames:
+                fp = rp / fname
+                if not fp.is_symlink():
+                    try:
+                        os.chmod(fp, 0o644)
+                    except OSError:
+                        pass
+
+    @staticmethod
+    def _enforce_readonly(mpath: Path) -> None:
+        """Strip write bits bottom-up on read-only mounts so tools cannot accidentally mutate them."""
+        if not mpath.exists() or mpath.is_symlink():
+            return
+        for root_dir, dirnames, filenames in os.walk(mpath, topdown=False, followlinks=False):
             rp = Path(root_dir)
             for fname in filenames:
-                try:
-                    os.chmod(rp / fname, 0o444)
-                except OSError:
-                    pass
+                fp = rp / fname
+                if not fp.is_symlink():
+                    try:
+                        os.chmod(fp, 0o444)
+                    except OSError:
+                        pass
             for dname in dirnames:
-                try:
-                    os.chmod(rp / dname, 0o555)
-                except OSError:
-                    pass
+                dp = rp / dname
+                if not dp.is_symlink():
+                    try:
+                        os.chmod(dp, 0o555)
+                    except OSError:
+                        pass
         try:
             os.chmod(mpath, 0o555)
         except OSError:
@@ -111,12 +141,16 @@ class SyncCoordinator:
         """Initial parallel pull of every granted mount into ephemeral SSD."""
         def _pull_one(item: tuple[Path, str, str, bool]) -> tuple[str, SyncState]:
             mpath, prefix, kind, writable = item
-            state, _changed = pull_workspace(
-                self.s3, self.bucket, prefix, kind, mpath, tmp_dir=self.tmp_dir,
-            )
-            mpath.parent.mkdir(parents=True, exist_ok=True)
-            if not writable:
-                self._enforce_readonly(mpath)
+            if not writable and mpath.exists():
+                self._restore_writable(mpath)
+            try:
+                state, _changed = pull_workspace(
+                    self.s3, self.bucket, prefix, kind, mpath, tmp_dir=self.tmp_dir,
+                )
+                mpath.parent.mkdir(parents=True, exist_ok=True)
+            finally:
+                if not writable and mpath.exists():
+                    self._enforce_readonly(mpath)
             return str(mpath), state
 
         with self._lock:
@@ -128,14 +162,20 @@ class SyncCoordinator:
         """Fast HEAD check + pull for any mount that changed remotely while worker was warm."""
         refreshed: list[str] = []
         with self._lock:
-            for mpath, prefix, kind, _writable in self._entries:
+            for mpath, prefix, kind, writable in self._entries:
                 cur = self._states[str(mpath)]
                 remote_etag = head_etag(self.s3, self.bucket, prefix)
                 if remote_etag and remote_etag != cur.etag:
-                    new_state, changed = pull_workspace(
-                        self.s3, self.bucket, prefix, kind, mpath,
-                        current_state=cur, tmp_dir=self.tmp_dir,
-                    )
+                    if not writable and mpath.exists():
+                        self._restore_writable(mpath)
+                    try:
+                        new_state, changed = pull_workspace(
+                            self.s3, self.bucket, prefix, kind, mpath,
+                            current_state=cur, tmp_dir=self.tmp_dir,
+                        )
+                    finally:
+                        if not writable and mpath.exists():
+                            self._enforce_readonly(mpath)
                     self._states[str(mpath)] = new_state
                     if changed:
                         refreshed.append(prefix)

@@ -381,14 +381,15 @@ def test_workspace_stream_pins_live_meeting_topics_and_rejects_foreign_keys():
 
 def test_nova_bedrock_workspace_supports_agent_reach_and_readonly_global(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    from llm import agent_reach, bedrock_workspace
     from control_plane.dispatch import _has_workspace_byo_model, overlay_model_config
+    from control_plane.system_mounts import ensure_global_workspace
+    from llm import agent_reach, bedrock_workspace
 
-    gdir = tmp_path / "_global"
-    (gdir / "kg").mkdir(parents=True)
-    (gdir / "kg" / "guide.md").write_text("# Global Guide\nShared content.", encoding="utf-8")
+    gdir = ensure_global_workspace(tmp_path / "_global")
     pdir = tmp_path / "5"
     (pdir / "kg").mkdir(parents=True)
+    (pdir / "docs").mkdir(parents=True)
+    (pdir / "docs" / "private.md").write_text("secret", encoding="utf-8")
 
     monkeypatch.setenv("TINA_AGENT_REACH_URL", "http://agent-reach.tina-staging.local:8080")
     monkeypatch.setenv("TINA_UNIT_TOOLS", json.dumps(["reach.web.search", "reach.github.read"]))
@@ -396,6 +397,32 @@ def test_nova_bedrock_workspace_supports_agent_reach_and_readonly_global(tmp_pat
         {"slug": "_global", "path": str(gdir), "role": "global", "write": False},
         {"slug": "personal", "path": str(pdir), "role": "private", "write": True},
     ]))
+
+    # Direct _wiki_tool checks: seeded _global docs/README/CLAUDE/mail are readable; writes to _global
+    # and non-kg reads on personal mounts are strictly denied.
+    mounts_map = {
+        "_global": {"slug": "_global", "path": str(gdir), "role": "global", "write": False},
+        "personal": {"slug": "personal", "path": str(pdir), "role": "private", "write": True},
+    }
+    assert "TINA" in bedrock_workspace._wiki_tool(
+        mounts_map, "read_wiki", {"workspace": "_global", "path": "README.md"}, "",
+    )["text"]
+    assert "Kiến trúc 3 tầng" in bedrock_workspace._wiki_tool(
+        mounts_map, "read_wiki", {"workspace": "_global", "path": "docs/tina-handbook.md"}, "",
+    )["text"]
+    assert "Mẫu Email" in bedrock_workspace._wiki_tool(
+        mounts_map, "read_wiki", {"workspace": "_global", "path": "mail/follow-up.md"}, "",
+    )["text"]
+    with pytest.raises(ValueError):
+        bedrock_workspace._wiki_tool(
+            mounts_map, "create_wiki",
+            {"workspace": "_global", "path": "kg/x.md", "text": "nope"},
+            "/wiki-create _global:kg/x.md",
+        )
+    with pytest.raises(ValueError):
+        bedrock_workspace._wiki_tool(
+            mounts_map, "read_wiki", {"workspace": "personal", "path": "docs/private.md"}, "",
+        )
 
     reach_calls = []
     monkeypatch.setattr(
@@ -411,10 +438,10 @@ def test_nova_bedrock_workspace_supports_agent_reach_and_readonly_global(tmp_pat
             if len(turn_calls) == 1:
                 return {"stopReason": "tool_use", "output": {"message": {"role": "assistant", "content": [
                     {"toolUse": {"toolUseId": "t1", "name": "reach_web_search", "input": {"query": "TINA AWS"}}},
-                    {"toolUse": {"toolUseId": "t2", "name": "read_wiki", "input": {"workspace": "_global", "path": "kg/guide.md"}}},
+                    {"toolUse": {"toolUseId": "t2", "name": "read_wiki", "input": {"workspace": "_global", "path": "docs/tina-handbook.md"}}},
                 ]}}}
             return {"stopReason": "end_turn", "output": {"message": {"role": "assistant", "content": [
-                {"text": "Found web result and global guide."},
+                {"text": "Found web result and global handbook."},
             ]}}}
 
     monkeypatch.setattr(bedrock_workspace, "BedrockConverseCompletion", lambda **_: SimpleNamespace(client=FakeClient()))
@@ -427,11 +454,136 @@ def test_nova_bedrock_workspace_supports_agent_reach_and_readonly_global(tmp_pat
     tool_names = [t["toolSpec"]["name"] for t in turn_calls[0]["toolConfig"]["tools"]]
     assert "reach_web_search" in tool_names and "reach_github_read" in tool_names
 
-    # Verify custom HTTPS + anthropic API key overlay cleanly into claude-code runner
-    env_custom: dict[str, str] = {}
-    overlay_model_config(env_custom, {"mode": "custom", "base_url": "https://openrouter.ai/api/v1", "api_key": "or-key"})
-    assert env_custom["TINA_RUNNER"] == "claude-code" and env_custom["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api/v1"
+    # Verify custom HTTPS + anthropic API key overlay cleanly into claude-code runner,
+    # clearing stale credentials and setting Claude model aliases.
+    env_custom: dict[str, str] = {
+        "ANTHROPIC_API_KEY": "stale-anth",
+        "CLAUDE_CODE_OAUTH_TOKEN": "stale-oauth",
+        "OPENAI_API_KEY": "stale-openai",
+        "AWS_BEARER_TOKEN_BEDROCK": "stale-bedrock",
+    }
+    overlay_model_config(env_custom, {
+        "mode": "custom", "base_url": "https://openrouter.ai/api/v1",
+        "api_key": "or-key", "model": "deepseek/deepseek-chat",
+    })
+    assert env_custom["TINA_RUNNER"] == "claude-code"
+    assert env_custom["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api/v1"
+    assert env_custom["ANTHROPIC_AUTH_TOKEN"] == "or-key"
+    assert env_custom["ANTHROPIC_API_KEY"] == ""
+    assert env_custom["CLAUDE_CODE_OAUTH_TOKEN"] == ""
+    assert env_custom["OPENAI_API_KEY"] == ""
+    assert env_custom["AWS_BEARER_TOKEN_BEDROCK"] == ""
+    assert env_custom["ANTHROPIC_MODEL"] == "deepseek/deepseek-chat"
+    assert env_custom["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "deepseek/deepseek-chat"
+
+    env_custom_nokey: dict[str, str] = {"ANTHROPIC_AUTH_TOKEN": "stale-tok"}
+    overlay_model_config(env_custom_nokey, {"mode": "custom", "base_url": "https://openrouter.ai/api/v1"})
+    assert env_custom_nokey["ANTHROPIC_AUTH_TOKEN"] == ""
+
     env_anth: dict[str, str] = {}
     overlay_model_config(env_anth, {"mode": "anthropic", "api_key": "sk-ant-test"})
     assert env_anth["TINA_RUNNER"] == "claude-code" and env_anth["ANTHROPIC_API_KEY"] == "sk-ant-test"
     assert _has_workspace_byo_model({"mode": "anthropic", "api_key": "sk-ant-test"}) is True
+
+
+def test_workspace_sync_enforces_and_refreshes_readonly_mounts_nonroot(tmp_path):
+    import stat
+    from control_plane.system_mounts import ensure_global_workspace
+    from worker.workspace_sync import SyncCoordinator
+
+    s3 = FakeS3()
+    src = ensure_global_workspace(tmp_path / "src_global")
+    st1, _ = push_workspace(
+        s3, "b", "_global", "git", src, SyncState(prefix="_global", kind="git"),
+        actor="system", protect_policy=False, force=True,
+    )
+
+    ws_root = tmp_path / "workspaces"
+    ws_root.mkdir()
+    gpath = ws_root / "_global"
+    coord = SyncCoordinator(
+        s3=s3, bucket="b", kms_key_id=None, owner="42",
+        mounts=[{"slug": "_global", "path": str(gpath), "role": "global", "write": False}],
+        root=ws_root, tmp_dir=tmp_path / "tmp",
+    )
+    coord.bootstrap()
+
+    try:
+        readme = gpath / "README.md"
+        assert readme.is_file()
+        assert stat.S_IMODE(readme.stat().st_mode) == 0o444
+        assert stat.S_IMODE(gpath.stat().st_mode) == 0o555
+        if hasattr(os, "geteuid") and os.geteuid() != 0:
+            with pytest.raises(PermissionError):
+                readme.write_text("tamper", encoding="utf-8")
+
+        # Update _global on S3 and verify refresh cleanly swaps + re-locks without PermissionError or .old-* leaks
+        (src / "docs" / "tina-handbook.md").write_text("# Updated Handbook v2\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(src), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(src), "commit", "-m", "v2"], check=True, capture_output=True)
+        st2, changed = push_workspace(s3, "b", "_global", "git", src, st1, actor="system", protect_policy=False)
+        assert changed and st2.rev == 2
+
+        res = coord.refresh()
+        assert res["refreshed"] == ["_global"]
+        assert "Updated Handbook v2" in (gpath / "docs" / "tina-handbook.md").read_text(encoding="utf-8")
+        assert stat.S_IMODE((gpath / "docs" / "tina-handbook.md").stat().st_mode) == 0o444
+        assert stat.S_IMODE(gpath.stat().st_mode) == 0o555
+        assert not [p for p in ws_root.iterdir() if p.name.startswith(".old-")]
+    finally:
+        SyncCoordinator._restore_writable(gpath)
+
+
+def test_s3_middleware_hydrates_body_slug_on_git_sync_routes(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from fastapi.testclient import TestClient
+    from control_plane.api import create_app
+    from control_plane.workspace_reader import WorkspaceReader
+
+    monkeypatch.setenv("TINA_WORKSPACE_STORAGE", "s3")
+    monkeypatch.setenv("TINA_S3_WORKSPACE_BUCKET", "ws-bucket")
+
+    synced: list[str] = []
+    pushed: list[str] = []
+
+    class StubStore:
+        def __init__(self, root):
+            self.root = root
+
+        def compact_bloated_system_snapshots(self):
+            return {"compacted": 0}
+
+        @contextmanager
+        def distributed_lock(self, key, **_kw):
+            yield
+
+        def sync_subject_workspaces(self, subject, *, memberships=(), include_system=False, force=False):
+            pass
+
+        def ensure_synced(self, path, *, force=False):
+            synced.append(path.name)
+            path.mkdir(parents=True, exist_ok=True)
+
+        def push_attach_state(self, subject):
+            pass
+
+        def push_if_changed(self, path, *, actor=None, protect_policy=False):
+            pushed.append(path.name)
+
+    store = StubStore(tmp_path)
+    (tmp_path / "7").mkdir()
+    monkeypatch.setattr("control_plane.workspace_store.S3WorkspaceStore.from_env", classmethod(lambda cls, *args, **kw: store))
+    app = create_app(None, reader=WorkspaceReader(tmp_path))
+    app.router.routes[:] = [
+        route for route in app.router.routes if getattr(route, "path", None) != "/api/workspace/push"
+    ]
+
+    @app.post("/api/workspace/push")
+    def _push_probe():
+        return {"ok": True}
+
+    client = TestClient(app)
+    r = client.post("/api/workspace/push", headers={"X-User-Id": "7"}, json={"slug": "team-wiki"})
+    assert r.status_code == 200
+    assert "team-wiki" in synced
+    assert "team-wiki" in pushed

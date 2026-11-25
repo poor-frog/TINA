@@ -60,11 +60,14 @@ def _validate_workspace_runner(env: dict[str, str], *, allow_multi_provider: boo
             return
         raise ValueError("Staging workspace Codex runner requires valid credentials")
     if runner == "claude-code":
+        base_url = (env.get("ANTHROPIC_BASE_URL") or "").strip()
+        if base_url and not base_url.startswith("https://"):
+            raise ValueError("Staging workspace custom Anthropic endpoint must use HTTPS")
         if (env.get("CLAUDE_CODE_USE_BEDROCK") == "1"
                 or env.get("ANTHROPIC_API_KEY")
                 or env.get("ANTHROPIC_AUTH_TOKEN")
                 or env.get("CLAUDE_CODE_OAUTH_TOKEN")
-                or (env.get("ANTHROPIC_BASE_URL") or "").startswith("https://")):
+                or base_url.startswith("https://")):
             return
         raise ValueError("Staging workspace Claude runner requires Bedrock, API credentials, or HTTPS custom endpoint")
     if runner == "antigravity":

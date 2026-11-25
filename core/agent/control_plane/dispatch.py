@@ -396,11 +396,28 @@ def overlay_model_config(env: dict[str, str], config: dict, *, allowlist: str = 
     env["TINA_RUNNER"] = "claude-code"
     env["TINA_CODEX_AUTH_MODE"] = ""
     env["ANTHROPIC_BASE_URL"] = base_url
+    env["ANTHROPIC_AUTH_TOKEN"] = api_key
     env["TINA_LLM_PROVIDER"] = "openai-compat"
     env["TINA_LLM_BASE_URL"] = base_url
-    if api_key:
-        env["ANTHROPIC_AUTH_TOKEN"] = api_key
-        env["TINA_LLM_API_KEY"] = api_key
+    env["TINA_LLM_API_KEY"] = api_key
+    for other_key in (
+        "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "ACCESS_TOKEN",
+        "AWS_BEARER_TOKEN_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN", "AWS_PROFILE",
+    ):
+        env[other_key] = ""
+    target = model if model and _allowlisted(model, allowlist) else ""
+    if target:
+        env["TINA_AGENT_MODEL"] = target
+        env["TINA_LLM_MODEL"] = target
+        env["TINA_MEETING_MODEL"] = (
+            meeting_model if meeting_model and _allowlisted(meeting_model, allowlist) else target
+        )
+        for alias in (
+            "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        ):
+            env[alias] = target
 
 
 def worker_cwd(root: str, subject: str, mounts: list[dict]) -> str:
