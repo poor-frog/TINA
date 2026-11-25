@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { KnowledgeView } from "../KnowledgeView";
+import type { ChatStreamCallbacks } from "../../surfaces/chatStream";
+
+const mockStreamChatTurn = vi.fn();
 
 vi.mock("../../ui-kit/MdxDoc", () => ({
   MdxDoc: ({ children }: { children: string }) => <div data-testid="mdx-doc">{children}</div>,
@@ -8,6 +11,10 @@ vi.mock("../../ui-kit/MdxDoc", () => ({
 
 vi.mock("../../surfaces/MeetingKnowledge", () => ({
   MeetingWikiSourceStatus: () => null,
+}));
+
+vi.mock("../../surfaces/chatStream", () => ({
+  streamChatTurn: (...args: unknown[]) => mockStreamChatTurn(...args),
 }));
 
 function mockFetchRoutes() {
@@ -31,9 +38,17 @@ function mockFetchRoutes() {
     if (url.includes("/api/workspace/tree?slug=_global")) {
       return json({ files: ["README.md", "CLAUDE.md", "docs/tina-handbook.md", "mail/follow-up.md"] });
     }
+    if (url.includes("/api/workspace/tree?slug=team-alpha")) {
+      return json({ files: ["README.md", "wiki/team-notes.md"] });
+    }
     if (url.includes("/api/workspace/tree")) {
       return json({
-        files: ["README.md", "kg/entities/person/alice.md", "kg/entities/project/tina.md"],
+        files: [
+          "README.md",
+          "kg/entities/person/alice.md",
+          "kg/entities/project/tina.md",
+          "kg/entities/topic/orphan-topic.md",
+        ],
       });
     }
     if (url.includes("/api/workspace/purpose")) {
@@ -41,21 +56,28 @@ function mockFetchRoutes() {
     }
     if (url.includes("/api/workspace/document") && url.includes("slug=_global")) {
       return json({
-        content: "# TINA Global Knowledge\nShared platform guide.",
+        content: "# TINA Global Knowledge\n\n## Overview\nShared platform guide.\n\n### Architecture\nThree-tier mounts.",
         sha256: "a".repeat(64),
         writable: false,
       });
     }
+    if (url.includes("/api/workspace/document") && url.includes("slug=team-alpha")) {
+      return json({
+        content: "# Team Alpha\n\nShared notes editable by owners and contributors.",
+        sha256: "e".repeat(64),
+        writable: true,
+      });
+    }
     if (url.includes("/api/workspace/document") && url.includes("alice.md")) {
       return json({
-        content: "---\nid: person/alice\ntype: person\ntitle: Alice Nguyen\n---\n\nWorks on [[TINA]].",
+        content: "---\nid: person/alice\ntype: person\ntitle: Alice Nguyen\n---\n\n## Role\nWorks on [[TINA]].",
         sha256: "b".repeat(64),
         writable: true,
       });
     }
     if (url.includes("/api/workspace/document")) {
       return json({
-        content: "# Personal Wiki\nWelcome to TINA Knowledge Hub.",
+        content: "# Personal Wiki\n\n## Architecture\nWelcome to TINA Knowledge Hub.\n\n### Next Steps\nReview [[Alice Nguyen]].",
         sha256: "c".repeat(64),
         writable: true,
       });
@@ -70,7 +92,18 @@ function mockFetchRoutes() {
         content: "---\nid: project/tina\ntype: project\ntitle: TINA\n---\n\nLed by [[Alice Nguyen]].",
       });
     }
+    if (url.includes("/api/workspace/file") && url.includes("orphan-topic.md")) {
+      return json({
+        content: "---\nid: topic/orphan\ntype: topic\ntitle: Standalone Topic\n---\n\nNo links yet.",
+      });
+    }
     if (url.includes("/api/workspace/search")) {
+      if (url.includes("slug=_global")) {
+        return json({
+          hits: [{ path: "docs/tina-handbook.md", line: 3, text: "TINA platform handbook" }],
+          bounded: false,
+        });
+      }
       return json({
         hits: [{ path: "kg/entities/person/alice.md", line: 7, text: "Works on [[TINA]]." }],
         bounded: false,
@@ -99,8 +132,10 @@ function mockFetchRoutes() {
   });
 }
 
-describe("KnowledgeView (Production Web Knowledge Hub)", () => {
+describe("KnowledgeView v2 (Production Web Knowledge Hub)", () => {
   beforeEach(() => {
+    window.history.replaceState({}, "", "/?nav=knowledge");
+    mockStreamChatTurn.mockReset();
     mockFetchRoutes();
   });
 
@@ -109,19 +144,29 @@ describe("KnowledgeView (Production Web Knowledge Hub)", () => {
     vi.restoreAllMocks();
   });
 
-  it("loads Personal, Shared, and read-only _global Platform Guide and blocks edit on _global", async () => {
-    const onAskTina = vi.fn();
-    render(<KnowledgeView onAskTina={onAskTina} />);
+  it("loads Personal, editable Shared owner workspace, and read-only _global Platform Guide with TOC outline", async () => {
+    render(<KnowledgeView onAskTina={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByTestId("mdx-doc").textContent).toContain("Welcome to TINA Knowledge Hub");
     });
 
-    // Personal workspace exposes Edit button; switching to _global hides Edit and marks Read-Only
+    // Reading Outline (TOC) renders H2/H3 headings
+    expect(screen.getByText("On this page")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Architecture" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Next Steps" })).toBeTruthy();
+
+    // Shared owner workspace enables Edit & New Doc
+    const sharedBtn = await screen.findByRole("button", { name: /team-alpha/i });
+    fireEvent.click(sharedBtn);
+    await waitFor(() => {
+      expect(screen.getByTestId("mdx-doc").textContent).toContain("Shared notes editable");
+    });
     expect(screen.getByRole("button", { name: /^Edit$/i })).toBeTruthy();
+
+    // Switching to _global hides Edit and marks Read-Only
     const globalBtn = await screen.findByRole("button", { name: /Platform Guide \(_global\)/i });
     fireEvent.click(globalBtn);
-
     await waitFor(() => {
       expect(screen.getByText(/Platform · Read-Only/i)).toBeTruthy();
       expect(screen.getByTestId("mdx-doc").textContent).toContain("Shared platform guide.");
@@ -129,49 +174,104 @@ describe("KnowledgeView (Production Web Knowledge Hub)", () => {
     expect(screen.queryByRole("button", { name: /^Edit$/i })).toBeNull();
   });
 
-  it("renders upgraded Knowledge Graph with zoom/filters and opens selected entity in Documents", async () => {
-    render(<KnowledgeView onAskTina={vi.fn()} />);
+  it("supports inline Ask Tina Copilot drawer with 1-click Summarize and workspace refresh on commit", async () => {
+    mockStreamChatTurn.mockImplementation(async (_req: unknown, cbs: ChatStreamCallbacks) => {
+      cbs.onDelta("Executive summary of README.md");
+      cbs.onCommit("deadbeef1234");
+      return { sawVisibleOutput: true, terminal: true, aborted: false };
+    });
 
+    render(<KnowledgeView onAskTina={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByTestId("mdx-doc")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Ask Tina$/i }));
+    expect(screen.getByLabelText(/Ask Tina Knowledge Copilot/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Summarize$/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Executive summary of README\.md/i)).toBeTruthy();
+      expect(screen.getByText(/Updated workspace \(deadbee\)/i)).toBeTruthy();
+    });
+  });
+
+  it("provides Split-Preview Markdown editor with [[ wikilink autocomplete and Unsaved badge", async () => {
+    render(<KnowledgeView onAskTina={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^Edit$/i })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Edit$/i }));
+    const textarea = screen.getByLabelText(/Markdown editor/i) as HTMLTextAreaElement;
+    // Split preview renders MdxDoc alongside editor by default
+    expect(screen.getByTestId("mdx-doc")).toBeTruthy();
+
+    const nextText = `${textarea.value}\nSee [[ali`;
+    fireEvent.change(textarea, { target: { value: nextText, selectionStart: nextText.length } });
+    // Trigger cursor update + check Unsaved badge & autocomplete suggestion
+    expect(screen.getByText(/● Unsaved/i)).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByRole("listbox", { name: /Wikilink suggestions/i })).toBeTruthy();
+      expect(screen.getByRole("option", { name: /alice/i })).toBeTruthy();
+    });
+  });
+
+  it("upgrades Knowledge Graph with Orphans filter, Focus 1-hop, Fit to View, and Back/Forward history", async () => {
+    render(<KnowledgeView onAskTina={vi.fn()} />);
     await waitFor(() => {
       expect(screen.getByTestId("mdx-doc")).toBeTruthy();
     });
 
     fireEvent.click(screen.getByRole("tab", { name: /Knowledge Graph/i }));
-
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Alice Nguyen \(person\)/i })).toBeTruthy();
-      expect(screen.getByRole("button", { name: /TINA \(project\)/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Standalone Topic \(topic\)/i })).toBeTruthy();
     });
 
-    // Zoom control updates percentage
-    fireEvent.click(screen.getByRole("button", { name: /Zoom in/i }));
-    expect(screen.getByRole("button", { name: /Reset zoom/i }).textContent).toBe("115%");
+    // Orphan filter isolates unlinked nodes
+    fireEvent.click(screen.getByRole("button", { name: /Orphans \(1\)/i }));
+    expect(screen.getByRole("button", { name: /Standalone Topic \(topic\)/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Alice Nguyen \(person\)/i })).toBeNull();
 
-    // Open document switches back to Documents tab on that entity
+    // Reset to All, select Alice, test Focus 1-hop & Fit button
+    fireEvent.click(screen.getByRole("button", { name: /^All \(3\)$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Alice Nguyen \(person\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Focus 1-hop/i }));
+    expect(screen.getByRole("button", { name: /TINA \(project\)/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Standalone Topic \(topic\)/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Fit to view/i }));
     fireEvent.click(screen.getByRole("button", { name: /Open document/i }));
     await waitFor(() => {
       expect(screen.getByTestId("mdx-doc").textContent).toContain("Works on [[TINA]].");
     });
+
+    // Back button returns to README.md
+    const backBtn = screen.getByRole("button", { name: /Back in reading history/i });
+    expect((backBtn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(backBtn);
+    await waitFor(() => {
+      expect(screen.getByTestId("mdx-doc").textContent).toContain("Welcome to TINA Knowledge Hub");
+    });
   });
 
-  it("supports Full-text search and History & Sync diff inspection", async () => {
+  it("supports cross-workspace Full-text search and History & Sync diff inspection", async () => {
     render(<KnowledgeView onAskTina={vi.fn()} />);
-
     await waitFor(() => {
       expect(screen.getByTestId("mdx-doc")).toBeTruthy();
     });
 
-    // Full-text search
     fireEvent.click(screen.getByRole("button", { name: /Full-text/i }));
+    fireEvent.click(screen.getByLabelText(/Search all workspaces/i));
     fireEvent.change(screen.getByLabelText(/Search knowledge/i), { target: { value: "TINA" } });
     fireEvent.click(screen.getByRole("button", { name: /^Go$/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/1 match/i)).toBeTruthy();
-      expect(screen.getByText(/Works on \[\[TINA\]\]/i)).toBeTruthy();
+      expect(screen.getByText(/across 3 workspaces/i)).toBeTruthy();
+      expect(screen.getByText(/TINA platform handbook/i)).toBeTruthy();
     });
 
-    // History & Sync tab
     fireEvent.click(screen.getByRole("tab", { name: /History & Sync/i }));
     await waitFor(() => {
       expect(screen.getByText(/Token saved \(••••9f2a\)/i)).toBeTruthy();

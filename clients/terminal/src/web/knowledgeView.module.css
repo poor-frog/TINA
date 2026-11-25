@@ -677,9 +677,15 @@
 
 .graphCanvas {
   overflow: auto;
+  cursor: grab;
   background:
     radial-gradient(circle at 18% 12%, rgba(23, 107, 91, 0.14), transparent 52%),
     var(--tw-bg);
+}
+
+.graphCanvasPanning {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .graphSvg {
@@ -1017,7 +1023,349 @@
   color: #0f4c41;
 }
 
+/* ── Upgraded Editor (Split Preview + Toolbar + Wikilink Autocomplete) ── */
+.editorToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--tw-line-soft);
+  background: var(--tw-card);
+}
+
+.unsavedBadge {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #f2b880;
+  padding: 0 6px;
+}
+
+.editorGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.editorGridSplit {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.editorPreviewPane {
+  min-height: 440px;
+  max-height: 640px;
+  overflow-y: auto;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--tw-line-soft);
+  background: var(--tw-card);
+}
+
+.acPopover {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 30;
+  width: min(360px, calc(100% - 24px));
+  border-radius: 10px;
+  border: 1px solid var(--tw-line-strong);
+  background: var(--tw-chrome);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.acHead {
+  padding: 6px 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tw-text-4);
+  border-bottom: 1px solid var(--tw-line-soft);
+}
+
+.acItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  color: var(--tw-text-2);
+  text-align: left;
+}
+
+.acItem:hover,
+.acItemActive {
+  background: var(--tw-surface-teal);
+  color: var(--tw-mint-bright);
+}
+
+.acPath {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--tw-text-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+/* ── Document Reading Layout + Outline / Backlinks Rail ──────────────── */
+.docBodySplit {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.outlineRail {
+  width: 244px;
+  flex: 0 0 244px;
+  overflow-y: auto;
+  padding: 16px 14px;
+  border-left: 1px solid var(--tw-line-soft);
+  background: var(--tw-chrome);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.outlineSection {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.outlineHead {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tw-text-4);
+  margin-bottom: 2px;
+}
+
+.outlineItem {
+  display: block;
+  width: 100%;
+  padding: 4px 7px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--tw-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outlineItem:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--tw-text);
+}
+
+.outlineSub {
+  padding-left: 18px;
+  font-size: 11.5px;
+}
+
+/* ── Inline Ask Tina Copilot Drawer ──────────────────────────────────── */
+.copilotDrawer {
+  width: 356px;
+  flex: 0 0 356px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--tw-line-soft);
+  background: var(--tw-chrome);
+}
+
+.copilotHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--tw-line-soft);
+}
+
+.copilotTitle {
+  font-family: var(--tw-font-display);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.copilotSub {
+  font-size: 11px;
+  color: var(--tw-text-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 190px;
+}
+
+.copilotQuickBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--tw-line-soft);
+  background: var(--tw-card);
+}
+
+.copilotFeed {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.copilotEmpty {
+  margin: auto 0;
+  padding: 20px 10px;
+  text-align: center;
+  color: var(--tw-text-3);
+  font-size: 12.5px;
+  line-height: 1.55;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.copilotMsg {
+  padding: 9px 11px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.copilotMsgUser {
+  align-self: flex-end;
+  max-width: 90%;
+  background: var(--tw-surface-teal);
+  border: 1px solid rgba(145, 215, 190, 0.28);
+  color: var(--tw-text);
+}
+
+.copilotMsgAgent {
+  align-self: stretch;
+  background: var(--tw-card);
+  border: 1px solid var(--tw-line-soft);
+  color: var(--tw-text-2);
+}
+
+.copilotOps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.copilotCommit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--tw-mint);
+}
+
+.copilotErr {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--tw-danger);
+}
+
+.copilotComposer {
+  padding: 10px 12px;
+  border-top: 1px solid var(--tw-line-soft);
+  background: var(--tw-card);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.copilotInput {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-bg);
+  color: var(--tw-text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  resize: none;
+  outline: none;
+}
+
+.copilotInput:focus {
+  border-color: var(--tw-mint);
+}
+
+.copilotComposerBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* ── Drag-and-drop upload highlight ──────────────────────────────────── */
+.dropActive {
+  box-shadow: inset 0 0 0 2px var(--tw-mint);
+}
+
+.dropOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(12, 16, 15, 0.62);
+}
+
+.dropBadge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 24px;
+  border-radius: 14px;
+  border: 2px dashed var(--tw-mint);
+  background: var(--tw-surface-teal);
+  color: var(--tw-mint-bright);
+  font-family: var(--tw-font-display);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+@media (max-width: 1180px) {
+  .outlineRail {
+    display: none;
+  }
+  .editorGridSplit {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 960px) {
+  .copilotDrawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 108;
+    width: min(360px, 92vw);
+    box-shadow: -12px 0 36px rgba(0, 0, 0, 0.55);
+  }
   .rail {
     display: none;
   }

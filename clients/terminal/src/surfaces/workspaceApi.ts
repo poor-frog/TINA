@@ -472,12 +472,16 @@ export async function searchWorkspaceContent(
   return getJson(`/api/workspace/search?${qs.toString()}`);
 }
 
-export async function uploadWorkspaceFiles(files: File[]): Promise<{ files: Array<{ name: string; path: string }> }> {
+export async function uploadWorkspaceFiles(
+  files: File[],
+  opts?: { slug?: string },
+): Promise<{ files: Array<{ name: string; path: string }> }> {
   const form = new FormData();
   for (const file of files) {
     form.append("files", file);
   }
-  return getJson(`/api/workspace/upload`, {
+  const qs = opts?.slug ? `?slug=${encodeURIComponent(opts.slug)}` : "";
+  return getJson(`/api/workspace/upload${qs}`, {
     method: "POST",
     body: form,
   });

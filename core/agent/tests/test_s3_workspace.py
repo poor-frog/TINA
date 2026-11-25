@@ -630,3 +630,59 @@ def test_global_workspace_is_readonly_via_workspace_api(tmp_path, monkeypatch):
             "path": "docs/tina-handbook.md", "expected_sha256": doc["sha256"], "slug": "_global",
         })
         assert del_res.status_code == 403
+        up_res = client.post(
+            "/api/workspace/upload?slug=_global",
+            headers=headers,
+            files=[("files", ("bad.txt", b"nope", "text/plain"))],
+        )
+        assert up_res.status_code == 403
+
+
+def test_shared_wiki_document_edit_and_upload_enforces_roles(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from control_plane.api import create_app
+    from control_plane.dispatch import Dispatcher
+    from control_plane import workspace_membership as wm
+    from control_plane.workspace_reader import WorkspaceReader
+    from shared.config import load_settings
+
+    root = tmp_path / "workspaces"
+    ws_id = "team-docs"
+    _init_git_repo(root / ws_id, {"README.md": "# Team\n", "wiki/guide.md": "# Guide\n"})
+    idx = wm.InMemoryMembershipIndex()
+    wm.ensure_owner(root, ws_id, "10", index=idx)
+    wm.grant_membership(root, ws_id, "20", "contributor", added_by="10", index=idx)
+    wm.grant_membership(root, ws_id, "30", "viewer", added_by="10", index=idx)
+
+    monkeypatch.setenv("TINA_WORKSPACE_STORAGE", "local")
+    settings = load_settings(workspaces_dir=str(root))
+    app = create_app(Dispatcher(settings, None, None, membership_index=idx), reader=WorkspaceReader(str(root)), membership_index=idx)
+
+    with TestClient(app) as client:
+        # Owner and contributor see writable=True and can edit + upload to the shared workspace
+        doc_owner = client.get(f"/api/workspace/document?slug={ws_id}&path=wiki/guide.md", headers={"x-user-id": "10"}).json()
+        assert doc_owner["writable"] is True
+        put_c = client.put("/api/workspace/document", headers={"x-user-id": "20"}, json={
+            "path": "wiki/guide.md", "content": "# Guide v2\n", "expected_sha256": doc_owner["sha256"], "slug": ws_id,
+        })
+        assert put_c.status_code == 200
+        up_c = client.post(
+            f"/api/workspace/upload?slug={ws_id}",
+            headers={"x-user-id": "20"},
+            files=[("files", ("spec.txt", b"team spec", "text/plain"))],
+        )
+        assert up_c.status_code == 200
+        assert (root / ws_id / up_c.json()["files"][0]["path"]).read_bytes() == b"team spec"
+
+        # Viewer sees writable=False and is blocked from both PUT and upload (403)
+        doc_v = client.get(f"/api/workspace/document?slug={ws_id}&path=wiki/guide.md", headers={"x-user-id": "30"}).json()
+        assert doc_v["writable"] is False
+        assert client.put("/api/workspace/document", headers={"x-user-id": "30"}, json={
+            "path": "wiki/guide.md", "content": "tamper", "expected_sha256": doc_v["sha256"], "slug": ws_id,
+        }).status_code == 403
+        assert client.post(
+            f"/api/workspace/upload?slug={ws_id}",
+            headers={"x-user-id": "30"},
+            files=[("files", ("spec.txt", b"viewer", "text/plain"))],
+        ).status_code == 403

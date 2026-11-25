@@ -2,13 +2,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { WebIcon } from "./Icons";
 import type { MeetingMock } from "../surfaces/meetingModel";
+import { searchWorkspaceContent, type WorkspaceSearchHit } from "../surfaces/workspaceApi";
 import type { WebNavView } from "./Sidebar";
 
 interface SearchHit {
   id: string;
   label: string;
   detail: string;
-  kind: "meeting" | "action";
+  kind: "meeting" | "knowledge" | "action";
   run: () => void;
 }
 
@@ -20,6 +21,7 @@ export function WebGlobalSearch({
   terminalHref,
   onClose,
   onOpenMeeting,
+  onOpenKnowledgeDoc,
   onNavigate,
   onOpenCapture,
 }: {
@@ -30,14 +32,17 @@ export function WebGlobalSearch({
   terminalHref: string;
   onClose: () => void;
   onOpenMeeting: (meetingId: string) => void;
+  onOpenKnowledgeDoc?: (docPath: string, wsSlug?: string) => void;
   onNavigate: (view: Exclude<WebNavView, "meeting">) => void;
   onOpenCapture: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [wikiHits, setWikiHits] = useState<Array<WorkspaceSearchHit & { wsSlug?: string; wsLabel: string }>>([]);
 
   useEffect(() => {
     if (!open) {
       setQuery("");
+      setWikiHits([]);
       return;
     }
     const onKey = (e: KeyboardEvent) => {
@@ -46,6 +51,41 @@ export function WebGlobalSearch({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open || meetingsOnly) {
+      setWikiHits([]);
+      return;
+    }
+    const q = query.trim();
+    if (q.length < 2) {
+      setWikiHits([]);
+      return;
+    }
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      void Promise.all([
+        searchWorkspaceContent(q)
+          .then((r) => r.hits.map((h) => ({ ...h, wsSlug: undefined, wsLabel: "Personal" })))
+          .catch(() => []),
+        searchWorkspaceContent(q, { slug: "_global" })
+          .then((r) => r.hits.map((h) => ({ ...h, wsSlug: "_global", wsLabel: "Platform Guide" })))
+          .catch(() => []),
+      ]).then(([own, glob]) => {
+        if (!alive) return;
+        const dedup = new Map<string, WorkspaceSearchHit & { wsSlug?: string; wsLabel: string }>();
+        for (const h of [...own, ...glob]) {
+          const key = `${h.wsSlug || ""}:${h.path}`;
+          if (!dedup.has(key)) dedup.set(key, h);
+        }
+        setWikiHits([...dedup.values()].slice(0, 6));
+      });
+    }, 180);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [open, meetingsOnly, query]);
 
   const hits = useMemo<SearchHit[]>(() => {
     const q = query.trim().toLowerCase();
@@ -147,8 +187,20 @@ export function WebGlobalSearch({
     ];
     const actions = rawActions.filter((a) => !q || `${a.label} ${a.detail}`.toLowerCase().includes(q));
 
-    return [...meetingHits, ...actions];
-  }, [query, meetings, meetingsOnly, canOpenTerminal, terminalHref, onOpenMeeting, onClose, onOpenCapture, onNavigate]);
+    const knowledgeHits: SearchHit[] = wikiHits.map((h) => ({
+      id: `kb:${h.wsSlug || "personal"}:${h.path}:${h.line}`,
+      label: h.path,
+      detail: `${h.wsLabel} · L${h.line}: ${h.text}`,
+      kind: "knowledge",
+      run: () => {
+        if (onOpenKnowledgeDoc) onOpenKnowledgeDoc(h.path, h.wsSlug);
+        else onNavigate("knowledge");
+        onClose();
+      },
+    }));
+
+    return [...knowledgeHits, ...meetingHits, ...actions];
+  }, [query, meetings, wikiHits, meetingsOnly, canOpenTerminal, terminalHref, onOpenMeeting, onOpenKnowledgeDoc, onClose, onOpenCapture, onNavigate]);
 
   if (!open) return null;
 
@@ -179,7 +231,10 @@ export function WebGlobalSearch({
               className="tina-web-feed-row"
               style={{ minHeight: 46, padding: "8px 12px" }}
             >
-              <WebIcon name={hit.kind === "meeting" ? "video" : "sparkleSmall"} size={15} />
+              <WebIcon
+                name={hit.kind === "meeting" ? "video" : hit.kind === "knowledge" ? "bookOpen" : "sparkleSmall"}
+                size={15}
+              />
               <span className="tina-web-feed-main">
                 <span className="tina-web-feed-title">{hit.label}</span>
                 <span className="tina-web-feed-meta">{hit.detail}</span>

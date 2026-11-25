@@ -1,8 +1,9 @@
 "use client";
 /** KnowledgeGraphCanvas — Upgraded Entity-Lane Knowledge Graph for the Production Web UI.
- *  Reuses `buildWorkspaceGraph` (entity Markdown files under `kg/entities/<type>/` connected via `[[wikilinks]]`), adds
- *  entity-type filter chips, zoom controls, directional link highlighting, and one-click document opening. */
-import { useEffect, useId, useMemo, useState } from "react";
+ *  Reuses `buildWorkspaceGraph` (entity Markdown files under `kg/entities/<type>/` connected via `[[wikilinks]]`),
+ *  adding entity-type filter chips, Fit-to-View zoom, click-drag Pan, Focus 1-hop neighborhood isolation,
+ *  Orphan-node filtering, directional link highlighting, and one-click document opening. */
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent } from "react";
 import { WebIcon } from "./Icons";
 import { listWorkspaceTree, readWorkspaceFile } from "../surfaces/workspaceApi";
 import { presentError } from "../surfaces/apiClient";
@@ -62,6 +63,7 @@ export function KnowledgeGraphCanvas({
   slug,
   workspaceName,
   isReadOnly,
+  externalRefreshKey = 0,
   onOpenDocument,
   onAskTina,
   onCreateEntity,
@@ -69,18 +71,25 @@ export function KnowledgeGraphCanvas({
   slug?: string;
   workspaceName: string;
   isReadOnly: boolean;
+  externalRefreshKey?: number;
   onOpenDocument: (path: string) => void;
   onAskTina: (prompt: string) => void;
   onCreateEntity?: () => void;
 }) {
   const markerBase = `wkg-${useId().replace(/:/g, "")}`;
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const panStateRef = useRef<{ x: number; y: number; scrollLeft: number; scrollTop: number } | null>(null);
+
   const [graph, setGraph] = useState<WorkspaceGraph | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [query, setQuery] = useState("");
   const [activeType, setActiveType] = useState<string>("all");
+  const [orphansOnly, setOrphansOnly] = useState(false);
+  const [focusOneHop, setFocusOneHop] = useState(false);
   const [zoom, setZoom] = useState<number>(1);
+  const [panning, setPanning] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
   useEffect(() => {
@@ -90,6 +99,8 @@ export function KnowledgeGraphCanvas({
     setGraph(null);
     setSelectedPath(null);
     setActiveType("all");
+    setOrphansOnly(false);
+    setFocusOneHop(false);
     void (async () => {
       const paths = (await listWorkspaceTree(slug ? { slug } : undefined)).filter((p) => ENTITY_PATH.test(p));
       const files: WorkspaceGraphFile[] = [];
@@ -118,7 +129,32 @@ export function KnowledgeGraphCanvas({
     return () => {
       alive = false;
     };
-  }, [slug, refreshKey]);
+  }, [slug, refreshKey, externalRefreshKey]);
+
+  const degreeMap = useMemo(() => {
+    const deg = new Map<string, number>();
+    for (const node of graph?.nodes ?? []) deg.set(node.path, 0);
+    for (const edge of graph?.edges ?? []) {
+      deg.set(edge.from, (deg.get(edge.from) ?? 0) + 1);
+      deg.set(edge.to, (deg.get(edge.to) ?? 0) + 1);
+    }
+    return deg;
+  }, [graph]);
+
+  const orphanCount = useMemo(
+    () => (graph?.nodes ?? []).filter((n) => (degreeMap.get(n.path) ?? 0) === 0).length,
+    [graph, degreeMap],
+  );
+
+  const oneHopSet = useMemo(() => {
+    if (!focusOneHop || !selectedPath) return null;
+    const set = new Set<string>([selectedPath]);
+    for (const edge of graph?.edges ?? []) {
+      if (edge.from === selectedPath) set.add(edge.to);
+      if (edge.to === selectedPath) set.add(edge.from);
+    }
+    return set;
+  }, [focusOneHop, selectedPath, graph]);
 
   const allTypes = useMemo(() => {
     const counts = new Map<string, number>();
@@ -129,10 +165,12 @@ export function KnowledgeGraphCanvas({
   }, [graph]);
 
   const visibleNodes = useMemo(() => {
-    const nodes = graph?.nodes ?? [];
-    if (activeType === "all") return nodes;
-    return nodes.filter((n) => n.type === activeType);
-  }, [graph, activeType]);
+    let nodes = graph?.nodes ?? [];
+    if (activeType !== "all") nodes = nodes.filter((n) => n.type === activeType);
+    if (orphansOnly) nodes = nodes.filter((n) => (degreeMap.get(n.path) ?? 0) === 0);
+    if (oneHopSet) nodes = nodes.filter((n) => oneHopSet.has(n.path));
+    return nodes;
+  }, [graph, activeType, orphansOnly, degreeMap, oneHopSet]);
 
   const needle = query.trim().toLocaleLowerCase();
   const matchingPaths = useMemo(
@@ -142,13 +180,13 @@ export function KnowledgeGraphCanvas({
 
   useEffect(() => {
     if (!visibleNodes.length) {
-      setSelectedPath(null);
+      if (!focusOneHop) setSelectedPath(null);
       return;
     }
     if (!selectedPath || !visibleNodes.some((n) => n.path === selectedPath)) {
       setSelectedPath([...matchingPaths][0] ?? visibleNodes[0]?.path ?? null);
     }
-  }, [visibleNodes, matchingPaths, selectedPath]);
+  }, [visibleNodes, matchingPaths, selectedPath, focusOneHop]);
 
   const lanes = useMemo(() => {
     const byType = new Map<string, WorkspaceGraphEntity[]>();
@@ -206,10 +244,47 @@ export function KnowledgeGraphCanvas({
   const rawWidth = Math.max(620, 36 + Math.max(0, lanes.length - 1) * LANE_STEP + NODE_WIDTH + 40);
   const rawHeight = Math.max(380, 108 + Math.max(0, ...lanes.map((l) => l.nodes.length)) * ROW_STEP);
 
+  const handleFitToView = useCallback(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const availW = Math.max(320, el.clientWidth - 24);
+    const availH = Math.max(260, el.clientHeight - 24);
+    const next = Math.min(availW / rawWidth, availH / rawHeight, 1.15);
+    setZoom(Math.max(0.45, Number(next.toFixed(2))));
+    el.scrollTo?.({ left: 0, top: 0, behavior: "smooth" });
+  }, [rawWidth, rawHeight]);
+
+  const handlePointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("[data-graph-node]")) return;
+    const el = canvasRef.current;
+    if (!el) return;
+    panStateRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      scrollLeft: el.scrollLeft,
+      scrollTop: el.scrollTop,
+    };
+    setPanning(true);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+
+  const handlePointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    const pan = panStateRef.current;
+    const el = canvasRef.current;
+    if (!pan || !el) return;
+    el.scrollLeft = pan.scrollLeft - (e.clientX - pan.x);
+    el.scrollTop = pan.scrollTop - (e.clientY - pan.y);
+  };
+
+  const handlePointerUp = () => {
+    panStateRef.current = null;
+    setPanning(false);
+  };
+
   return (
     <section className={styles.graphShell} aria-label="Knowledge graph">
       <div className={styles.graphToolbar}>
-        <div className={styles.searchBox} style={{ width: 220 }}>
+        <div className={styles.searchBox} style={{ width: 200 }}>
           <WebIcon name="search" size={14} />
           <input
             type="search"
@@ -223,8 +298,11 @@ export function KnowledgeGraphCanvas({
         <div className={styles.chipRow} style={{ marginTop: 0 }}>
           <button
             type="button"
-            className={`${styles.chip} ${activeType === "all" ? styles.chipActive : ""}`}
-            onClick={() => setActiveType("all")}
+            className={`${styles.chip} ${activeType === "all" && !orphansOnly ? styles.chipActive : ""}`}
+            onClick={() => {
+              setActiveType("all");
+              setOrphansOnly(false);
+            }}
           >
             All ({graph?.nodes.length ?? 0})
           </button>
@@ -233,11 +311,37 @@ export function KnowledgeGraphCanvas({
               key={type}
               type="button"
               className={`${styles.chip} ${activeType === type ? styles.chipActive : ""}`}
-              onClick={() => setActiveType(type)}
+              onClick={() => {
+                setActiveType(type);
+                setOrphansOnly(false);
+              }}
             >
               {type} ({count})
             </button>
           ))}
+          <button
+            type="button"
+            className={`${styles.chip} ${orphansOnly ? styles.chipActive : ""}`}
+            onClick={() => {
+              setOrphansOnly((v) => !v);
+              setFocusOneHop(false);
+            }}
+            title="Show entities with zero incoming or outgoing wikilinks"
+          >
+            Orphans ({orphanCount})
+          </button>
+          <button
+            type="button"
+            className={`${styles.chip} ${focusOneHop ? styles.chipActive : ""}`}
+            disabled={!selectedPath}
+            onClick={() => {
+              setFocusOneHop((v) => !v);
+              setOrphansOnly(false);
+            }}
+            title="Isolate the selected entity and its direct 1-hop neighbors"
+          >
+            Focus 1-hop
+          </button>
         </div>
 
         <div className={styles.graphZoom}>
@@ -248,7 +352,7 @@ export function KnowledgeGraphCanvas({
             type="button"
             className={styles.tinyBtn}
             aria-label="Zoom out"
-            onClick={() => setZoom((z) => Math.max(0.55, Number((z - 0.15).toFixed(2))))}
+            onClick={() => setZoom((z) => Math.max(0.45, Number((z - 0.15).toFixed(2))))}
           >
             −
           </button>
@@ -267,6 +371,14 @@ export function KnowledgeGraphCanvas({
             onClick={() => setZoom((z) => Math.min(1.45, Number((z + 0.15).toFixed(2))))}
           >
             +
+          </button>
+          <button
+            type="button"
+            className={styles.tinyBtn}
+            aria-label="Fit to view"
+            onClick={handleFitToView}
+          >
+            Fit
           </button>
           <button
             type="button"
@@ -312,7 +424,14 @@ export function KnowledgeGraphCanvas({
         </div>
       ) : (
         <div className={styles.graphWorkarea}>
-          <div className={styles.graphCanvas}>
+          <div
+            ref={canvasRef}
+            className={`${styles.graphCanvas} ${panning ? styles.graphCanvasPanning : ""}`}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+          >
             <div style={{ width: rawWidth * zoom, height: rawHeight * zoom }}>
               <svg
                 className={styles.graphSvg}
@@ -390,6 +509,7 @@ export function KnowledgeGraphCanvas({
                   return (
                     <g
                       key={node.path}
+                      data-graph-node="1"
                       transform={`translate(${pos.x}, ${pos.y})`}
                       className={`${styles.nodeGroup} ${isSel ? styles.nodeSelected : ""} ${dimmed ? styles.nodeDim : ""}`}
                       onClick={() => setSelectedPath(node.path)}
@@ -410,7 +530,7 @@ export function KnowledgeGraphCanvas({
                         {label}
                       </text>
                       <text x={14} y={37} className={styles.nodeMeta}>
-                        {node.type} · {node.id.slice(0, 16)}
+                        {node.type} · {degreeMap.get(node.path) ?? 0} links
                       </text>
                     </g>
                   );
@@ -461,6 +581,7 @@ export function KnowledgeGraphCanvas({
                         className={styles.inspectorLinkRow}
                         onClick={() => {
                           setActiveType("all");
+                          setOrphansOnly(false);
                           setSelectedPath(target.path);
                         }}
                       >
@@ -484,6 +605,7 @@ export function KnowledgeGraphCanvas({
                         className={styles.inspectorLinkRow}
                         onClick={() => {
                           setActiveType("all");
+                          setOrphansOnly(false);
                           setSelectedPath(source.path);
                         }}
                       >

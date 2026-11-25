@@ -1119,8 +1119,10 @@ def create_app(
                     extra_shared.add(qv)
             if invite_target_ws:
                 extra_shared.add(invite_target_ws)
-            if method == "POST" and path in (
+            if method in ("POST", "PUT") and path in (
                 "/api/workspace/push", "/api/workspace/pull", "/api/workspace/publish",
+                "/api/workspace/document", "/api/workspace/document/move",
+                "/api/workspace/document/move/preview", "/api/workspace/document/delete",
             ):
                 try:
                     raw = await request.body()
@@ -2371,40 +2373,58 @@ def create_app(
             return base
         raise HTTPException(403, 'Only private writable workspaces can be edited here')
 
+    def _document_write_target(request, slug):
+        subject = subject_of(request)
+        target = (slug or "").strip()
+        if target in (system_mounts.GLOBAL_SLUG, system_mounts.SYSTEM_SLUG):
+            raise HTTPException(403, 'Platform and system workspaces cannot be edited here')
+        base = _read_target(request, slug)
+        own = active_workspaces(wsr.root, subject)
+        if base == wsr.workspace_dir(subject) or any(Path(m.path) == base and m.write for m in own):
+            return base
+        if target and membership_mod.is_member(wsr.root, target, subject) in ("owner", "contributor"):
+            return base
+        raise HTTPException(403, 'Only writable personal or owner/contributor shared workspaces can be edited here')
+
     from control_plane.workspace_documents import register as register_workspace_documents
-    register_workspace_documents(app, subject_of, _read_target, _private_write_target, wsr)
+    register_workspace_documents(app, subject_of, _read_target, _document_write_target, wsr)
 
     from control_plane.discussion_review import register as register_discussion_review
     register_discussion_review(app, subject_of, _private_write_target, wsr, settings.meeting_api_url if settings else '',
                                lambda request, text: _transcript_completion(request, text=text, task='discussion'))
 
     @app.post("/api/workspace/upload")
-    async def ws_upload(request: Request, files: list[UploadFile] = File(...)):
+    async def ws_upload(request: Request, files: list[UploadFile] = File(...), slug: Optional[str] = None):
         if not files:
             raise HTTPException(status_code=400, detail="no files uploaded")
         subject = subject_of(request)
-        try:
-            memberships = mindex.list(subject)
-        except Exception:  # noqa: BLE001 — match dispatch's private-only fallback
-            logger.warning("membership-index lookup failed for upload subject=%s — selecting private mounts only",
-                           subject)
-            memberships = None
-        mounts = build_mount_set(dispatcher.settings, subject, memberships)
-        try:
-            worker_path = Path(worker_cwd(wsr.root, subject, mounts)).resolve()
-            workspace_root = Path(wsr.root).resolve()
-        except (OSError, RuntimeError, ValueError):
-            raise HTTPException(status_code=409, detail="no mounted workspace available")
-        if worker_path == workspace_root or workspace_root not in worker_path.parents:
-            raise HTTPException(status_code=400, detail="invalid mounted workspace")
-        selected = next(
-            (mount for mount in mounts if Path(mount["path"]).resolve() == worker_path),
-            None,
-        )
-        if selected is None:
-            raise HTTPException(status_code=409, detail="worker workspace is not mounted")
-        if selected.get("write") is not True:
-            raise HTTPException(status_code=403, detail="selected workspace is read-only")
+        workspace_root = Path(wsr.root).resolve()
+        if slug and slug.strip():
+            worker_path = _document_write_target(request, slug).resolve()
+            if worker_path == workspace_root or workspace_root not in worker_path.parents:
+                raise HTTPException(status_code=400, detail="invalid target workspace")
+        else:
+            try:
+                memberships = mindex.list(subject)
+            except Exception:  # noqa: BLE001 — match dispatch's private-only fallback
+                logger.warning("membership-index lookup failed for upload subject=%s — selecting private mounts only",
+                               subject)
+                memberships = None
+            mounts = build_mount_set(dispatcher.settings, subject, memberships)
+            try:
+                worker_path = Path(worker_cwd(wsr.root, subject, mounts)).resolve()
+            except (OSError, RuntimeError, ValueError):
+                raise HTTPException(status_code=409, detail="no mounted workspace available")
+            if worker_path == workspace_root or workspace_root not in worker_path.parents:
+                raise HTTPException(status_code=400, detail="invalid mounted workspace")
+            selected = next(
+                (mount for mount in mounts if Path(mount["path"]).resolve() == worker_path),
+                None,
+            )
+            if selected is None:
+                raise HTTPException(status_code=409, detail="worker workspace is not mounted")
+            if selected.get("write") is not True:
+                raise HTTPException(status_code=403, detail="selected workspace is read-only")
         uploads = worker_path / "uploads"
         try:
             uploads.mkdir(parents=True, exist_ok=True)

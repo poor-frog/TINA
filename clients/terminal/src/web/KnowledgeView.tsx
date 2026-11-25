@@ -1,8 +1,12 @@
 "use client";
-/** KnowledgeView — Full Knowledge Hub for TINA's Production Web UI (`/?nav=knowledge`).
- *  Unifies Personal & Extra workspaces, Shared Team Wikis, and the read-only `_global` Platform Guide
- *  with Markdown/MDX reading & inline editing, [[wikilink]] navigation, full-text search, file uploads,
- *  Meeting Source Provenance checks, Entity-Lane Knowledge Graph, Git History + Diff, and GitHub Sync. */
+/** KnowledgeView — Full Knowledge Hub v2 for TINA's Production Web UI (`/?nav=knowledge`).
+ *  Unifies Personal & Extra workspaces, Shared Team Wikis (owner/contributor direct editing & uploads),
+ *  and the read-only `_global` Platform Guide with:
+ *  - Inline Ask Tina Copilot Drawer (1-click Summarize / Extract Tasks / Suggest Links + auto-refresh)
+ *  - Split-Preview Markdown Editor with formatting toolbar, `[[` wikilink autocomplete, and Unsaved guard
+ *  - Reading Outline (H2/H3 TOC), live Backlinks, Meeting Provenance, and Cross-Workspace Full-Text Search
+ *  - URL Deep-Linking (`?nav=knowledge&ws=&doc=&tab=`) + Obsidian Back/Forward history (`Alt+← / Alt+→`)
+ *  - Drag-and-Drop file uploads, Entity-Lane Knowledge Graph (Pan/Fit/1-hop/Orphans), and GitHub Sync. */
 import {
   useCallback,
   useEffect,
@@ -10,11 +14,14 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type DragEvent,
   type FormEvent,
   type ReactNode,
 } from "react";
 import { WebIcon } from "./Icons";
 import { KnowledgeGraphCanvas } from "./KnowledgeGraphCanvas";
+import { KnowledgeCopilotDrawer } from "./KnowledgeCopilotDrawer";
+import { KnowledgeDocEditor } from "./KnowledgeDocEditor";
 import { MdxDoc } from "../ui-kit/MdxDoc";
 import {
   DocMetaContext,
@@ -74,7 +81,6 @@ type EntityFilter = "all" | "meeting" | "person" | "project" | "task" | "docs";
 
 interface WorkspaceEntry {
   id: string;
-  /** Undefined targets the caller's primary personal baseline; otherwise the workspace slug / shared id / `_global`. */
   slug?: string;
   slotSlug?: string;
   name: string;
@@ -89,6 +95,27 @@ interface TreeNode {
   path: string;
   isDir: boolean;
   children: TreeNode[];
+}
+
+interface CrossSearchHit extends WorkspaceSearchHit {
+  wsId: string;
+  wsName: string;
+}
+
+interface HistoryEntry {
+  wsId: string;
+  path: string;
+}
+
+interface OutlineHeading {
+  level: 2 | 3;
+  text: string;
+}
+
+export interface KnowledgeDeepLink {
+  ws?: string;
+  doc?: string;
+  tab?: KnowledgeTab;
 }
 
 function buildTree(paths: string[]): TreeNode[] {
@@ -123,6 +150,23 @@ function parseFrontmatter(text: string): { fm: Array<[string, string]>; body: st
     if (idx > 0) fm.push([line.slice(0, idx).trim(), line.slice(idx + 1).trim()]);
   }
   return { fm, body: m[2] };
+}
+
+function extractHeadings(markdown: string): OutlineHeading[] {
+  const headings: OutlineHeading[] = [];
+  let inFence = false;
+  for (const raw of markdown.split(/\r?\n/)) {
+    if (raw.trim().startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const m = raw.match(/^(#{2,3})\s+(.+?)\s*#*\s*$/);
+    if (m) {
+      headings.push({ level: m[1].length as 2 | 3, text: m[2].replace(/[*_`[\]]/g, "").trim() });
+    }
+  }
+  return headings;
 }
 
 function matchesEntityFilter(path: string, filter: EntityFilter): boolean {
@@ -186,7 +230,7 @@ function newDocTemplate(kind: string, title: string): { path: string; content: s
   if (kind === "person") {
     return {
       path: `kg/entities/person/${slug}.md`,
-      content: `---\nid: person/${slug}\ntype: person\ntitle: ${cleanTitle}\nupdated: ${today}\n---\n\n# ${cleanTitle}\n\n- Role:\n- Related projects:\n`,
+      content: `---\nid: person/${slug}\ntype: person\ntitle: ${cleanTitle}\nupdated: ${today}\n---\n\n# ${cleanTitle}\n\n## Role\n\n## Related projects\n`,
     };
   }
   if (kind === "project") {
@@ -207,13 +251,64 @@ function newDocTemplate(kind: string, title: string): { path: string; content: s
   };
 }
 
+function readUrlDeepLink(): KnowledgeDeepLink {
+  if (typeof window === "undefined") return {};
+  const sp = new URLSearchParams(window.location.search);
+  const tabRaw = sp.get("tab");
+  const tab: KnowledgeTab | undefined =
+    tabRaw === "documents" || tabRaw === "graph" || tabRaw === "sync" ? tabRaw : undefined;
+  return {
+    ws: sp.get("ws") || undefined,
+    doc: sp.get("doc") || undefined,
+    tab,
+  };
+}
+
+function syncKnowledgeUrl(wsSlug: string | undefined, docPath: string | null, tab: KnowledgeTab) {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (url.pathname !== "/") return;
+  url.searchParams.set("nav", "knowledge");
+  if (wsSlug) url.searchParams.set("ws", wsSlug);
+  else url.searchParams.delete("ws");
+  if (docPath) url.searchParams.set("doc", docPath);
+  else url.searchParams.delete("doc");
+  url.searchParams.set("tab", tab);
+  const next = `${url.pathname}?${url.searchParams.toString()}${url.hash}`;
+  if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== next) {
+    try {
+      window.history.replaceState(window.history.state, "", next);
+    } catch {
+      /* ignore sandboxed history */
+    }
+  }
+}
+
+function resolveWorkspaceIdBySlug(workspaces: WorkspaceEntry[], wsParam?: string): string | null {
+  if (!wsParam || wsParam === "personal") return "personal";
+  if (wsParam === "_global" || wsParam === "global") return "global";
+  const match = workspaces.find((w) => w.slug === wsParam || w.slotSlug === wsParam || w.id === wsParam);
+  return match?.id ?? null;
+}
+
 export function KnowledgeView({
   onAskTina,
   onOpenGitHubSettings,
+  onOpenMeeting,
+  initialTarget,
+  onConsumeInitialTarget,
 }: {
   onAskTina: (prompt: string, mode?: "send" | "draft") => void;
   onOpenGitHubSettings?: () => void;
+  onOpenMeeting?: (meetingId: string) => void;
+  initialTarget?: KnowledgeDeepLink | null;
+  onConsumeInitialTarget?: () => void;
 }) {
+  const bootLink = useMemo(() => initialTarget ?? readUrlDeepLink(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const pendingDeepLinkRef = useRef<KnowledgeDeepLink | null>(
+    bootLink.ws || bootLink.doc || bootLink.tab ? bootLink : null,
+  );
+
   // ── Workspaces state ─────────────────────────────────────────────────
   const [attached, setAttached] = useState<AttachedWorkspaces>({ active: null, slots: {} });
   const [activeSet, setActiveSet] = useState<ActiveMount[]>([]);
@@ -235,20 +330,33 @@ export function KnowledgeView({
   const [entityFilter, setEntityFilter] = useState<EntityFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMode, setSearchMode] = useState<"files" | "content">("files");
-  const [contentHits, setContentHits] = useState<WorkspaceSearchHit[]>([]);
+  const [searchAllWorkspaces, setSearchAllWorkspaces] = useState(false);
+  const [contentHits, setContentHits] = useState<CrossSearchHit[]>([]);
   const [contentSearchStatus, setContentSearchStatus] = useState("");
   const [searchingContent, setSearchingContent] = useState(false);
 
-  // ── Main pane tabs & Document state ──────────────────────────────────
-  const [activeTab, setActiveTab] = useState<KnowledgeTab>("documents");
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  // ── Main pane tabs, Document, Copilot & History state ────────────────
+  const [activeTab, setActiveTab] = useState<KnowledgeTab>(bootLink.tab ?? "documents");
+  const [selectedPath, setSelectedPath] = useState<string | null>(bootLink.doc ?? null);
   const [doc, setDoc] = useState<WorkspaceDocument | null>(null);
   const [docLoading, setDocLoading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const [editPreview, setEditPreview] = useState(false);
   const [commitOnSave, setCommitOnSave] = useState(true);
   const [commitMsg, setCommitMsg] = useState("");
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [graphRefreshKey, setGraphRefreshKey] = useState(0);
+  const [backlinks, setBacklinks] = useState<WorkspaceSearchHit[]>([]);
+  const [backlinksLoading, setBacklinksLoading] = useState(false);
+
+  // Obsidian-style Back / Forward history stack
+  const [navHistory, setNavHistory] = useState<HistoryEntry[]>([]);
+  const [navIndex, setNavIndex] = useState<number>(-1);
+  const navigatingHistoryRef = useRef(false);
+
+  // Drag & drop upload state
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepthRef = useRef(0);
 
   // ── Modals: Create Doc & Move Doc ────────────────────────────────────
   const [newDocOpen, setNewDocOpen] = useState(false);
@@ -279,6 +387,7 @@ export function KnowledgeView({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const docProseRef = useRef<HTMLDivElement>(null);
 
   const workspaces = useMemo<WorkspaceEntry[]>(() => {
     const entries: WorkspaceEntry[] = [];
@@ -320,7 +429,7 @@ export function KnowledgeView({
         kind: "shared",
         role: mem.role,
         mounted: isMounted,
-        readOnly: mem.role === "viewer",
+        readOnly: mem.role !== "owner" && mem.role !== "contributor",
       });
     }
 
@@ -345,6 +454,25 @@ export function KnowledgeView({
     [workspaces, selectedWsId],
   );
 
+  // Unsaved draft guard helper
+  const isUnsaved = editing && doc !== null && draft !== doc.content;
+  const confirmDiscardDraft = useCallback((): boolean => {
+    if (!isUnsaved) return true;
+    if (typeof window === "undefined") return true;
+    return window.confirm("You have unsaved Markdown changes. Discard them?");
+  }, [isUnsaved]);
+
+  // ── Apply external deep-link (e.g. from Cmd+K Global Search) ─────────
+  useEffect(() => {
+    if (!initialTarget) return;
+    pendingDeepLinkRef.current = initialTarget;
+    if (initialTarget.tab) setActiveTab(initialTarget.tab);
+    const resolvedWs = resolveWorkspaceIdBySlug(workspaces, initialTarget.ws);
+    if (resolvedWs) setSelectedWsId(resolvedWs);
+    if (initialTarget.doc) setSelectedPath(initialTarget.doc);
+    onConsumeInitialTarget?.();
+  }, [initialTarget, workspaces, onConsumeInitialTarget]);
+
   // ── Load workspace catalog ───────────────────────────────────────────
   const loadWorkspaces = useCallback(async () => {
     setWsLoading(true);
@@ -368,6 +496,72 @@ export function KnowledgeView({
     void loadWorkspaces();
   }, [loadWorkspaces]);
 
+  // Honor URL `?ws=` once workspace list is hydrated
+  useEffect(() => {
+    if (wsLoading || !pendingDeepLinkRef.current?.ws) return;
+    const targetId = resolveWorkspaceIdBySlug(workspaces, pendingDeepLinkRef.current.ws);
+    if (targetId) {
+      setSelectedWsId(targetId);
+      pendingDeepLinkRef.current = { ...pendingDeepLinkRef.current, ws: undefined };
+    }
+  }, [wsLoading, workspaces]);
+
+  // Sync URL query params on navigation
+  useEffect(() => {
+    if (wsLoading || !activeWs) return;
+    syncKnowledgeUrl(activeWs.slug, selectedPath, activeTab);
+  }, [wsLoading, activeWs, selectedPath, activeTab]);
+
+  // Record Obsidian reading history whenever (ws, path) settles
+  useEffect(() => {
+    if (!activeWs || !selectedPath) return;
+    if (navigatingHistoryRef.current) {
+      navigatingHistoryRef.current = false;
+      return;
+    }
+    setNavHistory((prev) => {
+      const cur = prev[navIndex];
+      if (cur && cur.wsId === activeWs.id && cur.path === selectedPath) return prev;
+      const trimmed = prev.slice(0, navIndex + 1);
+      const next = [...trimmed, { wsId: activeWs.id, path: selectedPath }].slice(-40);
+      setNavIndex(next.length - 1);
+      return next;
+    });
+  }, [activeWs?.id, selectedPath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const canGoBack = navIndex > 0;
+  const canGoForward = navIndex >= 0 && navIndex < navHistory.length - 1;
+
+  const goHistory = useCallback(
+    (delta: -1 | 1) => {
+      const targetIdx = navIndex + delta;
+      const entry = navHistory[targetIdx];
+      if (!entry || !confirmDiscardDraft()) return;
+      navigatingHistoryRef.current = true;
+      setNavIndex(targetIdx);
+      setEditing(false);
+      setSelectedWsId(entry.wsId);
+      setSelectedPath(entry.path);
+      setActiveTab("documents");
+    },
+    [navIndex, navHistory, confirmDiscardDraft],
+  );
+
+  // Alt+Left / Alt+Right keyboard shortcuts for Back / Forward
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey && e.key === "ArrowLeft" && canGoBack) {
+        e.preventDefault();
+        goHistory(-1);
+      } else if (e.altKey && e.key === "ArrowRight" && canGoForward) {
+        e.preventDefault();
+        goHistory(1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canGoBack, canGoForward, goHistory]);
+
   // ── Load file tree & metadata for selected workspace ─────────────────
   const loadTreeAndMeta = useCallback(async (ws: WorkspaceEntry, keepSelection = true) => {
     setTreeLoading(true);
@@ -379,7 +573,9 @@ export function KnowledgeView({
       const [treeFiles, wsPurpose] = await Promise.all([
         listWorkspaceTree(opts),
         ws.kind === "global"
-          ? Promise.resolve("Platform-wide read-only guidelines, handbook, and email templates mounted into every TINA session.")
+          ? Promise.resolve(
+              "Platform-wide read-only guidelines, handbook, and email templates mounted into every TINA session.",
+            )
           : readWorkspacePurpose(opts).catch(() => ""),
       ]);
       setFiles(treeFiles);
@@ -389,10 +585,16 @@ export function KnowledgeView({
       setPublishRepoName(
         `tina-${ws.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "knowledge"}`,
       );
-      setSelectedPath((prev) => {
-        if (keepSelection && prev && treeFiles.includes(prev)) return prev;
-        return pickInitialDoc(treeFiles);
-      });
+      const pendingDoc = pendingDeepLinkRef.current?.doc;
+      if (pendingDoc && treeFiles.includes(pendingDoc)) {
+        pendingDeepLinkRef.current = { ...pendingDeepLinkRef.current, doc: undefined };
+        setSelectedPath(pendingDoc);
+      } else {
+        setSelectedPath((prev) => {
+          if (keepSelection && prev && treeFiles.includes(prev)) return prev;
+          return pickInitialDoc(treeFiles);
+        });
+      }
     } catch (err) {
       setFiles([]);
       setSelectedPath(null);
@@ -408,7 +610,7 @@ export function KnowledgeView({
     setInviteLink(null);
     setExpandedSha(null);
     setDiffsBySha({});
-    void loadTreeAndMeta(activeWs, false);
+    void loadTreeAndMeta(activeWs, Boolean(pendingDeepLinkRef.current?.doc));
   }, [activeWs?.id, activeWs?.slug]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load selected document ───────────────────────────────────────────
@@ -420,14 +622,12 @@ export function KnowledgeView({
     }
     setDocLoading(true);
     setEditing(false);
-    setEditPreview(false);
     try {
       const loaded = await readWorkspaceDocument(path, slug ? { slug } : undefined);
       setDoc(loaded);
       setDraft(loaded.content);
       setError(null);
     } catch {
-      // Fall back to plain file read (e.g., JSON/non-document files)
       try {
         const raw = await readWorkspaceFile(path, slug ? { slug } : undefined);
         if (raw === null) {
@@ -450,13 +650,66 @@ export function KnowledgeView({
     void loadDocument(selectedPath, activeWs?.slug);
   }, [selectedPath, activeWs?.slug, loadDocument]);
 
+  // ── Compute live Backlinks for open document ─────────────────────────
+  const parsedDoc = useMemo(() => (doc ? parseFrontmatter(doc.content) : null), [doc]);
+  const outlineHeadings = useMemo(
+    () => (parsedDoc ? extractHeadings(parsedDoc.body) : []),
+    [parsedDoc],
+  );
+  const sourceMeetingId = useMemo(() => {
+    if (!selectedPath) return null;
+    const pathMatch = /^wiki\/meetings\/(\d+)\//.exec(selectedPath);
+    if (pathMatch) return pathMatch[1];
+    const fmRow = parsedDoc?.fm.find(([k]) => k.toLowerCase() === "meeting_id");
+    if (fmRow && /^\d+$/.test(fmRow[1].replace(/['"]/g, ""))) return fmRow[1].replace(/['"]/g, "");
+    return null;
+  }, [selectedPath, parsedDoc]);
+
+  useEffect(() => {
+    if (!selectedPath || !activeWs || activeTab !== "documents") {
+      setBacklinks([]);
+      return;
+    }
+    const fmTitle = parsedDoc?.fm.find(([k]) => k.toLowerCase() === "title")?.[1]?.replace(/^['"]|['"]$/g, "").trim();
+    const stem = (selectedPath.split("/").pop() ?? "").replace(/\.md$/i, "");
+    const queryTerm = fmTitle || stem;
+    if (!queryTerm || queryTerm.length < 2 || queryTerm.toLowerCase() === "readme") {
+      setBacklinks([]);
+      return;
+    }
+    let alive = true;
+    setBacklinksLoading(true);
+    void searchWorkspaceContent(`[[${queryTerm}`, activeWs.slug ? { slug: activeWs.slug } : undefined)
+      .then((res) => {
+        if (!alive) return;
+        const uniqueByPath = new Map<string, WorkspaceSearchHit>();
+        for (const hit of res.hits) {
+          if (hit.path !== selectedPath && !uniqueByPath.has(hit.path)) {
+            uniqueByPath.set(hit.path, hit);
+          }
+        }
+        setBacklinks([...uniqueByPath.values()].slice(0, 12));
+      })
+      .catch(() => {
+        if (alive) setBacklinks([]);
+      })
+      .finally(() => {
+        if (alive) setBacklinksLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [selectedPath, activeWs, activeTab, parsedDoc]);
+
   // ── Load Git history & remote sync when on History & Sync tab ────────
   const loadGitAndSync = useCallback(async (ws: WorkspaceEntry) => {
     const opts = ws.slug ? { slug: ws.slug } : undefined;
     const [g, rs, tok] = await Promise.all([
       readWorkspaceGit(opts).catch(() => null),
       ws.kind === "global" ? Promise.resolve(null) : gitRemoteStatus(opts).catch(() => null),
-      ws.kind === "global" ? Promise.resolve({ set: false, masked: null }) : getGitToken().catch(() => ({ set: false, masked: null })),
+      ws.kind === "global"
+        ? Promise.resolve({ set: false, masked: null })
+        : getGitToken().catch(() => ({ set: false, masked: null })),
     ]);
     setGitState(g);
     setRemoteStatus(rs);
@@ -469,9 +722,19 @@ export function KnowledgeView({
     }
   }, [activeTab, activeWs, loadGitAndSync]);
 
+  // Auto-refresh callback triggered when Ask Tina Copilot commits edits
+  const handleWorkspaceMutated = useCallback(() => {
+    if (!activeWs) return;
+    invalidateDocLinkCaches();
+    setGraphRefreshKey((k) => k + 1);
+    void loadTreeAndMeta(activeWs, true);
+    if (selectedPath) void loadDocument(selectedPath, activeWs.slug);
+  }, [activeWs, selectedPath, loadTreeAndMeta, loadDocument]);
+
   // ── In-place [[wikilink]] navigation ─────────────────────────────────
   const handleDocNavigate: DocNavigate = useCallback(
     (detail) => {
+      if (!confirmDiscardDraft()) return;
       void (async () => {
         const targetSlug = "slug" in detail ? detail.slug : activeWs?.slug;
         const resolved = await resolveDocRef(
@@ -490,7 +753,7 @@ export function KnowledgeView({
         setSelectedPath(resolved.path);
       })();
     },
-    [activeWs?.slug, selectedPath, workspaces],
+    [activeWs?.slug, selectedPath, workspaces, confirmDiscardDraft],
   );
 
   // ── Tree filtering ───────────────────────────────────────────────────
@@ -514,18 +777,33 @@ export function KnowledgeView({
     });
   };
 
-  // ── Full-text content search ─────────────────────────────────────────
+  // ── Full-text content search (current workspace OR all workspaces) ───
   const runContentSearch = async (e?: FormEvent) => {
     e?.preventDefault();
     const q = searchQuery.trim();
     if (!q || !activeWs) return;
     setSearchingContent(true);
-    setContentSearchStatus("Searching…");
+    setContentSearchStatus(searchAllWorkspaces ? "Searching all workspaces…" : "Searching…");
     try {
-      const res = await searchWorkspaceContent(q, activeWs.slug ? { slug: activeWs.slug } : undefined);
-      setContentHits(res.hits);
+      const targets = searchAllWorkspaces ? workspaces : [activeWs];
+      const settled = await Promise.all(
+        targets.map(async (ws) => {
+          try {
+            const res = await searchWorkspaceContent(q, ws.slug ? { slug: ws.slug } : undefined);
+            return {
+              bounded: res.bounded,
+              hits: res.hits.map<CrossSearchHit>((h) => ({ ...h, wsId: ws.id, wsName: ws.name })),
+            };
+          } catch {
+            return { bounded: false, hits: [] as CrossSearchHit[] };
+          }
+        }),
+      );
+      const merged = settled.flatMap((r) => r.hits).slice(0, 60);
+      const anyBounded = settled.some((r) => r.bounded);
+      setContentHits(merged);
       setContentSearchStatus(
-        `${res.hits.length} match${res.hits.length === 1 ? "" : "es"}${res.bounded ? " (limit reached)" : ""}`,
+        `${merged.length} match${merged.length === 1 ? "" : "es"}${searchAllWorkspaces ? ` across ${targets.length} workspaces` : ""}${anyBounded ? " (limit reached)" : ""}`,
       );
     } catch (err) {
       setContentHits([]);
@@ -554,6 +832,7 @@ export function KnowledgeView({
       setEditing(false);
       setCommitMsg("");
       invalidateDocLinkCaches();
+      setGraphRefreshKey((k) => k + 1);
       setNotice(
         res.commit
           ? `Saved & committed (${res.commit.slice(0, 7)})`
@@ -588,6 +867,7 @@ export function KnowledgeView({
         commit_message: `Create ${targetPath}`,
       });
       invalidateDocLinkCaches();
+      setGraphRefreshKey((k) => k + 1);
       setNewDocOpen(false);
       setNewDocTitle("");
       setNewDocCustomPath("");
@@ -637,6 +917,7 @@ export function KnowledgeView({
         expected_plan: movePreview?.fingerprint ?? null,
       });
       invalidateDocLinkCaches();
+      setGraphRefreshKey((k) => k + 1);
       setMoveOpen(false);
       setMovePreview(null);
       await loadTreeAndMeta(activeWs, false);
@@ -666,6 +947,7 @@ export function KnowledgeView({
         slug: activeWs.slug,
       });
       invalidateDocLinkCaches();
+      setGraphRefreshKey((k) => k + 1);
       setNotice(`Deleted ${selectedPath}`);
       await loadTreeAndMeta(activeWs, false);
     } catch (err) {
@@ -675,23 +957,58 @@ export function KnowledgeView({
     }
   };
 
+  const performUpload = useCallback(
+    async (fileList: File[]) => {
+      if (!fileList.length || !activeWs || activeWs.readOnly) return;
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const res = await uploadWorkspaceFiles(fileList, activeWs.slug ? { slug: activeWs.slug } : undefined);
+        invalidateDocLinkCaches();
+        await loadTreeAndMeta(activeWs, true);
+        setNotice(`Uploaded ${res.files.length} file(s) to ${activeWs.name}/uploads/.`);
+      } catch (err) {
+        setError(presentError(err).headline);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeWs, loadTreeAndMeta],
+  );
+
   const handleUploadChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!selected.length || !activeWs) return;
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const res = await uploadWorkspaceFiles(selected);
-      invalidateDocLinkCaches();
-      await loadTreeAndMeta(activeWs, true);
-      setNotice(`Uploaded ${res.files.length} file(s) to uploads/.`);
-    } catch (err) {
-      setError(presentError(err).headline);
-    } finally {
-      setBusy(false);
-    }
+    await performUpload(selected);
+  };
+
+  const handleDragEnter = (e: DragEvent<HTMLDivElement>) => {
+    if (activeWs?.readOnly || !e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setDragActive(true);
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    if (activeWs?.readOnly || !e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    if (!dragActive) return;
+    e.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragActive(false);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setDragActive(false);
+    if (activeWs?.readOnly) return;
+    const dropped = Array.from(e.dataTransfer?.files ?? []);
+    if (dropped.length) void performUpload(dropped);
   };
 
   // ── Workspace & GitHub Sync mutations ────────────────────────────────
@@ -757,6 +1074,16 @@ export function KnowledgeView({
     }
   };
 
+  const scrollToHeading = (headingText: string) => {
+    const container = docProseRef.current;
+    if (!container) return;
+    const candidates = Array.from(container.querySelectorAll<HTMLElement>("h1, h2, h3, h4"));
+    const match = candidates.find(
+      (el) => (el.textContent || "").trim().toLowerCase() === headingText.toLowerCase(),
+    );
+    match?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  };
+
   // ── Recursive Tree Renderer ──────────────────────────────────────────
   const renderTree = (nodes: TreeNode[], depth = 0): ReactNode =>
     nodes.map((node) => {
@@ -788,6 +1115,7 @@ export function KnowledgeView({
           className={`${styles.treeRow} ${isSelected ? styles.treeRowActive : ""}`}
           style={{ paddingLeft: 22 + depth * 14 }}
           onClick={() => {
+            if (!confirmDiscardDraft()) return;
             setSelectedPath(node.path);
             setActiveTab("documents");
             setMobileRailOpen(false);
@@ -801,10 +1129,16 @@ export function KnowledgeView({
       );
     });
 
-  const parsedDoc = useMemo(() => (doc ? parseFrontmatter(doc.content) : null), [doc]);
+  const showOutlineRail = !editing && !copilotOpen && (outlineHeadings.length > 0 || backlinks.length > 0 || backlinksLoading);
 
   return (
-    <div className={styles.shell}>
+    <div
+      className={`${styles.shell} ${dragActive ? styles.dropActive : ""}`}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <input
         ref={fileInputRef}
         type="file"
@@ -813,6 +1147,15 @@ export function KnowledgeView({
         aria-label="Upload workspace files"
         onChange={handleUploadChange}
       />
+
+      {dragActive && activeWs && !activeWs.readOnly && (
+        <div className={styles.dropOverlay} aria-hidden="true">
+          <div className={styles.dropBadge}>
+            <WebIcon name="upload" size={20} />
+            <span>Drop files to upload into {activeWs.name}/uploads/</span>
+          </div>
+        </div>
+      )}
 
       {/* ── Left Navigator Rail ── */}
       <aside className={`${styles.rail} ${mobileRailOpen ? styles.railOpen : ""}`} aria-label="Knowledge navigator">
@@ -842,6 +1185,7 @@ export function KnowledgeView({
                   aria-current={active ? "true" : undefined}
                   className={`${styles.wsRow} ${active ? styles.wsRowActive : ""}`}
                   onClick={() => {
+                    if (!confirmDiscardDraft()) return;
                     setSelectedWsId(ws.id);
                     setMobileRailOpen(false);
                   }}
@@ -906,14 +1250,8 @@ export function KnowledgeView({
               <button
                 type="button"
                 className={styles.tinyBtn}
-                disabled={activeWs?.readOnly || activeWs?.kind === "shared"}
-                title={
-                  activeWs?.readOnly
-                    ? "Read-only workspace"
-                    : activeWs?.kind === "shared"
-                      ? "Use Ask Tina or Git to add files in shared workspaces"
-                      : "Create Markdown document"
-                }
+                disabled={activeWs?.readOnly}
+                title={activeWs?.readOnly ? "Read-only workspace" : "Create Markdown document"}
                 onClick={() => setNewDocOpen(true)}
               >
                 <WebIcon name="plus" size={12} />
@@ -923,7 +1261,7 @@ export function KnowledgeView({
                 type="button"
                 className={styles.tinyBtn}
                 disabled={activeWs?.readOnly}
-                title="Upload files to workspace"
+                title={activeWs?.readOnly ? "Read-only workspace" : "Upload files (or drag & drop anywhere)"}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <WebIcon name="upload" size={12} />
@@ -987,6 +1325,16 @@ export function KnowledgeView({
                 </button>
               )}
             </div>
+            {searchMode === "content" && (
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 11.5, color: "var(--tw-text-3)" }}>
+                <input
+                  type="checkbox"
+                  checked={searchAllWorkspaces}
+                  onChange={(e) => setSearchAllWorkspaces(e.target.checked)}
+                />
+                <span>Search all workspaces</span>
+              </label>
+            )}
           </form>
 
           {searchMode === "files" && (
@@ -1024,17 +1372,24 @@ export function KnowledgeView({
               )}
               {contentHits.map((hit) => (
                 <button
-                  key={`${hit.path}:${hit.line}`}
+                  key={`${hit.wsId}:${hit.path}:${hit.line}`}
                   type="button"
                   className={styles.searchHit}
                   onClick={() => {
+                    if (!confirmDiscardDraft()) return;
+                    if (hit.wsId !== activeWs?.id) {
+                      pendingDeepLinkRef.current = { doc: hit.path };
+                      setSelectedWsId(hit.wsId);
+                    }
                     setSelectedPath(hit.path);
                     setActiveTab("documents");
                     setMobileRailOpen(false);
                   }}
                 >
                   <span className={styles.searchHitMeta}>
-                    <span className={styles.treeLabel}>{hit.path}</span>
+                    <span className={styles.treeLabel}>
+                      {searchAllWorkspaces ? `[${hit.wsName}] ${hit.path}` : hit.path}
+                    </span>
                     <span>L{hit.line}</span>
                   </span>
                   <span className={styles.searchHitText}>{hit.text}</span>
@@ -1042,7 +1397,7 @@ export function KnowledgeView({
               ))}
               {!contentHits.length && !contentSearchStatus && (
                 <p className={styles.cardSub} style={{ padding: "8px 6px" }}>
-                  Press Enter or Go to search inside Markdown files of {activeWs?.name}.
+                  Press Enter or Go to search inside Markdown files{searchAllWorkspaces ? " across all workspaces" : ` of ${activeWs?.name}`}.
                 </p>
               )}
             </>
@@ -1099,36 +1454,57 @@ export function KnowledgeView({
             </div>
           </div>
 
-          <div className={styles.tabs} role="tablist" aria-label="Knowledge mode">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div className={styles.tabs} role="tablist" aria-label="Knowledge mode">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "documents"}
+                className={`${styles.tabBtn} ${activeTab === "documents" ? styles.tabBtnActive : ""}`}
+                onClick={() => {
+                  if (!confirmDiscardDraft()) return;
+                  setActiveTab("documents");
+                }}
+              >
+                <WebIcon name="fileText" size={14} />
+                <span>Documents</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "graph"}
+                className={`${styles.tabBtn} ${activeTab === "graph" ? styles.tabBtnActive : ""}`}
+                onClick={() => {
+                  if (!confirmDiscardDraft()) return;
+                  setActiveTab("graph");
+                }}
+              >
+                <WebIcon name="network" size={14} />
+                <span>Knowledge Graph</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "sync"}
+                className={`${styles.tabBtn} ${activeTab === "sync" ? styles.tabBtnActive : ""}`}
+                onClick={() => {
+                  if (!confirmDiscardDraft()) return;
+                  setActiveTab("sync");
+                }}
+              >
+                <WebIcon name="gitBranch" size={14} />
+                <span>History &amp; Sync</span>
+              </button>
+            </div>
+
             <button
               type="button"
-              role="tab"
-              aria-selected={activeTab === "documents"}
-              className={`${styles.tabBtn} ${activeTab === "documents" ? styles.tabBtnActive : ""}`}
-              onClick={() => setActiveTab("documents")}
+              className={`${styles.btn} ${copilotOpen ? styles.btnPrimary : ""}`}
+              aria-pressed={copilotOpen}
+              onClick={() => setCopilotOpen((v) => !v)}
             >
-              <WebIcon name="fileText" size={14} />
-              <span>Documents</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "graph"}
-              className={`${styles.tabBtn} ${activeTab === "graph" ? styles.tabBtnActive : ""}`}
-              onClick={() => setActiveTab("graph")}
-            >
-              <WebIcon name="network" size={14} />
-              <span>Knowledge Graph</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "sync"}
-              className={`${styles.tabBtn} ${activeTab === "sync" ? styles.tabBtnActive : ""}`}
-              onClick={() => setActiveTab("sync")}
-            >
-              <WebIcon name="gitBranch" size={14} />
-              <span>History &amp; Sync</span>
+              <WebIcon name="tinaAsk" size={14} />
+              <span>Copilot</span>
             </button>
           </div>
         </header>
@@ -1160,25 +1536,52 @@ export function KnowledgeView({
             {selectedPath ? (
               <>
                 <div className={styles.docToolbar}>
-                  <div className={styles.breadcrumb} title={selectedPath}>
-                    <WebIcon name="fileText" size={13} />
-                    <span>{selectedPath}</span>
-                    {doc && (
-                      <span className={styles.wsTag} style={{ marginLeft: 6 }}>
-                        {doc.writable ? "Editable" : "Read-only"}
-                      </span>
-                    )}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    <button
+                      type="button"
+                      className={styles.tinyBtn}
+                      aria-label="Back in reading history"
+                      title="Back (Alt+←)"
+                      disabled={!canGoBack}
+                      onClick={() => goHistory(-1)}
+                    >
+                      <WebIcon name="arrowLeft" size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.tinyBtn}
+                      aria-label="Forward in reading history"
+                      title="Forward (Alt+→)"
+                      disabled={!canGoForward}
+                      onClick={() => goHistory(1)}
+                    >
+                      <WebIcon name="chevronRight" size={12} />
+                    </button>
+                    <div className={styles.breadcrumb} title={selectedPath}>
+                      <WebIcon name="fileText" size={13} />
+                      <span>{selectedPath}</span>
+                      {doc && (
+                        <span className={styles.wsTag} style={{ marginLeft: 6 }}>
+                          {doc.writable ? "Editable" : "Read-only"}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className={styles.docActions}>
+                    {sourceMeetingId && onOpenMeeting && (
+                      <button
+                        type="button"
+                        className={styles.btn}
+                        onClick={() => onOpenMeeting(sourceMeetingId)}
+                      >
+                        <WebIcon name="video" size={13} />
+                        <span>Open meeting</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       className={styles.btn}
-                      onClick={() =>
-                        onAskTina(
-                          `Read "${selectedPath}" in ${activeWs?.name || "my workspace"} and answer questions or suggest updates based on it.`,
-                          "draft",
-                        )
-                      }
+                      onClick={() => setCopilotOpen(true)}
                     >
                       <WebIcon name="tinaAsk" size={13} />
                       <span>Ask Tina</span>
@@ -1217,119 +1620,108 @@ export function KnowledgeView({
                         </button>
                       </>
                     )}
-                    {editing && (
-                      <>
-                        <button
-                          type="button"
-                          className={styles.btn}
-                          onClick={() => setEditPreview((v) => !v)}
-                        >
-                          <WebIcon name="eye" size={13} />
-                          <span>{editPreview ? "Write" : "Preview"}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`${styles.btn} ${styles.btnPrimary}`}
-                          disabled={busy}
-                          onClick={() => void handleSaveDoc()}
-                        >
-                          <WebIcon name="check" size={13} />
-                          <span>{busy ? "Saving…" : "Save"}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.btn}
-                          onClick={() => {
-                            setEditing(false);
-                            setDraft(doc?.content ?? "");
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    )}
                   </div>
                 </div>
 
-                <div className={styles.docScroll}>
-                  <div className={styles.docInner}>
-                    {docLoading ? (
-                      <p className={styles.cardSub}>Loading document…</p>
-                    ) : editing ? (
-                      <div className={styles.editorWrap}>
-                        {editPreview ? (
-                          <div className={styles.docProse}>
+                <div className={styles.docBodySplit}>
+                  <div className={styles.docScroll}>
+                    <div className={styles.docInner} style={editing ? { maxWidth: 1120 } : undefined}>
+                      {docLoading ? (
+                        <p className={styles.cardSub}>Loading document…</p>
+                      ) : editing && doc ? (
+                        <KnowledgeDocEditor
+                          path={selectedPath}
+                          slug={activeWs?.slug}
+                          initialContent={doc.content}
+                          draft={draft}
+                          onDraftChange={setDraft}
+                          files={files}
+                          busy={busy}
+                          commitOnSave={commitOnSave}
+                          onCommitOnSaveChange={setCommitOnSave}
+                          commitMsg={commitMsg}
+                          onCommitMsgChange={setCommitMsg}
+                          onSave={() => void handleSaveDoc()}
+                          onCancel={() => {
+                            if (!confirmDiscardDraft()) return;
+                            setEditing(false);
+                            setDraft(doc.content);
+                          }}
+                          onNavigateDoc={handleDocNavigate}
+                        />
+                      ) : doc && parsedDoc ? (
+                        <>
+                          <MeetingWikiSourceStatus
+                            path={selectedPath}
+                            slug={activeWs?.slug}
+                            content={doc.content}
+                          />
+                          {parsedDoc.fm.length > 0 && (
+                            <div className={styles.frontmatter} aria-label="Document metadata">
+                              {parsedDoc.fm.map(([k, v], i) => (
+                                <span key={`${k}-${i}`} className={styles.fmItem}>
+                                  <span className={styles.fmKey}>{k}</span>
+                                  <span className={styles.fmVal}>{v}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <div ref={docProseRef} className={styles.docProse}>
                             <DocNavContext.Provider value={handleDocNavigate}>
                               <DocMetaContext.Provider value={{ path: selectedPath, slug: activeWs?.slug }}>
-                                <MdxDoc>{parseFrontmatter(draft).body}</MdxDoc>
+                                <MdxDoc>{parsedDoc.body}</MdxDoc>
                               </DocMetaContext.Provider>
                             </DocNavContext.Provider>
                           </div>
-                        ) : (
-                          <textarea
-                            className={styles.editorTextarea}
-                            aria-label="Markdown editor"
-                            value={draft}
-                            onChange={(e) => setDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
-                                e.preventDefault();
-                                void handleSaveDoc();
-                              }
-                            }}
-                          />
-                        )}
-                        <div className={styles.editorBar}>
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-                            <input
-                              type="checkbox"
-                              checked={commitOnSave}
-                              onChange={(e) => setCommitOnSave(e.target.checked)}
-                            />
-                            <span>Commit to Git history</span>
-                          </label>
-                          {commitOnSave && (
-                            <input
-                              type="text"
-                              className={styles.input}
-                              style={{ maxWidth: 320 }}
-                              placeholder={`Update ${selectedPath}`}
-                              aria-label="Commit message"
-                              value={commitMsg}
-                              onChange={(e) => setCommitMsg(e.target.value)}
-                            />
-                          )}
-                        </div>
-                      </div>
-                    ) : doc && parsedDoc ? (
-                      <>
-                        <MeetingWikiSourceStatus
-                          path={selectedPath}
-                          slug={activeWs?.slug}
-                          content={doc.content}
-                        />
-                        {parsedDoc.fm.length > 0 && (
-                          <div className={styles.frontmatter} aria-label="Document metadata">
-                            {parsedDoc.fm.map(([k, v], i) => (
-                              <span key={`${k}-${i}`} className={styles.fmItem}>
-                                <span className={styles.fmKey}>{k}</span>
-                                <span className={styles.fmVal}>{v}</span>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        <div className={styles.docProse}>
-                          <DocNavContext.Provider value={handleDocNavigate}>
-                            <DocMetaContext.Provider value={{ path: selectedPath, slug: activeWs?.slug }}>
-                              <MdxDoc>{parsedDoc.body}</MdxDoc>
-                            </DocMetaContext.Provider>
-                          </DocNavContext.Provider>
-                        </div>
-                      </>
-                    ) : (
-                      <p className={styles.cardSub}>Document could not be loaded.</p>
-                    )}
+                        </>
+                      ) : (
+                        <p className={styles.cardSub}>Document could not be loaded.</p>
+                      )}
+                    </div>
                   </div>
+
+                  {showOutlineRail && (
+                    <aside className={styles.outlineRail} aria-label="Document outline and backlinks">
+                      {outlineHeadings.length > 0 && (
+                        <div className={styles.outlineSection}>
+                          <div className={styles.outlineHead}>On this page</div>
+                          {outlineHeadings.map((h, i) => (
+                            <button
+                              key={`${h.text}-${i}`}
+                              type="button"
+                              className={`${styles.outlineItem} ${h.level === 3 ? styles.outlineSub : ""}`}
+                              onClick={() => scrollToHeading(h.text)}
+                            >
+                              {h.text}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className={styles.outlineSection}>
+                        <div className={styles.outlineHead}>Backlinks ({backlinks.length})</div>
+                        {backlinksLoading ? (
+                          <span className={styles.cardSub}>Checking links…</span>
+                        ) : backlinks.length === 0 ? (
+                          <span className={styles.cardSub}>No incoming [[wikilinks]].</span>
+                        ) : (
+                          backlinks.map((bl) => (
+                            <button
+                              key={`${bl.path}:${bl.line}`}
+                              type="button"
+                              className={styles.inspectorLinkRow}
+                              onClick={() => setSelectedPath(bl.path)}
+                            >
+                              <WebIcon name="link" size={12} />
+                              <span className={styles.treeLabel} title={bl.path}>
+                                {bl.path.split("/").pop()?.replace(/\.md$/i, "") || bl.path}
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </aside>
+                  )}
                 </div>
               </>
             ) : (
@@ -1337,10 +1729,10 @@ export function KnowledgeView({
                 <WebIcon name="bookOpen" size={28} />
                 <h3>Select or create a document</h3>
                 <p>
-                  Browse your workspace Markdown files on the left, explore relationships in the Knowledge Graph, or
-                  view the Platform Guide (<code>_global</code>).
+                  Browse your workspace Markdown files on the left, drop files here to upload, explore the Knowledge
+                  Graph, or read the Platform Guide (<code>_global</code>).
                 </p>
-                {activeWs && !activeWs.readOnly && activeWs.kind !== "shared" && (
+                {activeWs && !activeWs.readOnly && (
                   <button
                     type="button"
                     className={`${styles.btn} ${styles.btnPrimary}`}
@@ -1360,7 +1752,8 @@ export function KnowledgeView({
           <KnowledgeGraphCanvas
             slug={activeWs.slug}
             workspaceName={activeWs.name}
-            isReadOnly={activeWs.readOnly || activeWs.kind === "shared"}
+            isReadOnly={activeWs.readOnly}
+            externalRefreshKey={graphRefreshKey}
             onOpenDocument={(path) => {
               setSelectedPath(path);
               setActiveTab("documents");
@@ -1379,7 +1772,6 @@ export function KnowledgeView({
             <div className={styles.syncGrid}>
               {activeWs.kind !== "global" ? (
                 <>
-                  {/* GitHub Sync Card */}
                   <section className={styles.card}>
                     <div className={styles.cardHead}>
                       <div>
@@ -1498,7 +1890,6 @@ export function KnowledgeView({
                     )}
                   </section>
 
-                  {/* Workspace Purpose, Share & Lifecycle */}
                   <section className={styles.card}>
                     <div className={styles.cardHead}>
                       <div>
@@ -1674,7 +2065,6 @@ export function KnowledgeView({
                 </section>
               )}
 
-              {/* Git Commit History + Diff */}
               <section className={styles.card}>
                 <div className={styles.cardHead}>
                   <div>
@@ -1754,6 +2144,20 @@ export function KnowledgeView({
           </div>
         )}
       </section>
+
+      {/* ── Right Docked Ask Tina Copilot Drawer (P0.1) ── */}
+      {activeWs && (
+        <KnowledgeCopilotDrawer
+          open={copilotOpen}
+          workspaceName={activeWs.name}
+          slug={activeWs.slug}
+          docPath={selectedPath}
+          isReadOnly={activeWs.readOnly}
+          onClose={() => setCopilotOpen(false)}
+          onWorkspaceMutated={handleWorkspaceMutated}
+          onOpenFullAsk={(prompt) => onAskTina(prompt, "draft")}
+        />
+      )}
 
       {/* ── Create Document Modal ── */}
       {newDocOpen && (

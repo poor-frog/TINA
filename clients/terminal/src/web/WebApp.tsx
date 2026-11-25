@@ -35,7 +35,7 @@ import { HomeView } from "./HomeView";
 import { MeetingsView } from "./MeetingsView";
 import { MeetingDetailView } from "./MeetingDetailView";
 import { AskTinaView, type AskTinaPrompt } from "./AskTinaView";
-import { KnowledgeView } from "./KnowledgeView";
+import { KnowledgeView, type KnowledgeDeepLink } from "./KnowledgeView";
 import { TasksView } from "./TasksView";
 import { RoutinesView } from "./RoutinesView";
 import { SettingsView } from "./SettingsView";
@@ -107,6 +107,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
   const [captureOpen, setCaptureOpen] = useState(false);
   const [captureMode, setCaptureMode] = useState<CaptureModalMode>("live");
   const [pendingPrompt, setPendingPrompt] = useState<AskTinaPrompt | null>(null);
+  const [pendingKnowledge, setPendingKnowledge] = useState<KnowledgeDeepLink | null>(null);
 
   const openCapture = useCallback((mode: CaptureModalMode = "live") => {
     setCaptureMode(mode);
@@ -130,6 +131,18 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
     if (typeof window !== "undefined") {
       const target = "/?nav=settings&settingsWorkspace=personal&settingsSection=github";
       try { window.history.pushState({}, "", target); } catch { /* noop */ }
+    }
+  }, []);
+
+  const openKnowledgeDoc = useCallback((docPath: string, wsSlug?: string) => {
+    setPendingKnowledge({ doc: docPath, ws: wsSlug, tab: "documents" });
+    setView("knowledge");
+    setActiveMeetingId(null);
+    setUserMenuOpen(false);
+    if (typeof window !== "undefined") {
+      const sp = new URLSearchParams({ nav: "knowledge", doc: docPath, tab: "documents" });
+      if (wsSlug) sp.set("ws", wsSlug);
+      try { window.history.pushState({}, "", `/?${sp.toString()}`); } catch { /* noop */ }
     }
   }, []);
 
@@ -314,6 +327,9 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
               <KnowledgeView
                 onAskTina={askTina}
                 onOpenGitHubSettings={openGitHubSettings}
+                onOpenMeeting={openMeeting}
+                initialTarget={pendingKnowledge}
+                onConsumeInitialTarget={() => setPendingKnowledge(null)}
               />
             )}
 
@@ -396,6 +412,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
           terminalHref={terminalHref}
           onClose={() => setSearchOpen(false)}
           onOpenMeeting={openMeeting}
+          onOpenKnowledgeDoc={openKnowledgeDoc}
           onNavigate={navigate}
           onOpenCapture={() => openCapture("live")}
         />
