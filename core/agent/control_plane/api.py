@@ -1046,6 +1046,7 @@ def create_app(
                 "/api/workspace", "/api/sessions", "/api/routines",
                 "/api/chat", "/api/models", "/invocations",
                 "/api/internal/meeting-voice",
+                "/api/meeting-translations", "/api/discussion-reviews",
             )
             if not path.startswith(sync_prefixes) or path.startswith("/api/workspace/git-token"):
                 return await call_next(request)
@@ -1061,7 +1062,11 @@ def create_app(
                 and (path.endswith("/task-flow") or path.endswith("/decision-flow"))
             )
             is_write = method in ("POST", "PUT", "PATCH", "DELETE") and (
-                path.startswith("/api/workspace") or path.startswith("/api/routines") or is_voice_write
+                path.startswith("/api/workspace")
+                or path.startswith("/api/routines")
+                or path.startswith("/api/meeting-translations")
+                or path.startswith("/api/discussion-reviews")
+                or is_voice_write
             )
             subject = (request.headers.get("x-user-id") or "").strip()
             if not subject and settings is not None:
@@ -1427,6 +1432,34 @@ def create_app(
         if target_language is not None:
             payload["target_language"] = target_language
         inline = prefix + json.dumps(payload, ensure_ascii=False)
+        knowledge_mode = str(source.get("mode", "")) if task == "knowledge" and not ecs_draft else ""
+        if (os.environ.get("TINA_LOCAL_COMPLETION_POOL") == "1"
+                and not ecs_draft
+                and not knowledge_mode.startswith("voice")
+                and knowledge_mode != "meeting_assistant"
+                and not (task == "knowledge" and not ecs_draft and sandbox_voice)):
+            from control_plane.local_completion import complete as run_local_completion
+            from control_plane.meeting_voice_completion import resolve_voice_model_env
+            timeout_s = 60.0
+            if task == "discussion":
+                try:
+                    window_count = max(1, len(json.loads(text).get("windows", [])))
+                except (ValueError, TypeError):
+                    window_count = 1
+                timeout_s = min(900.0, 90.0 + window_count * 40.0)
+            model_env = resolve_voice_model_env(
+                dispatcher.resolve_model_config(subject),
+                allowlist=settings.model_allowlist if settings else "",
+                subject=subject,
+            )
+            return run_local_completion(
+                task=task,
+                inline=inline,
+                session_id=f"{session}-{request_id}",
+                label=label,
+                timeout_seconds=timeout_s,
+                model_env=model_env,
+            )
         invocation = units.make_dispatch(
             subject=subject,
             trigger="message",

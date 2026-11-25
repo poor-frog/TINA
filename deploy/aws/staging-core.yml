@@ -31,9 +31,16 @@ Parameters:
   VoicePilotRoom: {Type: String, Default: '', AllowedPattern: '(|[a-z]{3}-[a-z]{4}-[a-z]{3}(,[a-z]{3}-[a-z]{4}-[a-z]{3})?)'}
   VoicePilotUserIds: {Type: String, Default: '', AllowedPattern: '(|[*]|[0-9]+(,[0-9]+)*)'}
   GatewayExtensionOrigins: {Type: String, Default: ''}
+  GoogleSecretArn: {Type: String, Default: ''}
+  FlowsApiUrl: {Type: String, Default: ''}
+  FlowsApiKeyArn: {Type: String, Default: ''}
 
 Conditions:
   WithExtensionOrigins: !Not [!Equals [!Ref GatewayExtensionOrigins, '']]
+  WithGoogleSecret: !Not [!Equals [!Ref GoogleSecretArn, '']]
+  WithFlows: !And
+    - !Not [!Equals [!Ref FlowsApiUrl, '']]
+    - !Not [!Equals [!Ref FlowsApiKeyArn, '']]
   WithTranscription: !And
     - !Not [!Equals [!Ref TranscriptionUrl, '']]
     - !Not [!Equals [!Ref TranscriptionTokenArn, '']]
@@ -136,6 +143,8 @@ Resources:
                   - !If [WithVoice, !Ref TtsTokenArn, !Ref 'AWS::NoValue']
                   - !If [WithVoice, !Ref TtsProfileKeyArn, !Ref 'AWS::NoValue']
                   - !If [WithLiveKitAudio, !Ref LiveKitSecretArn, !Ref 'AWS::NoValue']
+                  - !If [WithGoogleSecret, !Ref GoogleSecretArn, !Ref 'AWS::NoValue']
+                  - !If [WithFlows, !Ref FlowsApiKeyArn, !Ref 'AWS::NoValue']
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -224,10 +233,12 @@ Resources:
           PortMappings: [{ContainerPort: 8001}]
           Environment:
             - {Name: DB_HOST, Value: !Ref PostgresHost}
+            - !If [WithFlows, {Name: TINA_FLOWS_API_URL, Value: !Ref FlowsApiUrl}, !Ref 'AWS::NoValue']
           Secrets:
             - {Name: DB_PASSWORD, ValueFrom: !Ref CoreDbPassword}
             - {Name: ADMIN_API_TOKEN, ValueFrom: !Ref AdminToken}
             - {Name: INTERNAL_API_SECRET, ValueFrom: !Ref InternalSecret}
+            - !If [WithFlows, {Name: TINA_FLOWS_API_KEY, ValueFrom: !Ref FlowsApiKeyArn}, !Ref 'AWS::NoValue']
           Command:
             - python
             - -c
@@ -285,6 +296,7 @@ Resources:
             - !If [HasVoicePilotRoom, {Name: TINA_MEETING_VOICE_PILOT_ROOM, Value: !Ref VoicePilotRoom}, !Ref 'AWS::NoValue']
             - !If [HasVoicePilotUsers, {Name: TINA_MEETING_VOICE_PILOT_USER_IDS, Value: !Ref VoicePilotUserIds}, !Ref 'AWS::NoValue']
             - !If [WithVoicePilot, {Name: TINA_VOICE_TURN_SHADOW, Value: '0'}, !Ref 'AWS::NoValue']
+            - !If [WithFlows, {Name: TINA_FLOWS_API_URL, Value: !Ref FlowsApiUrl}, !Ref 'AWS::NoValue']
           Secrets:
             - {Name: DB_PASSWORD, ValueFrom: !Ref CoreDbPassword}
             - {Name: VALKEY_PASSWORD, ValueFrom: !Ref ValkeySecretArn}
@@ -297,6 +309,15 @@ Resources:
             - !If [WithVoice, {Name: TTS_API_TOKEN, ValueFrom: !Ref TtsTokenArn}, !Ref 'AWS::NoValue']
             - !If [WithVoice, {Name: TINA_TTS_PROFILE_KEY, ValueFrom: !Ref TtsProfileKeyArn}, !Ref 'AWS::NoValue']
             - !If [WithLiveKitAudio, {Name: LIVEKIT_API_SECRET, ValueFrom: !Ref LiveKitSecretArn}, !Ref 'AWS::NoValue']
+            - !If [WithFlows, {Name: TINA_FLOWS_API_KEY, ValueFrom: !Ref FlowsApiKeyArn}, !Ref 'AWS::NoValue']
+            - !If
+              - WithGoogleSecret
+              - {Name: GOOGLE_CLIENT_ID, ValueFrom: !Sub '${GoogleSecretArn}:client_id::'}
+              - !Ref 'AWS::NoValue'
+            - !If
+              - WithGoogleSecret
+              - {Name: GOOGLE_CLIENT_SECRET, ValueFrom: !Sub '${GoogleSecretArn}:client_secret::'}
+              - !Ref 'AWS::NoValue'
           Command:
             - python
             - -c

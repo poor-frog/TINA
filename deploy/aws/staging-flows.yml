@@ -15,6 +15,18 @@ Parameters:
   CoreInternalSecretArn: {Type: String}
   FlowsImage: {Type: String, AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'}
   FlowsRepositoryArn: {Type: String}
+  AgentApiUrl: {Type: String, Default: ''}
+  AgentApiClientSecurityGroupId: {Type: String, Default: ''}
+  ResendSecretArn: {Type: String, Default: ''}
+  ResendFrom: {Type: String, Default: ''}
+
+Conditions:
+  WithAgentApi: !Not [!Equals [!Ref AgentApiUrl, '']]
+  WithAgentApiSg: !Not [!Equals [!Ref AgentApiClientSecurityGroupId, '']]
+  WithResend: !And
+    - !Not [!Equals [!Ref ResendSecretArn, '']]
+    - !Not [!Equals [!Ref ResendFrom, '']]
+
 Resources:
   DatabasePassword:
     Type: AWS::SecretsManager::Secret
@@ -76,6 +88,7 @@ Resources:
                   - !Ref FlowsApiKey
                   - !Ref CoreAdminTokenArn
                   - !Ref CoreInternalSecretArn
+                  - !If [WithResend, !Ref ResendSecretArn, !Ref 'AWS::NoValue']
   Task:
     Type: AWS::ECS::TaskDefinition
     Metadata:
@@ -142,11 +155,14 @@ Resources:
             - {Name: TINA_FLOWS_API_PORT, Value: '8200'}
             - {Name: TINA_FLOWS_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}
             - {Name: TINA_FLOWS_GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
+            - !If [WithAgentApi, {Name: TINA_FLOWS_AGENT_API_URL, Value: !Ref AgentApiUrl}, !Ref 'AWS::NoValue']
+            - !If [WithResend, {Name: TINA_RESEND_FROM, Value: !Ref ResendFrom}, !Ref 'AWS::NoValue']
           Secrets:
             - {Name: FLOWS_DB_PASSWORD, ValueFrom: !Ref DatabasePassword}
             - {Name: TINA_FLOWS_API_KEY, ValueFrom: !Ref FlowsApiKey}
             - {Name: TINA_FLOWS_ADMIN_KEY, ValueFrom: !Ref CoreAdminTokenArn}
             - {Name: TINA_INTERNAL_API_SECRET, ValueFrom: !Ref CoreInternalSecretArn}
+            - !If [WithResend, {Name: TINA_RESEND_API_KEY, ValueFrom: !Ref ResendSecretArn}, !Ref 'AWS::NoValue']
           Command:
             - python
             - -c
@@ -174,11 +190,14 @@ Resources:
             - {Name: FLOWS_DB_HOST, Value: !Ref PostgresHost}
             - {Name: TINA_FLOWS_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}
             - {Name: TINA_FLOWS_GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
+            - !If [WithAgentApi, {Name: TINA_FLOWS_AGENT_API_URL, Value: !Ref AgentApiUrl}, !Ref 'AWS::NoValue']
+            - !If [WithResend, {Name: TINA_RESEND_FROM, Value: !Ref ResendFrom}, !Ref 'AWS::NoValue']
           Secrets:
             - {Name: FLOWS_DB_PASSWORD, ValueFrom: !Ref DatabasePassword}
             - {Name: TINA_FLOWS_API_KEY, ValueFrom: !Ref FlowsApiKey}
             - {Name: TINA_FLOWS_ADMIN_KEY, ValueFrom: !Ref CoreAdminTokenArn}
             - {Name: TINA_INTERNAL_API_SECRET, ValueFrom: !Ref CoreInternalSecretArn}
+            - !If [WithResend, {Name: TINA_RESEND_API_KEY, ValueFrom: !Ref ResendSecretArn}, !Ref 'AWS::NoValue']
           Command:
             - python
             - -c
@@ -204,7 +223,11 @@ Resources:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
           Subnets: !Ref AppSubnetIds
-          SecurityGroups: [!Ref AppSecurityGroupId, !Ref CoreClientSecurityGroupId, !GetAtt Ingress.GroupId]
+          SecurityGroups:
+            - !Ref AppSecurityGroupId
+            - !Ref CoreClientSecurityGroupId
+            - !GetAtt Ingress.GroupId
+            - !If [WithAgentApiSg, !Ref AgentApiClientSecurityGroupId, !Ref 'AWS::NoValue']
       ServiceRegistries:
         - RegistryArn: !GetAtt Discovery.Arn
       DeploymentConfiguration:

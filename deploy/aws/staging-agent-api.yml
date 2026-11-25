@@ -488,6 +488,7 @@ Resources:
             - !If [WithAgentReach, {Name: TINA_AGENT_REACH_URL, Value: !Ref AgentReachUrl}, !Ref 'AWS::NoValue']
             - !If [WithAgentReach, {Name: TINA_CHAT_TOOLBELT, Value: '["reach.web.search","reach.web.read","reach.github.search","reach.github.read"]'}, !Ref 'AWS::NoValue']
             - !If [WithVoiceCompletion, {Name: TINA_MEETING_VOICE_LOCAL_COMPLETION, Value: '1'}, !Ref 'AWS::NoValue']
+            - !If [WithVoiceCompletion, {Name: TINA_LOCAL_COMPLETION_POOL, Value: '1'}, !Ref 'AWS::NoValue']
             - !If [WithVoiceCompletion, {Name: TINA_LLM_PROVIDER, Value: bedrock-converse}, !Ref 'AWS::NoValue']
             - !If [WithVoiceCompletion, {Name: TINA_LLM_MODEL, Value: 'amazon.nova-lite-v1:0'}, !Ref 'AWS::NoValue']
             - !If [WithChatGPTVoice, {Name: TINA_CHATGPT_VOICE_SECRET_ARN, Value: !Ref ChatGPTVoiceSecretArn}, !Ref 'AWS::NoValue']

@@ -21,17 +21,25 @@ describe("workspace pilot", () => {
       expect(pilotRouteEnabled("models/catalog")).toBe(stage !== "closed");
       expect(pilotRouteEnabled("models/openai/catalog")).toBe(stage !== "closed");
       expect(pilotRouteEnabled("workspace/meeting-knowledge/14")).toBe(stage !== "closed");
+      expect(pilotRouteEnabled("workspace/meeting-knowledge/14/ask")).toBe(stage !== "closed");
+      expect(pilotRouteEnabled("workspace/meeting-knowledge/14/answers/a1")).toBe(stage !== "closed");
+      expect(pilotRouteEnabled("workspace/meeting-knowledge/14/apply")).toBe(stage !== "closed");
+      expect(pilotRouteEnabled("workspace/meeting-knowledge/14/facts/review")).toBe(stage !== "closed");
       expect(pilotRouteEnabled("workspace/meeting-knowledge/14/source-profiles")).toBe(stage !== "closed");
       expect(pilotRouteEnabled("workspace/meeting-knowledge/14/source-profiles/remove")).toBe(stage !== "closed");
       expect(pilotRouteEnabled("workspace/meeting-knowledge/14/voice-drafts")).toBe(stage !== "closed");
       expect(pilotRouteEnabled("workspace/meeting-knowledge/14/voice-drafts/d1/review")).toBe(stage !== "closed");
+      expect(pilotRouteEnabled("dictation/polish")).toBe(stage !== "closed");
+      expect(pilotRouteEnabled("dictation/translate")).toBe(stage !== "closed");
+      expect(pilotRouteEnabled("meeting-translations/14")).toBe(stage !== "closed");
+      expect(pilotRouteEnabled("discussion-reviews/14")).toBe(stage !== "closed");
       expect(pilotRouteEnabled("workspace/members")).toBe(["wiki", "routines"].includes(stage));
       expect(pilotRouteEnabled("workspace/search")).toBe(["wiki", "routines"].includes(stage));
       expect(pilotRouteEnabled("workspace/document")).toBe(["wiki", "routines"].includes(stage));
       expect(pilotRouteEnabled("workspace/document/move/preview")).toBe(["wiki", "routines"].includes(stage));
       expect(pilotRouteEnabled("workspace/document/delete")).toBe(["wiki", "routines"].includes(stage));
       expect(pilotRouteEnabled("routines/daily/enabled")).toBe(stage === "routines");
-      for (const path of ["internal/openai-auth", "workspace/git-token", "workspace/meeting-knowledge/14/ask", "workspace/../events"]) {
+      for (const path of ["internal/openai-auth", "workspace/git-token", "events", "workspace/../events"]) {
         expect(pilotRouteEnabled(path)).toBe(false);
       }
     }

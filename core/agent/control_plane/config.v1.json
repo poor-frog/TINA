@@ -94,6 +94,13 @@
       "description": "Use the local completion process in Agent API for meeting voice when set to 1."
     },
     {
+      "key": "TINA_LOCAL_COMPLETION_POOL",
+      "class": "defaulted",
+      "default": "0",
+      "targets": [],
+      "description": "Use an isolated local completion pool in Agent API for stateless non-voice tasks (dictation polish/translate, meeting translations, discussion review, meeting Q&A, post-meeting report) when set to 1."
+    },
+    {
       "key": "TINA_CHATGPT_VOICE_SECRET_ARN",
       "class": "defaulted",
       "default": "",

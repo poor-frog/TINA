@@ -18,12 +18,22 @@ Parameters:
   AdminTokenArn: {Type: String}
   InternalSecretArn: {Type: String}
   AsrControlUrl: {Type: String, Default: ''}
+  AppSecurityGroupId: {Type: String, Default: ''}
+  TranscriptionUrl: {Type: String, Default: ''}
+  TranscriptionTokenArn: {Type: String, Default: ''}
+  TranscriptionModel: {Type: String, Default: '5CD-AI/VieGem-ASR'}
   GoogleSecretArn: {Type: String, Default: ''}
+  AdminEmails: {Type: String, Default: ''}
   WorkspacePilotStage: {Type: String, Default: closed, AllowedValues: [closed, chat, wiki, routines]}
   WorkspacePilotUserIds: {Type: String, Default: '', AllowedPattern: '(|[*]|[0-9]+(,[0-9]+)*)'}
 
 Conditions:
   GoogleEnabled: !Not [!Equals [!Ref GoogleSecretArn, '']]
+  WithAppSecurityGroup: !Not [!Equals [!Ref AppSecurityGroupId, '']]
+  WithTranscription: !And
+    - !Not [!Equals [!Ref TranscriptionUrl, '']]
+    - !Not [!Equals [!Ref TranscriptionTokenArn, '']]
+  WithAdminEmails: !Not [!Equals [!Ref AdminEmails, '']]
   WithWorkspacePilot: !Not [!Equals [!Ref WorkspacePilotUserIds, '']]
 
 Resources:
@@ -89,6 +99,7 @@ Resources:
                   - !Ref InternalSecretArn
                   - !Ref NextAuthSecret
                   - !If [GoogleEnabled, !Ref GoogleSecretArn, !Ref 'AWS::NoValue']
+                  - !If [WithTranscription, !Ref TranscriptionTokenArn, !Ref 'AWS::NoValue']
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Metadata:
@@ -119,12 +130,19 @@ Resources:
             - {Name: TINA_API_URL, Value: 'http://core.tina-staging.local:8000'}
             - {Name: TINA_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}
             - {Name: TINA_ASR_CONTROL_URL, Value: !Ref AsrControlUrl}
+            - !If [WithTranscription, {Name: TRANSCRIPTION_SERVICE_URL, Value: !Ref TranscriptionUrl}, !Ref 'AWS::NoValue']
+            - !If [WithTranscription, {Name: TRANSCRIPTION_MODEL, Value: !Ref TranscriptionModel}, !Ref 'AWS::NoValue']
+            - !If [WithAdminEmails, {Name: TINA_ADMIN_EMAILS, Value: !Ref AdminEmails}, !Ref 'AWS::NoValue']
             - {Name: NEXTAUTH_URL, Value: !Ref StageUrl}
             - {Name: TERMINAL_URL, Value: !Ref StageUrl}
           Secrets:
             - {Name: TINA_ADMIN_API_KEY, ValueFrom: !Ref AdminTokenArn}
             - {Name: TINA_INTERNAL_API_SECRET, ValueFrom: !Ref InternalSecretArn}
             - {Name: NEXTAUTH_SECRET, ValueFrom: !Ref NextAuthSecret}
+            - !If
+              - WithTranscription
+              - {Name: TRANSCRIPTION_SERVICE_TOKEN, ValueFrom: !Ref TranscriptionTokenArn}
+              - !Ref 'AWS::NoValue'
             - !If
               - GoogleEnabled
               - {Name: GOOGLE_CLIENT_ID, ValueFrom: !Sub '${GoogleSecretArn}:client_id::'}
@@ -150,7 +168,10 @@ Resources:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
           Subnets: !Ref AppSubnetIds
-          SecurityGroups: [!Ref CoreClientSecurityGroupId, !GetAtt TerminalIngress.GroupId]
+          SecurityGroups:
+            - !Ref CoreClientSecurityGroupId
+            - !GetAtt TerminalIngress.GroupId
+            - !If [WithAppSecurityGroup, !Ref AppSecurityGroupId, !Ref 'AWS::NoValue']
       LoadBalancers:
         - {ContainerName: terminal, ContainerPort: 3000, TargetGroupArn: !Ref TerminalTargets}
       DeploymentConfiguration:

@@ -7,7 +7,7 @@ export function pilotRouteEnabled(path: string): boolean {
   const stage = process.env.TINA_WORKSPACE_PILOT_STAGE;
   if (stage !== "chat" && stage !== "wiki" && stage !== "routines") return false;
   if (path.split("/").some(seg => !/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(seg))) return false;
-  if (/^(chat(?:\/(?:reset|stop|approval))?|sessions(?:\/[^/]+\/history)?|models(?:\/(?:test|catalog|openai\/catalog))?|workspace\/meeting-knowledge\/[^/]+(?:\/(?:source-profiles(?:\/remove)?|voice-drafts(?:\/[^/]+\/review)?))?)$/.test(path)) return true;
+  if (/^(chat(?:\/(?:reset|stop|approval))?|sessions(?:\/[^/]+\/history)?|models(?:\/(?:test|catalog|openai\/catalog))?|dictation\/(?:polish|translate)|meeting-translations\/[^/]+|discussion-reviews\/[^/]+|workspace\/meeting-knowledge\/[^/]+(?:\/(?:ask|apply|facts\/review|answers\/[^/]+|source-profiles(?:\/remove)?|voice-drafts(?:\/[^/]+\/review)?))?)$/.test(path)) return true;
   if (stage === "chat") return false;
   if (/^workspace\/(tree|file|search|document(?:\/(?:move(?:\/preview)?|delete))?|git(?:\/show)?|init|active|attached|shared|purpose|new|upload|members(?:\/[^/]+(?:\/role)?)?|invites(?:\/[^/]+)?|shared\/(?:new|[^/]+\/active)|[^/]+\/(?:share-enable|leave|unshare))$/.test(path)) return true;
   return stage === "routines" && /^routines(?:\/[^/]+(?:\/enabled)?)?$/.test(path);
