@@ -1064,14 +1064,14 @@ export function MeetingDetailView({
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     const activeContext = m
       ? {
-          kind: "meeting",
+          kind: "meeting" as const,
           meeting_id: m.id,
           platform: m.platform === "Google Meet" ? "google_meet" : m.platform.toLowerCase(),
-          native_id: m.native_id,
+          native_id: m.native_id || m.id,
           status: m.live_status,
           title,
         }
-      : { kind: "meeting", meeting_id: resolvedId };
+      : { kind: "meeting" as const, meeting_id: resolvedId, native_id: resolvedId };
     const controller = new AbortController();
     try {
       await streamChatTurn(
@@ -1079,7 +1079,11 @@ export function MeetingDetailView({
           prompt: skill.prompt,
           session: `skill-${resolvedId}-${skill.id}-${Date.now().toString(36)}`,
           active: activeContext,
-          context: { tz, surface: "web-meeting-skill" },
+          context: {
+            tz,
+            surface: { list: "meetings", tab: { kind: "meeting" } },
+            focus: activeContext,
+          },
         },
         {
           onStarting: () => undefined,

@@ -100,13 +100,23 @@ export function KnowledgeCopilotDrawer({
         ? `[Context: Space "${workspaceName}"${slug ? ` (slug: ${slug})` : ""}, open page "${docPath}"${isReadOnly ? " (view-only)" : ""}]\n\n${prompt}`
         : `[Context: Space "${workspaceName}"${slug ? ` (slug: ${slug})` : ""}]\n\n${prompt}`;
 
+      const focusPayload = docPath
+        ? ({ kind: "file", ref: `@file:${docPath}` } as const)
+        : slug && slug !== "_global"
+          ? ({ kind: "workspace", slug } as const)
+          : null;
+
       try {
         await streamChatTurn(
           {
             prompt: groundedPrompt,
             session,
-            active: docPath ? { kind: "doc", path: docPath, slug } : undefined,
-            context: { tz, surface: "web-knowledge-copilot", docPath, slug },
+            active: focusPayload ?? undefined,
+            context: {
+              tz,
+              surface: { list: "files", tab: { kind: docPath ? "doc" : "workspace" } },
+              focus: focusPayload,
+            },
           },
           {
             onStarting: () => {

@@ -235,14 +235,14 @@ export function MeetingSidePanel({
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
       const activeContext = meeting
         ? {
-            kind: "meeting",
+            kind: "meeting" as const,
             meeting_id: meeting.id,
             platform: meeting.platform === "Google Meet" ? "google_meet" : meeting.platform.toLowerCase(),
-            native_id: meeting.native_id,
+            native_id: meeting.native_id || meeting.id,
             status: meeting.live_status,
             title: meeting.title_custom || meeting.title,
           }
-        : { kind: "meeting", meeting_id: meetingId };
+        : { kind: "meeting" as const, meeting_id: meetingId, native_id: meetingId };
 
       try {
         await streamChatTurn(
@@ -250,7 +250,11 @@ export function MeetingSidePanel({
             prompt,
             session: sessionRef.current,
             active: activeContext,
-            context: { tz, surface: "web-meeting-side" },
+            context: {
+              tz,
+              surface: { list: "meetings", tab: { kind: "meeting" } },
+              focus: activeContext,
+            },
           },
           {
             onStarting: () => {

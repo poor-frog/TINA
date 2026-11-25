@@ -137,10 +137,10 @@ export function AskTinaView({
       const meeting = meetings.find((m) => m.id === effectiveMeetingId);
       const activeContext = meeting
         ? {
-            kind: "meeting",
+            kind: "meeting" as const,
             meeting_id: meeting.id,
             platform: meeting.platform === "Google Meet" ? "google_meet" : meeting.platform.toLowerCase(),
-            native_id: meeting.native_id,
+            native_id: meeting.native_id || meeting.id,
             status: meeting.live_status,
             title: meeting.title_custom || meeting.title,
           }
@@ -152,7 +152,11 @@ export function AskTinaView({
             prompt: wirePrompt,
             session: activeSession,
             active: activeContext,
-            context: { tz, surface: "web-ask" },
+            context: {
+              tz,
+              surface: activeContext ? { list: "meetings", tab: { kind: "meeting" } } : { list: "ask" },
+              focus: activeContext ?? null,
+            },
           },
           {
             onStarting: () => {

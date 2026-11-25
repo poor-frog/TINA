@@ -352,6 +352,10 @@ describe("KnowledgeView v3 (Notion-Style Non-Tech Knowledge Hub)", () => {
       expect(screen.getByText(/Clear executive summary/i)).toBeTruthy();
       expect(screen.getByText(/Updated space · refreshed/i)).toBeTruthy();
     });
+    // Regression guard: agent-api ChatContextBody requires context.surface to be an object dict, never a string
+    const chatReq = mockStreamChatTurn.mock.calls[0]?.[0] as { context?: { surface?: unknown } };
+    expect(typeof chatReq?.context?.surface).toBe("object");
+    expect(chatReq?.context?.surface).not.toBeNull();
   });
 
   it("renders Constellation Graph with Display popover, All Spaces, Columns toggle, and Back/Forward reading history", async () => {

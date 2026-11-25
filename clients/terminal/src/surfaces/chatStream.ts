@@ -4,6 +4,7 @@ import {
   type ToolApprovalRequest,
   type ToolApprovalResolved,
 } from "../workbench/toolApproval";
+import type { ChatContext } from "./chatContext";
 
 /** chatStream — the resumable SSE reader for a chat turn (POST /api/chat).
  *
@@ -72,7 +73,7 @@ export type ChatStreamRequest = {
   /** the active center-tab grounding (legacy mirror), or undefined */
   active: unknown;
   /** the terminal-state context bundle {tz, surface, focus, include}, or undefined */
-  context?: unknown;
+  context?: ChatContext;
   research?: boolean;
 };
 
