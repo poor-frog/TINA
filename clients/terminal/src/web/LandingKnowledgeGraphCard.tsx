@@ -142,8 +142,8 @@ const GRAPH_NODES: readonly GraphNodeDef[] = [
     labelEn: "#decision-maker",
     metaVi: "Thẻ nhận diện người ra quyết định",
     metaEn: "Stakeholder decision-maker tag",
-    x: -54,
-    y: 108,
+    x: -46,
+    y: 88,
     size: 6.8,
   },
   {
@@ -153,8 +153,8 @@ const GRAPH_NODES: readonly GraphNodeDef[] = [
     labelEn: "#engineering",
     metaVi: "Nhóm kỹ thuật & kiến trúc tích hợp",
     metaEn: "Engineering & integration cluster",
-    x: 138,
-    y: 80,
+    x: 152,
+    y: 66,
     size: 6.8,
   },
   {
@@ -199,7 +199,7 @@ const GRAPH_NODES: readonly GraphNodeDef[] = [
     metaVi: "Trợ lý giọng nói có nguồn trích dẫn xác thực",
     metaEn: "Voice agent with verbatim source citations",
     x: -186,
-    y: 18,
+    y: -14,
     size: 9.8,
   },
   {
@@ -209,8 +209,8 @@ const GRAPH_NODES: readonly GraphNodeDef[] = [
     labelEn: "Executive Brief",
     metaVi: "My Space · Tự động tổng hợp sau họp",
     metaEn: "My Space · Auto-compiled post-meeting brief",
-    x: -168,
-    y: 106,
+    x: -180,
+    y: 58,
     size: 8.4,
   },
   {
@@ -221,7 +221,7 @@ const GRAPH_NODES: readonly GraphNodeDef[] = [
     metaVi: "kg/entities/task/ · Khởi động tuần tới",
     metaEn: "kg/entities/task/ · Launches next week",
     x: 214,
-    y: -102,
+    y: -96,
     size: 8.2,
   },
   {
@@ -231,8 +231,8 @@ const GRAPH_NODES: readonly GraphNodeDef[] = [
     labelEn: "Team Playbook",
     metaVi: "Team Space · Quy trình triển khai Enterprise",
     metaEn: "Team Space · Enterprise rollout handbook",
-    x: -196,
-    y: -96,
+    x: -192,
+    y: -92,
     size: 8.2,
   },
   {
@@ -243,7 +243,7 @@ const GRAPH_NODES: readonly GraphNodeDef[] = [
     metaVi: "Team Wiki · Đã đồng bộ [[Acme Corp]]",
     metaEn: "Team Wiki · Linked to [[Acme Corp]]",
     x: 56,
-    y: 118,
+    y: 88,
     size: 8.4,
   },
   {
@@ -254,7 +254,7 @@ const GRAPH_NODES: readonly GraphNodeDef[] = [
     metaVi: "Giai đoạn khảo sát nhu cầu khách hàng",
     metaEn: "Customer discovery stage tag",
     x: -98,
-    y: -116,
+    y: -112,
     size: 6,
   },
   {
@@ -276,7 +276,7 @@ const GRAPH_NODES: readonly GraphNodeDef[] = [
     metaVi: "Phiên âm & dịch song ngữ VI + EN",
     metaEn: "Live VI + EN transcription tag",
     x: -252,
-    y: -30,
+    y: -48,
     size: 5.8,
   },
   {
@@ -286,8 +286,8 @@ const GRAPH_NODES: readonly GraphNodeDef[] = [
     labelEn: "#tina-voice",
     metaVi: "Phản hồi bằng giọng nói ngay trong họp",
     metaEn: "In-call spoken voice response tag",
-    x: -242,
-    y: 78,
+    x: -248,
+    y: 26,
     size: 5.8,
   },
 ];
@@ -399,13 +399,13 @@ function createInitialSim(): Map<string, SimNodeState> {
 
 function computeFitCamera(w: number, h: number): CameraState {
   const spanW = 540;
-  const spanH = 290;
+  const spanH = 264;
   const availW = Math.max(240, w - 52);
-  const availH = Math.max(180, h - 104);
-  const scale = Math.max(0.58, Math.min(1.18, Math.min(availW / spanW, availH / spanH)));
+  const availH = Math.max(180, h - 122);
+  const scale = Math.max(0.58, Math.min(1.16, Math.min(availW / spanW, availH / spanH)));
   return {
     tx: w * 0.5 + 10 * scale,
-    ty: h * 0.5 + 8,
+    ty: h * 0.47,
     scale,
   };
 }
@@ -972,11 +972,11 @@ export function LandingKnowledgeGraphCard({
       for (const def of labelOrder) {
         const pos = screenPos.get(def.id);
         if (!pos) continue;
-        // Skip labels clipped outside visible safe HUD margins
-        if (pos.x < 16 || pos.x > w - 16 || pos.y < 52 || pos.y > h - 46) continue;
-
         const isFocus = def.id === focusId;
         const isNeighbor = focusNeighbors.has(def.id);
+        // Keep labels strictly inside safe HUD bounds so none ever collide with bottom inspector/legend
+        const bottomSafe = isNeighbor ? h - 62 : h - 78;
+        if (pos.x < 16 || pos.x > w - 16 || pos.y < 54 || pos.y > bottomSafe) continue;
         const label = st.lang === "vi" ? def.labelVi : def.labelEn;
         const fontSize = isFocus ? 12 : isNeighbor ? 11 : 10;
         ctx.font = `${isFocus ? 700 : isNeighbor ? 600 : 500} ${fontSize}px "Inter", system-ui, -apple-system, sans-serif`;

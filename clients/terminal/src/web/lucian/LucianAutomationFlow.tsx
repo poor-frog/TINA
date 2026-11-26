@@ -29,10 +29,10 @@ function getFlowCopy(lang: "vi" | "en") {
       runAgain: "Chạy lại",
       finished: (sec: string) => `Hoàn tất quy trình · ${sec} s`,
       nodes: [
-        { title: "Vào cuộc họp", idleSub: "Bot · Extension", doneSub: "Đã ghi & phiên âm" },
+        { title: "Vào cuộc họp", idleSub: "Bot · Extension", doneSub: "Đã ghi âm live" },
         { title: "AI & “Tina ơi”", idleSub: "Song ngữ VI + EN", doneSub: "Trích dẫn · 98%" },
         { title: "Cập nhật Wiki", idleSub: "My Space · Team", doneSub: "Đã gắn [[Entity]]" },
-        { title: "Tạo Action Items", idleSub: "kg/entities/task/", doneSub: "Đã nháp 3 việc" },
+        { title: "Tạo đầu việc", idleSub: "kg/entities/task/", doneSub: "Đã nháp 3 việc" },
       ],
     };
   }
