@@ -26,9 +26,20 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 BOT_S3_BUCKET="${BOT_S3_BUCKET:-tina-foundation-stagingrecordings-susispk8fjdt}"
 BOT_USERDATA_S3_PATH="${BOT_USERDATA_S3_PATH:-userdata/staging-bot-1}"
 BOT_S3_ENDPOINT="${BOT_S3_ENDPOINT:-https://s3.${AWS_REGION}.amazonaws.com}"
-BOT_IMAGE="${BOT_IMAGE:-283904064998.dkr.ecr.us-east-1.amazonaws.com/tina-foundation/bot:hardened-8eabec10}"
+BOT_STACK_NAME="${BOT_STACK_NAME:-tina-staging-bot}"
+BOT_IMAGE="${BOT_IMAGE:-}"
 NOVNC_PORT="${NOVNC_PORT:-6080}"
 LOGIN_TIMEOUT_MS="${LOGIN_TIMEOUT_MS:-600000}"
+
+if [ -z "${BOT_IMAGE}" ]; then
+  BOT_IMAGE="$(aws --profile "${AWS_PROFILE}" --region "${AWS_REGION}" cloudformation describe-stacks \
+    --stack-name "${BOT_STACK_NAME}" \
+    --query "Stacks[0].Parameters[?ParameterKey=='BotImage'].ParameterValue | [0]" \
+    --output text 2>/dev/null || true)"
+  if [ -z "${BOT_IMAGE}" ] || [ "${BOT_IMAGE}" = "None" ]; then
+    BOT_IMAGE="283904064998.dkr.ecr.us-east-1.amazonaws.com/tina-foundation/bot:hardened-8eabec10"
+  fi
+fi
 
 # Auto-select OrbStack context if the default Docker daemon is paused (common on macOS).
 if ! docker info >/dev/null 2>&1; then

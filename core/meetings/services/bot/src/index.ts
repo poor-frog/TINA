@@ -41,7 +41,7 @@ import { createBotRecordingSink } from './recording.js';
 import { createCaptureSignalRecorder, startBotLogSidecar, wrapTranscribeWithTap, wrapTranscriptWithSnapshot, type CaptureSignalRecorder } from './telemetry.js';
 import { uploadSignalTapes } from './signal-upload.js';
 import { createSttFaultReporter, isExpectedTeardownAudioClosedFault } from './stt-faults.js';
-import { launchBrowser, startCaptureBridge, startRecording, restartMixedCapture, createSpeakController, type BrowserSession, type SpeakController } from './capture-bridge.js';
+import { launchBrowser, shouldPersistAuthSession, startCaptureBridge, startRecording, restartMixedCapture, createSpeakController, type BrowserSession, type SpeakController } from './capture-bridge.js';
 import { createRemoteAudioActivityTap, createSilenceAlonenessSource, resolveAloneSilenceWindowMs } from './aloneness.js';
 import { installSignalHandlers } from './signals.js';
 import type {
@@ -408,16 +408,24 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
       };
     },
   });
-  stopOrchestrator = (reason) => orchestrator.stop(reason);
-  if (stopRequestedDuringBoot) orchestrator.stop('stopped');
+  stopOrchestrator = (reason) => {
+    shuttingDown = true;
+    orchestrator.stop(reason);
+  };
+  if (stopRequestedDuringBoot) {
+    shuttingDown = true;
+    orchestrator.stop('stopped');
+  }
 
   // Disposability (P7): a termination signal ends the active phase gracefully (leave → flush →
   // terminal callback → exit 0) so the container never hangs after `active` — BOUNDED by the
   // force-exit watchdog in signals.ts (<25s, inside the runtime's SIGTERM→SIGKILL stop grace) so
   // a wedged teardown can never ride a `docker stop` all the way to a silent 137 (the incident's
   // exit code on BOTH orphaned bots). Wire before run(); release the listeners after.
+  let runResult: { status: string; completionReason?: string } | undefined;
   try {
     const result = await orchestrator.run({ maxActiveMs: deriveMaxActiveMs(inv, aloneSilenceWindowMs, env) });
+    runResult = result;
     return result.exitCode;
   } finally {
     releaseSignals();
@@ -443,7 +451,9 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
     // orchestrator already returned. Runs inside the 30s SIGTERM grace: one attempt, streamed, with
     // its own timeout, so a slow object store cannot ride the grace all the way to a SIGKILL.
     await uploadSignalTapes(signalRecorder, { inv });
-    if (session) await session.close().catch(() => { /* best-effort */ });
+    if (session) {
+      await session.close({ persistSession: shouldPersistAuthSession(runResult) }).catch(() => { /* best-effort */ });
+    }
     // Quit the redis connections on teardown (best-effort — a quit failure must not change the
     // exit code; they may never have connected if redis was unreachable).
     await transcriptClient.quit().catch(() => { /* best-effort */ });

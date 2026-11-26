@@ -128,6 +128,23 @@ def next_retry_state(
     }
 
 
+def _extract_reason_detail(data: dict) -> Optional[str]:
+    """Extract a normalized failure reason string from meeting.data for retry fallback matching."""
+    parts: List[str] = []
+    reason = data.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        parts.append(reason.strip())
+    last_error = data.get("last_error")
+    if isinstance(last_error, str) and last_error.strip():
+        parts.append(last_error.strip())
+    elif isinstance(last_error, dict):
+        for key in ("reason", "error_details"):
+            val = last_error.get(key)
+            if isinstance(val, str) and val.strip():
+                parts.append(val.strip())
+    return "\n".join(parts) if parts else None
+
+
 def persist_retry_transition(data: dict, previous_status: str, status: str) -> None:
     """Update retry state with the lifecycle write, under the meeting row lock."""
     current = data.get("auto_retry")
@@ -147,7 +164,7 @@ def persist_retry_transition(data: dict, previous_status: str, status: str) -> N
             reason,
             data.get("failure_stage"),
             join_evidence=data.get("join_evidence"),
-            reason_detail=data.get("last_error"),
+            reason_detail=_extract_reason_detail(data),
         )
     elif status == "active":
         state["state"] = "succeeded"
@@ -209,10 +226,19 @@ class JoinRetryController:
         self.policy = policy or RetryPolicy()
 
     def on_join_failure(
-        self, meeting_id: int, reason: Optional[CompletionReason], attempt: int
+        self,
+        meeting_id: int,
+        reason: Optional[CompletionReason],
+        attempt: int,
+        *,
+        join_evidence: Optional[dict] = None,
+        reason_detail: Optional[str] = None,
     ) -> RetryOutcome:
         reason_v = reason.value if reason is not None else None
-        if not is_transient(reason):
+        retryable = is_transient(reason) or is_retryable_join_refusal(
+            reason, join_evidence=join_evidence, reason_detail=reason_detail
+        )
+        if not retryable:
             return RetryOutcome(action="permanent", attempt=attempt, reason=reason_v)
 
         next_attempt = attempt + 1

@@ -110,6 +110,38 @@ def test_google_meet_anti_abuse_403_schedules_bounded_retry_while_host_denial_st
     persist_retry_transition(data, "joining", "failed")
     assert data["auto_retry"]["state"] == "scheduled"
 
+    # Fallback when join_evidence is absent: data["reason"] string or data["last_error"] dict still matches.
+    reason_only = {
+        "completion_reason": "awaiting_admission_rejected",
+        "failure_stage": "joining",
+        "reason": "google_meet_join_refused: ResolveMeetingSpace answered HTTP 403",
+        "auto_retry": {"state": "ready", "attempt": 1, "max_attempts": 3},
+        "_auto_retry_request": {"bot_name": "TINA"},
+    }
+    persist_retry_transition(reason_only, "joining", "failed")
+    assert reason_only["auto_retry"]["state"] == "scheduled"
+
+    dict_error = {
+        "completion_reason": "awaiting_admission_rejected",
+        "failure_stage": "joining",
+        "last_error": {"exit_code": 1, "reason": "google_meet_join_refused: CreateMeetingDevice HTTP 403"},
+        "auto_retry": {"state": "ready", "attempt": 1, "max_attempts": 3},
+        "_auto_retry_request": {"bot_name": "TINA"},
+    }
+    persist_retry_transition(dict_error, "joining", "failed")
+    assert dict_error["auto_retry"]["state"] == "scheduled"
+
+    # In-memory JoinRetryController agrees with persist_retry_transition.
+    ctrl, _, _, _ = _build()
+    ev = {"attribution": "exogenous_platform", "detail": "google_meet_join_refused: HTTP 403"}
+    assert ctrl.on_join_failure(
+        MEETING_ID, CompletionReason.AWAITING_ADMISSION_REJECTED, 0, join_evidence=ev
+    ).action == "scheduled_retry"
+    assert ctrl.on_join_failure(
+        MEETING_ID, CompletionReason.AWAITING_ADMISSION_REJECTED, 0,
+        join_evidence={"attribution": "host_action", "detail": "Host denied"},
+    ).action == "permanent"
+
     # Real host denial MUST stay permanent / not_retryable.
     host_denied = next_retry_state(
         {"attempt": 1},

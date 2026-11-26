@@ -561,41 +561,73 @@ export async function runTeamsCaptionEnable(
  *  navigation. Overridable by env for the VM harness. */
 const BROWSER_UTILS_PATH = process.env.TINA_BROWSER_UTILS_PATH ?? '/app/browser-utils.global.js';
 
+export interface BrowserSessionCloseOptions {
+  /** Whether to write the live profile back to S3 on teardown (authenticated mode only).
+   *  Callers pass false when the bot did not reach a healthy completed session so a failed or
+   *  signed-out run never overwrites a working stored profile. Defaults to true. */
+  persistSession?: boolean;
+}
+
 /** A handle to the live browser the bot drives. The composition root closes it on teardown. */
 export interface BrowserSession {
   context: BrowserContext;
   page: Page;
-  close(): Promise<void>;
+  close(options?: BrowserSessionCloseOptions): Promise<void>;
 }
 
 /**
- * Launch the browser the bot joins through. Authenticated bots restore the persistent profile
- * from S3 first (so they join as a signed-in user); guest bots launch a fresh persistent context.
- * Always uses getJoinBrowserArgs() (the join lane's canonical flag set) merged with the
- * remote-browser auth args, so the page the JoinDriver receives is configured identically to
- * what @tina/join expects.  // L4 (O6/VM): live-validated against a real meeting.
+ * Only write rotated Google cookies back to S3 when the bot actually completed a signed-in
+ * meeting cleanly; failed joins (including auth_session_missing or pre-admission refusals) must
+ * leave the durable S3 profile untouched.
  */
+export function shouldPersistAuthSession(
+  result?: { status?: string; completionReason?: string } | null,
+): boolean {
+  return result?.status === 'completed';
+}
+
 /**
  * Assemble the Chromium launch args for a meeting bot.
  * Authenticated joins MUST omit --incognito so Chromium preserves restored Google session cookies
  * from the persistent profile dir; anonymous joins keep --incognito for clean guest isolation.
+ * Multiple --disable-features=... flags are coalesced into one comma-separated flag because
+ * Chromium lets a later --disable-features= overwrite an earlier one.
  */
 export function buildBotBrowserArgs(authenticated?: boolean): string[] {
   const merged = [
     ...getAuthenticatedBrowserArgs(),
     ...getJoinBrowserArgs({ authenticated: !!authenticated }),
   ];
+  const disabledFeatures: string[] = [];
+  const seenFeatures = new Set<string>();
+  const nonFeatureArgs: string[] = [];
+  for (const arg of merged) {
+    if (authenticated && arg === '--incognito') continue;
+    if (arg.startsWith('--disable-features=')) {
+      for (const feat of arg.slice('--disable-features='.length).split(',')) {
+        const trimmed = feat.trim();
+        if (trimmed && !seenFeatures.has(trimmed)) {
+          seenFeatures.add(trimmed);
+          disabledFeatures.push(trimmed);
+        }
+      }
+      continue;
+    }
+    nonFeatureArgs.push(arg);
+  }
   const seen = new Set<string>();
   const deduped: string[] = [];
-  for (let i = merged.length - 1; i >= 0; i--) {
-    const arg = merged[i];
-    if (authenticated && arg === '--incognito') continue;
+  for (let i = nonFeatureArgs.length - 1; i >= 0; i--) {
+    const arg = nonFeatureArgs[i];
     if (!seen.has(arg)) {
       seen.add(arg);
       deduped.push(arg);
     }
   }
   deduped.reverse();
+  if (disabledFeatures.length > 0) {
+    deduped.push(`--disable-features=${disabledFeatures.join(',')}`);
+  }
   return deduped;
 }
 
@@ -707,18 +739,21 @@ export async function launchBrowser(
   return {
     context,
     page,
-    async close() {
+    async close(closeOptions?: BrowserSessionCloseOptions) {
       await context.close().catch(() => { /* best-effort */ });
       // Write-back on clean teardown (#725): Google rotates session cookies during use, so the
       // durable copy is refreshed from the LIVE profile dir after the context flushes — the next
-      // spawn restores the freshest state instead of a decaying snapshot. Clean teardown only:
-      // a SIGKILL never reaches close(), so a hard-killed meeting keeps the last durable copy.
-      // Failures are attributed warnings, bounded per upload — teardown never hangs on S3.
+      // spawn restores the freshest state instead of a decaying snapshot. Clean completed runs only:
+      // a SIGKILL or failed/signed-out join must never overwrite the durable copy with degraded state.
       if (inv.authenticated && inv.userdataS3Path) {
-        try {
-          syncBrowserDataToS3(s3Config, dataDir);
-        } catch (e) {
-          console.error(`[bot] session write-back failed (durable copy stays at last restore): ${String(e)}`);
+        if (closeOptions?.persistSession === false) {
+          console.log('[bot] skipping session write-back (meeting did not complete signed-in)');
+        } else {
+          try {
+            syncBrowserDataToS3(s3Config, dataDir);
+          } catch (e) {
+            console.error(`[bot] session write-back failed (durable copy stays at last restore): ${String(e)}`);
+          }
         }
       }
       removeProfileDir(dataDir);   // per-bot dir — leaking one per bot fills the disk in tina-lite
