@@ -17,7 +17,7 @@ import { Icon } from "../ui-kit";
 import { MdxDoc } from "../ui-kit/MdxDoc";
 import { DateTimePicker } from "../ui-kit/DateTimePicker";
 import { copyText } from "../ui-kit/ContextMenu";
-import { useLiveMeetings, refreshMeetings } from "./liveMeetings";
+import { useLiveMeetings, refreshMeetings, seedLiveMeetingFromResponse } from "./liveMeetings";
 import type { MeetingMock } from "./meetingModel";
 import { presentError, readApiFailure } from "./apiClient";
 import { resolveJoinError, type ServiceDenialPresentation } from "./serviceDenial";
@@ -281,7 +281,18 @@ function MeetingPrepTab({ params }: TabProps) {
       // reached the presenter JSON-shaped and came out as "Something went wrong". Read it as the
       // typed ApiError instead, so 403 service_not_allowed can be told from a permissions fault.
       if (!r.ok) throw await readApiFailure(r, "/api/bots");
+      const body = await r.json().catch(() => null);
+      const targetId = seedLiveMeetingFromResponse(body) ?? m.id;
       refreshMeetings();
+      if (targetId) {
+        layout.openTab({
+          id: `meeting:${targetId}`,
+          title: (m.title_custom || m.title || `Meeting ${targetId}`).split(" — ")[0],
+          kind: "meeting",
+          params: { meetingId: targetId },
+        });
+        if (m.id) layout.closeTab(`prep:${m.id}`);
+      }
     } catch (e) {
       const state = resolveJoinError(e);
       if (state.kind === "denial") setDenial(state.presentation);

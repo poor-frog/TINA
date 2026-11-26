@@ -426,6 +426,32 @@ export function refreshMeetings(): void {
   void snapshot();
 }
 
+/** Extract the meeting id from a `POST /api/bots` response and, when the payload includes the full
+ *  created row, optimistically seed it into the live meetings store so immediate navigation to the
+ *  new meeting opens without a "not found" or loading flash. */
+export function seedLiveMeetingFromResponse(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const body = raw as Partial<MeetingRowDTO> & { meeting_id?: number | string };
+  const target = body.meeting_id ?? body.id;
+  if (target == null) return undefined;
+  const id = String(target).trim();
+  if (!id) return undefined;
+  if (typeof body.platform === "string" && typeof body.status === "string") {
+    const seeded = toMock({
+      ...(body as MeetingRowDTO),
+      id,
+      native_meeting_id: body.native_meeting_id ?? null,
+    });
+    storeRevision += 1;
+    const idx = meetings.findIndex((m) => m.id === seeded.id);
+    meetings = idx >= 0
+      ? [...meetings.slice(0, idx), seeded, ...meetings.slice(idx + 1)]
+      : [seeded, ...meetings];
+    subs.forEach((f) => f());
+  }
+  return id;
+}
+
 /** Subscribe a component to the live `meeting.status` stream's CONNECTION state. `false` means the
  *  rows are the last snapshot, not live truth — state-bearing controls (Stop bot …) must degrade
  *  to indeterminate/disabled until it is `true` again (ws.v1 is the authoritative state channel). */

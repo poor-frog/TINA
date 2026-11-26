@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { actionsFor } from "../meeting";
+import { getLiveMeeting } from "../liveMeetings";
 import type { MeetingMock } from "../meetingModel";
 
 const NATIVE = "abc-defg-hij";
@@ -206,6 +207,46 @@ describe("actionsFor — each action fires the correct endpoint+body", () => {
     actionsFor({ ...row("failed"), meeting_url: `https://meet.google.com/meet/${NATIVE}?authuser=1` })
       .find((a) => a.id === "resend")!.run();
     expect(lastFetch().body.meeting_url).toBe(`https://meet.google.com/${NATIVE}`);
+  });
+
+  it("failed→Re-send extracts the newly created meeting id, seeds the live store, and reports it via onSuccess", async () => {
+    const onFailure = vi.fn();
+    const onSuccess = vi.fn();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        id: 88,
+        platform: "google_meet",
+        native_meeting_id: NATIVE,
+        status: "requested",
+        constructed_meeting_url: `https://meet.google.com/${NATIVE}`,
+      }),
+    } as unknown as Response);
+
+    await actionsFor({ ...row("failed"), id: "27" }).find((a) => a.id === "resend")!.run(onFailure, onSuccess);
+
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(onSuccess).toHaveBeenCalledWith({ meetingId: "88" });
+    expect(getLiveMeeting("88")).toMatchObject({ id: "88", native_id: NATIVE, live_status: "requested", status: "live" });
+  });
+
+  it("failed→Re-send does not invoke onSuccess when POST /api/bots rejects", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const onFailure = vi.fn();
+    const onSuccess = vi.fn();
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      statusText: "Bad Gateway",
+      url: "/api/bots",
+      json: async () => ({ detail: "Failed to start bot workload" }),
+    } as unknown as Response);
+
+    await actionsFor({ ...row("failed"), id: "27" }).find((a) => a.id === "resend")!.run(onFailure, onSuccess);
+
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onSuccess).not.toHaveBeenCalled();
   });
 
   it("planned→Delete DELETEs by ROW id (works link-less)", () => {

@@ -75,6 +75,46 @@ describe("BotControls — enabled-ness follows WS connectivity", () => {
     expect(screen.queryByRole("button", { name: "Stop bot" })).toBeNull();
     expect(screen.getByRole("button", { name: "Send bot again" })).toBeTruthy();
   });
+  it("clicking 'Send bot again' on a failed meeting navigates to the newly created meeting id", async () => {
+    const onOpenMeeting = vi.fn();
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url) === "/api/bots") {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ id: 28, platform: "google_meet", native_meeting_id: NATIVE, status: "requested" }),
+        } as unknown as Response;
+      }
+      return { ok: true, json: async () => ({ meetings: [] }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    render(<BotControls m={{ ...row("failed"), id: "27" }} connected={true} onOpenMeeting={onOpenMeeting} />);
+    fireEvent.click(screen.getByRole("button", { name: "Send bot again" }));
+
+    await waitFor(() => expect(onOpenMeeting).toHaveBeenCalledWith("28"));
+  });
+  it("clicking 'Send bot again' stays on the current meeting and renders an alert when POST /api/bots fails", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const onOpenMeeting = vi.fn();
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url) === "/api/bots") {
+        return {
+          ok: false,
+          status: 409,
+          statusText: "Conflict",
+          url: "/api/bots",
+          json: async () => ({ detail: "An active or requested meeting already exists" }),
+        } as unknown as Response;
+      }
+      return { ok: true, json: async () => ({ meetings: [] }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    render(<BotControls m={{ ...row("failed"), id: "27" }} connected={true} onOpenMeeting={onOpenMeeting} />);
+    fireEvent.click(screen.getByRole("button", { name: "Send bot again" }));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("That meeting already has a bot."));
+    expect(onOpenMeeting).not.toHaveBeenCalled();
+  });
 });
 
 describe("recap time — cached live labels never imply the meeting is still running", () => {

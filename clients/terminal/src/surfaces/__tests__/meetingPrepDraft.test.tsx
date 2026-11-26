@@ -12,7 +12,7 @@ vi.mock("../../platform", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useService: () => ({ openTab, closeTab }),
 }));
-vi.mock("../liveMeetings", () => ({ useLiveMeetings: () => [], refreshMeetings: vi.fn() }));
+vi.mock("../liveMeetings", () => ({ useLiveMeetings: () => [], refreshMeetings: vi.fn(), seedLiveMeetingFromResponse: () => undefined }));
 vi.mock("../plannedApi", () => ({
   createPlannedMeeting: vi.fn(async () => ({ id: 77 })),
   updatePlannedMeeting: vi.fn(async () => ({})),

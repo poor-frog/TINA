@@ -35,6 +35,8 @@ const mockFetchDurableTranscript = vi.fn().mockResolvedValue({
   notes: [],
 });
 
+const mockFetchMeetingById = vi.fn().mockResolvedValue(null);
+
 const TODAY_ISO = new Date().toISOString();
 const YESTERDAY_START = new Date(Date.now() - 86_400_000).toISOString();
 const YESTERDAY_END = new Date(Date.now() - 86_400_000 + 45 * 60_000).toISOString();
@@ -82,8 +84,15 @@ vi.mock("../../surfaces/liveMeetings", () => ({
   useLiveMeetingsLoaded: () => true,
   useLiveMeetingsConnection: () => true,
   refreshMeetings: vi.fn(),
+  seedLiveMeetingFromResponse: (raw: unknown) => {
+    if (!raw || typeof raw !== "object") return undefined;
+    const obj = raw as { id?: number | string; meeting_id?: number | string };
+    const id = obj.meeting_id ?? obj.id;
+    return id != null ? String(id) : undefined;
+  },
   liveMeetingsNow: () => [],
   getLiveMeeting: () => undefined,
+  fetchMeetingById: (...args: unknown[]) => mockFetchMeetingById(...args),
   fetchDurableTranscript: (...args: unknown[]) => mockFetchDurableTranscript(...args),
 }));
 
@@ -975,6 +984,93 @@ describe("WebShell production UI (Option A & Option B)", () => {
       expect(toggleBtn().getAttribute("aria-expanded")).toBe("false");
       fireEvent.click(toggleBtn());
       expect(sidebar().classList.contains("collapsed")).toBe(false);
+    }
+  });
+
+  it("navigates to the newly created meeting page when clicking 'Send bot again' on a failed meeting", async () => {
+    const origEventSource = globalThis.EventSource;
+    const sseUrls: string[] = [];
+    class FakeEventSource {
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(url: string) {
+        sseUrls.push(url);
+      }
+      addEventListener() {}
+      removeEventListener() {}
+      close() {}
+    }
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+
+    try {
+      window.history.replaceState({}, "", "/meetings/109");
+      mockFetchMeetingById.mockImplementation(async (id: string) => {
+        if (id === "109") {
+          return {
+            id: "109",
+            native_id: "cfr-uyfy-enb",
+            title: "Google Meet · cfr-uyfy-enb",
+            when: "Just now",
+            status: "past",
+            live_status: "failed",
+            join_failure_summary: "Google Meet timed out waiting for admission.",
+            platform: "Google Meet",
+            participants: [],
+            mentioned: [],
+            actions: [],
+            transcript: [],
+            insights: [],
+          } as MeetingMock;
+        }
+        if (id === "110") {
+          return {
+            id: "110",
+            native_id: "cfr-uyfy-enb",
+            title: "Google Meet · cfr-uyfy-enb",
+            when: "Now · live",
+            status: "live",
+            live_status: "requested",
+            session_uid: "110",
+            platform: "Google Meet",
+            participants: [],
+            mentioned: [],
+            actions: [],
+            transcript: [],
+            insights: [],
+          } as MeetingMock;
+        }
+        return null;
+      });
+
+      const baseFetch = mockEnvironment({ admin: false });
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === "/api/bots" && init?.method === "POST") {
+          return new Response(
+            JSON.stringify({
+              id: 110,
+              platform: "google_meet",
+              native_meeting_id: "cfr-uyfy-enb",
+              status: "requested",
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return baseFetch(input, init);
+      }) as typeof fetch;
+
+      render(<WebShell initialMeetingId="109" />);
+
+      const sendAgainBtn = await screen.findByRole("button", { name: "Send bot again" });
+      fireEvent.click(sendAgainBtn);
+
+      await waitFor(() => {
+        expect(window.location.pathname).toBe("/meetings/110");
+      });
+      expect(await screen.findByRole("button", { name: "Stop bot" })).toBeTruthy();
+      expect(sseUrls.some((url) => url.includes("meeting_id=110"))).toBe(true);
+    } finally {
+      mockFetchMeetingById.mockResolvedValue(null);
+      globalThis.EventSource = origEventSource;
     }
   });
 });

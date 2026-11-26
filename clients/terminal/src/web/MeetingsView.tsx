@@ -220,9 +220,16 @@ export function MeetingsView({
       return next;
     });
     try {
-      await act.run((failure) => {
-        setActionErrors((prev) => ({ ...prev, [m.id]: `${failure.actionLabel}: ${failure.message}` }));
-      });
+      await act.run(
+        (failure) => {
+          setActionErrors((prev) => ({ ...prev, [m.id]: `${failure.actionLabel}: ${failure.message}` }));
+        },
+        (result) => {
+          if ((act.id === "resend" || act.id === "send") && result.meetingId) {
+            onOpenMeeting(result.meetingId);
+          }
+        },
+      );
     } finally {
       setBusyId(null);
     }

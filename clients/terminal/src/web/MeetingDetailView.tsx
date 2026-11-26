@@ -44,6 +44,7 @@ import {
   fetchDurableTranscript,
   fetchMeetingById,
   refreshMeetings,
+  seedLiveMeetingFromResponse,
   type ProcessedNoteDTO,
 } from "../surfaces/liveMeetings";
 import { useMeetingLive, type LiveSegment } from "../surfaces/meetingLive";
@@ -281,6 +282,7 @@ export function MeetingDetailView({
   canOpenTerminal,
   user,
   onBack,
+  onOpenMeeting,
   onOpenMobileNav,
   onOpenCapture,
   onUserMenuToggle,
@@ -293,6 +295,7 @@ export function MeetingDetailView({
   canOpenTerminal: boolean;
   user?: WebUser;
   onBack: () => void;
+  onOpenMeeting?: (meetingId: string) => void;
   onOpenMobileNav?: () => void;
   onOpenCapture?: (mode?: CaptureModalMode) => void;
   onUserMenuToggle?: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -1587,7 +1590,7 @@ export function MeetingDetailView({
             </button>
           )}
 
-          {m && <BotControls m={m} connected={wsConnected} />}
+          {m && <BotControls m={m} connected={wsConnected} onOpenMeeting={onOpenMeeting} />}
 
           {m?.id && !m.shared && (
             <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -1644,6 +1647,7 @@ export function MeetingDetailView({
           key={m.id}
           meeting={m}
           onBack={onBack}
+          onOpenMeeting={onOpenMeeting}
           onUpdated={() => {
             refreshMeetings();
             if (needsDetail) setDetailAttempt((a) => a + 1);
@@ -2320,10 +2324,12 @@ export function MeetingDetailView({
 function PlannedMeetingEditor({
   meeting,
   onBack,
+  onOpenMeeting,
   onUpdated,
 }: {
   meeting: MeetingMock;
   onBack: () => void;
+  onOpenMeeting?: (meetingId: string) => void;
   onUpdated: () => void;
 }) {
   const [title, setTitle] = useState(meeting.title_custom || meeting.title || "");
@@ -2380,7 +2386,13 @@ function PlannedMeetingEditor({
         }),
       });
       if (!r.ok) throw await readApiFailure(r);
+      const body = await r.json().catch(() => null);
+      const targetId = seedLiveMeetingFromResponse(body);
       onUpdated();
+      if (targetId && targetId !== meeting.id) {
+        onOpenMeeting?.(targetId);
+        return;
+      }
       setStatusMsg("Bot dispatched to meeting.");
     } catch (err) {
       setError(presentMeetingActionFailure(err));

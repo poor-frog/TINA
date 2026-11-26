@@ -341,6 +341,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
                 canOpenTerminal={canOpenTerminal}
                 user={user}
                 onBack={() => navigate("meetings")}
+                onOpenMeeting={openMeeting}
                 onOpenMobileNav={() => setMobileNavOpen((v) => !v)}
                 onOpenCapture={openCapture}
                 onUserMenuToggle={(event) => {

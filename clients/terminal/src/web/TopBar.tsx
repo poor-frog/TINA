@@ -8,7 +8,7 @@ import { getJitsiHosts } from "../surfaces/jitsiHosts";
 import { defaultBotName } from "../surfaces/defaultBotName";
 import { readApiFailure } from "../surfaces/apiClient";
 import { presentMeetingActionFailure } from "../surfaces/meeting";
-import { refreshMeetings } from "../surfaces/liveMeetings";
+import { refreshMeetings, seedLiveMeetingFromResponse } from "../surfaces/liveMeetings";
 import { createPlannedMeeting } from "../surfaces/plannedApi";
 import type { MeetingMock } from "../surfaces/meetingModel";
 
@@ -249,9 +249,10 @@ function CaptureMeetingModal({
       });
       if (!response.ok) throw await readApiFailure(response);
       const data = (await response.json().catch(() => ({}))) as { id?: number | string; meeting_id?: number | string };
+      const seededId = seedLiveMeetingFromResponse(data);
       refreshMeetings();
-      const targetId = data.meeting_id ?? data.id;
-      onCaptured(targetId != null ? String(targetId) : undefined);
+      const targetId = seededId ?? (data.meeting_id != null ? String(data.meeting_id) : data.id != null ? String(data.id) : undefined);
+      onCaptured(targetId);
     } catch (err) {
       setError(presentMeetingActionFailure(err));
     } finally {
