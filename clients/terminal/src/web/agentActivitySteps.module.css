@@ -1,0 +1,251 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.compact {
+  margin-bottom: 8px;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--tw-text-3, #9ca3af);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  align-self: flex-start;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.compact .trigger {
+  min-height: 26px;
+  padding: 3px 9px 3px 7px;
+  font-size: 11.5px;
+}
+
+.trigger:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(145, 215, 190, 0.28);
+  color: var(--tw-text, #f3f4f6);
+}
+
+.streaming .trigger {
+  border-color: rgba(145, 215, 190, 0.28);
+  background: rgba(23, 107, 91, 0.14);
+  color: var(--tw-mint-bright, #b5e8d1);
+}
+
+.leadIcon {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.leadIconDone {
+  background: rgba(23, 107, 91, 0.24);
+  color: var(--tw-mint, #91d7be);
+}
+
+.leadIconLive {
+  background: rgba(23, 107, 91, 0.3);
+}
+
+.liveDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tw-mint-bright, #b5e8d1);
+  animation: activityPulse 1.2s ease-in-out infinite;
+}
+
+.summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stepBadge {
+  flex: none;
+  min-width: 18px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(145, 215, 190, 0.16);
+  color: var(--tw-mint-bright, #b5e8d1);
+  font-size: 10.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--tw-text-4, #6b7280);
+  transition: transform 150ms ease, color 140ms ease;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+  color: var(--tw-mint, #91d7be);
+}
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 8px 10px 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 440px;
+}
+
+.stepRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--tw-text-2, #d1d5db);
+}
+
+.stepIcon {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--tw-text-3, #9ca3af);
+}
+
+.kind_write .stepIcon {
+  background: rgba(23, 107, 91, 0.22);
+  color: var(--tw-mint, #91d7be);
+}
+
+.kind_web .stepIcon {
+  background: rgba(96, 165, 250, 0.14);
+  color: #93c5fd;
+}
+
+.stepActive .stepLabel {
+  color: var(--tw-mint-bright, #b5e8d1);
+}
+
+.stepLabel {
+  flex: 1;
+  min-width: 0;
+}
+
+.rawCode {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--tw-text-4, #8b949e);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10.5px;
+}
+
+.countPill {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--tw-text-3, #9ca3af);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+@keyframes activityPulse {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scale(0.86);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+:global(html[data-theme="light"]) .trigger {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(15, 23, 42, 0.03);
+  color: #475569;
+}
+
+:global(html[data-theme="light"]) .trigger:hover {
+  background: rgba(15, 23, 42, 0.06);
+  border-color: rgba(23, 107, 91, 0.28);
+  color: #0f172a;
+}
+
+:global(html[data-theme="light"]) .streaming .trigger {
+  border-color: rgba(23, 107, 91, 0.26);
+  background: rgba(23, 107, 91, 0.09);
+  color: #0f4c41;
+}
+
+:global(html[data-theme="light"]) .leadIconDone {
+  background: rgba(23, 107, 91, 0.12);
+  color: #0f4c41;
+}
+
+:global(html[data-theme="light"]) .timeline {
+  border-color: rgba(15, 23, 42, 0.08);
+  background: rgba(15, 23, 42, 0.02);
+}
+
+:global(html[data-theme="light"]) .stepRow {
+  color: #334155;
+}
+
+:global(html[data-theme="light"]) .stepIcon {
+  background: rgba(15, 23, 42, 0.06);
+  color: #475569;
+}
+
+:global(html[data-theme="light"]) .kind_write .stepIcon {
+  background: rgba(23, 107, 91, 0.12);
+  color: #0f4c41;
+}
+
+:global(html[data-theme="light"]) .kind_web .stepIcon {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+}
+
+:global(html[data-theme="light"]) .rawCode,
+:global(html[data-theme="light"]) .countPill {
+  background: rgba(15, 23, 42, 0.06);
+  color: #64748b;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liveDot {
+    animation: none;
+  }
+}

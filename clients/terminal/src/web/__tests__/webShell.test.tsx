@@ -1110,4 +1110,55 @@ describe("WebShell production UI (Option A & Option B)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Collapse Ask Tina and Transcript" }));
     expect(screen.getByLabelText("Meeting notes workspace")).toBeTruthy();
   });
+
+  it("renders collapsible AgentActivitySteps, sidebar toggle, custom meeting scope popover, edit and retry in Ask Tina", async () => {
+    mockEnvironment({ admin: false });
+    render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+    expect(await screen.findByText("Q4 Rollout Checklist")).toBeTruthy();
+
+    // Toggle chat history sidebar via topbar button
+    const toggleBtn = screen.getByRole("button", { name: "Toggle chat history" });
+    expect(toggleBtn.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggleBtn);
+    expect(toggleBtn.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggleBtn);
+    expect(toggleBtn.getAttribute("aria-pressed")).toBe("true");
+
+    // Custom meeting scope popover grounds conversation and shows removable topbar chip
+    fireEvent.click(screen.getByRole("button", { name: "Ground on meeting" }));
+    fireEvent.click(screen.getByRole("option", { name: /Product Weekly Sync/i }));
+    expect(screen.getByRole("button", { name: "Clear meeting focus" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear meeting focus" }));
+    expect(screen.queryByRole("button", { name: "Clear meeting focus" })).toBeNull();
+
+    // Send a prompt -> emit tool calls -> renders friendly collapsible activity summary instead of raw tool pills
+    const composer = screen.getByLabelText("Message Ask Tina") as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: "Delete sample docs" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(capturedChatCallbacks?.onTool).toBeTruthy();
+    });
+    capturedChatCallbacks?.onTool?.("list_wiki");
+    capturedChatCallbacks?.onTool?.("delete_wiki");
+    capturedChatCallbacks?.onTool?.("delete_wiki");
+
+    const activitySummary = await screen.findByText(/3 steps · Browsed Knowledge library, Deleted 2 pages/i);
+    expect(activitySummary).toBeTruthy();
+    fireEvent.click(activitySummary.closest("button")!);
+    expect(await screen.findByLabelText("Agent tool activity")).toBeTruthy();
+    expect(screen.getByText("Browsed Knowledge library")).toBeTruthy();
+    expect(screen.getByText("Deleted 2 pages")).toBeTruthy();
+
+    // Edit user message puts clean text back into composer
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+    expect(composer.value).toBe("Delete sample docs");
+
+    // Retry response button re-runs the turn
+    fireEvent.click(screen.getByRole("button", { name: "Retry response" }));
+    await waitFor(() => {
+      expect(screen.getAllByText("Delete sample docs").length).toBeGreaterThanOrEqual(2);
+    });
+  });
 });

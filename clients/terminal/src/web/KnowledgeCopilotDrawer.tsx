@@ -5,6 +5,7 @@
  *  seeded prompts from uploaded files or Connections Map, and auto-refreshes on workspace commits. */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { WebIcon, type WebIconName } from "./Icons";
+import { AgentActivitySteps } from "./AgentActivitySteps";
 import { friendlyPageTitle } from "./knowledgeFriendly";
 import { Markdown } from "../ui-kit/Markdown";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
@@ -445,7 +446,7 @@ export function KnowledgeCopilotDrawer({
           </div>
         ) : (
           <div className={styles.copilotThread}>
-            {messages.map((m) => {
+            {messages.map((m, idx) => {
               const isStreamingThis = busy && m.role === "agent" && m.id === lastMessageId;
 
               if (m.role === "user") {
@@ -455,6 +456,16 @@ export function KnowledgeCopilotDrawer({
                   </div>
                 );
               }
+
+              const retryPreviousPrompt = () => {
+                if (busy) return;
+                for (let i = idx - 1; i >= 0; i--) {
+                  if (messages[i]?.role === "user") {
+                    void sendPrompt(messages[i].text);
+                    return;
+                  }
+                }
+              };
 
               return (
                 <div key={m.id} className={styles.copilotTurnAgent}>
@@ -467,28 +478,41 @@ export function KnowledgeCopilotDrawer({
                       <span className={styles.copilotPhaseHint}>{phaseLabel(phase, Boolean(m.text), activeTool)}</span>
                     )}
                     {m.text && !isStreamingThis && (
-                      <button
-                        type="button"
-                        className={styles.copilotCopyBtn}
-                        aria-label="Copy response"
-                        title={copiedId === m.id ? "Copied" : "Copy response"}
-                        onClick={() => void handleCopy(m.id, m.text)}
-                      >
-                        <WebIcon name={copiedId === m.id ? "check" : "copy"} size={12} />
-                        <span>{copiedId === m.id ? "Copied" : "Copy"}</span>
-                      </button>
+                      <div className={styles.copilotAgentMetaActions}>
+                        <button
+                          type="button"
+                          className={styles.copilotCopyBtn}
+                          aria-label="Retry response"
+                          title="Regenerate response"
+                          disabled={busy}
+                          onClick={retryPreviousPrompt}
+                        >
+                          <WebIcon name="refresh" size={12} />
+                          <span>Retry</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.copilotCopyBtn}
+                          aria-label="Copy response"
+                          title={copiedId === m.id ? "Copied" : "Copy response"}
+                          onClick={() => void handleCopy(m.id, m.text)}
+                        >
+                          <WebIcon name={copiedId === m.id ? "check" : "copy"} size={12} />
+                          <span>{copiedId === m.id ? "Copied" : "Copy"}</span>
+                        </button>
+                      </div>
                     )}
                   </div>
 
                   <div className={styles.copilotAgentBody}>
-                    {devView && m.ops && m.ops.length > 0 && (
-                      <div className={styles.copilotOps}>
-                        {m.ops.map((op, i) => (
-                          <span key={`${op}-${i}`} className={styles.copilotOpTag}>
-                            {op}
-                          </span>
-                        ))}
-                      </div>
+                    {m.ops && m.ops.length > 0 && (
+                      <AgentActivitySteps
+                        ops={m.ops}
+                        streaming={isStreamingThis && !m.text}
+                        commit={m.commit}
+                        compact
+                        showRawToolNames={devView}
+                      />
                     )}
 
                     {m.text ? (
@@ -521,6 +545,12 @@ export function KnowledgeCopilotDrawer({
                       <div className={styles.copilotErr} role="alert">
                         <WebIcon name="alertTriangle" size={13} />
                         <span>{m.error}</span>
+                        {!busy && (
+                          <button type="button" className={styles.copilotRetryInline} onClick={retryPreviousPrompt}>
+                            <WebIcon name="refresh" size={11} />
+                            <span>Retry</span>
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>

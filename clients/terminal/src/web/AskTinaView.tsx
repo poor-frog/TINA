@@ -4,6 +4,7 @@
  *  message actions, parsed context pills, and searchable `/api/sessions` history. */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { WebIcon, type WebIconName } from "./Icons";
+import { AgentActivitySteps, describeAgentTool } from "./AgentActivitySteps";
 import { Markdown } from "../ui-kit/Markdown";
 import { startStreamingDictation, type StreamingDictation } from "../ui-kit/micDictation";
 import { deleteSession, listSessions, sessionHistory, type SessionSummary } from "../surfaces/sessionsApi";
@@ -59,8 +60,8 @@ function newSessionId(): string {
   return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function formatSessionStamp(stamp?: string | number | null): string {
-  if (stamp == null || stamp === "") return "";
+function parseSessionMs(stamp?: string | number | null): number {
+  if (stamp == null || stamp === "") return 0;
   const ms =
     typeof stamp === "number"
       ? stamp > 1e12
@@ -71,13 +72,31 @@ function formatSessionStamp(stamp?: string | number | null): string {
           ? Number(stamp)
           : Number(stamp) * 1000
         : Date.parse(stamp);
-  if (!Number.isFinite(ms) || ms <= 0) return "";
+  return Number.isFinite(ms) && ms > 0 ? ms : 0;
+}
+
+function formatSessionStamp(stamp?: string | number | null): string {
+  const ms = parseSessionMs(stamp);
+  if (!ms) return "";
   const diffMin = Math.floor((Date.now() - ms) / 60_000);
   if (diffMin < 1) return "Just now";
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHrs = Math.floor(diffMin / 60);
   if (diffHrs < 24) return `${diffHrs}h ago`;
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+type SessionTimeBucket = "Today" | "Yesterday" | "Previous 7 days" | "Older";
+
+function sessionTimeBucket(stamp?: string | number | null): SessionTimeBucket {
+  const ms = parseSessionMs(stamp);
+  if (!ms) return "Older";
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (ms >= startToday) return "Today";
+  if (ms >= startToday - 86_400_000) return "Yesterday";
+  if (ms >= startToday - 7 * 86_400_000) return "Previous 7 days";
+  return "Older";
 }
 
 /** Extract leading `[Context: ...]` metadata prepended by Knowledge/Meeting deep-links
@@ -103,8 +122,9 @@ function parseUserContext(raw: string): { badges: string[]; body: string } {
   return { badges, body };
 }
 
-function agentPhaseLabel(phase: ChatPhase | null, hasText: boolean): string {
+function agentPhaseLabel(phase: ChatPhase | null, hasText: boolean, lastOp?: string): string {
   if (hasText) return "Writing…";
+  if (lastOp) return describeAgentTool(lastOp).active;
   if (phase === "connecting") return "Starting agent…";
   if (phase === "reconnecting") return "Reconnecting…";
   if (phase === "working") return "Working…";
@@ -137,11 +157,17 @@ export function AskTinaView({
   const [deletingSessions, setDeletingSessions] = useState<Record<string, boolean>>({});
   const [confirmClearAll, setConfirmClearAll] = useState(false);
   const [clearingAll, setClearingAll] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
+  const [showScrollDown, setShowScrollDown] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const historyRef = useRef<AbortController | null>(null);
   const dictRef = useRef<StreamingDictation | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
+  const scopeWrapRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<ChatMessage[]>(messages);
   messagesRef.current = messages;
@@ -167,6 +193,40 @@ export function AskTinaView({
   }, [loadSessionList]);
 
   useEffect(() => {
+    if (!scopeMenuOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (scopeWrapRef.current && !scopeWrapRef.current.contains(e.target as Node)) {
+        setScopeMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setScopeMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [scopeMenuOpen]);
+
+  const handleThreadScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const nearBottom = distance < 96;
+    isNearBottomRef.current = nearBottom;
+    setShowScrollDown(!nearBottom && el.scrollHeight > el.clientHeight + 120);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    isNearBottomRef.current = true;
+    setShowScrollDown(false);
+    endRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
+  }, []);
+
+  useEffect(() => {
+    if (!isNearBottomRef.current) return;
     endRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
   }, [messages, phase]);
 
@@ -188,11 +248,38 @@ export function AskTinaView({
     );
   }, [sessions, sessionQuery]);
 
+  const groupedSessions = useMemo(() => {
+    const order: SessionTimeBucket[] = ["Today", "Yesterday", "Previous 7 days", "Older"];
+    const map = new Map<SessionTimeBucket, SessionSummary[]>();
+    for (const s of filteredSessions) {
+      const bucket = sessionTimeBucket(s.last_active || s.created);
+      const list = map.get(bucket) ?? [];
+      list.push(s);
+      map.set(bucket, list);
+    }
+    return order
+      .map((bucket) => ({ bucket, items: map.get(bucket) ?? [] }))
+      .filter((g) => g.items.length > 0);
+  }, [filteredSessions]);
+
+  const selectedMeeting = useMemo(
+    () => meetings.find((m) => m.id === selectedMeetingId) ?? null,
+    [meetings, selectedMeetingId],
+  );
+
+  const activeConversationTitle = useMemo(() => {
+    const match = sessions.find((s) => s.session === activeSession);
+    if (match?.title) return match.title;
+    return messages.length > 0 ? "Ask Tina" : "New conversation";
+  }, [sessions, activeSession, messages.length]);
+
   const sendMessage = useCallback(
     async (rawPrompt: string, meetingOverrideId?: string) => {
       const displayPrompt = rawPrompt.trim();
       if (!displayPrompt || abortRef.current || historyRef.current) return;
 
+      isNearBottomRef.current = true;
+      setShowScrollDown(false);
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
       const wirePrompt = /^\/routine(?:\s|$)/i.test(displayPrompt)
         ? routineCreationPrompt(displayPrompt, tz)
@@ -564,6 +651,25 @@ export function AskTinaView({
     }
   };
 
+  const retryFromMessage = useCallback(
+    (agentIndex: number) => {
+      if (busy || historyLoading) return;
+      for (let i = agentIndex - 1; i >= 0; i--) {
+        if (messages[i]?.role === "user") {
+          void sendMessage(messages[i].text);
+          return;
+        }
+      }
+    },
+    [busy, historyLoading, messages, sendMessage],
+  );
+
+  const editUserMessage = useCallback((rawText: string) => {
+    const clean = parseUserContext(rawText).body;
+    setDraft(clean);
+    composerRef.current?.focus();
+  }, []);
+
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!draft.trim() || busy || historyLoading) return;
@@ -573,10 +679,82 @@ export function AskTinaView({
   };
 
   const lastMessageId = messages[messages.length - 1]?.id;
+  const showSlashHint = draft.startsWith("/") && !/^\/routine\s+\S/i.test(draft);
+
+  const renderSessionRow = (s: SessionSummary) => {
+    const stamp = formatSessionStamp(s.last_active || s.created);
+    const label = s.title || s.session;
+    const isDeleting = Boolean(deletingSessions[s.session]);
+    const isConfirming = confirmDeleteSession === s.session;
+    return (
+      <div
+        key={s.session}
+        className={`tina-web-session-item ${activeSession === s.session ? "active" : ""} ${isConfirming ? "confirming" : ""}`}
+      >
+        <button
+          type="button"
+          className={`tina-web-session-row ${activeSession === s.session ? "active" : ""}`}
+          onClick={() => {
+            setConfirmDeleteSession(null);
+            setConfirmClearAll(false);
+            void openSession(s.session);
+          }}
+        >
+          <span className="tina-web-session-icon" aria-hidden="true">
+            <WebIcon name="tinaAsk" size={13} />
+          </span>
+          <span className="tina-web-session-copy">
+            <strong>{label}</strong>
+            {stamp && <small>{stamp}</small>}
+          </span>
+        </button>
+
+        {isConfirming ? (
+          <div className="tina-web-session-confirm" role="group" aria-label={`Confirm delete ${label}`}>
+            <button
+              type="button"
+              className="tina-web-session-confirm-del"
+              disabled={isDeleting}
+              onClick={() => void handleDeleteSession(s.session)}
+            >
+              {isDeleting ? "…" : "Delete"}
+            </button>
+            <button
+              type="button"
+              className="tina-web-session-confirm-cancel"
+              aria-label="Cancel delete"
+              disabled={isDeleting}
+              onClick={() => setConfirmDeleteSession(null)}
+            >
+              <WebIcon name="close" size={12} />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="tina-web-session-delete-btn"
+            aria-label={`Delete conversation ${label}`}
+            title="Delete conversation"
+            disabled={isDeleting || clearingAll}
+            onClick={() => {
+              setConfirmClearAll(false);
+              setConfirmDeleteSession(s.session);
+            }}
+          >
+            <WebIcon name="trash" size={13} />
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="tina-web-ask">
-      <aside className="tina-web-ask-sessions" aria-label="Chat sessions">
+      <aside
+        className={`tina-web-ask-sessions ${sidebarCollapsed ? "collapsed" : ""}`}
+        aria-label="Chat sessions"
+        aria-hidden={sidebarCollapsed || undefined}
+      >
         <button
           type="button"
           className="tina-web-ask-new-btn"
@@ -661,72 +839,14 @@ export function AskTinaView({
             }
           }}
         >
-          {filteredSessions.map((s) => {
-            const stamp = formatSessionStamp(s.last_active || s.created);
-            const label = s.title || s.session;
-            const isDeleting = Boolean(deletingSessions[s.session]);
-            const isConfirming = confirmDeleteSession === s.session;
-            return (
-              <div
-                key={s.session}
-                className={`tina-web-session-item ${activeSession === s.session ? "active" : ""} ${isConfirming ? "confirming" : ""}`}
-              >
-                <button
-                  type="button"
-                  className={`tina-web-session-row ${activeSession === s.session ? "active" : ""}`}
-                  onClick={() => {
-                    setConfirmDeleteSession(null);
-                    setConfirmClearAll(false);
-                    void openSession(s.session);
-                  }}
-                >
-                  <span className="tina-web-session-icon" aria-hidden="true">
-                    <WebIcon name="tinaAsk" size={13} />
-                  </span>
-                  <span className="tina-web-session-copy">
-                    <strong>{label}</strong>
-                    {stamp && <small>{stamp}</small>}
-                  </span>
-                </button>
-
-                {isConfirming ? (
-                  <div className="tina-web-session-confirm" role="group" aria-label={`Confirm delete ${label}`}>
-                    <button
-                      type="button"
-                      className="tina-web-session-confirm-del"
-                      disabled={isDeleting}
-                      onClick={() => void handleDeleteSession(s.session)}
-                    >
-                      {isDeleting ? "…" : "Delete"}
-                    </button>
-                    <button
-                      type="button"
-                      className="tina-web-session-confirm-cancel"
-                      aria-label="Cancel delete"
-                      disabled={isDeleting}
-                      onClick={() => setConfirmDeleteSession(null)}
-                    >
-                      <WebIcon name="close" size={12} />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="tina-web-session-delete-btn"
-                    aria-label={`Delete conversation ${label}`}
-                    title="Delete conversation"
-                    disabled={isDeleting || clearingAll}
-                    onClick={() => {
-                      setConfirmClearAll(false);
-                      setConfirmDeleteSession(s.session);
-                    }}
-                  >
-                    <WebIcon name="trash" size={13} />
-                  </button>
-                )}
-              </div>
-            );
-          })}
+          {sessionQuery.trim()
+            ? filteredSessions.map(renderSessionRow)
+            : groupedSessions.map((group) => (
+                <div key={group.bucket} role="group" aria-label={group.bucket}>
+                  <div className="tina-web-ask-session-group-label">{group.bucket}</div>
+                  {group.items.map(renderSessionRow)}
+                </div>
+              ))}
 
           {filteredSessions.length === 0 && (
             <div className="tina-web-ask-sessions-empty">
@@ -739,12 +859,56 @@ export function AskTinaView({
       </aside>
 
       <section className="tina-web-ask-main">
-        <div className="tina-web-ask-scroll">
+        <header className="tina-web-ask-topbar">
+          <div className="tina-web-ask-topbar-left">
+            <button
+              type="button"
+              className="tina-web-ask-topbar-btn"
+              aria-label="Toggle chat history"
+              aria-pressed={!sidebarCollapsed}
+              title={sidebarCollapsed ? "Show chat history" : "Hide chat history"}
+              onClick={() => setSidebarCollapsed((v) => !v)}
+            >
+              <WebIcon name="sidebar" size={16} />
+            </button>
+            {sidebarCollapsed && (
+              <button
+                type="button"
+                className="tina-web-ask-topbar-btn"
+                aria-label="Start new conversation"
+                title="New conversation"
+                onClick={() => switchSession(newSessionId())}
+              >
+                <WebIcon name="plus" size={16} />
+              </button>
+            )}
+            <span className="tina-web-ask-topbar-title">{activeConversationTitle}</span>
+          </div>
+
+          <div className="tina-web-ask-topbar-right">
+            {selectedMeeting && (
+              <span className="tina-web-ask-topbar-scope">
+                <WebIcon name="video" size={12} />
+                <span>{selectedMeeting.title_custom || selectedMeeting.title}</span>
+                <button
+                  type="button"
+                  aria-label="Clear meeting focus"
+                  title="Ask across all workspace & meetings"
+                  onClick={() => setSelectedMeetingId("")}
+                >
+                  <WebIcon name="close" size={11} />
+                </button>
+              </span>
+            )}
+          </div>
+        </header>
+
+        <div ref={scrollRef} className="tina-web-ask-scroll" onScroll={handleThreadScroll}>
           <div className="tina-web-ask-thread">
             {sessionError && (
               <div role="alert" className="tina-web-msg-error">
                 <WebIcon name="alertTriangle" size={15} />
-                <span>{sessionError}</span>
+                <span className="tina-web-msg-error-text">{sessionError}</span>
               </div>
             )}
 
@@ -797,7 +961,7 @@ export function AskTinaView({
                 </div>
               </div>
             ) : (
-              messages.map((msg) => {
+              messages.map((msg, msgIndex) => {
                 if (msg.role === "user") {
                   const parsed = parseUserContext(msg.text);
                   return (
@@ -812,24 +976,38 @@ export function AskTinaView({
                           ))}
                         </div>
                       )}
-                      <div className="tina-web-msg-bubble">{parsed.body}</div>
+                      <div className="tina-web-msg-user-row">
+                        <button
+                          type="button"
+                          className="tina-web-msg-user-edit"
+                          aria-label="Edit message"
+                          title="Edit and resend"
+                          disabled={busy}
+                          onClick={() => editUserMessage(msg.text)}
+                        >
+                          <WebIcon name="edit" size={13} />
+                        </button>
+                        <div className="tina-web-msg-bubble">{parsed.body}</div>
+                      </div>
                     </div>
                   );
                 }
 
-                const isStreamingThis = busy && msg.id === lastMessageId;
+                const isLatest = msg.id === lastMessageId;
+                const isStreamingThis = busy && isLatest;
+                const lastOp = msg.ops && msg.ops.length > 0 ? msg.ops[msg.ops.length - 1] : undefined;
 
                 return (
-                  <div key={msg.id} className="tina-web-msg agent">
+                  <div key={msg.id} className={`tina-web-msg agent ${isLatest ? "latest" : ""}`}>
                     <div className="tina-web-agent-head">
                       <span className="tina-web-agent-avatar" aria-hidden="true">
-                        <WebIcon name="tinaAsk" size={14} />
+                        <WebIcon name="tinaAsk" size={13} />
                       </span>
                       <span className="tina-web-agent-name">Tina</span>
                       {isStreamingThis && (
                         <span className="tina-web-agent-phase">
                           <span className="tina-web-agent-phase-dot" aria-hidden="true" />
-                          <span>{agentPhaseLabel(phase, Boolean(msg.text))}</span>
+                          <span>{agentPhaseLabel(phase, Boolean(msg.text), lastOp)}</span>
                         </span>
                       )}
                     </div>
@@ -837,14 +1015,11 @@ export function AskTinaView({
                     <div className="tina-web-agent-content">
                       <div className="tina-web-msg-bubble">
                         {msg.ops && msg.ops.length > 0 && (
-                          <div className="tina-web-ops-list">
-                            {msg.ops.map((op, i) => (
-                              <span key={`${op}-${i}`} className="tina-web-op-chip">
-                                <WebIcon name="zap" size={11} />
-                                <span>{op}</span>
-                              </span>
-                            ))}
-                          </div>
+                          <AgentActivitySteps
+                            ops={msg.ops}
+                            streaming={isStreamingThis && !msg.text}
+                            commit={msg.commit}
+                          />
                         )}
 
                         {msg.text ? (
@@ -859,11 +1034,13 @@ export function AskTinaView({
                               <span />
                             </span>
                             <span>
-                              {phase === "reconnecting"
-                                ? "Reconnecting to agent…"
-                                : phase === "working"
-                                  ? "Reading your workspace…"
-                                  : "Thinking…"}
+                              {lastOp
+                                ? describeAgentTool(lastOp).active
+                                : phase === "reconnecting"
+                                  ? "Reconnecting to agent…"
+                                  : phase === "working"
+                                    ? "Reading your workspace…"
+                                    : "Thinking…"}
                             </span>
                           </div>
                         ) : null}
@@ -880,7 +1057,7 @@ export function AskTinaView({
                           </div>
                         )}
 
-                        {msg.commit && (
+                        {msg.commit && !(msg.ops && msg.ops.length > 0) && (
                           <div className="tina-web-commit-pill">
                             <WebIcon name="check" size={12} />
                             <span>Workspace updated ({msg.commit.slice(0, 7)})</span>
@@ -889,8 +1066,18 @@ export function AskTinaView({
 
                         {msg.error && (
                           <div role="alert" className="tina-web-msg-error">
-                            <WebIcon name="alertTriangle" size={14} />
-                            <span>{msg.error}</span>
+                            <WebIcon name="alertTriangle" size={15} />
+                            <span className="tina-web-msg-error-text">{msg.error}</span>
+                            {!busy && (
+                              <button
+                                type="button"
+                                className="tina-web-msg-retry-inline"
+                                onClick={() => retryFromMessage(msgIndex)}
+                              >
+                                <WebIcon name="refresh" size={12} />
+                                <span>Retry</span>
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -906,6 +1093,17 @@ export function AskTinaView({
                           >
                             <WebIcon name={actionFeedback[msg.id] === "Copied" ? "check" : "copy"} size={13} />
                             <span>{actionFeedback[msg.id] === "Copied" ? "Copied" : "Copy"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="tina-web-msg-action-btn"
+                            aria-label="Retry response"
+                            title="Regenerate response"
+                            disabled={busy}
+                            onClick={() => retryFromMessage(msgIndex)}
+                          >
+                            <WebIcon name="refresh" size={13} />
+                            <span>Retry</span>
                           </button>
                           <button
                             type="button"
@@ -933,7 +1131,36 @@ export function AskTinaView({
           </div>
         </div>
 
+        {showScrollDown && messages.length > 0 && (
+          <button
+            type="button"
+            className="tina-web-ask-scroll-down"
+            aria-label="Scroll to latest message"
+            title="Scroll to latest message"
+            onClick={scrollToBottom}
+          >
+            <WebIcon name="chevronDown" size={16} />
+          </button>
+        )}
+
         <div className="tina-web-ask-footer">
+          {showSlashHint && (
+            <div className="tina-web-ask-slash-hint">
+              <button
+                type="button"
+                className="tina-web-ask-slash-btn"
+                onClick={() => {
+                  setDraft("/routine Every weekday at 9:00 AM, ");
+                  composerRef.current?.focus();
+                }}
+              >
+                <WebIcon name="skills" size={13} />
+                <code>/routine</code>
+                <span>Schedule a recurring Tina agent</span>
+              </button>
+            </div>
+          )}
+
           <form className="tina-web-ask-form" onSubmit={onSubmit}>
             <textarea
               ref={composerRef}
@@ -946,25 +1173,74 @@ export function AskTinaView({
                   onSubmit(e);
                 }
               }}
-              placeholder="Ask Tina about any meeting, or type /routine to schedule an agent…"
+              placeholder="Ask Tina about any meeting, workspace, or type /routine…"
               aria-label="Message Ask Tina"
             />
             <div className="tina-web-ask-bar">
-              <div className="tina-web-ask-scope-wrap">
-                <WebIcon name={selectedMeetingId ? "video" : "layers"} size={13} />
-                <select
-                  className="tina-web-ask-select"
+              <div ref={scopeWrapRef} className="tina-web-ask-scope-popover-wrap">
+                <button
+                  type="button"
+                  className={`tina-web-ask-scope-trigger ${selectedMeeting ? "active" : ""}`}
                   aria-label="Ground on meeting"
-                  value={selectedMeetingId}
-                  onChange={(e) => setSelectedMeetingId(e.target.value)}
+                  aria-haspopup="listbox"
+                  aria-expanded={scopeMenuOpen}
+                  onClick={() => setScopeMenuOpen((v) => !v)}
                 >
-                  <option value="">All workspace &amp; meetings</option>
-                  {meetings.slice(0, 20).map((m) => (
-                    <option key={m.id} value={m.id}>
-                      Meeting: {m.title_custom || m.title}
-                    </option>
-                  ))}
-                </select>
+                  <WebIcon name={selectedMeeting ? "video" : "layers"} size={13} />
+                  <span className="tina-web-ask-scope-label">
+                    {selectedMeeting
+                      ? `Meeting: ${selectedMeeting.title_custom || selectedMeeting.title}`
+                      : "All workspace & meetings"}
+                  </span>
+                  <WebIcon name="chevronDown" size={12} />
+                </button>
+
+                {scopeMenuOpen && (
+                  <div className="tina-web-ask-scope-menu" role="listbox" aria-label="Context scope">
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={!selectedMeetingId}
+                      className={`tina-web-ask-scope-option ${!selectedMeetingId ? "selected" : ""}`}
+                      onClick={() => {
+                        setSelectedMeetingId("");
+                        setScopeMenuOpen(false);
+                      }}
+                    >
+                      <WebIcon name="layers" size={13} />
+                      <span className="tina-web-ask-scope-option-text">All workspace &amp; meetings</span>
+                      {!selectedMeetingId && <WebIcon name="check" size={13} />}
+                    </button>
+
+                    {meetings.length > 0 && (
+                      <>
+                        <div className="tina-web-ask-scope-section">Recent meetings</div>
+                        {meetings.slice(0, 20).map((m) => {
+                          const isSelected = m.id === selectedMeetingId;
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              role="option"
+                              aria-selected={isSelected}
+                              className={`tina-web-ask-scope-option ${isSelected ? "selected" : ""}`}
+                              onClick={() => {
+                                setSelectedMeetingId(m.id);
+                                setScopeMenuOpen(false);
+                              }}
+                            >
+                              <WebIcon name="video" size={13} />
+                              <span className="tina-web-ask-scope-option-text">
+                                {m.title_custom || m.title}
+                              </span>
+                              {isSelected && <WebIcon name="check" size={13} />}
+                            </button>
+                          );
+                        })}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="tina-web-ask-bar-right">
@@ -973,7 +1249,7 @@ export function AskTinaView({
                     <span className="tina-web-agent-phase-dot" aria-hidden="true" />
                     <span>
                       {phase === "connecting"
-                        ? "Starting agent…"
+                        ? "Starting…"
                         : phase === "reconnecting"
                           ? "Reconnecting…"
                           : "Working…"}
@@ -995,7 +1271,7 @@ export function AskTinaView({
                     className="tina-web-ask-stop-btn"
                     onClick={() => abortRef.current?.abort()}
                   >
-                    <WebIcon name="stop" size={13} />
+                    <WebIcon name="stop" size={12} />
                     <span>Stop</span>
                   </button>
                 ) : (
@@ -1003,10 +1279,10 @@ export function AskTinaView({
                     type="submit"
                     className="tina-web-ask-send-btn"
                     aria-label="Send"
+                    title="Send message (Enter)"
                     disabled={!draft.trim() || historyLoading}
                   >
-                    <WebIcon name="sendUp" size={14} strokeWidth={2.2} />
-                    <span>Send</span>
+                    <WebIcon name="sendUp" size={15} strokeWidth={2.2} />
                   </button>
                 )}
               </div>

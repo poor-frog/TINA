@@ -2509,10 +2509,10 @@
 }
 
 .copilotAgentBody {
-  padding: 11px 13px;
-  border-radius: 4px 14px 14px 14px;
-  background: var(--tw-card);
-  border: 1px solid var(--tw-line-soft);
+  padding: 2px 0 0 29px;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
   color: var(--tw-text-2);
   display: flex;
   flex-direction: column;
@@ -2520,9 +2520,42 @@
 }
 
 .copilotProse {
-  font-size: 13px;
-  line-height: 1.62;
+  font-size: 13.5px;
+  line-height: 1.66;
   overflow-wrap: anywhere;
+  --panel: rgba(255, 255, 255, 0.025);
+  --panel2: rgba(255, 255, 255, 0.05);
+  --line: rgba(255, 255, 255, 0.09);
+  --line2: rgba(255, 255, 255, 0.14);
+}
+
+.copilotAgentMetaActions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.copilotRetryInline {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(240, 141, 144, 0.34);
+  background: rgba(240, 141, 144, 0.12);
+  color: #fecaca;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.copilotRetryInline:hover {
+  background: rgba(240, 141, 144, 0.24);
+  color: #ffffff;
 }
 
 .copilotOps {

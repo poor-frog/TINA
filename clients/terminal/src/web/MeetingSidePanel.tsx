@@ -8,6 +8,7 @@
  *     bilingual VI/EN/Song ngữ translation, source citations, and audio sync. */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
+import { AgentActivitySteps } from "./AgentActivitySteps";
 import { Markdown } from "../ui-kit/Markdown";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
 import { presentError } from "../surfaces/apiClient";
@@ -278,7 +279,7 @@ export function MeetingSidePanel({
               if (controller.signal.aborted) return;
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === agentId && !m.ops?.includes(op)
+                  m.id === agentId
                     ? { ...m, ops: [...(m.ops ?? []), op] }
                     : m,
                 ),
@@ -587,54 +588,97 @@ export function MeetingSidePanel({
                 </>
               ) : (
                 <div className={styles.chatList}>
-                  {messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`${styles.chatBubble} ${msg.role === "user" ? styles.chatBubbleUser : styles.chatBubbleAgent}`}
-                    >
-                      {msg.role === "agent" && (
+                  {messages.map((msg, idx) => {
+                    const isStreamingThis = busy && msg.role === "agent" && idx === messages.length - 1;
+                    const retryPrevious = () => {
+                      if (busy) return;
+                      for (let i = idx - 1; i >= 0; i--) {
+                        if (messages[i]?.role === "user") {
+                          void sendPrompt(messages[i].text);
+                          return;
+                        }
+                      }
+                    };
+
+                    if (msg.role === "user") {
+                      return (
+                        <div key={msg.id} className={`${styles.chatBubble} ${styles.chatBubbleUser}`}>
+                          <div>{msg.text}</div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={msg.id} className={`${styles.chatBubble} ${styles.chatBubbleAgent}`}>
                         <div className={styles.bubbleHead}>
                           <span className={styles.tinaOrb} aria-hidden="true">
                             <WebIcon name="tinaAsk" size={10} />
                           </span>
                           <span>Tina AI</span>
                         </div>
-                      )}
 
-                      {msg.role === "user" ? (
-                        <div>{msg.text}</div>
-                      ) : msg.error ? (
-                        <div role="alert" style={{ color: "var(--tw-danger)" }}>
-                          {msg.error}
-                        </div>
-                      ) : msg.text ? (
-                        <Markdown>{msg.text}</Markdown>
-                      ) : (
-                        <div style={{ color: "var(--tw-text-3)" }}>
-                          {phase === "reconnecting"
-                            ? "Reconnecting…"
-                            : phase === "stalled"
-                              ? "Resuming stream…"
-                              : phase === "connecting"
-                                ? "Reading meeting context…"
-                                : "Working…"}
-                        </div>
-                      )}
+                        <div className={styles.bubbleBody}>
+                          {msg.ops && msg.ops.length > 0 && (
+                            <AgentActivitySteps
+                              ops={msg.ops}
+                              streaming={isStreamingThis && !msg.text}
+                              compact
+                            />
+                          )}
 
-                      {msg.role === "agent" && msg.text && (
-                        <div className={styles.bubbleActions}>
-                          <button
-                            type="button"
-                            className={styles.bubbleActBtn}
-                            onClick={() => void copyReply(msg.id, msg.text)}
-                          >
-                            <WebIcon name={copiedId === msg.id ? "check" : "copy"} size={12} />
-                            <span>{copiedId === msg.id ? "Copied" : "Copy"}</span>
-                          </button>
+                          {msg.error ? (
+                            <div role="alert" className={styles.bubbleError}>
+                              <WebIcon name="alertTriangle" size={14} />
+                              <span className={styles.bubbleErrorText}>{msg.error}</span>
+                              {!busy && (
+                                <button type="button" className={styles.bubbleRetryBtn} onClick={retryPrevious}>
+                                  <WebIcon name="refresh" size={11} />
+                                  <span>Retry</span>
+                                </button>
+                              )}
+                            </div>
+                          ) : msg.text ? (
+                            <div className={styles.bubbleProse}>
+                              <Markdown>{msg.text}</Markdown>
+                            </div>
+                          ) : (
+                            <div style={{ color: "var(--tw-text-3)" }}>
+                              {phase === "reconnecting"
+                                ? "Reconnecting…"
+                                : phase === "stalled"
+                                  ? "Resuming stream…"
+                                  : phase === "connecting"
+                                    ? "Reading meeting context…"
+                                    : "Working…"}
+                            </div>
+                          )}
+
+                          {msg.text && !isStreamingThis && (
+                            <div className={styles.bubbleActions}>
+                              <button
+                                type="button"
+                                className={styles.bubbleActBtn}
+                                onClick={() => void copyReply(msg.id, msg.text)}
+                              >
+                                <WebIcon name={copiedId === msg.id ? "check" : "copy"} size={12} />
+                                <span>{copiedId === msg.id ? "Copied" : "Copy"}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className={styles.bubbleActBtn}
+                                aria-label="Retry response"
+                                disabled={busy}
+                                onClick={retryPrevious}
+                              >
+                                <WebIcon name="refresh" size={12} />
+                                <span>Retry</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  ))}
+                      </div>
+                    );
+                  })}
                   <div ref={chatEndRef} />
                 </div>
               )}
@@ -655,14 +699,26 @@ export function MeetingSidePanel({
                     }
                   }}
                 />
-                <button
-                  type="submit"
-                  className={styles.sendBtn}
-                  disabled={busy || !draft.trim()}
-                  aria-label="Send question"
-                >
-                  <WebIcon name="sendUp" size={14} />
-                </button>
+                {busy ? (
+                  <button
+                    type="button"
+                    className={styles.stopBtn}
+                    aria-label="Stop generating"
+                    onClick={() => abortRef.current?.abort()}
+                  >
+                    <WebIcon name="stop" size={11} />
+                    <span>Stop</span>
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    className={styles.sendBtn}
+                    disabled={!draft.trim()}
+                    aria-label="Send question"
+                  >
+                    <WebIcon name="sendUp" size={14} />
+                  </button>
+                )}
               </form>
             </div>
           </>
