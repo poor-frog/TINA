@@ -28,6 +28,7 @@ injects the real ``redis_client.publish``.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 from typing import Any, Optional, Protocol, runtime_checkable
 
@@ -96,6 +97,38 @@ _CANCELLED_REASON = "stopped"
 # platform guard (A1/A3): reject a non-enum platform up front, BEFORE the find_active lookup (which would
 # otherwise miss and 404 — drifting from the contract a client must code against).
 _SUPPORTED_PLATFORMS = frozenset({"google_meet", "zoom", "teams", "jitsi", "discord", "browser_session"})
+_STUCK_BOOTING_AGE_SEC = 5.0
+
+
+def _iso_age_seconds(raw: Any) -> Optional[float]:
+    if isinstance(raw, datetime):
+        dt = raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    elif isinstance(raw, str) and raw:
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    else:
+        return None
+    return max(0.0, (datetime.now(timezone.utc) - dt).total_seconds())
+
+
+def _is_stale_stopped_booting(row: dict) -> bool:
+    """True when an already stop-requested booting row is genuinely stuck (not an immediate
+    redelivery within a few milliseconds of the first Stop)."""
+    if row.get("status") not in _BOOTING_STATUSES:
+        return False
+    if row.get("bot_container_id"):
+        return True
+    data = row.get("data") or {}
+    stop_age = _iso_age_seconds(data.get("stop_requested_at"))
+    if stop_age is not None:
+        return stop_age >= _STUCK_BOOTING_AGE_SEC
+    # Legacy rows stopped before `stop_requested_at` was stamped: fall back to row age.
+    row_age = _iso_age_seconds(row.get("created_at") or row.get("updated_at"))
+    return row_age is not None and row_age >= _STUCK_BOOTING_AGE_SEC
 
 
 def build_stop_router(repo: MeetingRepo, publisher: CommandPublisher, runtime=None) -> APIRouter:
@@ -158,10 +191,7 @@ def build_stop_router(repo: MeetingRepo, publisher: CommandPublisher, runtime=No
         pending = [row for row in rows if not (row.get("data") or {}).get("stop_requested")]
         if not pending:
             stuck_booting = (
-                [
-                    row for row in rows
-                    if row.get("status") in _BOOTING_STATUSES and row.get("bot_container_id")
-                ]
+                [row for row in rows if _is_stale_stopped_booting(row)]
                 if runtime is not None
                 else []
             )
@@ -170,12 +200,11 @@ def build_stop_router(repo: MeetingRepo, publisher: CommandPublisher, runtime=No
             cleaned: list[dict] = []
             for row in stuck_booting:
                 fresh = await _reread(repo, row)
-                boot_stage = fresh.get("status")
-                if boot_stage not in _BOOTING_STATUSES:
+                if not _is_stale_stopped_booting(fresh):
                     continue
                 if await _teardown_and_terminalize_booting(
                     repo, publisher, runtime, user_id, fresh, native_meeting_id=native_meeting_id,
-                    allow_missing_container=False,
+                    allow_missing_container=True,
                 ):
                     cleaned.append(fresh)
             if not cleaned:
@@ -415,17 +444,21 @@ async def _mark_stop_requested(repo, row: dict) -> None:
     calendar would recreate this occurrence and send another bot. Fall back to a direct data merge.
     """
     status = row.get("status")
+    stop_payload = {
+        "stop_requested": True,
+        "stop_requested_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
     sessions = await repo.list_sessions(meeting_id=row["id"])
     if sessions:
         await repo.update_meeting_status(
             session_uid=sessions[-1],
             status=status if status in _BOOTING_STATUSES else "stopping",
-            data={"stop_requested": True},
+            data=stop_payload,
         )
         return
     merge = getattr(repo, "merge_meeting_data", None)
     if merge is not None:
-        await merge(row["id"], {"stop_requested": True})
+        await merge(row["id"], stop_payload)
 
 
 def _log_stop_evicted(meeting_id, sibling_ids, native_meeting_id) -> None:

@@ -336,3 +336,18 @@ def test_stop_terminalizes_booting_bot_immediately_on_teardown_and_untracked_wor
     assert row3["data"]["completion_reason"] == "stopped"
     # Must NOT re-publish a bot leave command when cleaning up an already stop_requested zombie
     assert not any(ch.startswith("bot_commands:") for ch, _ in pub3.published)
+
+    # Case 4: stale container-less `joining` zombie (bot_container_id=None, created >5s ago, stop_requested=True)
+    repo4, pub4 = InMemoryMeetingRepo(), InMemoryCommandPublisher()
+    app4 = create_app(meeting_repo=repo4, command_publisher=pub4, runtime=FakeRuntimeClient())
+    orphan = _seed(repo4, user_id=7, platform="google_meet", native="join-nocontainer", status="joining")
+    asyncio.run(repo4.merge_meeting_data(orphan["id"], {"stop_requested": True}))
+    repo4._meetings[orphan["id"]]["created_at"] = "2026-01-01T00:00:00Z"
+
+    r4 = TestClient(app4).delete("/bots/google_meet/join-nocontainer", headers={"x-user-id": "7"})
+    assert r4.status_code == 200, r4.text
+    row4 = asyncio.run(repo4.get_meeting(orphan["id"]))
+    assert row4["status"] == "failed"
+    assert row4["data"]["failure_stage"] == "joining"
+    assert row4["data"]["completion_reason"] == "stopped"
+    assert any(ch == "u:7:meetings" and json.loads(msg)["status"] == "failed" for ch, msg in pub4.published)
