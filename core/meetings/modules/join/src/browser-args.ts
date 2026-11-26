@@ -48,6 +48,9 @@ export const JOIN_BROWSER_ARGS: readonly string[] = [
   "--incognito",
   "--no-sandbox",
   "--disable-setuid-sandbox",
+  // AWS Fargate provides only 64 MiB /dev/shm with no shm_size override; route Chromium shared
+  // memory through /tmp so long/multi-participant meetings do not crash the renderer tab.
+  "--disable-dev-shm-usage",
   "--disable-features=IsolateOrigins,site-per-process",
   "--disable-infobars",
   "--disable-gpu",
@@ -72,7 +75,11 @@ export const JOIN_BROWSER_ARGS: readonly string[] = [
 
 /** The canonical join launch args, as a fresh mutable array per call. Includes
  *  the pinned-locale flags (#856) so every launch path — production bot and the
- *  debug harness — is byte-identical and speaks the same UI language. */
-export function getJoinBrowserArgs(): string[] {
-  return [...JOIN_BROWSER_ARGS, ...getLocaleBrowserArgs()];
+ *  debug harness — is byte-identical and speaks the same UI language.
+ *  Authenticated launches omit --incognito so Chromium preserves restored cookies. */
+export function getJoinBrowserArgs(options?: { authenticated?: boolean }): string[] {
+  const base = options?.authenticated
+    ? JOIN_BROWSER_ARGS.filter((arg) => arg !== "--incognito")
+    : JOIN_BROWSER_ARGS;
+  return [...base, ...getLocaleBrowserArgs()];
 }

@@ -575,6 +575,30 @@ export interface BrowserSession {
  * remote-browser auth args, so the page the JoinDriver receives is configured identically to
  * what @tina/join expects.  // L4 (O6/VM): live-validated against a real meeting.
  */
+/**
+ * Assemble the Chromium launch args for a meeting bot.
+ * Authenticated joins MUST omit --incognito so Chromium preserves restored Google session cookies
+ * from the persistent profile dir; anonymous joins keep --incognito for clean guest isolation.
+ */
+export function buildBotBrowserArgs(authenticated?: boolean): string[] {
+  const merged = [
+    ...getAuthenticatedBrowserArgs(),
+    ...getJoinBrowserArgs({ authenticated: !!authenticated }),
+  ];
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (let i = merged.length - 1; i >= 0; i--) {
+    const arg = merged[i];
+    if (authenticated && arg === '--incognito') continue;
+    if (!seen.has(arg)) {
+      seen.add(arg);
+      deduped.push(arg);
+    }
+  }
+  deduped.reverse();
+  return deduped;
+}
+
 export async function launchBrowser(
   inv: Invocation,
   options: { signal?: AbortSignal } = {},
@@ -612,8 +636,9 @@ export async function launchBrowser(
 
   // getAuthenticatedBrowserArgs() is the minimal clean set remote-browser uses for signed-in
   // joins; getJoinBrowserArgs() adds the fake-device / autoplay flags the join lane needs. The
-  // join args win on conflict (later wins in Chromium arg parsing).
-  const args = [...getAuthenticatedBrowserArgs(), ...getJoinBrowserArgs()];
+  // join args win on conflict (later wins in Chromium arg parsing), and authenticated mode strips
+  // --incognito so restored cookies remain active.
+  const args = buildBotBrowserArgs(inv.authenticated);
   const { context, page } = await launchPersistentBrowser({ dataDir, args });
   if (options.signal?.aborted) {
     await context.close().catch(() => { /* shutdown raced browser startup */ });

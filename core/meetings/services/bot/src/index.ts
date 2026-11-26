@@ -40,7 +40,7 @@ import { createBotPipeline, createLiveFaultReporter, createLivePipeline, createT
 import { createBotRecordingSink } from './recording.js';
 import { createCaptureSignalRecorder, startBotLogSidecar, wrapTranscribeWithTap, wrapTranscriptWithSnapshot, type CaptureSignalRecorder } from './telemetry.js';
 import { uploadSignalTapes } from './signal-upload.js';
-import { createSttFaultReporter } from './stt-faults.js';
+import { createSttFaultReporter, isExpectedTeardownAudioClosedFault } from './stt-faults.js';
 import { launchBrowser, startCaptureBridge, startRecording, restartMixedCapture, createSpeakController, type BrowserSession, type SpeakController } from './capture-bridge.js';
 import { createRemoteAudioActivityTap, createSilenceAlonenessSource, resolveAloneSilenceWindowMs } from './aloneness.js';
 import { installSignalHandlers } from './signals.js';
@@ -218,6 +218,7 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
   // transcript is short or empty, instead of leaving it indistinguishable from a silent room.
   const sttFaults = createSttFaultReporter();
   const liveFaults = createLiveFaultReporter();
+  let shuttingDown = false;
   const speakerStreamConfig = speakerStreamConfigFromEnv(env);
   const remoteAudioActivity = createRemoteAudioActivityTap();
   const aloneSilenceWindowMs = resolveAloneSilenceWindowMs(inv.automaticLeave?.everyoneLeftTimeout, env);
@@ -277,7 +278,14 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
       config: speakerStreamConfig,
       // Every STT fault is counted and carried out on the terminal lifecycle event (see
       // sttFaults). Logging it here as well keeps the raw line for anyone tailing the container.
-      onError: (e) => { sttFaults.record(e); console.error(`[bot] pipeline fault: ${String(e)}`); },
+      onError: (e) => {
+        if (isExpectedTeardownAudioClosedFault(e, shuttingDown)) {
+          console.log('[bot] teardown STT flush skipped (audio session already closed: HTTP 409)');
+          return;
+        }
+        sttFaults.record(e);
+        console.error(`[bot] pipeline fault: ${String(e)}`);
+      },
       // The lane's own observations — today, WHICH TURN SPINE it is running on and why that
       // changed. A transcript carries no trace of that, so without this line a stored fixture
       // cannot say whether it is scoring the transport anchor or the fallback that replaced it.
@@ -359,6 +367,7 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
         void voice?.start().catch(() => console.error('[bot] meeting-voice startup failed'));
       },
       async stop() {
+        shuttingDown = true;
         voice?.disarm();
         try { await speak.stop(); }
         finally { await transcriptPipeline.stop(); }

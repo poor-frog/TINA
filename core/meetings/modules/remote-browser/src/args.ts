@@ -31,6 +31,7 @@ export function getAuthenticatedBrowserArgs(): string[] {
   return [
     '--no-sandbox',
     '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
     '--disable-blink-features=AutomationControlled',
     '--disable-infobars',
     '--disable-gpu',
@@ -52,6 +53,7 @@ export function getBrowserSessionArgs(): string[] {
   return [
     '--no-sandbox',
     '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
     '--disable-blink-features=AutomationControlled',
     '--use-fake-ui-for-media-stream',
     '--start-maximized',

@@ -142,6 +142,10 @@ def default_registry() -> ProfileRegistry:
             "BOT_SPEAKER_CONFIRM_THRESHOLD",
             "BOT_SPEAKER_MAX_BUFFER_SEC",
             "BOT_SPEAKER_IDLE_TIMEOUT_SEC",
+            "BOT_PROXY_URL",
+            "BOT_PROXY_USERNAME",
+            "BOT_PROXY_PASSWORD",
+            "BOT_PROXY_BYPASS",
         )
         if os.environ.get(key, "").strip()
     }

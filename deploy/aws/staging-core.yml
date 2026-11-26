@@ -35,10 +35,16 @@ Parameters:
   GoogleSecretArn: {Type: String, Default: ''}
   FlowsApiUrl: {Type: String, Default: ''}
   FlowsApiKeyArn: {Type: String, Default: ''}
+  DefaultBotName: {Type: String, Default: 'TINA'}
+  BotAuthenticated: {Type: String, Default: 'false', AllowedValues: ['true', 'false']}
+  BotUserdataS3Path: {Type: String, Default: 'userdata/staging-bot-1'}
 
 Conditions:
   WithExtensionOrigins: !Not [!Equals [!Ref GatewayExtensionOrigins, '']]
   WithGoogleSecret: !Not [!Equals [!Ref GoogleSecretArn, '']]
+  WithAuthenticatedBot: !And
+    - !Equals [!Ref BotAuthenticated, 'true']
+    - !Not [!Equals [!Ref BotUserdataS3Path, '']]
   WithFlows: !And
     - !Not [!Equals [!Ref FlowsApiUrl, '']]
     - !Not [!Equals [!Ref FlowsApiKeyArn, '']]
@@ -322,8 +328,14 @@ Resources:
             - {Name: ADMIN_API_URL, Value: http://127.0.0.1:8001}
             - {Name: RUNTIME_API_URL, Value: !Ref RuntimeUrl}
             - {Name: MEETING_API_URL, Value: http://core.tina-staging.local:8080}
+            - {Name: DEFAULT_BOT_NAME, Value: !Ref DefaultBotName}
+            - {Name: RECORDING_ENABLED, Value: 'true'}
             - {Name: S3_ENDPOINT, Value: !Sub 'https://s3.${AWS::Region}.amazonaws.com'}
             - {Name: MINIO_BUCKET, Value: !Ref RecordingsBucket}
+            - !If [WithAuthenticatedBot, {Name: BOT_AUTHENTICATED, Value: 'true'}, !Ref 'AWS::NoValue']
+            - !If [WithAuthenticatedBot, {Name: BOT_USERDATA_S3_PATH, Value: !Ref BotUserdataS3Path}, !Ref 'AWS::NoValue']
+            - !If [WithAuthenticatedBot, {Name: BOT_S3_ENDPOINT, Value: !Sub 'https://s3.${AWS::Region}.amazonaws.com'}, !Ref 'AWS::NoValue']
+            - !If [WithAuthenticatedBot, {Name: BOT_S3_BUCKET, Value: !Ref RecordingsBucket}, !Ref 'AWS::NoValue']
             - !If
               - WithTranscription
               - {Name: TRANSCRIPTION_SERVICE_URL, Value: !Ref TranscriptionUrl}
