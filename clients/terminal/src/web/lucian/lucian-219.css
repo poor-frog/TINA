@@ -1,0 +1,103 @@
+/* Lucian UX/UI Prompt #219 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#219 */
+
+.u219-tg {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--ux-surface-2);
+  box-shadow: inset 0 0 0 1px var(--ux-line-2);
+  color: var(--ux-ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex: none;
+  transition: background-color .2s var(--ux-ease), box-shadow .2s var(--ux-ease), color .2s var(--ux-ease);
+}
+
+.u219-tg:hover {
+  background: var(--ux-surface-3);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ux-accent) 42%, var(--ux-line-2));
+}
+
+.u219-tg:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 2px;
+}
+
+.u219-tg svg {
+  grid-area: 1 / 1;
+  width: 16px;
+  height: 16px;
+  transition: transform .6s cubic-bezier(.3, 1.4, .5, 1), opacity .35s var(--ux-ease);
+}
+
+.u219-tg[data-theme-mode="light"] .u219-sun {
+  opacity: 1;
+  transform: rotate(0deg) scale(1);
+}
+
+.u219-tg[data-theme-mode="light"] .u219-moon {
+  opacity: 0;
+  transform: rotate(90deg) scale(.6);
+}
+
+.u219-tg[data-theme-mode="dark"] .u219-sun {
+  opacity: 0;
+  transform: rotate(-90deg) scale(.6);
+}
+
+.u219-tg[data-theme-mode="dark"] .u219-moon {
+  opacity: 1;
+  transform: rotate(0deg) scale(1);
+}
+
+/* Native View Transition circular reveal when #219 triggers a live theme switch */
+html.u219-revealing::view-transition-old(root),
+html.u219-revealing::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+html.u219-revealing::view-transition-old(root) {
+  z-index: 1;
+}
+
+html.u219-revealing::view-transition-new(root) {
+  z-index: 9999;
+}
+
+/* Subtle fallback radial pulse for browsers without View Transitions API */
+.u219-fallback-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+  clip-path: circle(0px at var(--u219-cx, 95%) var(--u219-cy, 24px));
+  animation: u219-ripple .7s cubic-bezier(.65, 0, .35, 1) forwards;
+}
+
+@keyframes u219-ripple {
+  0% {
+    clip-path: circle(0px at var(--u219-cx, 95%) var(--u219-cy, 24px));
+    opacity: .22;
+  }
+  70% {
+    opacity: .1;
+  }
+  100% {
+    clip-path: circle(var(--u219-r, 1800px) at var(--u219-cx, 95%) var(--u219-cy, 24px));
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u219-tg svg {
+    transition: none;
+  }
+  .u219-fallback-veil {
+    display: none;
+  }
+}

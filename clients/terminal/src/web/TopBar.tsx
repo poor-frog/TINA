@@ -3,6 +3,8 @@
  *  and Split-Button `Capture ▾` (Join live now | Plan / Schedule | Connect Calendar). */
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
+import { LucianThemeToggle } from "./lucian/LucianThemeToggle";
+import { emitWebToast } from "./lucian/webToast";
 import { parseMeetingInput, meetingUrlFor } from "../surfaces/meetingId";
 import { getJitsiHosts } from "../surfaces/jitsiHosts";
 import { defaultBotName } from "../surfaces/defaultBotName";
@@ -93,6 +95,7 @@ export function WebTopBar({
         </div>
 
         <div className="tina-web-topbar-right">
+          <LucianThemeToggle />
           <div className="tina-web-capture-split" ref={splitRef}>
             <button
               type="button"
@@ -252,6 +255,7 @@ function CaptureMeetingModal({
       const seededId = seedLiveMeetingFromResponse(data);
       refreshMeetings();
       const targetId = seededId ?? (data.meeting_id != null ? String(data.meeting_id) : data.id != null ? String(data.id) : undefined);
+      emitWebToast("TINA bot is joining the meeting");
       onCaptured(targetId);
     } catch (err) {
       setError(presentMeetingActionFailure(err));
@@ -277,6 +281,7 @@ function CaptureMeetingModal({
         auto_join: autoJoin,
       });
       refreshMeetings();
+      emitWebToast("Meeting scheduled");
       onCaptured(created?.id != null ? String(created.id) : undefined);
     } catch (err) {
       setError(presentMeetingActionFailure(err));

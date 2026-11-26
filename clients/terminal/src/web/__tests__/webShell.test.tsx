@@ -1161,4 +1161,86 @@ describe("WebShell production UI (Option A & Option B)", () => {
       expect(screen.getAllByText("Delete sample docs").length).toBeGreaterThanOrEqual(2);
     });
   });
+
+  it("supports Lucian #451 @-mention picker, #453 thinking text, #435 toast notifications, and #219 circular theme toggle", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    mockEnvironment({ admin: false });
+    render(<WebShell />);
+
+    // #219 Circular-reveal dark mode toggle in TopBar switches html[data-theme] and aria-label
+    const themeBtn = await screen.findByRole("button", { name: /Switch to light mode/i });
+    fireEvent.click(themeBtn);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    expect(screen.getByRole("button", { name: /Switch to dark mode/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Switch to dark mode/i }));
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+
+    // Open Ask Tina and verify #451 @-mention picker (meetings + knowledge pages + spaces)
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+    expect(await screen.findByText("Q4 Rollout Checklist")).toBeTruthy();
+
+    const composer = screen.getByLabelText("Message Ask Tina") as HTMLTextAreaElement;
+    // Trigger @ via toolbar button -> popover opens with real meeting & workspace suggestions
+    fireEvent.click(screen.getByRole("button", { name: "Mention meeting or knowledge" }));
+    const listbox = await screen.findByRole("listbox", { name: "Mention meetings or knowledge" });
+    expect(listbox).toBeTruthy();
+    const firstOption = screen.getByRole("option", { name: /Product Weekly Sync/i });
+    expect(firstOption).toBeTruthy();
+
+    // Keyboard Enter selects active mention, inserts @Label, adds bouncing chip, and grounds meeting
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect(composer.value).toContain("@Product Weekly Sync");
+    expect(screen.getByRole("button", { name: "Remove mention Product Weekly Sync" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear meeting focus" })).toBeTruthy();
+
+    // Atomic Backspace removes the entire @Product Weekly Sync mention token
+    const trimmed = "@Product Weekly Sync";
+    fireEvent.change(composer, { target: { value: trimmed, selectionStart: trimmed.length, selectionEnd: trimmed.length } });
+    composer.setSelectionRange(trimmed.length, trimmed.length);
+    fireEvent.keyDown(composer, { key: "Backspace" });
+    expect(composer.value).toBe("");
+
+    // #457 Voice input pill button is present in Ask Tina composer
+    expect(screen.getByTestId("lucian-voice-input")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Voice input" })).toBeTruthy();
+
+    // #453 Thinking text renders while streaming before text arrives, and #435 Toast fires on Copy
+    const turnGate = { resolve: () => {} };
+    mockStreamChatTurn.mockImplementationOnce(async (_req: unknown, cbs: ChatStreamCallbacks) => {
+      capturedChatCallbacks = cbs;
+      cbs.onStarting?.();
+      cbs.onStatus?.("working");
+      await new Promise<void>((res) => {
+        turnGate.resolve = res;
+      });
+      return { sawVisibleOutput: true, terminal: true, aborted: false };
+    });
+
+    fireEvent.change(composer, { target: { value: "Summarize blockers" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    const thinking = await screen.findByTestId("lucian-thinking-text");
+    expect(thinking).toBeTruthy();
+    expect(thinking.textContent).toContain("Reading your workspace…");
+    // Expand thinking disclosure panel
+    const thinkBtn = thinking.querySelector("button")!;
+    fireEvent.click(thinkBtn);
+    expect(thinkBtn.getAttribute("aria-expanded")).toBe("true");
+
+    // Finish stream -> Copy triggers #435 stacked toast notification -> Dismiss closes it
+    capturedChatCallbacks?.onReply?.("Blocker summary ready.");
+    turnGate.resolve();
+    expect(await screen.findByText("Blocker summary ready.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy response" }));
+    expect(await screen.findByText("Copied response to clipboard")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Copied response to clipboard")).toBeNull();
+    });
+  });
 });

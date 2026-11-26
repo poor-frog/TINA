@@ -6,6 +6,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { WebIcon, type WebIconName } from "./Icons";
 import { AgentActivitySteps } from "./AgentActivitySteps";
+import { LucianThinkingText } from "./lucian/LucianThinkingText";
+import { emitWebToast } from "./lucian/webToast";
 import { friendlyPageTitle } from "./knowledgeFriendly";
 import { Markdown } from "../ui-kit/Markdown";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
@@ -315,6 +317,7 @@ export function KnowledgeCopilotDrawer({
     try {
       await navigator.clipboard.writeText(text);
       setCopiedId(msgId);
+      emitWebToast("Copied response to clipboard");
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => {
         setCopiedId((cur) => (cur === msgId ? null : cur));
@@ -519,15 +522,17 @@ export function KnowledgeCopilotDrawer({
                       <div className={`${styles.docProse} ${styles.copilotProse}`}>
                         <Markdown>{m.text}</Markdown>
                       </div>
-                    ) : !m.error ? (
-                      <div className={styles.copilotThinking} role="status">
-                        <span className={styles.copilotTypingDots} aria-hidden="true">
-                          <span />
-                          <span />
-                          <span />
-                        </span>
-                        <span>{phaseLabel(phase, false, activeTool)}</span>
-                      </div>
+                    ) : !m.error && !(m.ops && m.ops.length > 0) ? (
+                      <LucianThinkingText
+                        compact
+                        label={phaseLabel(phase, false, activeTool)}
+                        lines={[
+                          docPath ? `Reading ${targetLabel}` : `Grounding on ${workspaceName}`,
+                          phase === "reconnecting"
+                            ? "Reconnecting stream…"
+                            : "Reviewing linked pages & meetings",
+                        ]}
+                      />
                     ) : null}
 
                     {m.commit && (

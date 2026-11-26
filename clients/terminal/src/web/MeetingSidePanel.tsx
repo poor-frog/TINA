@@ -9,6 +9,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
 import { AgentActivitySteps } from "./AgentActivitySteps";
+import { LucianThinkingText } from "./lucian/LucianThinkingText";
+import { emitWebToast } from "./lucian/webToast";
 import { Markdown } from "../ui-kit/Markdown";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
 import { presentError } from "../surfaces/apiClient";
@@ -344,6 +346,7 @@ export function MeetingSidePanel({
     try {
       await navigator.clipboard.writeText(text);
       setCopiedId(id);
+      emitWebToast("Copied response to clipboard");
       window.setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1800);
     } catch {
       /* ignore clipboard error */
@@ -641,17 +644,26 @@ export function MeetingSidePanel({
                             <div className={styles.bubbleProse}>
                               <Markdown>{msg.text}</Markdown>
                             </div>
-                          ) : (
-                            <div style={{ color: "var(--tw-text-3)" }}>
-                              {phase === "reconnecting"
-                                ? "Reconnecting…"
-                                : phase === "stalled"
-                                  ? "Resuming stream…"
-                                  : phase === "connecting"
-                                    ? "Reading meeting context…"
-                                    : "Working…"}
-                            </div>
-                          )}
+                          ) : !(msg.ops && msg.ops.length > 0) ? (
+                            <LucianThinkingText
+                              compact
+                              label={
+                                phase === "reconnecting"
+                                  ? "Reconnecting…"
+                                  : phase === "stalled"
+                                    ? "Resuming stream…"
+                                    : phase === "connecting"
+                                      ? "Reading meeting context…"
+                                      : "Thinking…"
+                              }
+                              lines={[
+                                meeting?.title_custom || meeting?.title
+                                  ? `Grounded on ${meeting.title_custom || meeting.title}`
+                                  : "Reviewing meeting transcript",
+                                "Checking decisions, speakers & linked notes",
+                              ]}
+                            />
+                          ) : null}
 
                           {msg.text && !isStreamingThis && (
                             <div className={styles.bubbleActions}>

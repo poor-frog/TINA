@@ -1,0 +1,197 @@
+/* Lucian UX/UI Prompt #457 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#457 */
+
+.u457 {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+}
+
+.u457-p {
+  position: relative;
+  width: var(--u457-w, 34px);
+  height: var(--u457-h, 34px);
+  max-width: min(214px, calc(100vw - 116px));
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: 0 0 0 1px transparent;
+  transition:
+    width .62s cubic-bezier(.3, 1.25, .5, 1),
+    height .5s cubic-bezier(.3, 1.3, .5, 1),
+    background-color .45s var(--ux-ease),
+    box-shadow .45s var(--ux-ease);
+}
+
+.u457-p[data-s="idle"]:hover {
+  background: color-mix(in srgb, var(--ux-ink) 7%, transparent);
+}
+
+.u457-p[data-s="rec"] {
+  background: var(--ux-accent);
+  box-shadow: 0 0 0 0 var(--ux-line-2), 0 12px 24px -12px var(--ux-accent), 0 3px 8px -3px var(--ux-shadow);
+}
+
+.u457-b {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0);
+  color: var(--ux-ink-3);
+  transition:
+    right .5s cubic-bezier(.3, 1.3, .5, 1),
+    top .5s cubic-bezier(.3, 1.3, .5, 1),
+    width .5s cubic-bezier(.3, 1.3, .5, 1),
+    height .5s cubic-bezier(.3, 1.3, .5, 1),
+    background-color .35s var(--ux-ease),
+    color .35s var(--ux-ease),
+    transform .45s var(--ux-spring);
+}
+
+.u457-p[data-s="idle"]:hover .u457-b {
+  color: var(--ux-ink);
+}
+
+.u457-b:active {
+  transform: scale(.9);
+  transition-duration: .5s, .5s, .5s, .5s, .35s, .35s, .1s;
+}
+
+.u457 .u457-b:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 2px;
+}
+
+.u457-p[data-s="rec"] .u457-b {
+  right: 4px;
+  top: 4px;
+  width: 26px;
+  height: 26px;
+  background: var(--ux-accent-ink);
+  color: var(--ux-accent);
+}
+
+.u457-mic,
+.u457-sq {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transition: transform .5s cubic-bezier(.34, 1.6, .5, 1), opacity .22s var(--ux-ease);
+}
+
+.u457-mic {
+  width: 17px;
+  height: 17px;
+  margin: -8.5px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.u457-mic rect {
+  fill: currentColor;
+  stroke: none;
+}
+
+.u457-sq {
+  width: 10px;
+  height: 10px;
+  margin: -5px;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0;
+  transform: scale(.2) rotate(-90deg);
+}
+
+.u457-p[data-s="rec"] .u457-mic {
+  opacity: 0;
+  transform: scale(.3);
+}
+
+.u457-p[data-s="rec"] .u457-sq {
+  opacity: 1;
+  transform: none;
+}
+
+.u457-rec {
+  position: absolute;
+  left: 12px;
+  top: 0;
+  bottom: 0;
+  right: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ux-accent-ink);
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  transition: opacity .2s var(--ux-ease);
+}
+
+.u457-p[data-s="rec"] .u457-rec {
+  opacity: 1;
+  transition: opacity .3s var(--ux-ease) .18s;
+}
+
+.u457-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff4d5e;
+  box-shadow: 0 0 0 3px rgba(255, 77, 94, .28);
+  animation: u457-blink 1.1s ease-in-out infinite;
+}
+
+@keyframes u457-blink {
+  50% {
+    opacity: .35;
+  }
+}
+
+.u457-tm {
+  flex: none;
+  min-width: 30px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.u457-wv {
+  flex: 1;
+  min-width: 48px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transform-origin: 50% 50%;
+  transition: transform .45s cubic-bezier(.6, 0, .3, 1) .12s;
+}
+
+.u457-wv i {
+  width: 2.5px;
+  height: 18px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: scaleY(.12);
+}
+
+.u457-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -1,10 +1,12 @@
 "use client";
+// Lucian UX/UI Prompt #454 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#454
 /** AgentActivitySteps — Collapsible, human-friendly tool execution summary shared across
- *  Ask Tina, Meeting SidePanel, and Knowledge Copilot. Replaces raw snake_case tool pills
- *  with a calm single-line timeline that expands on click. */
-import { useMemo, useState } from "react";
+ *  Ask Tina, Meeting SidePanel, and Knowledge Copilot. Upgraded with Lucian #454 vertical
+ *  task progression timeline, animated check marks, connecting progress rail, and live timer. */
+import { useEffect, useMemo, useRef, useState } from "react";
 import { WebIcon, type WebIconName } from "./Icons";
 import styles from "./agentActivitySteps.module.css";
+import "./lucian/lucian-454.css";
 
 export interface ToolDescriptor {
   icon: WebIconName;
@@ -124,6 +126,8 @@ interface GroupedStep {
   desc: ToolDescriptor;
 }
 
+const STEP_ROW_H = 38;
+
 export function AgentActivitySteps({
   ops,
   streaming = false,
@@ -137,7 +141,31 @@ export function AgentActivitySteps({
   compact?: boolean;
   showRawToolNames?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(streaming);
+  const [userToggled, setUserToggled] = useState(false);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const startedAtRef = useRef<number>(Date.now());
+  const prevStreamingRef = useRef<boolean>(streaming);
+
+  useEffect(() => {
+    if (streaming && !prevStreamingRef.current) {
+      startedAtRef.current = Date.now();
+      setElapsedSec(0);
+      if (!userToggled) setExpanded(true);
+    } else if (!streaming && prevStreamingRef.current) {
+      setElapsedSec(Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)));
+      if (!userToggled) setExpanded(false);
+    }
+    prevStreamingRef.current = streaming;
+  }, [streaming, userToggled]);
+
+  useEffect(() => {
+    if (!streaming) return;
+    const timer = window.setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - startedAtRef.current) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [streaming]);
 
   const grouped = useMemo<GroupedStep[]>(() => {
     if (!ops || ops.length === 0) return [];
@@ -164,6 +192,12 @@ export function AgentActivitySteps({
     ? lastStep.desc.active
     : `${totalSteps === 1 ? "1 step" : `${totalSteps} steps`} · ${summaryParts.join(", ")}`;
 
+  const totalRows = grouped.length + (commit ? 1 : 0);
+  const completedRows = streaming ? Math.max(0, totalRows - 1) : totalRows;
+  const fillRatio =
+    totalRows <= 1 ? 1 : Math.min(1, Math.max(0, (completedRows - (streaming ? 0 : 1)) / (totalRows - 1)));
+  const trackHeight = Math.max(0, (totalRows - 1) * STEP_ROW_H);
+
   return (
     <div
       className={`${styles.root} ${compact ? styles.compact : ""} ${streaming ? styles.streaming : ""}`}
@@ -173,7 +207,10 @@ export function AgentActivitySteps({
         type="button"
         className={styles.trigger}
         aria-expanded={expanded}
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => {
+          setUserToggled(true);
+          setExpanded((v) => !v);
+        }}
       >
         <span
           className={`${styles.leadIcon} ${streaming ? styles.leadIconLive : styles.leadIconDone}`}
@@ -193,38 +230,92 @@ export function AgentActivitySteps({
       </button>
 
       {expanded && (
-        <ol className={styles.timeline} aria-label="Agent tool activity">
-          {grouped.map((step, idx) => {
-            const isActiveStep = streaming && idx === grouped.length - 1;
-            const label = isActiveStep
-              ? step.desc.active
-              : step.count > 1
-                ? step.desc.pluralDone(step.count)
-                : step.desc.done;
-            return (
-              <li
-                key={`${step.tool}-${idx}`}
-                className={`${styles.stepRow} ${styles[`kind_${step.desc.kind}`]} ${isActiveStep ? styles.stepActive : ""}`}
-              >
-                <span className={styles.stepIcon} aria-hidden="true">
-                  <WebIcon name={step.desc.icon} size={11} />
-                </span>
-                <span className={styles.stepLabel}>{label}</span>
-                {showRawToolNames && <code className={styles.rawCode}>{step.tool}</code>}
-                {!showRawToolNames && step.count > 1 && <span className={styles.countPill}>×{step.count}</span>}
-              </li>
-            );
-          })}
-          {commit && (
-            <li className={`${styles.stepRow} ${styles.kind_write}`}>
-              <span className={styles.stepIcon} aria-hidden="true">
-                <WebIcon name="check" size={11} />
+        <div className={`ux u454 ${!streaming ? "is-done" : ""} ${compact ? "is-compact" : ""}`}>
+          <div className="u454-c">
+            {totalRows > 1 && (
+              <i className="u454-tr" aria-hidden="true" style={{ height: `${trackHeight}px` }}>
+                <i style={{ "--u454-p": fillRatio.toFixed(3) } as React.CSSProperties} />
+              </i>
+            )}
+            <ol className="u454-l" aria-label="Agent tool activity">
+              {grouped.map((step, idx) => {
+                const isActiveStep = streaming && idx === grouped.length - 1;
+                const state = isActiveStep ? "run" : "done";
+                const label = isActiveStep
+                  ? step.desc.active
+                  : step.count > 1
+                    ? step.desc.pluralDone(step.count)
+                    : step.desc.done;
+                return (
+                  <li
+                    key={`${step.tool}-${idx}`}
+                    className="u454-s"
+                    data-s={state}
+                    aria-current={isActiveStep ? "step" : undefined}
+                  >
+                    <span className="u454-ic" aria-hidden="true">
+                      <i className="u454-d" />
+                      <i className="u454-sp" />
+                      <span className="u454-ck">
+                        <svg viewBox="0 0 24 24">
+                          <path d="m6 12.5 4 4 8-9" />
+                        </svg>
+                      </span>
+                    </span>
+                    <span className="u454-t">{label}</span>
+                    {(showRawToolNames || step.count > 1) && (
+                      <span className="u454-m">
+                        {showRawToolNames ? <code>{step.tool}</code> : `×${step.count}`}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+              {commit && (
+                <li className="u454-s" data-s="done">
+                  <span className="u454-ic" aria-hidden="true">
+                    <i className="u454-d" />
+                    <i className="u454-sp" />
+                    <span className="u454-ck">
+                      <svg viewBox="0 0 24 24">
+                        <path d="m6 12.5 4 4 8-9" />
+                      </svg>
+                    </span>
+                  </span>
+                  <span className="u454-t">Saved changes to workspace</span>
+                  {showRawToolNames && (
+                    <span className="u454-m">
+                      <code>{commit.slice(0, 7)}</code>
+                    </span>
+                  )}
+                </li>
+              )}
+            </ol>
+
+            <div className="u454-f">
+              <span className="u454-fi" aria-hidden="true">
+                <i className="u454-pu" />
+                <svg className="u454-ok" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="9.2" />
+                  <path d="m8 12.3 2.8 2.8L16.2 9.6" />
+                </svg>
               </span>
-              <span className={styles.stepLabel}>Saved changes to workspace</span>
-              {showRawToolNames && <code className={styles.rawCode}>{commit.slice(0, 7)}</code>}
-            </li>
-          )}
-        </ol>
+              <span className="u454-fx">
+                <span className="u454-fw" aria-hidden={!streaming || undefined}>
+                  <b>Working</b>
+                  <small>{elapsedSec}s</small>
+                </span>
+                <span className="u454-fd" aria-hidden={streaming || undefined}>
+                  <b>Done</b>
+                  <small>
+                    · {totalSteps === 1 ? "1 step" : `${totalSteps} steps`}
+                    {elapsedSec > 0 ? ` · ${elapsedSec}s` : ""}
+                  </small>
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,0 +1,294 @@
+/* Lucian UX/UI Prompt #435 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#435 */
+
+.u435 {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: min(332px, calc(100vw - 24px));
+  max-width: 100%;
+  z-index: 120;
+  pointer-events: none;
+}
+
+.u435-rg {
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  pointer-events: auto;
+}
+
+.u435-rg.is-empty {
+  pointer-events: none;
+}
+
+.u435-t {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 8px 0 14px;
+  border-radius: 16px;
+  background: var(--ux-surface);
+  background: light-dark(var(--ux-surface), var(--ux-surface-2));
+  box-shadow: 0 0 0 1px var(--ux-line-2), 0 14px 30px -14px var(--ux-shadow-strong), 0 2px 6px -2px var(--ux-shadow);
+  transform-origin: 50% 100%;
+  transform: translate3d(var(--x, 0px), var(--y, 0px), 0) scale(var(--s, 1));
+  opacity: var(--o, 1);
+  transition: transform .62s cubic-bezier(.3, 1.42, .52, 1), opacity .3s var(--ux-ease);
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+
+.u435-t.is-drag {
+  transition: opacity .3s var(--ux-ease);
+  cursor: grabbing;
+}
+
+.u435-t > * {
+  transition: opacity .25s var(--ux-ease);
+}
+
+.u435-t.is-back > * {
+  opacity: 0;
+}
+
+.u435-ic {
+  position: relative;
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.u435-ic > span {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  transition: opacity .25s var(--ux-ease), transform .45s cubic-bezier(.34, 1.6, .5, 1);
+}
+
+.u435-ic .ok {
+  background: var(--ux-mint);
+  color: var(--ux-surface);
+  color: light-dark(#ffffff, var(--ux-page));
+}
+
+.u435-t[data-tone="info"] .u435-ic .ok {
+  background: var(--ux-accent);
+  color: var(--ux-accent-ink);
+}
+
+.u435-t[data-tone="error"] .u435-ic .ok {
+  background: var(--ux-danger);
+  color: #ffffff;
+  color: light-dark(#ffffff, var(--ux-page));
+}
+
+.u435-ic .bk {
+  background: var(--ux-surface-3);
+  color: var(--ux-ink-2);
+  opacity: 0;
+  transform: scale(.4) rotate(-90deg);
+}
+
+.u435-ic svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.u435-ic .ok path {
+  stroke-dasharray: 18;
+  stroke-dashoffset: 18;
+  animation: u435-draw .4s var(--ux-ease) .22s forwards;
+}
+
+.u435-t.is-in .u435-ic .ok {
+  animation: u435-pop .5s cubic-bezier(.34, 1.7, .5, 1) .08s both;
+}
+
+@keyframes u435-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes u435-pop {
+  from {
+    transform: scale(.3);
+  }
+}
+
+.u435-t.is-undo .u435-ic .ok {
+  opacity: 0;
+  transform: scale(.4) rotate(90deg);
+}
+
+.u435-t.is-undo .u435-ic .bk {
+  opacity: 1;
+  transform: none;
+}
+
+.u435-tx {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+
+.u435-tx b {
+  grid-area: 1 / 1;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity .25s var(--ux-ease), transform .35s var(--ux-ease), filter .25s var(--ux-ease);
+}
+
+.u435-tx b + b {
+  opacity: 0;
+  transform: translateY(7px);
+  filter: blur(3px);
+}
+
+.u435-t.is-undo .u435-tx b:first-child {
+  opacity: 0;
+  transform: translateY(-7px);
+  filter: blur(3px);
+}
+
+.u435-t.is-undo .u435-tx b + b {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+.u435-un {
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ux-surface-2);
+  background: light-dark(var(--ux-surface-2), var(--ux-surface-3));
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--ux-ink);
+  transition: opacity .2s var(--ux-ease), transform .3s var(--ux-ease), background-color .15s;
+}
+
+.u435-un:hover {
+  background: var(--ux-surface-3);
+}
+
+.u435-t.is-undo .u435-un {
+  opacity: 0;
+  transform: scale(.9);
+  pointer-events: none;
+}
+
+.u435-x {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: none;
+  color: var(--ux-ink-3);
+  transition: background-color .15s, color .15s;
+}
+
+.u435-x:hover {
+  background: var(--ux-surface-2);
+  color: var(--ux-ink);
+}
+
+.u435-x svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.u435 .u435-un:focus-visible,
+.u435 .u435-x:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 1px;
+}
+
+.u435-pb {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.u435-pb i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ux-mint);
+  opacity: .75;
+  transform-origin: 0 50%;
+  animation: u435-pb linear forwards;
+}
+
+.u435-t[data-tone="info"] .u435-pb i {
+  background: var(--ux-accent);
+}
+
+.u435-t[data-tone="error"] .u435-pb i {
+  background: var(--ux-danger);
+}
+
+.u435-t.is-undo .u435-pb i {
+  background: var(--ux-ink-3);
+}
+
+@keyframes u435-pb {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.u435-rg.is-paused .u435-pb i {
+  animation-play-state: paused;
+}
+
+@media (max-width: 520px) {
+  .u435 {
+    right: 12px;
+    left: 12px;
+    bottom: 12px;
+    width: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u435-pb {
+    display: none;
+  }
+}

@@ -6,6 +6,8 @@
  *  Exposes a link to `/terminal` (the dev Dockview workbench) only for admins or when the dev flag is set. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./tina-web.css";
+import "./lucian/lucianTokens.css";
+import { LucianToastStack } from "./lucian/LucianToastStack";
 import { AppGates } from "../app/AppGates";
 import { meetingsOnly, workspacePilotMode } from "../app/mode";
 import { meetingIdFromPath, meetingPath, TERMINAL_ROUTE_PREFIX, terminalMeetingPath } from "../app/meetingRoute";
@@ -453,6 +455,8 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
           onNavigate={navigate}
           onOpenCapture={() => openCapture("live")}
         />
+
+        <LucianToastStack />
       </div>
     </ServicesProvider>
   );

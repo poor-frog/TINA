@@ -1,0 +1,217 @@
+/* Lucian UX/UI Prompt #453 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#453 */
+
+.u453 {
+  position: relative;
+  max-width: 100%;
+}
+
+.u453-w {
+  position: relative;
+  max-width: 100%;
+}
+
+.u453-h {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  max-width: 100%;
+  margin-left: -8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 11px;
+  background: none;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -.01em;
+  color: var(--ux-ink-2);
+  transition: background-color .2s var(--ux-ease), color .2s var(--ux-ease);
+}
+
+.u453.is-compact .u453-h {
+  min-height: 28px;
+  font-size: 13px;
+  gap: 7px;
+}
+
+.u453-h:not([disabled]):hover {
+  background: color-mix(in srgb, var(--ux-ink) 6%, transparent);
+  color: var(--ux-ink);
+}
+
+.u453-h[disabled] {
+  cursor: default;
+}
+
+.u453 .u453-h:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 1px;
+}
+
+.u453-ic {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  color: var(--ux-accent);
+  transition: color .5s var(--ux-ease);
+}
+
+.u453.is-compact .u453-ic {
+  width: 15px;
+  height: 15px;
+}
+
+.u453-ic svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.u453.is-done .u453-ic {
+  color: var(--ux-ink-3);
+}
+
+.u453-tx {
+  display: grid;
+  min-width: 0;
+}
+
+.u453-tx > span {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity .4s var(--ux-ease), transform .5s var(--ux-ease), filter .4s var(--ux-ease);
+}
+
+.u453-a {
+  color: var(--ux-ink-3);
+  background: linear-gradient(100deg, var(--ux-ink-3) 0 36%, var(--ux-ink) 50%, var(--ux-ink-3) 64% 100%);
+  background-size: 280% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: u453-sh 1.9s cubic-bezier(.45, 0, .55, 1) infinite;
+}
+
+@keyframes u453-sh {
+  to {
+    background-position: 0 0;
+  }
+}
+
+.u453-b {
+  opacity: 0;
+  transform: translateY(7px);
+  filter: blur(3px);
+}
+
+.u453.is-done .u453-a {
+  opacity: 0;
+  transform: translateY(-7px);
+  filter: blur(3px);
+}
+
+.u453.is-done .u453-b {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+.u453-cv {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-left: -2px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: .75;
+  transition: transform .45s cubic-bezier(.3, 1.5, .5, 1);
+}
+
+.u453-h[aria-expanded="true"] .u453-cv {
+  transform: rotate(90deg);
+}
+
+.u453-pn {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .5s cubic-bezier(.3, .9, .3, 1);
+}
+
+.u453-h[aria-expanded="true"] + .u453-pn {
+  grid-template-rows: 1fr;
+}
+
+.u453-in {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.u453-ls {
+  margin: 4px 0 2px 8px;
+  padding: 1px 0 1px 16px;
+  border-left: 1.5px solid var(--ux-line-2);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity .3s var(--ux-ease), transform .45s var(--ux-ease);
+}
+
+.u453-h[aria-expanded="true"] + .u453-pn .u453-ls {
+  opacity: 1;
+  transform: none;
+  transition-delay: .06s;
+}
+
+.u453-ln {
+  display: grid;
+  grid-template-rows: 0fr;
+  margin: 0;
+  opacity: 0;
+  transform: translateY(5px);
+  filter: blur(3px);
+  transition:
+    grid-template-rows .45s var(--ux-ease),
+    opacity .45s var(--ux-ease) .08s,
+    transform .55s cubic-bezier(.3, 1.4, .5, 1) .08s,
+    filter .45s var(--ux-ease) .08s;
+}
+
+.u453-ln.is-on {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+.u453-ln > span {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.u453-ln > span > span {
+  display: block;
+  padding: 2.5px 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--ux-ink-2);
+  transition: color .5s var(--ux-ease);
+}
+
+.u453.is-done .u453-ln > span > span {
+  color: var(--ux-ink-3);
+}
+
+.u453-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

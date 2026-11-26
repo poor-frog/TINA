@@ -36,7 +36,13 @@ TINA Terminal workbench at `/terminal`.
   `VoiceReplySources` citations, search & audio-synced rows), and docked bottom studio audio scrubber.
 - **Ask Tina (`AskTinaView.tsx`)**: Full-page SSE assistant with real MCP Tool Approval cards
   (`/api/chat/approval`), Copy & Share response actions, searchable `/api/sessions` history,
-  meeting pre-grounding, and real `/routine` prompt compilation.
+  meeting pre-grounding, `@`-mention picker (`#451`), shimmering thinking state (`#453`), connected
+  agent task-step timeline (`#454`), morphing tool approval card (`#455`), morphing voice dictation
+  pill (`#457`), and real `/routine` prompt compilation.
+- **Lucian micro-interaction layer (`lucian/`)**: Ported MIT primitives from Lucian UX/UI Prompt
+  bridged onto TINA's dark/light palette (`lucianTokens.css`), including the global stacked toast
+  deck (`#435` `LucianToastStack` + `webToast.ts`) mounted in `WebApp.tsx` and the circular-reveal
+  dark/light mode toggle (`#219` `LucianThemeToggle`) mounted in `TopBar.tsx`.
 - **Knowledge Hub (`KnowledgeView.tsx` + `knowledgeFriendly.ts` + `constellationGraph.ts` + `KnowledgeDocEditor.tsx` + `KnowledgeCopilotDrawer.tsx` + `KnowledgeGraphCanvas.tsx` + `knowledgeView.module.css`)**:
   Notion-style, non-tech-friendly Knowledge library mounted directly at `/?nav=knowledge` (with URL
   deep-linking `?nav=knowledge&ws=&doc=&tab=` and Back/Forward reading history), uniting Private

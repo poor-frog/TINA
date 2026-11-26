@@ -2,12 +2,26 @@
 /** AskTinaView — Full-page Production AI Assistant backed by TINA's resumable SSE `/api/chat`,
  *  MCP Tool Approval cards (`/api/chat/approval`), real `/routine` prompt compilation, Copy/Share
  *  message actions, parsed context pills, and searchable `/api/sessions` history. */
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { WebIcon, type WebIconName } from "./Icons";
 import { AgentActivitySteps, describeAgentTool } from "./AgentActivitySteps";
+import { LucianThinkingText } from "./lucian/LucianThinkingText";
+import { LucianToolApprovalCard } from "./lucian/LucianToolApprovalCard";
+import { LucianVoiceInputButton } from "./lucian/LucianVoiceInputButton";
+import {
+  LucianMentionChips,
+  LucianMentionPopover,
+  LucianMentionTriggerButton,
+  detectMentionAtCursor,
+  findMentionBeforeCursor,
+  type MentionMatch,
+  type MentionTarget,
+} from "./lucian/LucianMentionPicker";
+import { emitWebToast } from "./lucian/webToast";
 import { Markdown } from "../ui-kit/Markdown";
 import { startStreamingDictation, type StreamingDictation } from "../ui-kit/micDictation";
 import { deleteSession, listSessions, sessionHistory, type SessionSummary } from "../surfaces/sessionsApi";
+import { listWorkspaceTree, readActiveSet } from "../surfaces/workspaceApi";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
 import { routineCreationPrompt, stripContextBlocks } from "../surfaces/chat";
 import { presentError } from "../surfaces/apiClient";
@@ -132,6 +146,15 @@ function agentPhaseLabel(phase: ChatPhase | null, hasText: boolean, lastOp?: str
   return "Thinking…";
 }
 
+function friendlyMentionPageLabel(path: string): string {
+  const base = path.split("/").pop() || path;
+  return base
+    .replace(/\.md$/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
+}
+
 export function AskTinaView({
   meetings,
   initialPrompt,
@@ -141,6 +164,7 @@ export function AskTinaView({
   initialPrompt: AskTinaPrompt | null;
   onConsumeInitialPrompt: () => void;
 }) {
+  const mentionListboxId = useId();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionQuery, setSessionQuery] = useState("");
   const [activeSession, setActiveSession] = useState<string>(() => newSessionId());
@@ -160,6 +184,12 @@ export function AskTinaView({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [workspaceDocs, setWorkspaceDocs] = useState<string[]>([]);
+  const [activeSpaces, setActiveSpaces] = useState<Array<{ slug: string; name?: string | null }>>([]);
+  const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
+  const [mentionActiveIdx, setMentionActiveIdx] = useState(0);
+  const [mentionDismissedAnchor, setMentionDismissedAnchor] = useState(-1);
+  const [mentionedTargets, setMentionedTargets] = useState<MentionTarget[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
   const historyRef = useRef<AbortController | null>(null);
@@ -183,7 +213,21 @@ export function AskTinaView({
 
   useEffect(() => {
     loadSessionList();
+    let mounted = true;
+    void listWorkspaceTree()
+      .then((files) => {
+        if (mounted && Array.isArray(files)) setWorkspaceDocs(files);
+      })
+      .catch(() => undefined);
+    void readActiveSet()
+      .then((res) => {
+        if (mounted && Array.isArray(res?.active)) {
+          setActiveSpaces(res.active.map((m) => ({ slug: m.slug, name: m.name })));
+        }
+      })
+      .catch(() => undefined);
     return () => {
+      mounted = false;
       abortRef.current?.abort();
       abortRef.current = null;
       historyRef.current?.abort();
@@ -266,6 +310,155 @@ export function AskTinaView({
     () => meetings.find((m) => m.id === selectedMeetingId) ?? null,
     [meetings, selectedMeetingId],
   );
+
+  const allMentionTargets = useMemo<MentionTarget[]>(() => {
+    const out: MentionTarget[] = [];
+    const seen = new Set<string>();
+
+    for (const m of meetings.slice(0, 12)) {
+      const label = (m.title_custom || m.title || "").trim();
+      if (!label) continue;
+      const key = `meeting:${m.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        id: key,
+        kind: "meeting",
+        label,
+        role: "Meeting",
+        gradientA: "#7CCBFF",
+        gradientB: "#3B6CF0",
+        meetingId: m.id,
+      });
+    }
+
+    for (const space of activeSpaces.slice(0, 8)) {
+      const label = (space.name || space.slug || "").trim();
+      if (!label) continue;
+      const key = `space:${space.slug}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        id: key,
+        kind: "space",
+        label,
+        role: "Space",
+        gradientA: "#D2C2FF",
+        gradientB: "#7458F0",
+        spaceSlug: space.slug,
+      });
+    }
+
+    for (const file of workspaceDocs.filter((p) => /\.md$/i.test(p)).slice(0, 16)) {
+      const label = friendlyMentionPageLabel(file);
+      if (!label) continue;
+      const key = `page:${file}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        id: key,
+        kind: "page",
+        label,
+        role: "Page",
+        gradientA: "#8EE3BE",
+        gradientB: "#139A72",
+        docPath: file,
+      });
+    }
+
+    return out;
+  }, [meetings, activeSpaces, workspaceDocs]);
+
+  const filteredMentions = useMemo(() => {
+    if (!mentionMatch) return [];
+    const q = mentionMatch.query.trim().toLowerCase();
+    const list = q
+      ? allMentionTargets.filter(
+          (item) =>
+            item.label.toLowerCase().includes(q) ||
+            item.role.toLowerCase().includes(q) ||
+            (item.docPath && item.docPath.toLowerCase().includes(q)),
+        )
+      : allMentionTargets;
+    return list.slice(0, 8);
+  }, [allMentionTargets, mentionMatch]);
+
+  const mentionOpen = Boolean(mentionMatch && filteredMentions.length > 0);
+
+  const syncMentionState = useCallback(
+    (nextValue: string, cursorPos: number) => {
+      const match = detectMentionAtCursor(nextValue, cursorPos);
+      if (!match) {
+        setMentionDismissedAnchor(-1);
+        setMentionMatch(null);
+        return;
+      }
+      if (match.anchor === mentionDismissedAnchor) return;
+      setMentionMatch((prev) => {
+        if (!prev || prev.anchor !== match.anchor) setMentionActiveIdx(0);
+        return match;
+      });
+    },
+    [mentionDismissedAnchor],
+  );
+
+  const pickMention = useCallback(
+    (target: MentionTarget) => {
+      const el = composerRef.current;
+      const cursor = el?.selectionStart ?? draft.length;
+      const anchor = mentionMatch?.anchor ?? cursor;
+      const insertion = `@${target.label} `;
+      const nextValue = draft.slice(0, anchor) + insertion + draft.slice(cursor);
+      const nextPos = anchor + insertion.length;
+
+      setDraft(nextValue);
+      setMentionMatch(null);
+      setMentionDismissedAnchor(-1);
+      setMentionedTargets((prev) => (prev.some((x) => x.id === target.id) ? prev : [...prev, target]));
+      if (target.kind === "meeting" && target.meetingId) {
+        setSelectedMeetingId(target.meetingId);
+      }
+      window.requestAnimationFrame(() => {
+        if (!composerRef.current) return;
+        composerRef.current.focus();
+        composerRef.current.setSelectionRange(nextPos, nextPos);
+      });
+    },
+    [draft, mentionMatch],
+  );
+
+  const insertAtMentionTrigger = useCallback(() => {
+    const el = composerRef.current;
+    const focused = el && document.activeElement === el;
+    const start = focused ? (el.selectionStart ?? draft.length) : draft.length;
+    const end = focused ? (el.selectionEnd ?? draft.length) : draft.length;
+    const before = draft.slice(0, start);
+    const ins = (before && !/\s$/.test(before) ? " " : "") + "@";
+    const nextValue = before + ins + draft.slice(end);
+    const nextPos = start + ins.length;
+    setDraft(nextValue);
+    setMentionDismissedAnchor(-1);
+    setMentionActiveIdx(0);
+    setMentionMatch({ anchor: nextPos - 1, query: "" });
+    window.requestAnimationFrame(() => {
+      if (!composerRef.current) return;
+      composerRef.current.focus();
+      composerRef.current.setSelectionRange(nextPos, nextPos);
+    });
+  }, [draft]);
+
+  const removeMentionChip = useCallback((id: string) => {
+    setMentionedTargets((prev) => {
+      const target = prev.find((x) => x.id === id);
+      if (target?.kind === "meeting" && target.meetingId && target.meetingId === selectedMeetingId) {
+        setSelectedMeetingId("");
+      }
+      if (target) {
+        setDraft((cur) => cur.replace(new RegExp(`@${target.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s?`, "g"), "").trimStart());
+      }
+      return prev.filter((x) => x.id !== id);
+    });
+  }, [selectedMeetingId]);
 
   const activeConversationTitle = useMemo(() => {
     const match = sessions.find((s) => s.session === activeSession);
@@ -374,6 +567,15 @@ export function AskTinaView({
                     : m,
                 ),
               );
+              emitWebToast({
+                message:
+                  resolved.outcome === "approved"
+                    ? "Tool action approved"
+                    : resolved.outcome === "denied"
+                      ? "Tool action denied"
+                      : `Tool approval ${resolved.outcome}`,
+                tone: resolved.outcome === "approved" ? "success" : "info",
+              });
             },
             onCommit: (sha) => {
               setMessages((prev) =>
@@ -515,6 +717,7 @@ export function AskTinaView({
       if (activeSession === sessionId) {
         switchSession(newSessionId());
       }
+      emitWebToast({ message: "Conversation deleted", tone: "info" });
     } catch (err) {
       setSessionError(presentError(err).headline);
     } finally {
@@ -552,6 +755,10 @@ export function AskTinaView({
         if (deletedIds.has(activeSession)) {
           switchSession(newSessionId());
         }
+        emitWebToast({
+          message: `Cleared ${deletedIds.size} ${deletedIds.size === 1 ? "conversation" : "conversations"}`,
+          tone: "info",
+        });
       }
       setConfirmClearAll(false);
       setConfirmDeleteSession(null);
@@ -590,6 +797,17 @@ export function AskTinaView({
     }
   };
 
+  const cancelMic = useCallback(() => {
+    if (!dictRef.current) {
+      setDictating(false);
+      return;
+    }
+    const active = dictRef.current;
+    dictRef.current = null;
+    setDictating(false);
+    active.cancel();
+  }, []);
+
   const toggleMic = async () => {
     if (dictRef.current) {
       const active = dictRef.current;
@@ -606,11 +824,16 @@ export function AskTinaView({
           const text = [confirmed, pending].filter(Boolean).join(" ").trim();
           if (text) setDraft(text);
         },
-        onError: (msg) => setSessionError(msg),
+        onError: (msg) => {
+          setSessionError(msg);
+          emitWebToast({ message: msg, tone: "error" });
+        },
       });
     } catch (err) {
       setDictating(false);
-      setSessionError(err instanceof Error ? err.message : "Microphone dictation is unavailable.");
+      const msg = err instanceof Error ? err.message : "Microphone dictation is unavailable.";
+      setSessionError(msg);
+      emitWebToast({ message: msg, tone: "error" });
     }
   };
 
@@ -630,8 +853,10 @@ export function AskTinaView({
     try {
       await navigator.clipboard.writeText(text);
       setTransientFeedback(msgId, "Copied");
+      emitWebToast("Copied response to clipboard");
     } catch {
       setTransientFeedback(msgId, "Copy unavailable");
+      emitWebToast({ message: "Copy unavailable", tone: "error" });
     }
   };
 
@@ -640,13 +865,16 @@ export function AskTinaView({
       if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
         await navigator.share({ title: "Ask Tina response", text });
         setTransientFeedback(msgId, "Shared");
+        emitWebToast("Shared response");
       } else {
         await navigator.clipboard.writeText(text);
         setTransientFeedback(msgId, "Copied to share");
+        emitWebToast("Copied response to share");
       }
     } catch (err) {
       if ((err as Error)?.name !== "AbortError") {
         setTransientFeedback(msgId, "Share unavailable");
+        emitWebToast({ message: "Share unavailable", tone: "error" });
       }
     }
   };
@@ -675,6 +903,8 @@ export function AskTinaView({
     if (!draft.trim() || busy || historyLoading) return;
     const text = draft;
     setDraft("");
+    setMentionMatch(null);
+    setMentionedTargets([]);
     void sendMessage(text);
   };
 
@@ -1026,29 +1256,30 @@ export function AskTinaView({
                           <div className="tina-web-agent-prose">
                             <Markdown>{msg.text}</Markdown>
                           </div>
-                        ) : !msg.approvals?.length && !msg.error ? (
-                          <div className="tina-web-thinking" role="status">
-                            <span className="tina-web-typing-dots" aria-hidden="true">
-                              <span />
-                              <span />
-                              <span />
-                            </span>
-                            <span>
-                              {lastOp
-                                ? describeAgentTool(lastOp).active
-                                : phase === "reconnecting"
-                                  ? "Reconnecting to agent…"
-                                  : phase === "working"
-                                    ? "Reading your workspace…"
-                                    : "Thinking…"}
-                            </span>
-                          </div>
+                        ) : !msg.approvals?.length && !msg.error && !(msg.ops && msg.ops.length > 0) ? (
+                          <LucianThinkingText
+                            label={
+                              phase === "reconnecting"
+                                ? "Reconnecting to agent…"
+                                : phase === "working"
+                                  ? "Reading your workspace…"
+                                  : "Thinking…"
+                            }
+                            lines={[
+                              selectedMeeting
+                                ? `Grounded on meeting: ${selectedMeeting.title_custom || selectedMeeting.title}`
+                                : "Searching across meetings & knowledge spaces",
+                              phase === "reconnecting"
+                                ? "Restoring stream connection…"
+                                : "Preparing response & verifying context",
+                            ]}
+                          />
                         ) : null}
 
                         {msg.approvals && msg.approvals.length > 0 && (
                           <div className="tina-web-approval-stack">
                             {msg.approvals.map((approval) => (
-                              <WebToolApprovalCard
+                              <LucianToolApprovalCard
                                 key={approval.approval_id}
                                 approval={approval}
                                 onDecision={(id, decision) => void respondToApproval(id, decision)}
@@ -1162,85 +1393,162 @@ export function AskTinaView({
           )}
 
           <form className="tina-web-ask-form" onSubmit={onSubmit}>
+            <LucianMentionPopover
+              open={mentionOpen}
+              listboxId={mentionListboxId}
+              query={mentionMatch?.query ?? ""}
+              items={filteredMentions}
+              activeIndex={mentionActiveIdx}
+              onHoverIndex={setMentionActiveIdx}
+              onPick={pickMention}
+            />
+            <LucianMentionChips mentions={mentionedTargets} onRemove={removeMentionChip} />
             <textarea
               ref={composerRef}
               rows={1}
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={mentionOpen}
+              aria-controls={mentionListboxId}
+              aria-activedescendant={mentionOpen ? `${mentionListboxId}-opt-${Math.min(mentionActiveIdx, Math.max(0, filteredMentions.length - 1))}` : undefined}
+              onChange={(e) => {
+                const next = e.target.value;
+                setDraft(next);
+                syncMentionState(next, e.target.selectionStart ?? next.length);
+              }}
+              onClick={(e) => {
+                const target = e.currentTarget;
+                syncMentionState(target.value, target.selectionStart ?? target.value.length);
+              }}
+              onKeyUp={(e) => {
+                if (/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) {
+                  const target = e.currentTarget;
+                  syncMentionState(target.value, target.selectionStart ?? target.value.length);
+                }
+              }}
+              onBlur={() => setMentionMatch(null)}
               onKeyDown={(e) => {
+                if (mentionOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+                  e.preventDefault();
+                  setMentionActiveIdx((cur) => (cur + (e.key === "ArrowDown" ? 1 : -1) + filteredMentions.length) % filteredMentions.length);
+                  return;
+                }
+                if (mentionOpen && (e.key === "Enter" || e.key === "Tab")) {
+                  e.preventDefault();
+                  const chosen = filteredMentions[Math.min(mentionActiveIdx, filteredMentions.length - 1)];
+                  if (chosen) pickMention(chosen);
+                  return;
+                }
+                if (mentionOpen && e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (mentionMatch) setMentionDismissedAnchor(mentionMatch.anchor);
+                  setMentionMatch(null);
+                  return;
+                }
+                if (e.key === "Backspace") {
+                  const el = e.currentTarget;
+                  const selStart = el.selectionStart ?? 0;
+                  const selEnd = el.selectionEnd ?? 0;
+                  if (selStart === selEnd && selStart > 0) {
+                    const token = findMentionBeforeCursor(
+                      draft,
+                      selStart,
+                      allMentionTargets.map((t) => t.label),
+                    );
+                    if (token) {
+                      e.preventDefault();
+                      const nextValue = draft.slice(0, selStart - token.length) + draft.slice(selStart);
+                      const nextPos = selStart - token.length;
+                      setDraft(nextValue);
+                      const strippedLabel = token.slice(1);
+                      setMentionedTargets((prev) => prev.filter((t) => t.label !== strippedLabel));
+                      window.requestAnimationFrame(() => {
+                        if (!composerRef.current) return;
+                        composerRef.current.setSelectionRange(nextPos, nextPos);
+                        syncMentionState(nextValue, nextPos);
+                      });
+                      return;
+                    }
+                  }
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   onSubmit(e);
                 }
               }}
-              placeholder="Ask Tina about any meeting, workspace, or type /routine…"
+              placeholder="Ask Tina about any meeting, type @ to mention, or /routine…"
               aria-label="Message Ask Tina"
             />
             <div className="tina-web-ask-bar">
-              <div ref={scopeWrapRef} className="tina-web-ask-scope-popover-wrap">
-                <button
-                  type="button"
-                  className={`tina-web-ask-scope-trigger ${selectedMeeting ? "active" : ""}`}
-                  aria-label="Ground on meeting"
-                  aria-haspopup="listbox"
-                  aria-expanded={scopeMenuOpen}
-                  onClick={() => setScopeMenuOpen((v) => !v)}
-                >
-                  <WebIcon name={selectedMeeting ? "video" : "layers"} size={13} />
-                  <span className="tina-web-ask-scope-label">
-                    {selectedMeeting
-                      ? `Meeting: ${selectedMeeting.title_custom || selectedMeeting.title}`
-                      : "All workspace & meetings"}
-                  </span>
-                  <WebIcon name="chevronDown" size={12} />
-                </button>
+              <div className="tina-web-ask-bar-left">
+                <LucianMentionTriggerButton onClick={insertAtMentionTrigger} disabled={busy || historyLoading} />
+                <div ref={scopeWrapRef} className="tina-web-ask-scope-popover-wrap">
+                  <button
+                    type="button"
+                    className={`tina-web-ask-scope-trigger ${selectedMeeting ? "active" : ""}`}
+                    aria-label="Ground on meeting"
+                    aria-haspopup="listbox"
+                    aria-expanded={scopeMenuOpen}
+                    onClick={() => setScopeMenuOpen((v) => !v)}
+                  >
+                    <WebIcon name={selectedMeeting ? "video" : "layers"} size={13} />
+                    <span className="tina-web-ask-scope-label">
+                      {selectedMeeting
+                        ? `Meeting: ${selectedMeeting.title_custom || selectedMeeting.title}`
+                        : "All workspace & meetings"}
+                    </span>
+                    <WebIcon name="chevronDown" size={12} />
+                  </button>
 
-                {scopeMenuOpen && (
-                  <div className="tina-web-ask-scope-menu" role="listbox" aria-label="Context scope">
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={!selectedMeetingId}
-                      className={`tina-web-ask-scope-option ${!selectedMeetingId ? "selected" : ""}`}
-                      onClick={() => {
-                        setSelectedMeetingId("");
-                        setScopeMenuOpen(false);
-                      }}
-                    >
-                      <WebIcon name="layers" size={13} />
-                      <span className="tina-web-ask-scope-option-text">All workspace &amp; meetings</span>
-                      {!selectedMeetingId && <WebIcon name="check" size={13} />}
-                    </button>
+                  {scopeMenuOpen && (
+                    <div className="tina-web-ask-scope-menu" role="listbox" aria-label="Context scope">
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={!selectedMeetingId}
+                        className={`tina-web-ask-scope-option ${!selectedMeetingId ? "selected" : ""}`}
+                        onClick={() => {
+                          setSelectedMeetingId("");
+                          setScopeMenuOpen(false);
+                        }}
+                      >
+                        <WebIcon name="layers" size={13} />
+                        <span className="tina-web-ask-scope-option-text">All workspace &amp; meetings</span>
+                        {!selectedMeetingId && <WebIcon name="check" size={13} />}
+                      </button>
 
-                    {meetings.length > 0 && (
-                      <>
-                        <div className="tina-web-ask-scope-section">Recent meetings</div>
-                        {meetings.slice(0, 20).map((m) => {
-                          const isSelected = m.id === selectedMeetingId;
-                          return (
-                            <button
-                              key={m.id}
-                              type="button"
-                              role="option"
-                              aria-selected={isSelected}
-                              className={`tina-web-ask-scope-option ${isSelected ? "selected" : ""}`}
-                              onClick={() => {
-                                setSelectedMeetingId(m.id);
-                                setScopeMenuOpen(false);
-                              }}
-                            >
-                              <WebIcon name="video" size={13} />
-                              <span className="tina-web-ask-scope-option-text">
-                                {m.title_custom || m.title}
-                              </span>
-                              {isSelected && <WebIcon name="check" size={13} />}
-                            </button>
-                          );
-                        })}
-                      </>
-                    )}
-                  </div>
-                )}
+                      {meetings.length > 0 && (
+                        <>
+                          <div className="tina-web-ask-scope-section">Recent meetings</div>
+                          {meetings.slice(0, 20).map((m) => {
+                            const isSelected = m.id === selectedMeetingId;
+                            return (
+                              <button
+                                key={m.id}
+                                type="button"
+                                role="option"
+                                aria-selected={isSelected}
+                                className={`tina-web-ask-scope-option ${isSelected ? "selected" : ""}`}
+                                onClick={() => {
+                                  setSelectedMeetingId(m.id);
+                                  setScopeMenuOpen(false);
+                                }}
+                              >
+                                <WebIcon name="video" size={13} />
+                                <span className="tina-web-ask-scope-option-text">
+                                  {m.title_custom || m.title}
+                                </span>
+                                {isSelected && <WebIcon name="check" size={13} />}
+                              </button>
+                            );
+                          })}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="tina-web-ask-bar-right">
@@ -1256,15 +1564,12 @@ export function AskTinaView({
                     </span>
                   </span>
                 )}
-                <button
-                  type="button"
-                  className={`tina-web-icon-btn ${dictating ? "recording" : ""}`}
-                  aria-label={dictating ? "Stop dictation" : "Voice input"}
-                  title={dictating ? "Stop dictation" : "Dictate with microphone"}
-                  onClick={() => void toggleMic()}
-                >
-                  <WebIcon name="mic" size={16} />
-                </button>
+                <LucianVoiceInputButton
+                  recording={dictating}
+                  disabled={historyLoading}
+                  onToggle={() => void toggleMic()}
+                  onCancel={cancelMic}
+                />
                 {busy ? (
                   <button
                     type="button"
@@ -1291,92 +1596,5 @@ export function AskTinaView({
         </div>
       </section>
     </div>
-  );
-}
-
-function WebToolApprovalCard({
-  approval,
-  onDecision,
-}: {
-  approval: ToolApprovalState;
-  onDecision: (approvalId: string, decision: ToolApprovalDecision) => void;
-}) {
-  const isPending = approval.status === "pending";
-  const isSubmitting = approval.status === "submitting";
-  const resolvedLabel =
-    approval.status === "approved"
-      ? "Approved for this call"
-      : approval.status === "denied"
-        ? "Denied"
-        : approval.status === "expired"
-          ? "Approval expired; the tool was not called"
-          : approval.status === "cancelled"
-            ? "Approval cancelled"
-            : "";
-
-  return (
-    <section
-      className={`tina-web-approval-card ${approval.status}`}
-      aria-label={`Approval required: ${approval.title}`}
-    >
-      <div className="tina-web-approval-head">
-        <WebIcon name="zap" size={13} />
-        <span>Approval required</span>
-        <code>
-          {approval.server}/{approval.tool}
-        </code>
-      </div>
-      <div className="tina-web-approval-title">{approval.title}</div>
-      {approval.description && <div className="tina-web-approval-desc">{approval.description}</div>}
-      {approval.message && <div className="tina-web-approval-msg">{approval.message}</div>}
-
-      {approval.parameters.length > 0 && (
-        <dl className="tina-web-approval-params">
-          {approval.parameters.map((param) => (
-            <div key={param.name} className="tina-web-approval-param-row">
-              <dt>{param.display_name}</dt>
-              <dd>{param.value}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-
-      {isPending && (
-        <div className="tina-web-approval-actions">
-          <button
-            type="button"
-            className="tina-web-btn-primary"
-            onClick={() => onDecision(approval.approval_id, "approve")}
-          >
-            <WebIcon name="check" size={13} />
-            <span>Approve once</span>
-          </button>
-          <button
-            type="button"
-            className="tina-web-btn-danger-ghost"
-            onClick={() => onDecision(approval.approval_id, "deny")}
-          >
-            <WebIcon name="close" size={13} />
-            <span>Deny</span>
-          </button>
-        </div>
-      )}
-
-      {isSubmitting && (
-        <div role="status" className="tina-web-approval-status">
-          Sending decision…
-        </div>
-      )}
-      {resolvedLabel && (
-        <div role="status" className="tina-web-approval-status">
-          {resolvedLabel}
-        </div>
-      )}
-      {approval.error && (
-        <div role="alert" className="tina-web-approval-error">
-          {approval.error}
-        </div>
-      )}
-    </section>
   );
 }
