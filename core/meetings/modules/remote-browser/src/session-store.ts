@@ -138,11 +138,15 @@ function describeAwsFailure(err: any): string {
 }
 
 function getS3Env(config: S3Config): Record<string, string> {
-  return {
-    ...process.env as Record<string, string>,
-    AWS_ACCESS_KEY_ID: config.s3AccessKey || '',
-    AWS_SECRET_ACCESS_KEY: config.s3SecretKey || '',
-  };
+  const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+  // Only override AWS static credentials when explicitly configured (e.g. MinIO / scoped key pair).
+  // Leaving them untouched when unset lets AWS CLI use the ECS Task Role / default credential chain.
+  if (config.s3AccessKey || config.s3SecretKey) {
+    env.AWS_ACCESS_KEY_ID = config.s3AccessKey || '';
+    env.AWS_SECRET_ACCESS_KEY = config.s3SecretKey || '';
+    delete env.AWS_SESSION_TOKEN;
+  }
+  return env;
 }
 
 export function s3Sync(localDir: string, s3Path: string, config: S3Config, direction: 'up' | 'down', excludes: string[] = []): void {

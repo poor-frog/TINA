@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: TINA AWS foundation with an ECS cluster, private image repositories, and two-AZ networking.
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - {Key: Name, Value: !Sub '${AWS::StackName}-vpc'}
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  VpcGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.42.0.0/24
+      Tags:
+        - {Key: Name, Value: !Sub '${AWS::StackName}-public-a'}
+  PublicB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.42.1.0/24
+      Tags:
+        - {Key: Name, Value: !Sub '${AWS::StackName}-public-b'}
+  AppA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.42.10.0/24
+      Tags:
+        - {Key: Name, Value: !Sub '${AWS::StackName}-app-a'}
+  AppB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.42.11.0/24
+      Tags:
+        - {Key: Name, Value: !Sub '${AWS::StackName}-app-b'}
+  DataA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.42.20.0/24
+      Tags:
+        - {Key: Name, Value: !Sub '${AWS::StackName}-data-a'}
+  DataB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.42.21.0/24
+      Tags:
+        - {Key: Name, Value: !Sub '${AWS::StackName}-data-b'}
+
+  PublicRoutes:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGateway
+    Properties:
+      RouteTableId: !Ref PublicRoutes
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  AppRoutesA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+  AppRoutesB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+  DataRoutes:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+  PublicAssocA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PublicA, RouteTableId: !Ref PublicRoutes}
+  PublicAssocB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PublicB, RouteTableId: !Ref PublicRoutes}
+  AppAssocA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref AppA, RouteTableId: !Ref AppRoutesA}
+  AppAssocB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref AppB, RouteTableId: !Ref AppRoutesB}
+  DataAssocA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref DataA, RouteTableId: !Ref DataRoutes}
+  DataAssocB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref DataB, RouteTableId: !Ref DataRoutes}
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Gateway
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      RouteTableIds: [!Ref AppRoutesA, !Ref AppRoutesB]
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${AWS::StackName}-ecs'
+      CapacityProviders: [FARGATE]
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+  BotImages:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${AWS::StackName}/bot'
+      ImageTagMutability: IMMUTABLE
+  RuntimeImages:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${AWS::StackName}/runtime'
+      ImageTagMutability: IMMUTABLE
+  MeetingApiImages:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${AWS::StackName}/meeting-api'
+      ImageTagMutability: IMMUTABLE
+  StagingRecordings:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireBotInvocations
+            Prefix: runtime-invocations/
+            Status: Enabled
+            ExpirationInDays: 1
+  StagingRecordingsPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StagingRecordings
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource: [!GetAtt StagingRecordings.Arn, !Sub '${StagingRecordings.Arn}/*']
+            Condition:
+              Bool: {'aws:SecureTransport': 'false'}
+
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+  PublicSubnetIds:
+    Value: !Join [',', [!Ref PublicA, !Ref PublicB]]
+  AppSubnetIds:
+    Value: !Join [',', [!Ref AppA, !Ref AppB]]
+  DataSubnetIds:
+    Value: !Join [',', [!Ref DataA, !Ref DataB]]
+  AppRouteTableIds:
+    Value: !Join [',', [!Ref AppRoutesA, !Ref AppRoutesB]]
+  S3EndpointId:
+    Value: !Ref S3GatewayEndpoint
+  ClusterName:
+    Value: !Ref Cluster
+  BotRepositoryUri:
+    Value: !GetAtt BotImages.RepositoryUri
+  RuntimeRepositoryUri:
+    Value: !GetAtt RuntimeImages.RepositoryUri
+  MeetingApiRepositoryUri:
+    Value: !GetAtt MeetingApiImages.RepositoryUri
+  StagingRecordingsBucket:
+    Value: !Ref StagingRecordings

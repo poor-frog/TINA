@@ -19,6 +19,46 @@ import { BROWSER_DATA_DIR } from './session-store';
 // WebGL vendor/renderer, chrome.runtime, permissions, iframe.contentWindow, and more.
 chromium.use(StealthPlugin());
 
+export interface BrowserProxyConfig {
+  server: string;
+  username?: string;
+  password?: string;
+  bypass?: string;
+}
+
+const DEFAULT_PROXY_BYPASS = 'localhost,127.0.0.1,.tina-staging.local,.local';
+
+/**
+ * Resolve optional egress proxy settings (e.g. residential proxy for cloud/Fargate bot egress).
+ * Supports http://, https://, socks5:// URLs with optional embedded user:pass@ credentials or
+ * explicit BOT_PROXY_USERNAME / BOT_PROXY_PASSWORD overrides. Never logs credentials.
+ */
+export function resolveBrowserProxy(env: NodeJS.ProcessEnv = process.env): BrowserProxyConfig | undefined {
+  const raw = (env.BOT_PROXY_URL || '').trim();
+  if (!raw) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error('BOT_PROXY_URL is not a valid URL');
+  }
+  if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(parsed.protocol)) {
+    throw new Error(`BOT_PROXY_URL protocol '${parsed.protocol}' is unsupported (expected http/https/socks5)`);
+  }
+  const server = `${parsed.protocol}//${parsed.host}`;
+  const username = (env.BOT_PROXY_USERNAME || '').trim() || (parsed.username ? decodeURIComponent(parsed.username) : undefined);
+  const password = env.BOT_PROXY_PASSWORD !== undefined && env.BOT_PROXY_PASSWORD !== ''
+    ? env.BOT_PROXY_PASSWORD
+    : (parsed.password ? decodeURIComponent(parsed.password) : undefined);
+  const bypass = (env.BOT_PROXY_BYPASS || '').trim() || DEFAULT_PROXY_BYPASS;
+  return {
+    server,
+    ...(username ? { username } : {}),
+    ...(password ? { password } : {}),
+    bypass,
+  };
+}
+
 export interface LaunchPersistentOptions {
   /** Chromium profile dir — the durable session lives here. Defaults to BROWSER_DATA_DIR. */
   dataDir?: string;
@@ -30,6 +70,8 @@ export interface LaunchPersistentOptions {
    *  context. Defaults to BOT_UI_LOCALE (env), else en-US. Keeps the page-level
    *  locale byte-identical to the --lang launch flag the caller passes in args. */
   locale?: string;
+  /** Optional proxy override; defaults to BOT_PROXY_URL env when set. */
+  proxy?: BrowserProxyConfig;
 }
 
 export async function launchPersistentBrowser(
@@ -37,12 +79,17 @@ export async function launchPersistentBrowser(
 ): Promise<{ context: BrowserContext; page: Page }> {
   const dataDir = opts.dataDir ?? BROWSER_DATA_DIR;
   const locale = opts.locale ?? ((process.env.BOT_UI_LOCALE || '').trim() || 'en-US');
+  const proxy = opts.proxy ?? resolveBrowserProxy();
+  if (proxy) {
+    console.log(`[remote-browser] proxy enabled: ${proxy.server} (bypass=${proxy.bypass ?? 'none'})`);
+  }
   const context = await chromium.launchPersistentContext(dataDir, {
     headless: opts.headless ?? false,
     ignoreDefaultArgs: ['--enable-automation'],
     args: opts.args,
     viewport: null,
     locale,
+    ...(proxy ? { proxy } : {}),
   });
   // Anti-detection the stealth plugin misses under playwright-extra. Measured live (with stealth
   // active) that the bot's browser still leaks the tells below; patch them on every frame/navigation.

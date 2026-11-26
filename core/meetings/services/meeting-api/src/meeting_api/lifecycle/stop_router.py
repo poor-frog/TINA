@@ -28,6 +28,7 @@ injects the real ``redis_client.publish``.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 from typing import Any, Optional, Protocol, runtime_checkable
 
@@ -96,6 +97,38 @@ _CANCELLED_REASON = "stopped"
 # platform guard (A1/A3): reject a non-enum platform up front, BEFORE the find_active lookup (which would
 # otherwise miss and 404 — drifting from the contract a client must code against).
 _SUPPORTED_PLATFORMS = frozenset({"google_meet", "zoom", "teams", "jitsi", "discord", "browser_session"})
+_STUCK_BOOTING_AGE_SEC = 5.0
+
+
+def _iso_age_seconds(raw: Any) -> Optional[float]:
+    if isinstance(raw, datetime):
+        dt = raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    elif isinstance(raw, str) and raw:
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    else:
+        return None
+    return max(0.0, (datetime.now(timezone.utc) - dt).total_seconds())
+
+
+def _is_stale_stopped_booting(row: dict) -> bool:
+    """True when an already stop-requested booting row is genuinely stuck (not an immediate
+    redelivery within a few milliseconds of the first Stop)."""
+    if row.get("status") not in _BOOTING_STATUSES:
+        return False
+    if row.get("bot_container_id"):
+        return True
+    data = row.get("data") or {}
+    stop_age = _iso_age_seconds(data.get("stop_requested_at"))
+    if stop_age is not None:
+        return stop_age >= _STUCK_BOOTING_AGE_SEC
+    # Legacy rows stopped before `stop_requested_at` was stamped: fall back to row age.
+    row_age = _iso_age_seconds(row.get("created_at") or row.get("updated_at"))
+    return row_age is not None and row_age >= _STUCK_BOOTING_AGE_SEC
 
 
 def build_stop_router(repo: MeetingRepo, publisher: CommandPublisher, runtime=None) -> APIRouter:
@@ -157,7 +190,32 @@ def build_stop_router(repo: MeetingRepo, publisher: CommandPublisher, runtime=No
         # sibling — spawned after the first stop — must still take it down.
         pending = [row for row in rows if not (row.get("data") or {}).get("stop_requested")]
         if not pending:
-            raise HTTPException(status_code=404, detail="No active meeting for this bot")
+            stuck_booting = (
+                [row for row in rows if _is_stale_stopped_booting(row)]
+                if runtime is not None
+                else []
+            )
+            if not stuck_booting:
+                raise HTTPException(status_code=404, detail="No active meeting for this bot")
+            cleaned: list[dict] = []
+            for row in stuck_booting:
+                fresh = await _reread(repo, row)
+                if not _is_stale_stopped_booting(fresh):
+                    continue
+                if await _teardown_and_terminalize_booting(
+                    repo, publisher, runtime, user_id, fresh, native_meeting_id=native_meeting_id,
+                    allow_missing_container=True,
+                ):
+                    cleaned.append(fresh)
+            if not cleaned:
+                raise HTTPException(status_code=404, detail="No active meeting for this bot")
+            return {
+                "status": "stopping",
+                "meeting_id": cleaned[0]["id"],
+                "native_meeting_id": native_meeting_id,
+                "also_stopped": [row["id"] for row in cleaned[1:]],
+                "cancelled": [],
+            }
         meeting = pending[0]
         meeting_id = meeting["id"]
 
@@ -222,12 +280,11 @@ def build_stop_router(repo: MeetingRepo, publisher: CommandPublisher, runtime=No
         if runtime is not None:
             for row in live:
                 fresh = await _reread(repo, row)
-                container = fresh.get("bot_container_id")
-                if container and fresh.get("status") in _BOOTING_STATUSES:
-                    try:
-                        await runtime.delete_workload(container)
-                    except Exception as e:  # noqa: BLE001 — best-effort; reconcile backstops
-                        _log_stop_teardown_failed(row["id"], container, e)
+                if fresh.get("status") in _BOOTING_STATUSES:
+                    await _teardown_and_terminalize_booting(
+                        repo, publisher, runtime, user_id, fresh, native_meeting_id=native_meeting_id,
+                        allow_missing_container=False,
+                    )
 
         if siblings:
             _log_stop_evicted(meeting_id, [row["id"] for row in siblings], native_meeting_id)
@@ -310,6 +367,64 @@ async def _cancel_planned(repo, row: dict) -> None:
         pass
 
 
+async def _teardown_and_terminalize_booting(
+    repo,
+    publisher: CommandPublisher,
+    runtime,
+    user_id: int,
+    row: dict,
+    *,
+    native_meeting_id: str,
+    allow_missing_container: bool,
+) -> bool:
+    """Tear down a pre-active booting bot workload and terminalize the meeting immediately.
+
+    A booting bot (`requested`/`joining`/`awaiting_admission`) never reached `active` and has no
+    recording to finalize. Leaving its row stuck in `joining` after teardown (or after a runtime
+    restart made the dead workload `WorkloadUnknown`) traps the UI in a zombie `Joining` pill until
+    the long reconcile grace expires. Terminalizing as `failed` with `failure_stage=boot_stage` and
+    `completion_reason='stopped'` preserves the #807 stage attribution while clearing the UI right away.
+    """
+    boot_stage = row.get("status")
+    container = row.get("bot_container_id")
+    if not container:
+        if not allow_missing_container:
+            return False
+        reason = "stopped by the user before the bot joined"
+    else:
+        reason = "stopped by the user while booting"
+        try:
+            await runtime.delete_workload(container)
+        except WorkloadUnknown as e:
+            _log_stop_teardown_failed(row["id"], container, e)
+            reason = "stopped by the user; booting workload no longer tracked by runtime"
+        except Exception as e:  # noqa: BLE001 — transient teardown failure; reconcile backstops
+            _log_stop_teardown_failed(row["id"], container, e)
+            return False
+
+    await repo.fail_meeting(
+        meeting_id=row["id"],
+        reason=reason,
+        failure_stage=boot_stage,
+        completion_reason=_CANCELLED_REASON,
+        data={"stop_requested": True},
+    )
+    try:
+        await publisher.publish(
+            f"u:{user_id}:meetings",
+            json.dumps({
+                "type": "meeting.status",
+                "meeting_id": row["id"],
+                "native": native_meeting_id,
+                "status": "failed",
+                "completion_reason": _CANCELLED_REASON,
+            }),
+        )
+    except Exception:  # noqa: BLE001 — terminal state is already durable in Postgres
+        pass
+    return True
+
+
 async def _mark_stop_requested(repo, row: dict) -> None:
     """Persist the user-stop intent on one row, keyed by its latest session.
 
@@ -329,17 +444,21 @@ async def _mark_stop_requested(repo, row: dict) -> None:
     calendar would recreate this occurrence and send another bot. Fall back to a direct data merge.
     """
     status = row.get("status")
+    stop_payload = {
+        "stop_requested": True,
+        "stop_requested_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
     sessions = await repo.list_sessions(meeting_id=row["id"])
     if sessions:
         await repo.update_meeting_status(
             session_uid=sessions[-1],
             status=status if status in _BOOTING_STATUSES else "stopping",
-            data={"stop_requested": True},
+            data=stop_payload,
         )
         return
     merge = getattr(repo, "merge_meeting_data", None)
     if merge is not None:
-        await merge(row["id"], {"stop_requested": True})
+        await merge(row["id"], stop_payload)
 
 
 def _log_stop_evicted(meeting_id, sibling_ids, native_meeting_id) -> None:

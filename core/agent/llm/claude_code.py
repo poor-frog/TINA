@@ -213,10 +213,16 @@ def _link_chat_into_workspace(work: Path) -> None:
     is therefore replaced only when EMPTY (``rmdir``, which cannot destroy content); a non-empty
     one is left alone and the link is skipped — the turn still works, without cross-turn resume."""
     ws_projects = work / ".claude" / "projects"
-    ws_projects.mkdir(parents=True, exist_ok=True)
     home_claude = Path(os.environ.get("HOME", "/root")) / ".claude"
-    home_claude.mkdir(parents=True, exist_ok=True)
     link = home_claude / "projects"
+    if link == ws_projects:
+        # The S3 worker uses the private continuity root as HOME.
+        if link.is_symlink() and os.readlink(link) == str(link):
+            link.unlink()
+        ws_projects.mkdir(parents=True, exist_ok=True)
+        return
+    ws_projects.mkdir(parents=True, exist_ok=True)
+    home_claude.mkdir(parents=True, exist_ok=True)
     try:
         if link.is_symlink():
             if os.readlink(link) == str(ws_projects):

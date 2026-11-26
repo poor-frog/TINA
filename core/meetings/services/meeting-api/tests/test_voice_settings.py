@@ -39,6 +39,48 @@ async def test_service_metadata_is_authenticated_safe_and_reports_the_actual_voi
     assert requests[0].headers['X-API-Key']=='synthetic-secret'
 
 
+async def test_service_metadata_reports_transcript_only_policy_when_pilot_room_is_set(settings, monkeypatch):
+    client, _, _ = settings
+    monkeypatch.setenv('TINA_MEETING_VOICE_PILOT_ROOM', 'abc-defg-hij')
+    r = await client.get('/bots/voice/services', headers={'X-User-Id': '7'})
+    from meeting_api.lifecycle.voice import new_meeting_voice_policy
+    assert r.json()['new_meeting_policy'] == new_meeting_voice_policy(transcript_only=True)
+
+
+async def test_voice_pilot_user_gate_and_completion_backend_policy(settings, monkeypatch):
+    from meeting_api.bot_spawn import request_bot
+    from meeting_api.bot_spawn.fakes import InMemoryMeetingRepo, FakeRuntimeClient
+
+    client, _, _ = settings
+    monkeypatch.delenv('TINA_MEETING_VOICE_PILOT_ROOM', raising=False)
+    monkeypatch.setenv('TINA_MEETING_VOICE_PILOT_USER_IDS', '7,11')
+    monkeypatch.setenv('TINA_MEETING_VOICE_AGENT_BACKEND', 'completion')
+    monkeypatch.setenv('TRANSCRIPTION_SERVICE_URL', 'http://stt.test')
+    monkeypatch.setenv('TRANSCRIPTION_SERVICE_TOKEN', 'tok')
+
+    allowed = (await client.get('/bots/voice/services', headers={'X-User-Id': '7'})).json()
+    denied = (await client.get('/bots/voice/services', headers={'X-User-Id': '8'})).json()
+    assert allowed['voice_pipeline_configured'] is True
+    assert denied['voice_pipeline_configured'] is False
+    assert allowed['new_meeting_policy']['include_workspace_wiki'] is True
+    assert allowed['new_meeting_policy']['allow_web_search'] is True
+    assert allowed['new_meeting_policy']['agent_backend'] == 'completion'
+
+    repo, runtime = InMemoryMeetingRepo(), FakeRuntimeClient()
+    await request_bot(repo, runtime, user_id=7, platform='google_meet', native_meeting_id='any-room-xyz',
+                      transcribe_enabled=True, voice_agent_enabled=True, token_secret='synthetic-meeting-key')
+    await request_bot(repo, runtime, user_id=8, platform='google_meet', native_meeting_id='any-room-abc',
+                      transcribe_enabled=True, voice_agent_enabled=True, token_secret='synthetic-meeting-key')
+    assert repo._meetings[1]['data']['voice_assistant_capable'] is True
+    assert repo._meetings[1]['data']['voice_assistant']['include_workspace_wiki'] is True
+    assert repo._meetings[1]['data']['voice_assistant']['agent_backend'] == 'completion'
+    assert repo._meetings[2]['data']['voice_assistant_capable'] is False
+
+    monkeypatch.setenv('TINA_MEETING_VOICE_PILOT_USER_IDS', '*')
+    wildcard = (await client.get('/bots/voice/services', headers={'X-User-Id': '8'})).json()
+    assert wildcard['voice_pipeline_configured'] is True
+
+
 async def test_services_reports_selected_filter_without_forwarding_tts_key_to_livekit(monkeypatch):
     monkeypatch.setenv('LIVEKIT_AGENT_URL','http://livekit.test')
     monkeypatch.setenv('TTS_SERVICE_URL','http://tts.test');monkeypatch.setenv('TTS_API_TOKEN','synthetic-secret')

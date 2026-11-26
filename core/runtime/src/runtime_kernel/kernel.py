@@ -67,6 +67,8 @@ class Runtime:
         clock: Optional[Clock] = None,
         owner_resolver: OwnerResolver = default_owner,
         owner_quota: Optional[int] = None,
+        global_quota: Optional[int] = None,
+        enforcer=None,
     ) -> None:
         self.backend: Backend = backend or ProcessBackend()
         # `profiles` accepts a ProfileRegistry, a plain {name: Runnable|command} dict (legacy/tests),
@@ -78,6 +80,8 @@ class Runtime:
         self.clock: Clock = clock or SystemClock()
         self.owner_resolver = owner_resolver
         self.owner_quota = owner_quota
+        self.global_quota = global_quota
+        self.enforcer = enforcer
         # Live, non-serializable backend handles. Empty on a fresh process (post-restart).
         self._handles: dict[str, WorkloadHandle] = {}
 
@@ -87,7 +91,10 @@ class Runtime:
         return ev
 
     def _persist(self, spec: WorkloadSpec, status: WorkloadStatus) -> None:
-        self.store.set(WorkloadRecord(spec=spec, status=status, owner=self.owner_resolver(spec)))
+        owner = self.owner_resolver(spec)
+        if spec.env.get("TINA_POST_MEETING_DRAFT") == "1" or spec.profile == "workspace-agent":
+            spec = spec.model_copy(update={"env": {}})
+        self.store.set(WorkloadRecord(spec=spec, status=status, owner=owner))
 
     def _record(self, workload_id: str) -> WorkloadRecord:
         record = self.store.get(workload_id)
@@ -171,6 +178,8 @@ class Runtime:
         except KeyError:
             existing = None
         if existing is not None and existing.state in (RuntimeState.starting, RuntimeState.running):
+            if self.enforcer is not None:
+                self.enforcer.touch(spec.workloadId)
             return existing
 
         profile = self.profiles.get(spec.profile)
@@ -178,11 +187,27 @@ class Runtime:
             raise ValueError(f"unknown profile: {spec.profile!r}")
         runnable = profile.runnable
 
-        # Quota check (O-RT-2): reject the N+1th active workload for this owner.
-        if self.owner_quota is not None:
+        # Quota checks (O-RT-2 + org/global cap): refresh exited workloads before rejecting so a
+        # self-exited Fargate task never falsely trips 429 QuotaExceeded.
+        if self.owner_quota is not None or self.global_quota is not None:
             owner = self.owner_resolver(spec)
-            if self.store.count_for_owner(owner) >= self.owner_quota:
-                raise QuotaExceeded(owner, self.owner_quota)
+            owner_over = self.owner_quota is not None and self.store.count_for_owner(owner) >= self.owner_quota
+            active_total = sum(
+                1 for r in self.store.list()
+                if r.status.state in (RuntimeState.starting, RuntimeState.running)
+            )
+            global_over = self.global_quota is not None and active_total >= self.global_quota
+            if owner_over or global_over:
+                self.list()  # reflect any self-exited workloads to stopped
+                if self.owner_quota is not None and self.store.count_for_owner(owner) >= self.owner_quota:
+                    raise QuotaExceeded(owner, self.owner_quota)
+                if self.global_quota is not None:
+                    active_total = sum(
+                        1 for r in self.store.list()
+                        if r.status.state in (RuntimeState.starting, RuntimeState.running)
+                    )
+                    if active_total >= self.global_quota:
+                        raise QuotaExceeded("__global__", self.global_quota)
 
         status = WorkloadStatus(
             workloadId=spec.workloadId, profile=spec.profile,
@@ -219,6 +244,8 @@ class Runtime:
         status.startedAt = _now()
         status.ports = {}
         self._persist(spec, status)
+        if self.enforcer is not None:
+            self.enforcer.track(spec.workloadId)
         self._emit(spec.workloadId, RuntimeState.running, ports={})
         return status
 
@@ -241,6 +268,8 @@ class Runtime:
                 status.stoppedAt = _now()
                 status.stopReason = StopReason.completed if code == 0 else StopReason.failed
                 self._persist(record.spec, status)
+                if self.enforcer is not None:
+                    self.enforcer.forget(workload_id)
                 self._emit(workload_id, RuntimeState.stopped, exitCode=code, stopReason=status.stopReason)
         return status
 
@@ -260,7 +289,7 @@ class Runtime:
             self.backend.terminate(h)                               # graceful SIGTERM + grace window
             deadline = time.time() + self.grace_sec
             while self.backend.exit_code(h) is None and time.time() < deadline:
-                time.sleep(0.02)
+                time.sleep(getattr(self.backend, "stop_poll_interval", 0.02))
             if self.backend.exit_code(h) is None:
                 self.backend.kill(h)                                # force after grace
             code = self.backend.exit_code(h)
@@ -271,6 +300,8 @@ class Runtime:
         status.stoppedAt = _now()
         status.stopReason = reason
         self._persist(record.spec, status)
+        if self.enforcer is not None:
+            self.enforcer.forget(workload_id)
         self._emit(workload_id, RuntimeState.stopped, exitCode=code, stopReason=reason)
         return status
 

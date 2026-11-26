@@ -6,23 +6,100 @@
  *  GFM pipe tables, paragraphs and line breaks. Intentionally a small subset — robust,
  *  not spec-complete. */
 "use client";
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { Card, CardGroup, InternalLink, Wikilink, isInternalHref, useOpenEntity } from "./docLinks";
 
-// A workspace-doc path in inline code → clickable to open the doc. Matches kg/ docs by any
-// spelling the agent uses (relative `kg/entities/x.md` or the verbatim absolute mount path
-// `<root>/<subject>/kg/...`) plus any doc inside an attached-workspace mount
+// A workspace-doc path in inline code → clickable to open the doc. Matches Knowledge docs by any
+// spelling the agent uses (relative `kg/entities/x.md`, `notes/...md`, `wiki/...md`, or verbatim
+// absolute mount path `<root>/<subject>/kg/...`) plus any doc inside an attached-workspace mount
 // (`<root>/.attached/<subject>/<slug>/...md`) — resolveDocRef translates all of them.
-const ENTITY_PATH = /^(?:(?:[\w./-]*\/)?kg\/[\w./-]+\.md|\/[\w./-]*\.attached\/[\w./-]+\.md)$/;
+const ENTITY_PATH = /^(?:(?:[\w./-]*\/)?(?:kg|wiki|notes|sources|concepts|docs|mail)\/(?!.*\.\.)[^\n`]+\.md|\/[\w./-]*\.attached\/(?!.*\.\.)[^\n`]+\.md)$/;
 // Clickable `kg/entities/...` inline code — a component so it can read the doc's
 // workspace context (DocMeta/DocNav) via useOpenEntity, same as every other link.
 function EntityCode({ code }: { code: string }) {
   const openEntity = useOpenEntity();
   return (
     <code onClick={() => openEntity({ path: code })}
-      style={{ fontFamily: "var(--mono)", fontSize: "0.88em", background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 4, padding: "0.5px 5px", color: "var(--blue)", cursor: "pointer" }}>
+      style={{
+        fontFamily: "var(--mono)",
+        fontSize: "0.86em",
+        background: "var(--panel2)",
+        border: "1px solid var(--line)",
+        borderRadius: 6,
+        padding: "1px 6px",
+        color: "var(--blue)",
+        cursor: "pointer",
+        textDecoration: "none",
+      }}>
       {code}
     </code>
+  );
+}
+
+function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+  const label = lang.trim().split(/\s+/)[0] || "code";
+
+  const copy = () => {
+    const cb = typeof navigator !== "undefined" ? navigator.clipboard : undefined;
+    if (!cb?.writeText) return;
+    void cb.writeText(code).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    }).catch(() => undefined);
+  };
+
+  return (
+    <div style={{
+      margin: "10px 0 14px",
+      borderRadius: 10,
+      border: "1px solid var(--line)",
+      background: "var(--panel)",
+      overflow: "hidden",
+    }}>
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "5px 10px 5px 12px",
+        background: "var(--panel2)",
+        borderBottom: "1px solid var(--line)",
+        fontSize: 11,
+        color: "var(--t3)",
+      }}>
+        <span style={{ fontFamily: "var(--mono)", textTransform: "lowercase", letterSpacing: "0.02em" }}>
+          {label}
+        </span>
+        <button
+          type="button"
+          aria-label={copied ? "Copied code" : "Copy code"}
+          onClick={copy}
+          style={{
+            background: "transparent",
+            border: "none",
+            padding: "2px 6px",
+            borderRadius: 5,
+            fontSize: 11,
+            fontWeight: 500,
+            color: copied ? "var(--accent)" : "var(--t3)",
+            cursor: "pointer",
+          }}
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <pre style={{
+        margin: 0,
+        padding: "11px 13px",
+        overflowX: "auto",
+        fontFamily: "var(--mono)",
+        fontSize: 12.5,
+        lineHeight: 1.58,
+        color: "var(--t1)",
+      }}>
+        <code>{code}</code>
+      </pre>
+    </div>
   );
 }
 
@@ -184,8 +261,8 @@ export function Markdown({ children, style }: { children: string; style?: React.
   const flushList = (items: string[], ordered: boolean) => {
     const Tag = ordered ? "ol" : "ul";
     blocks.push(
-      <Tag key={key++} style={{ margin: "4px 0 8px", paddingLeft: 20, display: "flex", flexDirection: "column", gap: 2 }}>
-        {items.map((it, j) => <li key={j} style={{ lineHeight: 1.55 }}>{inline(it)}</li>)}
+      <Tag key={key++} style={{ margin: "6px 0 11px", paddingLeft: 21, display: "flex", flexDirection: "column", gap: 4 }}>
+        {items.map((it, j) => <li key={j} style={{ lineHeight: 1.66 }}>{inline(it)}</li>)}
       </Tag>,
     );
   };
@@ -196,15 +273,12 @@ export function Markdown({ children, style }: { children: string; style?: React.
     // fenced code block ```
     const fence = line.match(/^\s*```(.*)$/);
     if (fence) {
+      const lang = fence[1] ?? "";
       const buf: string[] = [];
       i++;
       while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i++; }
       i++; // closing fence
-      blocks.push(
-        <pre key={key++} style={{ fontFamily: "var(--mono)", fontSize: 12, background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 8, padding: "9px 11px", margin: "6px 0 10px", overflowX: "auto", lineHeight: 1.5, color: "var(--t1)" }}>
-          <code>{buf.join("\n")}</code>
-        </pre>,
-      );
+      blocks.push(<CodeBlock key={key++} lang={lang} code={buf.join("\n")} />);
       continue;
     }
 
@@ -213,7 +287,7 @@ export function Markdown({ children, style }: { children: string; style?: React.
 
     // horizontal rule
     if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
-      blocks.push(<hr key={key++} style={{ border: "none", borderTop: "1px solid var(--line)", margin: "12px 0" }} />);
+      blocks.push(<hr key={key++} style={{ border: "none", borderTop: "1px solid var(--line)", margin: "16px 0" }} />);
       i++; continue;
     }
 
@@ -222,7 +296,7 @@ export function Markdown({ children, style }: { children: string; style?: React.
     if (h) {
       const lvl = h[1].length;
       blocks.push(
-        <div key={key++} style={{ fontSize: HEADING_SIZE[lvl], fontWeight: 600, color: "var(--t1)", lineHeight: 1.3, margin: lvl <= 2 ? "12px 0 6px" : "10px 0 4px" }}>
+        <div key={key++} style={{ fontSize: HEADING_SIZE[lvl], fontWeight: 600, color: "var(--t1)", lineHeight: 1.35, letterSpacing: lvl <= 2 ? "-0.015em" : undefined, margin: lvl <= 2 ? "16px 0 8px" : "12px 0 6px" }}>
           {inline(h[2])}
         </div>,
       );
@@ -234,7 +308,7 @@ export function Markdown({ children, style }: { children: string; style?: React.
       const buf: string[] = [];
       while (i < lines.length && /^\s*>/.test(lines[i])) { buf.push(lines[i].replace(/^\s*>\s?/, "")); i++; }
       blocks.push(
-        <blockquote key={key++} style={{ borderLeft: "3px solid var(--line2)", paddingLeft: 12, margin: "6px 0 8px", color: "var(--t2)", lineHeight: 1.55 }}>
+        <blockquote key={key++} style={{ borderLeft: "2.5px solid var(--accent)", background: "var(--panel)", borderRadius: "0 8px 8px 0", padding: "8px 13px", margin: "8px 0 12px", color: "var(--t2)", lineHeight: 1.62 }}>
           {inline(buf.join("\n"))}
         </blockquote>,
       );
@@ -267,7 +341,7 @@ export function Markdown({ children, style }: { children: string; style?: React.
       const parsed = parseCardBlock(buf.join("\n"));
       if (parsed.cards.length === 0) {
         // not actually card markup (e.g. a lone unclosed tag) — show it as literal text
-        blocks.push(<p key={key++} style={{ margin: "0 0 8px", lineHeight: 1.6 }}>{inline(buf.join(" "))}</p>);
+        blocks.push(<p key={key++} style={{ margin: "0 0 10px", lineHeight: 1.68 }}>{inline(buf.join(" "))}</p>);
         continue;
       }
       const rendered = parsed.cards.map((c, j) => (
@@ -291,28 +365,30 @@ export function Markdown({ children, style }: { children: string; style?: React.
         i++;
       }
       blocks.push(
-        <table key={key++} style={{ width: "100%", borderCollapse: "collapse", margin: "6px 0 10px", color: "var(--t1)", fontSize: "inherit", lineHeight: 1.45 }}>
-          <thead>
-            <tr>
-              {table.header.map((cell, col) => (
-                <th key={col} style={{ background: "var(--panel)", border: "1px solid var(--line2)", padding: "6px 9px", textAlign: table.align[col], color: "var(--t1)", fontWeight: 600 }}>
-                  {inline(cell)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, rowIndex) => (
-              <tr key={rowIndex}>
-                {row.map((cell, col) => (
-                  <td key={col} style={{ border: "1px solid var(--line)", padding: "6px 9px", textAlign: table.align[col], color: "var(--t2)", verticalAlign: "top" }}>
+        <div key={key++} style={{ overflowX: "auto", margin: "10px 0 14px", borderRadius: 10, border: "1px solid var(--line)" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", color: "var(--t1)", fontSize: "0.94em", lineHeight: 1.5 }}>
+            <thead>
+              <tr>
+                {table.header.map((cell, col) => (
+                  <th key={col} style={{ background: "var(--panel2)", borderBottom: "1px solid var(--line)", borderRight: col < table.header.length - 1 ? "1px solid var(--line)" : undefined, padding: "8px 11px", textAlign: table.align[col], color: "var(--t1)", fontWeight: 600 }}>
                     {inline(cell)}
-                  </td>
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>,
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {row.map((cell, col) => (
+                    <td key={col} style={{ borderBottom: rowIndex < rows.length - 1 ? "1px solid var(--line)" : undefined, borderRight: col < table.header.length - 1 ? "1px solid var(--line)" : undefined, padding: "8px 11px", textAlign: table.align[col], color: "var(--t2)", verticalAlign: "top" }}>
+                      {inline(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
       );
       continue;
     }
@@ -323,7 +399,7 @@ export function Markdown({ children, style }: { children: string; style?: React.
       para.push(lines[i]); i++;
     }
     blocks.push(
-      <p key={key++} style={{ margin: "0 0 8px", lineHeight: 1.6 }}>
+      <p key={key++} style={{ margin: "0 0 10px", lineHeight: 1.68 }}>
         {para.map((pl, j) => <Fragment key={j}>{j > 0 && <br />}{inline(pl)}</Fragment>)}
       </p>,
     );

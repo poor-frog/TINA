@@ -40,8 +40,8 @@ import { createBotPipeline, createLiveFaultReporter, createLivePipeline, createT
 import { createBotRecordingSink } from './recording.js';
 import { createCaptureSignalRecorder, startBotLogSidecar, wrapTranscribeWithTap, wrapTranscriptWithSnapshot, type CaptureSignalRecorder } from './telemetry.js';
 import { uploadSignalTapes } from './signal-upload.js';
-import { createSttFaultReporter } from './stt-faults.js';
-import { launchBrowser, startCaptureBridge, startRecording, restartMixedCapture, createSpeakController, type BrowserSession, type SpeakController } from './capture-bridge.js';
+import { createSttFaultReporter, isExpectedTeardownAudioClosedFault } from './stt-faults.js';
+import { launchBrowser, shouldPersistAuthSession, startCaptureBridge, startRecording, restartMixedCapture, createSpeakController, type BrowserSession, type SpeakController } from './capture-bridge.js';
 import { createRemoteAudioActivityTap, createSilenceAlonenessSource, resolveAloneSilenceWindowMs } from './aloneness.js';
 import { installSignalHandlers } from './signals.js';
 import type {
@@ -218,6 +218,7 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
   // transcript is short or empty, instead of leaving it indistinguishable from a silent room.
   const sttFaults = createSttFaultReporter();
   const liveFaults = createLiveFaultReporter();
+  let shuttingDown = false;
   const speakerStreamConfig = speakerStreamConfigFromEnv(env);
   const remoteAudioActivity = createRemoteAudioActivityTap();
   const aloneSilenceWindowMs = resolveAloneSilenceWindowMs(inv.automaticLeave?.everyoneLeftTimeout, env);
@@ -277,7 +278,14 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
       config: speakerStreamConfig,
       // Every STT fault is counted and carried out on the terminal lifecycle event (see
       // sttFaults). Logging it here as well keeps the raw line for anyone tailing the container.
-      onError: (e) => { sttFaults.record(e); console.error(`[bot] pipeline fault: ${String(e)}`); },
+      onError: (e) => {
+        if (isExpectedTeardownAudioClosedFault(e, shuttingDown)) {
+          console.log('[bot] teardown STT flush skipped (audio session already closed: HTTP 409)');
+          return;
+        }
+        sttFaults.record(e);
+        console.error(`[bot] pipeline fault: ${String(e)}`);
+      },
       // The lane's own observations — today, WHICH TURN SPINE it is running on and why that
       // changed. A transcript carries no trace of that, so without this line a stored fixture
       // cannot say whether it is scoring the transport anchor or the fallback that replaced it.
@@ -359,6 +367,7 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
         void voice?.start().catch(() => console.error('[bot] meeting-voice startup failed'));
       },
       async stop() {
+        shuttingDown = true;
         voice?.disarm();
         try { await speak.stop(); }
         finally { await transcriptPipeline.stop(); }
@@ -399,16 +408,24 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
       };
     },
   });
-  stopOrchestrator = (reason) => orchestrator.stop(reason);
-  if (stopRequestedDuringBoot) orchestrator.stop('stopped');
+  stopOrchestrator = (reason) => {
+    shuttingDown = true;
+    orchestrator.stop(reason);
+  };
+  if (stopRequestedDuringBoot) {
+    shuttingDown = true;
+    orchestrator.stop('stopped');
+  }
 
   // Disposability (P7): a termination signal ends the active phase gracefully (leave → flush →
   // terminal callback → exit 0) so the container never hangs after `active` — BOUNDED by the
   // force-exit watchdog in signals.ts (<25s, inside the runtime's SIGTERM→SIGKILL stop grace) so
   // a wedged teardown can never ride a `docker stop` all the way to a silent 137 (the incident's
   // exit code on BOTH orphaned bots). Wire before run(); release the listeners after.
+  let runResult: { status: string; completionReason?: string } | undefined;
   try {
     const result = await orchestrator.run({ maxActiveMs: deriveMaxActiveMs(inv, aloneSilenceWindowMs, env) });
+    runResult = result;
     return result.exitCode;
   } finally {
     releaseSignals();
@@ -434,7 +451,9 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
     // orchestrator already returned. Runs inside the 30s SIGTERM grace: one attempt, streamed, with
     // its own timeout, so a slow object store cannot ride the grace all the way to a SIGKILL.
     await uploadSignalTapes(signalRecorder, { inv });
-    if (session) await session.close().catch(() => { /* best-effort */ });
+    if (session) {
+      await session.close({ persistSession: shouldPersistAuthSession(runResult) }).catch(() => { /* best-effort */ });
+    }
     // Quit the redis connections on teardown (best-effort — a quit failure must not change the
     // exit code; they may never have connected if redis was unreachable).
     await transcriptClient.quit().catch(() => { /* best-effort */ });

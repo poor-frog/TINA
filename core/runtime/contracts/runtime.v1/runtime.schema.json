@@ -11,7 +11,7 @@
     "StopReason": {
       "enum": ["completed", "stopped", "idle_timeout", "failed", "oom", "start_failed", "max_lifetime"]
     },
-    "Backend": { "enum": ["docker", "k8s", "process"] },
+    "Backend": { "enum": ["docker", "k8s", "process", "ecs"] },
     "WorkloadSpec": {
       "description": "The create() input. The kernel runs this as an opaque profile + env.",
       "type": "object",

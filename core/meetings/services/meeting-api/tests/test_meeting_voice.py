@@ -583,6 +583,22 @@ async def test_diagnostics_are_owner_only_ephemeral_and_do_not_change_meeting_or
     assert (await client.get('/meetings/1/voice-assistant', headers={'X-User-Id': '7'})).json()['runtime']['diagnostic'] is None
 
 
+async def test_chatgpt_plan_notice_is_owner_and_session_scoped(setup):
+    import json
+
+    client, repo, redis, *_ = setup
+    url = '/meetings/1/voice-assistant'
+    owner = {'X-User-Id': '7'}
+    for code in ('usage_limit', 'reconnect_required'):
+        await redis.set('meeting:voice:1:provider-issue', json.dumps({'session_uid': 'current', 'code': code}))
+        assert (await client.get(url, headers=owner)).json()['chatgpt_plan_issue'] == code
+    assert (await client.get(url, headers={'X-User-Id': '8'})).status_code == 404
+    await redis.set('meeting:voice:1:provider-issue', json.dumps({'session_uid': 'old', 'code': 'usage_limit'}))
+    assert (await client.get(url, headers=owner)).json()['chatgpt_plan_issue'] is None
+    repo.row['status'] = 'completed'
+    assert (await client.get(url, headers=owner)).json()['chatgpt_plan_issue'] is None
+
+
 async def test_diagnostic_heartbeat_or_retry_cannot_extend_original_text_expiry(setup):
     import time
     client, repo, redis, *_ = setup

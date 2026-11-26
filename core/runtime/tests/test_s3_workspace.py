@@ -1,0 +1,354 @@
+"""Tests for S3 ephemeral workspace STS Session Policy scoping and ECSBackend dual env-file isolation."""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+import json
+from unittest.mock import Mock
+
+from runtime_kernel.ecs_backend import ECSBackend
+from runtime_kernel.profiles import Runnable
+from runtime_kernel.s3_workspace import (
+    S3WorkspaceConfig,
+    S3WorkspaceLauncher,
+    build_scoped_s3_session_policy,
+)
+
+WORKER_IMAGE = "example.invalid/tina/worker@sha256:" + "c" * 64
+BOT_IMAGE = "example.invalid/tina/bot@sha256:" + "a" * 64
+BOT_DEF = "arn:aws:ecs:us-east-1:123456789012:task-definition/tina-bot:4"
+EPH_DEF = "arn:aws:ecs:us-east-1:123456789012:task-definition/tina-staging-ws-ephemeral:3"
+TASK_ARN = "arn:aws:ecs:us-east-1:123456789012:task/tina/eph-1"
+
+
+def test_session_policy_scopes_prefixes_and_readonly_shared_wikis():
+    mounts = {
+        "/workspaces/_global": False,
+        "/workspaces/_system/42": True,
+        "/workspaces/42": True,
+        "/workspaces/_attached/42/workspace-1": True,
+        "/workspaces/wiki-rw": True,
+        "/workspaces/wiki-ro": False,
+    }
+    raw = build_scoped_s3_session_policy(
+        bucket="tina-ws-bucket",
+        kms_key_arn="arn:aws:kms:us-east-1:123456789012:key/data-key",
+        owner="42",
+        mounts=mounts,
+    )
+    assert len(raw.encode("utf-8")) <= 2048
+    policy = json.loads(raw)
+    stmts = {s["Sid"]: s for s in policy["Statement"]}
+    assert stmts["RW"]["Resource"] == [
+        "arn:aws:s3:::tina-ws-bucket/shared/wiki-rw/*",
+        "arn:aws:s3:::tina-ws-bucket/users/42/*",
+    ]
+    assert stmts["RO"]["Action"] == "s3:GetObject"
+    assert stmts["RO"]["Resource"] == [
+        "arn:aws:s3:::tina-ws-bucket/_global/*",
+        "arn:aws:s3:::tina-ws-bucket/shared/wiki-ro/*",
+    ]
+    assert "secrets" not in raw
+    assert "DeleteObject" not in raw
+
+    # Writable _global must always be rejected at both validation and policy layers
+    import pytest
+    from runtime_kernel.dynamic_workspace import validate_dynamic_mounts
+    with pytest.raises(ValueError, match="read-only"):
+        validate_dynamic_mounts("42", {"/workspaces/_global": True, "/workspaces/_system/42": True}, "/workspaces/_system/42")
+    with pytest.raises(ValueError, match="read-only"):
+        build_scoped_s3_session_policy(
+            bucket="tina-ws-bucket", kms_key_arn="arn:aws:kms:us-east-1:123456789012:key/data-key",
+            owner="42", mounts={"/workspaces/_global": True, "/workspaces/_system/42": True},
+        )
+
+
+def test_ecs_backend_s3_ephemeral_isolates_sts_creds_to_sync_sidecar():
+    ecs = Mock()
+
+    def describe_td(taskDefinition):
+        if taskDefinition == BOT_DEF:
+            return {"taskDefinition": {
+                "requiresCompatibilities": ["FARGATE"], "networkMode": "awsvpc",
+                "cpu": "2048", "memory": "4096",
+                "containerDefinitions": [{"name": "bot", "image": BOT_IMAGE}],
+            }}
+        return {"taskDefinition": {
+            "requiresCompatibilities": ["FARGATE"], "networkMode": "awsvpc",
+            "cpu": "1024", "memory": "2048",
+            "containerDefinitions": [
+                {"name": "init-perms", "image": WORKER_IMAGE, "essential": False},
+                {"name": "worker", "image": WORKER_IMAGE},
+                {"name": "sync", "image": WORKER_IMAGE},
+                {"name": "stream", "image": WORKER_IMAGE},
+            ],
+        }}
+
+    ecs.describe_task_definition.side_effect = describe_td
+    ecs.run_task.return_value = {"tasks": [{"taskArn": TASK_ARN, "lastStatus": "PROVISIONING"}]}
+
+    sts = Mock()
+    sts.assume_role.return_value = {"Credentials": {
+        "AccessKeyId": "ASIA_TEMP_KEY",
+        "SecretAccessKey": "SECRET_TEMP_KEY",
+        "SessionToken": "SESSION_TEMP_TOKEN",
+        "Expiration": datetime.now(timezone.utc) + timedelta(minutes=15),
+    }}
+    s3 = Mock()
+    cfg = S3WorkspaceConfig(
+        task_definition=EPH_DEF,
+        security_group="sg-0123456789abcdef0",
+        broker_role_arn="arn:aws:iam::123456789012:role/BrokerRole",
+        bucket="tina-ws-bucket",
+        kms_key_arn="arn:aws:kms:us-east-1:123456789012:key/data-key",
+    )
+    launcher = S3WorkspaceLauncher(ecs=ecs, sts=sts, config=cfg)
+    backend = ECSBackend(
+        ecs=ecs, s3=s3, cluster="tina", task_definition=BOT_DEF,
+        subnets=["subnet-1"], security_groups=["sg-app"], bucket="inv-bucket",
+        s3_workspace=launcher,
+    )
+
+    uid = "agent-42-chat-main"
+    mounts = [
+        {"path": "/workspaces/_system/42", "write": True},
+        {"path": "/workspaces/_attached/42/workspace-1", "write": True},
+        {"path": "/workspaces/team-wiki", "write": False},
+    ]
+    env = {
+        "TINA_WORKSPACE_ATTEMPT": "d" * 32,
+        "TINA_WORKSPACE_STORAGE": "s3",
+        "TINA_OWNER": "42",
+        "TINA_UNIT_ID": uid,
+        "TINA_CHAT_SESSION": "main",
+        "TINA_UNIT_TRIGGER": "message",
+        "TINA_UNIT_IN_TOPIC": f"unit:{uid}:in",
+        "TINA_UNIT_OUT_TOPIC": f"unit:{uid}:out",
+        "TINA_WORKSPACE_PATH": "/workspaces/_attached/42/workspace-1",
+        "TINA_MOUNTS": json.dumps(mounts),
+        "TINA_RUNNER": "claude-code",
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "AWS_REGION": "us-east-1",
+        "TINA_AGENT_MODEL": "us.anthropic.claude-sonnet-4-6",
+        "REDIS_URL": "rediss://must-not-leak",
+    }
+
+    handle = backend.start(uid, Runnable(image=WORKER_IMAGE, command=["python", "-m", "worker"]), env)
+    assert handle._impl == TASK_ARN
+
+    # Separate env files uploaded: worker.env has ZERO AWS credentials; sync.env carries STS creds
+    puts = {c.kwargs["Key"]: c.kwargs["Body"].decode() for c in s3.put_object.call_args_list}
+    worker_keys = [k for k in puts if "/workspace/42/" in k]
+    sync_keys = [k for k in puts if "/workspace-sync/42/" in k]
+    assert len(worker_keys) == 1 and len(sync_keys) == 1
+    worker_env = puts[worker_keys[0]]
+    sync_env = puts[sync_keys[0]]
+    assert "AWS_ACCESS_KEY_ID" not in worker_env
+    assert "AWS_SECRET_ACCESS_KEY" not in worker_env
+    assert "AWS_SESSION_TOKEN" not in worker_env
+    assert "REDIS_URL" not in worker_env
+    assert "TINA_WORKSPACE_SYNC_SIDECAR=1" in worker_env
+    assert "TINA_IDLE_TIMEOUT_SEC=300" in worker_env
+    assert "AWS_ACCESS_KEY_ID=ASIA_TEMP_KEY" in sync_env
+    assert "AWS_SESSION_TOKEN=SESSION_TEMP_TOKEN" in sync_env
+    assert "TINA_S3_BUCKET=tina-ws-bucket" in sync_env
+
+
+def test_ecs_backend_honors_workspace_idle_timeout_env(monkeypatch):
+    monkeypatch.setenv("RUNTIME_WORKSPACE_IDLE_TIMEOUT_SEC", "600")
+    from runtime_kernel.ecs_backend import _workspace_idle_timeout_sec
+    assert _workspace_idle_timeout_sec() == "600"
+    monkeypatch.setenv("RUNTIME_WORKSPACE_IDLE_TIMEOUT_SEC", "invalid")
+    assert _workspace_idle_timeout_sec() == "300"
+
+
+def test_ecs_backend_filters_safe_agent_reach_tools():
+    from runtime_kernel.ecs_backend import (
+        _NOVA_FIELDS,
+        _WORKSPACE_ALLOWED_ENV_FIELDS,
+        _allowed_workspace_unit_tools,
+        _validate_workspace_runner,
+    )
+    from runtime_kernel.egress_proxy import DEFAULT_ALLOWLIST, host_allowed
+
+    # Without Agent Reach URL, toolbelt stays empty.
+    assert _allowed_workspace_unit_tools(
+        {"TINA_UNIT_TOOLS": '["reach.web.search","calendar.write"]'}, native_nova=False,
+    ) == "[]"
+
+    # With Agent Reach URL on BOTH general S3 and Nova workers, only safe public reach.* tools pass through.
+    for is_nova in (False, True):
+        granted = json.loads(_allowed_workspace_unit_tools(
+            {"TINA_AGENT_REACH_URL": "http://agent-reach.tina-staging.local:8080",
+             "TINA_UNIT_TOOLS": '["reach.web.search","calendar.create","reach.github.read","reach.web.search"]'},
+            native_nova=is_nova,
+        ))
+        assert granted == ["reach.web.search", "reach.github.read"]
+
+    # Nova fields carry Agent Reach URL + unit tools, and Claude OAuth + DeepSeek + HTTPS Custom URL are allowed.
+    assert {"TINA_AGENT_REACH_URL", "TINA_UNIT_TOOLS"} <= _NOVA_FIELDS
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in _WORKSPACE_ALLOWED_ENV_FIELDS
+    _validate_workspace_runner({"TINA_RUNNER": "claude-code", "CLAUDE_CODE_OAUTH_TOKEN": "tok"}, allow_multi_provider=True)
+    _validate_workspace_runner({"TINA_RUNNER": "claude-code", "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic", "ANTHROPIC_AUTH_TOKEN": "sk-ds"}, allow_multi_provider=True)
+    _validate_workspace_runner({"TINA_RUNNER": "claude-code", "ANTHROPIC_BASE_URL": "https://openrouter.ai/api/v1"}, allow_multi_provider=True)
+    import pytest
+    with pytest.raises(ValueError, match="HTTPS"):
+        _validate_workspace_runner(
+            {"TINA_RUNNER": "claude-code", "ANTHROPIC_BASE_URL": "http://insecure.local/v1", "ANTHROPIC_AUTH_TOKEN": "sk-key"},
+            allow_multi_provider=True,
+        )
+    assert host_allowed("api.deepseek.com", DEFAULT_ALLOWLIST)
+    assert host_allowed("openrouter.ai", DEFAULT_ALLOWLIST)
+
+
+def test_ecs_backend_launches_live_meeting_copilot_on_s3_ephemeral_worker():
+    ecs = Mock()
+
+    def describe_td(taskDefinition):
+        if taskDefinition == BOT_DEF:
+            return {"taskDefinition": {
+                "requiresCompatibilities": ["FARGATE"], "networkMode": "awsvpc",
+                "cpu": "2048", "memory": "4096",
+                "containerDefinitions": [{"name": "bot", "image": BOT_IMAGE}],
+            }}
+        return {"taskDefinition": {
+            "requiresCompatibilities": ["FARGATE"], "networkMode": "awsvpc",
+            "cpu": "1024", "memory": "2048",
+            "containerDefinitions": [
+                {"name": "init-perms", "image": WORKER_IMAGE, "essential": False},
+                {"name": "worker", "image": WORKER_IMAGE},
+                {"name": "sync", "image": WORKER_IMAGE},
+                {"name": "stream", "image": WORKER_IMAGE},
+            ],
+        }}
+
+    ecs.describe_task_definition.side_effect = describe_td
+    ecs.run_task.return_value = {"tasks": [{"taskArn": TASK_ARN, "lastStatus": "PROVISIONING"}]}
+    sts = Mock()
+    sts.assume_role.return_value = {"Credentials": {
+        "AccessKeyId": "ASIA_TEMP_KEY", "SecretAccessKey": "SECRET_TEMP_KEY",
+        "SessionToken": "SESSION_TEMP_TOKEN", "Expiration": datetime.now(timezone.utc) + timedelta(minutes=15),
+    }}
+    s3 = Mock()
+    cfg = S3WorkspaceConfig(
+        task_definition=EPH_DEF, security_group="sg-0123456789abcdef0",
+        broker_role_arn="arn:aws:iam::123456789012:role/BrokerRole",
+        bucket="tina-ws-bucket", kms_key_arn="arn:aws:kms:us-east-1:123456789012:key/data-key",
+    )
+    backend = ECSBackend(
+        ecs=ecs, s3=s3, cluster="tina", task_definition=BOT_DEF,
+        subnets=["subnet-1"], security_groups=["sg-app"], bucket="inv-bucket",
+        s3_workspace=S3WorkspaceLauncher(ecs=ecs, sts=sts, config=cfg),
+    )
+
+    uid = "agent-meet-42"
+    mounts = [
+        {"path": "/workspaces/_system/7", "write": True},
+        {"path": "/workspaces/7", "write": True},
+    ]
+    env = {
+        "TINA_WORKSPACE_ATTEMPT": "e" * 32,
+        "TINA_WORKSPACE_STORAGE": "s3",
+        "TINA_OWNER": "7",
+        "TINA_UNIT_ID": uid,
+        "TINA_UNIT_TRIGGER": "transcription",
+        "TINA_UNIT_IN_TOPIC": f"unit:{uid}:in",
+        "TINA_UNIT_OUT_TOPIC": f"unit:{uid}:out",
+        "TINA_WORKSPACE_PATH": "/workspaces/7",
+        "TINA_MOUNTS": json.dumps(mounts),
+        "TINA_RUNNER": "claude-code",
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "TINA_LLM_PROVIDER": "bedrock-converse",
+        "TINA_LLM_MODEL": "us.anthropic.claude-sonnet-4-6",
+        "TINA_TRANSCRIPT_STREAM": "tc:meeting:42",
+        "TINA_MEETING_NUMERIC_ID": "42",
+        "TINA_MEETING_ID": "abc-defg-hij",
+        "TINA_MEETING_PLATFORM": "google_meet",
+    }
+    handle = backend.start(uid, Runnable(image=WORKER_IMAGE, command=["python", "-m", "worker"]), env)
+    assert handle._impl == TASK_ARN
+    overrides = ecs.run_task.call_args.kwargs["overrides"]["containerOverrides"]
+    stream_override = next(o for o in overrides if o["name"] == "stream")
+    stream_env = {item["name"]: item["value"] for item in stream_override["environment"]}
+    assert stream_env["TINA_TRANSCRIPT_STREAM"] == "tc:meeting:42"
+    assert stream_env["TINA_MEETING_NUMERIC_ID"] == "42"
+    puts = {c.kwargs["Key"]: c.kwargs["Body"].decode() for c in s3.put_object.call_args_list}
+    worker_env = next(v for k, v in puts.items() if "/workspace/7/" in k)
+    assert "TINA_TRANSCRIPT_STREAM=tc:meeting:42" in worker_env
+    assert "TINA_LLM_PROVIDER=bedrock-converse" in worker_env
+
+
+def test_ecs_backend_nova_wildcard_authorizes_any_numeric_owner(monkeypatch):
+    import pytest
+
+    nova_def = "arn:aws:ecs:us-east-1:123456789012:task-definition/tina-staging-ws-nova:8"
+    ecs = Mock()
+
+    def describe_td(taskDefinition):
+        if taskDefinition == BOT_DEF:
+            return {"taskDefinition": {
+                "requiresCompatibilities": ["FARGATE"], "networkMode": "awsvpc",
+                "cpu": "2048", "memory": "4096",
+                "containerDefinitions": [{"name": "bot", "image": BOT_IMAGE}],
+            }}
+        return {"taskDefinition": {
+            "requiresCompatibilities": ["FARGATE"], "networkMode": "awsvpc",
+            "cpu": "1024", "memory": "2048",
+            "containerDefinitions": [
+                {"name": "init-perms", "image": WORKER_IMAGE, "essential": False},
+                {"name": "worker", "image": WORKER_IMAGE},
+                {"name": "sync", "image": WORKER_IMAGE},
+                {"name": "stream", "image": WORKER_IMAGE},
+            ],
+        }}
+
+    ecs.describe_task_definition.side_effect = describe_td
+    ecs.run_task.return_value = {"tasks": [{"taskArn": TASK_ARN, "lastStatus": "PROVISIONING"}]}
+    sts = Mock()
+    sts.assume_role.return_value = {"Credentials": {
+        "AccessKeyId": "ASIA_TEMP_KEY", "SecretAccessKey": "SECRET_TEMP_KEY",
+        "SessionToken": "SESSION_TEMP_TOKEN", "Expiration": datetime.now(timezone.utc) + timedelta(minutes=15),
+    }}
+    s3 = Mock()
+    monkeypatch.setenv("RUNTIME_ECS_CLUSTER", "tina")
+    monkeypatch.setenv("RUNTIME_ECS_BOT_TASK_DEFINITION", BOT_DEF)
+    monkeypatch.setenv("RUNTIME_ECS_SUBNETS", "subnet-1")
+    monkeypatch.setenv("RUNTIME_ECS_SECURITY_GROUPS", "sg-app")
+    monkeypatch.setenv("RUNTIME_ECS_INVOCATION_BUCKET", "inv-bucket")
+    monkeypatch.setenv("RUNTIME_ECS_WORKSPACE_STORAGE", "s3")
+    monkeypatch.setenv("RUNTIME_ECS_EPHEMERAL_TASK_DEFINITION", EPH_DEF)
+    monkeypatch.setenv("RUNTIME_ECS_EPHEMERAL_SECURITY_GROUP", "sg-0123456789abcdef0")
+    monkeypatch.setenv("RUNTIME_ECS_WORKSPACE_S3_BROKER_ROLE_ARN", "arn:aws:iam::123456789012:role/BrokerRole")
+    monkeypatch.setenv("RUNTIME_ECS_WORKSPACE_S3_BUCKET", "tina-ws-bucket")
+    monkeypatch.setenv("RUNTIME_ECS_WORKSPACE_S3_KMS_KEY_ARN", "arn:aws:kms:us-east-1:123456789012:key/data-key")
+    monkeypatch.setenv("RUNTIME_ECS_NOVA_WORKSPACE_TASK_DEFINITION", nova_def)
+    monkeypatch.setenv("RUNTIME_ECS_NOVA_WORKSPACE_OWNERS", "*")
+
+    import boto3
+    monkeypatch.setattr(boto3, "client", lambda name: {"ecs": ecs, "sts": sts, "s3": s3}[name])
+    backend = ECSBackend.from_env()
+    assert "*" in backend.nova_owners
+
+    uid = "agent-99-chat-main"
+    env = {
+        "TINA_WORKSPACE_ATTEMPT": "f" * 32,
+        "TINA_WORKSPACE_STORAGE": "s3",
+        "TINA_OWNER": "99",
+        "TINA_UNIT_ID": uid,
+        "TINA_CHAT_SESSION": "main",
+        "TINA_UNIT_TRIGGER": "message",
+        "TINA_UNIT_IN_TOPIC": f"unit:{uid}:in",
+        "TINA_UNIT_OUT_TOPIC": f"unit:{uid}:out",
+        "TINA_WORKSPACE_PATH": "/workspaces/_system/99",
+        "TINA_MOUNTS": json.dumps([{"path": "/workspaces/_system/99", "write": True}]),
+        "TINA_RUNNER": "bedrock-workspace",
+        "TINA_LLM_PROVIDER": "bedrock-converse",
+        "TINA_LLM_MODEL": "amazon.nova-lite-v1:0",
+        "TINA_AGENT_MODEL": "amazon.nova-lite-v1:0",
+    }
+    handle = backend.start(uid, Runnable(image=WORKER_IMAGE, command=["python", "-m", "worker"]), env)
+    assert handle._impl == TASK_ARN
+    assert ecs.run_task.call_args.kwargs["taskDefinition"] == nova_def
+
+    # Non-numeric owner is still rejected even under wildcard
+    with pytest.raises(ValueError, match="Nova is not authorized"):
+        backend.start(uid, Runnable(image=WORKER_IMAGE, command=["python", "-m", "worker"]), {**env, "TINA_OWNER": "evil"})

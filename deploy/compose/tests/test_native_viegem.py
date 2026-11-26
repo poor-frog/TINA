@@ -119,8 +119,7 @@ class NativeViegemTests(unittest.TestCase):
         calls = []
         def urlopen(request, **kwargs):
             calls.append(request)
-            value = {"gipformer_url": "http://host.docker.internal:18002", "gipformer_token": "injected-gip-secret",
-                     "viegem_token": "injected-vie-secret"}
+            value = {"viegem_token": "injected-vie-secret"}
             if request.data:
                 value.update(json.loads(request.data))
             return io.BytesIO(json.dumps({"value": value, "configured": False}).encode())

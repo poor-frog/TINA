@@ -1,0 +1,210 @@
+/* Lucian UX/UI Prompt #471 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#471 */
+
+.u471 {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.u471-b {
+  --u471-k: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 36px;
+  padding: 0 7px 0 12px;
+  border: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--ux-surface);
+  background: light-dark(var(--ux-surface), var(--ux-surface-2));
+  color: var(--ux-ink-2);
+  text-align: left;
+  box-shadow: 0 0 0 1px var(--ux-line-2), 0 1px 2px var(--ux-shadow), 0 10px 24px -18px var(--ux-shadow-strong);
+  transform: scale(var(--u471-k));
+  transition: transform .5s cubic-bezier(.34, 1.7, .5, 1), box-shadow .35s var(--ux-ease), color .2s;
+}
+
+.u471-b:hover {
+  color: var(--ux-ink);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ux-accent) 36%, var(--ux-line-2)), 0 1px 2px var(--ux-shadow), 0 14px 28px -18px var(--ux-shadow-strong);
+}
+
+.u471-b.is-down {
+  --u471-k: .975;
+  transition: transform .14s var(--ux-ease), box-shadow .35s var(--ux-ease), color .2s;
+}
+
+.u471-b.is-hit {
+  box-shadow: 0 0 0 1px var(--ux-accent), 0 0 0 4px var(--ux-accent-soft), 0 14px 28px -18px var(--ux-shadow-strong);
+  transition: transform .5s cubic-bezier(.34, 1.7, .5, 1), box-shadow .12s var(--ux-ease), color .2s;
+}
+
+.u471-b.is-pop {
+  animation: u471-pop .55s cubic-bezier(.34, 1.6, .5, 1);
+}
+
+@keyframes u471-pop {
+  0% { transform: scale(.975); }
+  45% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+
+.u471 .u471-b:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 3px;
+}
+
+.u471-ic {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: .75;
+  transition: transform .5s cubic-bezier(.34, 1.8, .5, 1);
+}
+
+.u471-b.is-hit .u471-ic {
+  transform: rotate(-14deg) scale(1.12);
+}
+
+.u471-l {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -.012em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.u471-ks {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: flex;
+  gap: 3px;
+}
+
+.u471-k {
+  position: relative;
+  display: block;
+  font-family: inherit;
+  min-width: 23px;
+  height: 24px;
+}
+
+.u471-k::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 2.5px;
+  bottom: 0;
+  border-radius: 6px;
+  background: #08090e;
+  background: light-dark(#d6d2ca, #08090e);
+  box-shadow: 0 2px 3px -1px var(--ux-shadow), 0 0 0 1px var(--ux-line);
+  transition: box-shadow .2s var(--ux-ease);
+}
+
+.u471-k.is-wide {
+  min-width: 33px;
+}
+
+.u471-t {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 21.5px;
+  display: grid;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, var(--ux-surface-3), var(--ux-surface-2));
+  background: linear-gradient(180deg, light-dark(#ffffff, #2c2f36), light-dark(#f1f4f2, #202329));
+  box-shadow: inset 0 0 0 1px var(--ux-line-2), inset 0 1px 0 light-dark(rgba(255, 255, 255, .9), rgba(255, 255, 255, .12));
+  color: var(--ux-ink-2);
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1;
+  font-family: inherit;
+  transform: translateY(0);
+  transition: transform .42s cubic-bezier(.3, 1.9, .5, 1), color .25s, background-color .25s, box-shadow .25s;
+}
+
+.u471-k.is-wide .u471-t {
+  font-size: 10.5px;
+  letter-spacing: 0;
+}
+
+.u471-k.is-down::before {
+  box-shadow: 0 1px 1px -1px var(--ux-shadow), 0 0 0 1px var(--ux-line);
+  transition: box-shadow .08s;
+}
+
+.u471-k.is-down .u471-t {
+  transform: translateY(2.5px);
+  color: var(--ux-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ux-accent) 55%, transparent), inset 0 1px 0 rgba(255, 255, 255, .2);
+  transition: transform .07s var(--ux-ease), color .1s, box-shadow .1s;
+}
+
+.u471-k.is-ask .u471-t {
+  animation: u471-ask 1.1s ease-in-out infinite;
+}
+
+@keyframes u471-ask {
+  50% {
+    transform: translateY(1px);
+    box-shadow: inset 0 0 0 1px var(--ux-accent), 0 0 0 3px var(--ux-accent-soft);
+  }
+}
+
+.u471-rp {
+  position: absolute;
+  z-index: 0;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  background: var(--ux-accent);
+  opacity: 0;
+  pointer-events: none;
+  animation: u471-rp .75s cubic-bezier(.2, .7, .3, 1) forwards;
+}
+
+@keyframes u471-rp {
+  0% { opacity: .26; transform: scale(.4); }
+  100% { opacity: 0; transform: scale(26); }
+}
+
+@media (max-width: 520px) {
+  .u471-ks {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u471-b,
+  .u471-ic,
+  .u471-t,
+  .u471-k::before {
+    transition: none;
+  }
+  .u471-b.is-pop,
+  .u471-k.is-ask .u471-t,
+  .u471-rp {
+    animation: none;
+  }
+}

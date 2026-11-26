@@ -1,0 +1,9 @@
+{
+  "repo": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+  "files": {
+    "model.pt": "b3be75be477f0780277f3bae0fe489f48718f585f3a6e45d7dd1fbb1a4255fc5",
+    "config.yaml": "486861ca26ddb79081663b6179cb204c6bfae71c52f04aafc48a9e9d8dde1e93",
+    "am.mvn": "6820fef9687708c4fc3fab2530179c8fcea6262daa25514380056cd8f6eb1754",
+    "configuration.json": "7bce8867e37d55c3dd8f672695ced18077a2be199ea529a5d432d5350fc0acba"
+  }
+}

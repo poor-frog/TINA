@@ -9,6 +9,7 @@ import os
 import re
 import asyncio
 import time
+from contextlib import suppress
 from uuid import UUID
 from typing import Literal, Annotated
 
@@ -254,11 +255,27 @@ class VoiceState(BaseModel):
     kws: KwsStatus | None = None
 
 
-def new_meeting_voice_policy():
+def voice_pilot_rooms() -> set[str]:
+    return set(os.environ.get('TINA_MEETING_VOICE_PILOT_ROOM', '').replace(',', ' ').split())
+
+
+def voice_pilot_user_allowed(user_id: int | str) -> bool:
+    raw = os.environ.get('TINA_MEETING_VOICE_PILOT_USER_IDS', '').strip()
+    if not raw:
+        return True
+    allowed = {entry.strip() for entry in raw.split(',') if entry.strip()}
+    return '*' in allowed or str(user_id) in allowed
+
+
+def new_meeting_voice_policy(*, transcript_only=False, agent_backend=None):
     """Seed new capable rooms; saved policies and document grants remain owner-controlled."""
+    if transcript_only:
+        return VoicePolicy(enabled=True, include_transcript=True, noise_suppression=True,
+                           engine='livekit', agent_backend='completion').model_dump()
+    backend = agent_backend or ('completion' if os.environ.get('TINA_MEETING_VOICE_AGENT_BACKEND') == 'completion' else 'sandbox')
     return VoicePolicy(enabled=True,include_transcript=True,include_workspace_wiki=True,noise_suppression=True,
                        allow_general_knowledge=True,allow_web_search=True,auto_web_search=True,
-                       engine='livekit',agent_backend='sandbox').model_dump()
+                       engine='livekit',agent_backend=backend).model_dump()
 
 
 def policy_of(row):
@@ -406,8 +423,9 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         row = await meeting(mid, _resolve_user_id(x_user_id))
         sessions = await repo.list_sessions(meeting_id=mid) if row.get('status') == 'active' else []
         active_session = sessions[-1] if row.get('status') == 'active' and sessions else None
-        state, diagnostic, raw_progress, held = await redis.mget(f'meeting:voice:{mid}:state',
-            f'meeting:voice:{mid}:diagnostic', f'meeting:voice:{mid}:progress', f'meeting:voice:{mid}:lock')
+        state, diagnostic, raw_progress, held, raw_issue = await redis.mget(f'meeting:voice:{mid}:state',
+            f'meeting:voice:{mid}:diagnostic', f'meeting:voice:{mid}:progress', f'meeting:voice:{mid}:lock',
+            f'meeting:voice:{mid}:provider-issue')
         runtime = json.loads(state) if state else {}
         if not active_session or runtime.get('session_uid') != active_session:
             runtime = {}
@@ -419,9 +437,17 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 or detail.get('expires_at_ms', 0) <= int(time.time() * 1000)):
             detail = None
         policy = policy_of(row)
+        issue = None
+        if active_session and policy.enabled and raw_issue:
+            with suppress(ValueError, AttributeError):
+                candidate = json.loads(raw_issue)
+                if (candidate.get('session_uid') == active_session
+                        and candidate.get('code') in ('reconnect_required', 'usage_limit')):
+                    issue = candidate['code']
         current_progress = live_progress(raw_progress, held, active_session, policy.revision, runtime.get('request_id')) \
             if policy.enabled and runtime.get('state') == 'THINKING' and runtime.get('request_id') else None
         return {'replies': public_replies(row, active_session, bool(runtime)),
+                'chatgpt_plan_issue': issue,
                 'livekit_available': bool(os.environ.get('LIVEKIT_AGENT_URL', '').strip()),
                 'available': bool((row.get('data') or {}).get('voice_assistant_capable')),
                 'policy': policy_of(row).model_dump(), 'runtime': {

@@ -72,6 +72,40 @@ def _client(stream_reader=None) -> TestClient:
     ))
 
 
+@pytest.mark.parametrize("workspace", [True, False])
+def test_chatgpt_model_catalog_uses_the_configured_connection(monkeypatch, workspace):
+    from io import BytesIO
+    from urllib import request
+
+    from control_plane import aws_voice_chatgpt, openai_auth
+
+    settings = load_settings()
+    resolved = []
+    monkeypatch.setattr(aws_voice_chatgpt, "workspace_connected", lambda subject: workspace)
+
+    def workspace_token(subject, redis_url):
+        resolved.append(("workspace", subject, redis_url))
+        return "synthetic-workspace-access"
+
+    def local_token(subject):
+        resolved.append(("local", subject))
+        return "synthetic-local-access"
+
+    def get_catalog(req, *, timeout):
+        connection = "workspace" if workspace else "local"
+        assert req.get_header("Authorization") == f"Bearer synthetic-{connection}-access"
+        return BytesIO(b'{"models":[{"slug":"gpt-6-luna","visibility":"list"}]}')
+
+    monkeypatch.setattr(aws_voice_chatgpt, "workspace_access_token", workspace_token)
+    monkeypatch.setattr(openai_auth, "access_token", local_token)
+    monkeypatch.setattr(request, "urlopen", get_catalog)
+    with TestClient(create_app(Dispatcher(settings, _FakeRuntime(), _FakeIdentity()))) as client:
+        response = client.get("/api/models/openai/catalog", headers={"x-user-id": "42"})
+    assert response.status_code == 200
+    assert response.json() == {"models": [{"id": "gpt-6-luna", "name": "gpt-6-luna"}]}
+    assert resolved == ([("workspace", "42", settings.redis_url)] if workspace else [("local", "42")])
+
+
 @pytest.mark.parametrize('header', ['00000000-0000-4000-8000-000000000123', 'invalid-private-header'])
 def test_voice_dispatch_preserves_trace_metadata_separately_from_model_input(tmp_path, monkeypatch, header):
     from fastapi import Request
@@ -79,7 +113,7 @@ def test_voice_dispatch_preserves_trace_metadata_separately_from_model_input(tmp
     from control_plane.workspace_reader import WorkspaceReader
     from shared.meeting_knowledge import PREFIX
     captured = []
-    monkeypatch.setattr(meeting_knowledge, 'register', lambda *args: captured.append(args[-1]))
+    monkeypatch.setattr(meeting_knowledge, 'register', lambda *args, **kwargs: captured.append(args[-1]))
     class Reader:
         def read(self, *args, **kwargs):
             yield {'type': 'message-delta', 'text': '{"claims":[]}'}
@@ -2132,7 +2166,7 @@ def test_sandbox_dispatch_freezes_the_live_voice_lease_and_rejects_cancelled_tur
     from control_plane.workspace_reader import WorkspaceReader
     from shared.meeting_knowledge import PREFIX
     captured=[];invocations=[];holder=['session:00000000-0000-4000-8000-000000000001']
-    monkeypatch.setattr(meeting_knowledge,'register',lambda *args:captured.append(args[-1]))
+    monkeypatch.setattr(meeting_knowledge,'register',lambda *args, **kwargs:captured.append(args[-1]))
     class Connection:
         def get(self,key):assert key=='meeting:voice:1:lock';return holder[0]
         def delete(self,*args):pass
@@ -2162,7 +2196,7 @@ def test_direct_voice_revocation_stops_only_its_worker(monkeypatch,tmp_path):
     from control_plane import meeting_knowledge
     from control_plane.workspace_reader import WorkspaceReader
     captured=[];stopped=[];holder=['session:00000000-0000-4000-8000-000000000001']
-    monkeypatch.setattr(meeting_knowledge,'register',lambda *args:captured.append(args[-1]))
+    monkeypatch.setattr(meeting_knowledge,'register',lambda *args, **kwargs:captured.append(args[-1]))
     class Connection:
         def get(self,key):return holder[0]
         def delete(self,*args):pass

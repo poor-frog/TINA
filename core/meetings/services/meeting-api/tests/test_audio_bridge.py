@@ -49,3 +49,16 @@ async def test_bridge_config_failure_never_inserts_or_spawns(monkeypatch):
     with pytest.raises(TranscriptionNotConfigured):
         await request_bot(repo,runtime,user_id=7,platform='google_meet',native_meeting_id='audio',token_secret='test')
     assert not repo._meetings and not runtime.specs
+
+
+def test_audio_key_prefers_explicit_livekit_secret(monkeypatch):
+    import hmac
+    from meeting_api.lifecycle.audio import audio_key
+
+    monkeypatch.setenv('INTERNAL_API_SECRET', 'internal-only')
+    monkeypatch.setenv('LIVEKIT_API_SECRET', 'shared-livekit-secret')
+    assert audio_key() == b'shared-livekit-secret'
+    token = issue_audio_capability(42, 'sess-1', 'http://asr.test', 'tok', 'viegem')
+    payload, sig = token.rsplit('.', 1)
+    expected = hmac.new(b'shared-livekit-secret', b'tina-audio.v1:' + payload.encode(), 'sha256').hexdigest()
+    assert sig == expected

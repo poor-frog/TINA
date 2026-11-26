@@ -11,7 +11,7 @@
  * neither a non-STT fault nor a throwing reporter can perturb the exit path.
  * Run: npx tsx src/stt-faults.test.ts
  */
-import { createSttFaultReporter } from './stt-faults.js';
+import { createSttFaultReporter, isExpectedTeardownAudioClosedFault } from './stt-faults.js';
 import { createOrchestrator } from './orchestrator.js';
 import type { Invocation } from './config.js';
 import type { LifecycleEvent } from './contracts.js';
@@ -124,6 +124,18 @@ async function main(): Promise<void> {
     check('a throwing reporter still lets the bot report its terminal state',
       result.status === 'completed' && events.some((e) => e.status === 'completed'),
       JSON.stringify(result));
+  }
+
+  // ── 6) teardown HTTP 409 audio-session-closed suppression ──
+  {
+    const err409 = sttError('bad_request', 409, '{"detail":"Audio session rejected"}');
+    const err503 = sttError('unavailable', 503, 'upstream down');
+    check('HTTP 409 during teardown is recognized as expected audio-session close',
+      isExpectedTeardownAudioClosedFault(err409, true) === true);
+    check('HTTP 409 during active call is NOT suppressed',
+      isExpectedTeardownAudioClosedFault(err409, false) === false);
+    check('non-409 STT fault during teardown is NOT suppressed',
+      isExpectedTeardownAudioClosedFault(err503, true) === false);
   }
 
   if (failed) { console.error(`\n❌ stt-faults: ${failed} check(s) FAILED.`); process.exit(1); }

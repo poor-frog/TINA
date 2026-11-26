@@ -5,6 +5,7 @@ from functools import wraps
 import asyncio
 import json
 import logging
+import os
 import time
 from uuid import UUID, uuid4
 
@@ -23,6 +24,10 @@ def voice_span(stage, request_id=None):
         identifier = current or str(uuid4())
     token = voice_trace_id.set(identifier)
     started = time.monotonic()
+    span_id = str(uuid4())
+    if os.environ.get('TINA_CHATGPT_VOICE_PILOT') == '1':
+        log.info('%s', json.dumps({'type': 'voice_stage', 'request_id': identifier,
+            'span_id': span_id, 'stage': stage, 'elapsed_ms': 0, 'status': 'started'}))
     metrics = {}
     status = 'ok'
     try:
@@ -32,7 +37,7 @@ def voice_span(stage, request_id=None):
         raise
     finally:
         voice_trace_id.reset(token)
-        record = {'type': 'voice_stage', 'request_id': identifier, 'span_id': str(uuid4()), 'stage': stage,
+        record = {'type': 'voice_stage', 'request_id': identifier, 'span_id': span_id, 'stage': stage,
                   'elapsed_ms': round((time.monotonic() - started) * 1000), 'status': status}
         for key in ('input_sources', 'output_sources'):
             if type(metrics.get(key)) is int: record[key] = metrics[key]

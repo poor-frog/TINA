@@ -71,7 +71,10 @@ class Docker:
                 if "--environment" in args:
                     values = {k: v for k, v in self.config["services"]["admin-api"]["environment"].items()
                               if k == "TINA_VIEGEM_TOKEN"}
-                    values.update({k: (env or {})[k] for k in ("TINA_VIEGEM_DEVICE", "COMPOSE_PROFILES", "TINA_MEETING_VOICE", "TTS_API_TOKEN", "LIVEKIT_AGENT_URL") if k in (env or {})})
+                    keys = ("TINA_VIEGEM_DEVICE", "COMPOSE_PROFILES", "TINA_MEETING_VOICE", "TTS_API_TOKEN",
+                            "LIVEKIT_AGENT_URL", "TRANSCRIPTION_SERVICE_URL", "TRANSCRIPTION_SERVICE_TOKEN",
+                            "TRANSCRIPTION_MODEL")
+                    values.update({k: (env or {})[k] for k in keys if k in (env or {})})
                     out = "\n".join(f"{k}={v}" for k, v in values.items())
                 else:
                     config = copy.deepcopy(self.config)
@@ -162,22 +165,37 @@ class EntryPointTest(unittest.TestCase):
         with self.assertRaisesRegex(stack.StackError, "does not enforce the workspace VolumeOptions.Subpath"):
             selected.validate_bindings()
 
+    def test_legacy_asr_profile_does_not_restore_the_retired_worker(self):
+        self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token"
+        env = {**os.environ, "TINA_VIEGEM_DEVICE": "cpu", "COMPOSE_PROFILES": "asr,dashboard",
+               "TRANSCRIPTION_SERVICE_URL": "http://gipformer:8000",
+               "TRANSCRIPTION_SERVICE_TOKEN": "retired-token", "TRANSCRIPTION_MODEL": "retired-model"}
+        selected = stack.Stack("plan", env=env)
+        self.assertEqual(selected.env["COMPOSE_PROFILES"], "dashboard,viegem")
+        self.assertEqual(selected.env["TINA_USE_VIEGEM_DEFAULT"], "1")
+        for key in ("TRANSCRIPTION_SERVICE_URL", "TRANSCRIPTION_SERVICE_TOKEN", "TRANSCRIPTION_MODEL"):
+            self.assertEqual(selected.env[key], "")
+        external = stack.Stack("plan", env={**env, "TRANSCRIPTION_SERVICE_URL": "https://external.example"})
+        self.assertEqual(external.env["TRANSCRIPTION_SERVICE_URL"], "https://external.example")
+        self.assertNotIn("TINA_USE_VIEGEM_DEFAULT", external.env)
+
     def test_doctor_accepts_a_paused_unused_asr_worker_but_rejects_a_required_failed_one(self):
         from types import SimpleNamespace
         self.docker.config['services']['admin-api']['environment']['INTERNAL_API_SECRET'] = 'fixture-internal'
-        self.docker.config['services']['gipformer'] = {'image':'asr:fixture'}
-        self.docker.rows.append({'Service':'gipformer','State':'exited','ExitCode':143})
+        self.docker.config['services']['viegem'] = {'image':'asr:fixture'}
+        self.docker.rows.append({'Service':'viegem','State':'exited','ExitCode':143})
         selected = stack.Stack('doctor')
-        counts = {'gipformer':0,'viegem':0}
+        selected.viegem_device = 'cpu'
+        counts = {'viegem':0}
         class ControlError(Exception): pass
         module = SimpleNamespace(Identity=lambda _:SimpleNamespace(read=lambda:{'counts':counts}),
             Workers=lambda _:SimpleNamespace(status=lambda _: {'ready':False}),ControlError=ControlError)
         with patch.dict(sys.modules, {'asr_control':module}):
-            self.assertEqual(selected.doctor_readiness(), {'gipformer'})
-            counts['gipformer'] = 1
-            with self.assertRaisesRegex(stack.StackError, 'not ready: gipformer'):
+            self.assertEqual(selected.doctor_readiness(), {'viegem'})
+            counts['viegem'] = 1
+            with self.assertRaisesRegex(stack.StackError, 'not ready: viegem'):
                 selected.doctor_readiness()
-            counts['gipformer'] = False
+            counts['viegem'] = False
             with self.assertRaisesRegex(stack.StackError, 'Invalid managed ASR demand'):
                 selected.doctor_readiness()
 
@@ -309,10 +327,10 @@ class EntryPointTest(unittest.TestCase):
         self.assertLess(build, controller_stop)
         self.assertLess(controller_stop, up)
         self.assertLess(build, native["start"])
-        self.assertLess(up, controller)
-        self.assertLess(controller, native["start"])
+        self.assertLess(up, native["start"])
         self.assertLess(native["start"], native["register"])
-        self.assertLess(native["register"], access)
+        self.assertLess(native["register"], controller)
+        self.assertLess(controller, access)
         self.assertFalse(any("fixture-token" in str(args) for args in calls))
         start_env = next(env for args, env in self.docker.calls
                          if any(str(a).endswith("native_viegem.py") for a in args) and args[-1] == "start")
@@ -362,13 +380,12 @@ class EntryPointTest(unittest.TestCase):
         self.assertIn("http://host.docker.internal:18006", probes[-1][-1])
 
     def test_container_model_downloads_do_not_depend_on_viegem_native_or_token(self):
-        for service in ("gipformer-models", "viegem-models"):
-            self.docker.config["services"][service] = {"image": "fixture-model-installer"}
+        self.docker.config["services"]["viegem-models"] = {"image": "fixture-model-installer"}
         selected = stack.Stack("all")
         selected.build()
         calls = [args for args, _ in self.docker.calls]
         downloads = [args[-1] for args in calls if "run" in args and "--no-deps" in args]
-        self.assertEqual(downloads, ["gipformer-models", "viegem-models"])
+        self.assertEqual(downloads, ["viegem-models"])
         self.assertFalse(any("up" in args for args in calls))
 
     def test_cuda_driver_and_compute_failures_prevent_activation(self):

@@ -31,6 +31,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi_mcp import FastApiMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from . import bind as bind_mod
@@ -1335,7 +1336,8 @@ def create_app(
     # fault. That wait is why this call can take a few seconds on a cold start; see `discover`.
     app.state.assembly = None
     _assembly_env = assembly_env if assembly_env is not None else os.environ
-    if not _assembly_env.get("TINA_MCP_ASSEMBLY_OFF"):
+    read_only = os.getenv("TINA_MCP_READ_ONLY") == "1"
+    if not read_only and not _assembly_env.get("TINA_MCP_ASSEMBLY_OFF"):
         with httpx.Client(transport=assembly_transport) as _boot:
             _assembly, _openapi, _bases = discover_mod.discover(_boot, env=_assembly_env)
         _bound = bind_mod.verify(_assembly, _openapi)
@@ -1345,18 +1347,25 @@ def create_app(
     # ---------------------------
     # MCP mount + prompts
     # ---------------------------
-    mcp = FastApiMCP(app, headers=["authorization", "x-api-key"])
+    read_tools = ["list_meetings", "search_transcripts", "get_meeting_transcript"]
+    mcp = FastApiMCP(app, headers=["authorization", "x-api-key"],
+                     include_operations=read_tools if read_only else None)
     # Orientation at connect time. FastApiMCP has no `instructions` kwarg, but the lowlevel
     # Server it wraps carries the field the spec defines — a client that connects should not have
     # to infer what TINA is from nine tool descriptions.
-    mcp.server.instructions = TINA_INSTRUCTIONS
+    mcp.server.instructions = (
+        "List and search meetings you can access, then read a transcript by meeting_db_id."
+        if read_only else TINA_INSTRUCTIONS
+    )
 
     @mcp.server.list_prompts()
     async def _list_prompts() -> mcp_types.ListPromptsResult:
-        return mcp_types.ListPromptsResult(prompts=list(PROMPTS.values()))
+        return mcp_types.ListPromptsResult(prompts=[] if read_only else list(PROMPTS.values()))
 
     @mcp.server.get_prompt()
     async def _get_prompt(name: str, arguments: Optional[Dict[str, str]] = None) -> mcp_types.GetPromptResult:
+        if read_only:
+            raise ValueError("This deployment offers read-only tools")
         return get_prompt_result(name, arguments)
 
     # Close every tool's argument schema. Without `additionalProperties: false` an unknown
@@ -1371,9 +1380,17 @@ def create_app(
             schema.setdefault("additionalProperties", False)
 
     mcp.mount_http()
+    transport_host = os.getenv("TINA_MCP_TRANSPORT_HOST", "").strip()
+    public_origin = os.getenv("TINA_MCP_PUBLIC_ORIGIN", "").strip()
+    if read_only:
+        if not transport_host or not public_origin:
+            raise ValueError("Read-only MCP requires a transport host and public origin")
+        mcp._http_transport.security_settings = TransportSecuritySettings(
+            allowed_hosts=[transport_host], allowed_origins=[public_origin],
+        )
     # fastapi-mcp 0.4 buffers the ASGI response; a sessioned GET is an open SSE
     # stream and never completes that buffer — install a passthrough (#921).
-    install_streaming_http_transport(mcp)
+    install_streaming_http_transport(mcp, require_gateway_identity=read_only)
     # An upstream refusal reaches the agent as ONE string; fastapi-mcp writes it as prose with a JSON
     # document inside. Render it structurally instead — the actionable words first, the body once.
     install_structured_tool_errors(mcp)

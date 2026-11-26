@@ -5,7 +5,7 @@ Terminal and the Extension use the same pure TypeScript formatter at
 
 ```mermaid
 flowchart LR
-    PCM[Meeting PCM] --> ASR[VieGem or Gipformer]
+    PCM[Meeting PCM] --> ASR[Configured ASR]
     ASR --> LA[Existing LocalAgreement draft/final]
     LA --> RAW[Canonical source text and timestamps]
     RAW --> RAG[Existing retrieval and answer verification]

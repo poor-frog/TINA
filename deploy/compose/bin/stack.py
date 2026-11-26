@@ -157,16 +157,22 @@ class Stack:
             raise StackError("TINA_ASR_CONTROL_PORT must be between 1024 and 65535")
         if values.get("INTERNAL_API_SECRET"):
             self.env['TINA_TTS_PROFILE_KEY']=hmac.new(values['INTERNAL_API_SECRET'].encode(),b'tina-tts-profile:v1','sha256').hexdigest()
-            for backend in ("gipformer", "viegem"):
-                self.env[f"TINA_{backend.upper()}_DRAIN_KEY"] = hmac.new(
-                    values["INTERNAL_API_SECRET"].encode(), f"tina-asr-drain:v1:{backend}".encode(), "sha256").hexdigest()
+            self.env["TINA_VIEGEM_DRAIN_KEY"] = hmac.new(
+                values["INTERNAL_API_SECRET"].encode(), b"tina-asr-drain:v1:viegem", "sha256").hexdigest()
+        legacy_url = urlsplit(values.get("TRANSCRIPTION_SERVICE_URL") or "")
+        if legacy_url.hostname == "gipformer" or (
+            legacy_url.hostname in {"host.docker.internal", "localhost", "127.0.0.1"}
+            and legacy_url.netloc.rsplit(":", 1)[-1] == (values.get("GIPFORMER_HOST_PORT") or "18002")
+        ):
+            self.env.update(TRANSCRIPTION_SERVICE_URL="", TRANSCRIPTION_SERVICE_TOKEN="", TRANSCRIPTION_MODEL="")
+            self.env["TINA_USE_VIEGEM_DEFAULT"] = "1"
         self.viegem_device = select_viegem_device(bool(values.get("TINA_VIEGEM_TOKEN")),
                                                   values.get("TINA_VIEGEM_DEVICE") or "auto")
         self.env.setdefault('TINA_VIEGEM_NAME_BIAS', values.get('TINA_VIEGEM_NAME_BIAS') or '0')
         self.env.setdefault('TINA_VIEGEM_CUSTOM_WEIGHT', values.get('TINA_VIEGEM_CUSTOM_WEIGHT') or '1.0')
         self.env.setdefault('TINA_VIEGEM_CUSTOM_WORDS_FILE', values.get('TINA_VIEGEM_CUSTOM_WORDS_FILE') or '')
         self._cuda_verified = False
-        profiles = [p.strip() for p in values.get("COMPOSE_PROFILES", "").split(",") if p.strip()]
+        profiles = [p.strip() for p in values.get("COMPOSE_PROFILES", "").split(",") if p.strip() and p.strip() != "asr"]
         if values.get('LIVEKIT_AGENT_URL'):
             try:
                 self.env.update(livekit_credentials(values))
@@ -391,7 +397,7 @@ class Stack:
             self.compose("pull", "--ignore-buildable", *registry_services)
         self.check_images()
         self.verify_viegem_cuda()
-        for service in ("gipformer-models", "viegem-models", "meeting-voice-models", "tts-models"):
+        for service in ("viegem-models", "meeting-voice-models", "tts-models"):
             if service in self.services:
                 if service == "tts-models":
                     self.prepare_tts_models()
@@ -550,21 +556,19 @@ with urllib.request.urlopen(req, timeout=20) as response:
     def doctor_readiness(self):
         required = set(self.services)
         paused = set()
-        if self.services['admin-api'].get('environment', {}).get('INTERNAL_API_SECRET'):
+        if self.viegem_device != 'disabled' and self.services['admin-api'].get('environment', {}).get('INTERNAL_API_SECRET'):
             from asr_control import Identity, Workers, ControlError
             try:
                 counts = Identity(self).read()['counts']
                 workers = Workers(self)
-                managed = ({'gipformer'} if 'gipformer' in self.services else set())
-                if self.viegem_device != 'disabled': managed.add('viegem')
-                for backend in managed:
-                    count = counts.get(backend)
-                    if type(count) is not int or count < 0:
-                        raise StackError('Invalid managed ASR demand metadata')
-                    if count == 0:
-                        required.discard(backend); paused.add(backend)
-                    elif not workers.status(backend).get('ready'):
-                        raise StackError('ASR backend required by enabled accounts is not ready: ' + backend)
+                count = counts.get('viegem')
+                if type(count) is not int or count < 0:
+                    raise StackError('Invalid managed ASR demand metadata')
+                if count == 0:
+                    required.discard('viegem')
+                    paused.add('viegem')
+                elif not workers.status('viegem').get('ready'):
+                    raise StackError('ASR backend required by enabled accounts is not ready: viegem')
             except (ControlError, KeyError):
                 raise StackError('Could not verify managed ASR demand/readiness') from None
         self.readiness(required)
@@ -658,9 +662,6 @@ with urllib.request.urlopen(req, timeout=20) as response:
         self.compose("up", "-d", "--no-build", "--pull", "never", "--wait",
                      "--wait-timeout", self.env.get("WAIT_TIMEOUT", "180"))
         self.readiness()
-        if ("gipformer" in self.services or self.viegem_device != "disabled") and self.services["admin-api"].get("environment", {}).get("INTERNAL_API_SECRET"):
-            from asr_control import install
-            install(self)
         try:
             self.native_viegem("start")
         except StackError:
@@ -668,6 +669,9 @@ with urllib.request.urlopen(req, timeout=20) as response:
                 self.compose("--profile", "viegem", "start", "viegem", capture=True, check=False)
             raise
         self.native_viegem("register")
+        if self.viegem_device != "disabled" and self.services["admin-api"].get("environment", {}).get("INTERNAL_API_SECRET"):
+            from asr_control import install
+            install(self)
 
     def stop_asr_control(self):
         if self.services["admin-api"].get("environment", {}).get("INTERNAL_API_SECRET"):

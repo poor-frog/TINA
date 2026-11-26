@@ -60,8 +60,6 @@ def install_encrypted_archive(directory, manifest, archive):
             target = directory / name
             target.parent.mkdir(parents=True, exist_ok=True)
             (stage / name).replace(target)
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, default=Path(os.environ.get("HF_HOME", "/models")))

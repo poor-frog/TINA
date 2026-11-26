@@ -1,0 +1,144 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: HTTPS staging hostname for TINA with CloudFront, an existing Web ACL and an internal ALB.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  AppSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  CloudFrontOriginPrefixListId:
+    Type: String
+  WebAclArn:
+    Type: String
+  CustomDomainName:
+    Type: String
+    Default: ''
+    Description: Optional custom HTTPS hostname (e.g. staging.example.com). Leave empty to use the default CloudFront domain.
+  AcmCertificateArn:
+    Type: String
+    Default: ''
+    Description: Issued us-east-1 ACM certificate ARN covering CustomDomainName.
+  HostedZoneId:
+    Type: String
+    Default: ''
+    Description: Optional Route53 Public Hosted Zone ID to create A and AAAA alias records for CustomDomainName.
+
+Conditions:
+  HasCustomDomain: !And
+    - !Not [!Equals [!Ref CustomDomainName, '']]
+    - !Not [!Equals [!Ref AcmCertificateArn, '']]
+  CreateDnsAlias: !And
+    - !Condition HasCustomDomain
+    - !Not [!Equals [!Ref HostedZoneId, '']]
+
+Resources:
+  OriginSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: TINA internal ALB accepts only CloudFront origin traffic
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourcePrefixListId: !Ref CloudFrontOriginPrefixListId
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internal
+      Type: application
+      Subnets: !Ref AppSubnetIds
+      SecurityGroups: [!Ref OriginSecurityGroup]
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: '503'
+            ContentType: text/plain
+            MessageBody: TINA staging application is not deployed yet.
+  EdgeHealth:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref Listener
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values: [/edge-health]
+      Actions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: '200'
+            ContentType: text/plain
+            MessageBody: TINA_EDGE_READY
+  Origin:
+    Type: AWS::CloudFront::VpcOrigin
+    DependsOn: Listener
+    Properties:
+      VpcOriginEndpointConfig:
+        Arn: !Ref LoadBalancer
+        Name: !Ref AWS::StackName
+        HTTPPort: 80
+        OriginProtocolPolicy: http-only
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: TINA staging edge
+        Enabled: true
+        HttpVersion: http2
+        WebACLId: !Ref WebAclArn
+        Aliases: !If [HasCustomDomain, [!Ref CustomDomainName], !Ref 'AWS::NoValue']
+        ViewerCertificate: !If
+          - HasCustomDomain
+          - AcmCertificateArn: !Ref AcmCertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+        Origins:
+          - Id: tina-internal-alb
+            DomainName: !GetAtt LoadBalancer.DNSName
+            VpcOriginConfig:
+              VpcOriginId: !GetAtt Origin.Id
+        DefaultCacheBehavior:
+          TargetOriginId: tina-internal-alb
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # AWS managed CachingDisabled
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3 # AWS managed AllViewer
+        CustomErrorResponses:
+          - ErrorCode: 503
+            ErrorCachingMinTTL: 0
+
+  CustomDomainAliasRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Condition: CreateDnsAlias
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        - Name: !Ref CustomDomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+        - Name: !Ref CustomDomainName
+          Type: AAAA
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+
+Outputs:
+  StageUrl:
+    Value: !If [HasCustomDomain, !Sub 'https://${CustomDomainName}', !Sub 'https://${Distribution.DomainName}']
+  CloudFrontDomainName:
+    Value: !GetAtt Distribution.DomainName
+  DistributionId:
+    Value: !Ref Distribution
+  ListenerArn:
+    Value: !Ref Listener
+  OriginSecurityGroupId:
+    Value: !GetAtt OriginSecurityGroup.GroupId

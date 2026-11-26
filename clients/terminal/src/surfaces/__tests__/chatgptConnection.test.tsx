@@ -90,9 +90,9 @@ describe('ChatGPT account switch', () => {
   it('distinguishes Meeting AI from ASR configuration and refreshes after account changes', async () => {
     vi.mocked(fetch).mockImplementation(async input => String(input) === '/api/models'
       ? Response.json({ chat_model: 'gpt-6-luna', streaming_model: 'gpt-6-luna', chatgpt_connected: false })
-      : Response.json({ effective: { label: 'Gipformer' } }));
+      : Response.json({ effective: { label: 'VieGem + LM' } }));
     render(<ModelChips />);
-    await screen.findByText('Meeting AI'); await screen.findByText('Gipformer'); await screen.findByText('Connect ChatGPT in Settings');
+    await screen.findByText('Meeting AI'); await screen.findByText('VieGem + LM'); await screen.findByText('Connect ChatGPT in Settings');
     expect(screen.queryByText('stream')).toBeNull();
     const before = vi.mocked(fetch).mock.calls.length; window.dispatchEvent(new Event('tina-models-changed'));
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(before));

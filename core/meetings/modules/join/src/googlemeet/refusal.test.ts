@@ -7,6 +7,7 @@ import {
   GOOGLE_JOIN_REFUSED,
 } from "./refusal";
 import { AdmissionError } from "../shared/admission";
+import { getJoinBrowserArgs } from "../browser-args";
 import { waitForAnySelector, waitForLobbyCta } from "./join";
 
 let passed = 0;
@@ -137,6 +138,62 @@ function mockPage() {
     }, () => clock).catch((e) => e);
     check("re-knocks use only the remaining admission budget", budgets.join(",") === "30000,10000");
     check("stops retrying when the original budget is exhausted", budgets.length === 2 && error instanceof GoogleJoinRefusedError);
+  }
+
+  {
+    let cookiesCleared = 0;
+    let storageCleared = 0;
+    const delays: number[] = [];
+    const page: any = {
+      context: () => ({ clearCookies: async () => { cookiesCleared++; } }),
+      evaluate: async () => { storageCleared++; },
+    };
+    let knocks = 0;
+    const admitted = await knockUntilGoogleAccepts(
+      page,
+      60_000,
+      async () => {
+        if (++knocks < 3) throw new GoogleJoinRefusedError("ResolveMeetingSpace answered HTTP 403");
+        return true;
+      },
+      Date.now,
+      {
+        authenticated: false,
+        backoffMs: (attempt) => attempt * 1000,
+        sleep: async (ms) => { delays.push(ms); },
+      },
+    );
+    check("anonymous retry clears cookies+storage and backs off before re-knocking",
+      admitted && cookiesCleared === 2 && storageCleared === 2 && delays.join(",") === "1000,2000");
+  }
+
+  {
+    let cookiesCleared = 0;
+    const page: any = {
+      context: () => ({ clearCookies: async () => { cookiesCleared++; } }),
+      evaluate: async () => { cookiesCleared++; },
+    };
+    let knocks = 0;
+    const admitted = await knockUntilGoogleAccepts(
+      page,
+      60_000,
+      async () => {
+        if (++knocks < 2) throw new GoogleJoinRefusedError("CreateMeetingDevice answered HTTP 403");
+        return true;
+      },
+      Date.now,
+      { authenticated: true, backoffMs: () => 0 },
+    );
+    check("authenticated retry preserves signed-in cookies across knocks", admitted && cookiesCleared === 0);
+  }
+
+  {
+    const anonArgs = getJoinBrowserArgs();
+    const authArgs = getJoinBrowserArgs({ authenticated: true });
+    check("join browser args include --disable-dev-shm-usage for Fargate",
+      anonArgs.includes("--disable-dev-shm-usage") && authArgs.includes("--disable-dev-shm-usage"));
+    check("anonymous join keeps --incognito while authenticated join strips --incognito",
+      anonArgs.includes("--incognito") && !authArgs.includes("--incognito"));
   }
 
   console.log(`\n=== summary: ${passed} passed, ${failed} failed ===`);

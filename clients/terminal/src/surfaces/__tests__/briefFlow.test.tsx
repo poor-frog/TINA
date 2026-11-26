@@ -12,7 +12,7 @@ import type { MeetingMock } from '../meetingModel';
 import '../meetingPrep';
 
 const state = vi.hoisted(() => ({ meetings: [] as MeetingMock[] }));
-vi.mock('../liveMeetings', () => ({ useLiveMeetings: () => state.meetings, refreshMeetings: vi.fn() }));
+vi.mock('../liveMeetings', () => ({ useLiveMeetings: () => state.meetings, refreshMeetings: vi.fn(), seedLiveMeetingFromResponse: () => undefined }));
 vi.mock('../chatStream', () => ({ streamChatTurn: vi.fn(async () => ({ terminal: true, aborted: false })) }));
 vi.mock('../plannedApi', async original => ({ ...await original<typeof import('../plannedApi')>(), createPlannedMeeting: vi.fn() }));
 vi.mock('../workspaceApi', async original => ({ ...await original<typeof import('../workspaceApi')>(),

@@ -1,0 +1,9 @@
+{
+  "name": "meettina",
+  "compatibility_date": "2026-11-26",
+  "pages_build_output_dir": "public",
+  "vars": {
+    "TINA_PUBLIC_ORIGIN": "https://meettina.pages.dev",
+    "TINA_AWS_ORIGIN": "https://d2eanx74y89uq2.cloudfront.net"
+  }
+}

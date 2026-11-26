@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { GET } from '../models/openai/callback/route';
 import { POST } from '../models/openai/complete/route';
+import { POST as start } from '../models/openai/start/route';
+import { POST as logout } from '../models/openai/logout/route';
 import { beginChatGPTAuth, storePending, takePending } from '../../../lib/chatgptPlanAuth';
 
 const mocks = vi.hoisted(() => ({ subject: vi.fn(), complete: vi.fn() }));
@@ -61,3 +63,15 @@ describe('ChatGPT callback across browser profiles', () => {
     expect(mocks.complete).not.toHaveBeenCalled();
   });
 });
+
+it.each([['start', start], ['complete', POST], ['logout', logout]] as const)(
+  'blocks local ChatGPT %s in Workspace pilot mode before checking the user',
+  async (path, handle) => {
+    vi.stubEnv('NEXT_PUBLIC_TERMINAL_MODE', 'workspace-pilot');
+    const response = await handle(new NextRequest(`${base}/api/models/openai/${path}`, { method: 'POST' }));
+    expect(response.status).toBe(403);
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    expect(mocks.subject).not.toHaveBeenCalled();
+    expect(mocks.complete).not.toHaveBeenCalled();
+  },
+);

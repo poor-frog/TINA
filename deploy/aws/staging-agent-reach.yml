@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private public-source retrieval worker for TINA staging.
+
+Parameters:
+  ClusterName: {Type: String}
+  VpcId: {Type: 'AWS::EC2::VPC::Id'}
+  AppSubnetIds: {Type: 'List<AWS::EC2::Subnet::Id>'}
+  ServiceNamespaceId: {Type: String}
+  AgentReachImage: {Type: String, AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'}
+
+Resources:
+  AgentApiClients:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Staging Agent API clients of Agent Reach
+      VpcId: !Ref VpcId
+  Ingress:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Agent Reach from authorized staging Agent API tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 8080, ToPort: 8080, SourceSecurityGroupId: !GetAtt AgentApiClients.GroupId}
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+  Discovery:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: agent-reach
+      DnsConfig:
+        NamespaceId: !Ref ServiceNamespaceId
+        DnsRecords: [{Type: A, TTL: 15}]
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties: {RetentionInDays: 7}
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: PullAgentReachAndWriteLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer]
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-staging/agent-reach'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt Logs.Arn
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AWS::StackName
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '256'
+      Memory: '512'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      Volumes: [{Name: reach-scratch}]
+      ContainerDefinitions:
+        - Name: agent-reach
+          Image: !Ref AgentReachImage
+          Essential: true
+          ReadonlyRootFilesystem: true
+          MountPoints: [{SourceVolume: reach-scratch, ContainerPath: /tmp/tina-reach}]
+          PortMappings: [{ContainerPort: 8080}]
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4).close()"]
+            Interval: 15
+            Timeout: 5
+            Retries: 4
+            StartPeriod: 30
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+  AgentReach:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ClusterName
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      PlatformVersion: '1.4.0'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetIds
+          SecurityGroups: [!GetAtt Ingress.GroupId]
+      ServiceRegistries:
+        - RegistryArn: !GetAtt Discovery.Arn
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+
+Outputs:
+  ServiceName: {Value: !GetAtt AgentReach.Name}
+  AgentReachUrl: {Value: 'http://agent-reach.tina-staging.local:8080'}
+  AgentReachClientSecurityGroupId: {Value: !GetAtt AgentApiClients.GroupId}
+  IngressSecurityGroupId: {Value: !GetAtt Ingress.GroupId}
+  LogGroupName: {Value: !Ref Logs}

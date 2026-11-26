@@ -18,7 +18,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'deploy/transcription/viegem'))
 from engine import VieGemEngine, contextual_biased_decoder, load_custom_words
-from gipformer.engine import RATE, read_audio, speech_ranges
+from asr_audio import RATE, read_audio, speech_ranges
 
 
 def normalize(text):

@@ -51,6 +51,18 @@ function isSttFault(f: SttFaultLike): boolean {
   return f?.source === 'stt' || typeof f?.kind === 'string';
 }
 
+/**
+ * Benign shutdown race: when the bot stops and flushes trailing audio after meeting-api has already
+ * closed the meeting's audio permit (`stop_requested=true` / non-active), the LiveKit audio bridge
+ * rejects that final chunk with HTTP 409. That is expected teardown behaviour, not live STT
+ * degradation. During an active call (`shuttingDown=false`), HTTP 409 is still recorded loudly.
+ */
+export function isExpectedTeardownAudioClosedFault(fault: unknown, shuttingDown: boolean): boolean {
+  if (!shuttingDown || !fault || typeof fault !== 'object') return false;
+  const f = fault as SttFaultLike;
+  return isSttFault(f) && f.status === 409;
+}
+
 export function createSttFaultReporter(
   log: (m: string) => void = (m) => console.error(m),
   now: () => Date = () => new Date(),

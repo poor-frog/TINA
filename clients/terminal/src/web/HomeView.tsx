@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WebAvatar } from "./Avatar";
 import { WebIcon } from "./Icons";
+import { LucianSlidingTabs } from "./lucian/LucianSlidingTabs";
+import { LucianSkeletonList } from "./lucian/LucianSkeletonCard";
 import type { WebNavView } from "./Sidebar";
 import { meetingPhase, type MeetingMock } from "../surfaces/meetingModel";
 import { listWorkspaceTree } from "../surfaces/workspaceApi";
@@ -18,6 +20,7 @@ export function HomeView({
   firstName,
   userName,
   meetings,
+  listLoaded = true,
   meetingsOnly,
   onOpenMeeting,
   onAskTina,
@@ -27,6 +30,7 @@ export function HomeView({
   firstName: string;
   userName: string;
   meetings: MeetingMock[];
+  listLoaded?: boolean;
   meetingsOnly: boolean;
   onOpenMeeting: (meetingId: string) => void;
   onAskTina: (prompt?: string) => void;
@@ -34,6 +38,7 @@ export function HomeView({
   onOpenCapture: () => void;
 }) {
   const [tab, setTab] = useState<"recent" | "upcoming" | "live">("recent");
+  const [tabDir, setTabDir] = useState<"right" | "left">("right");
   const [draft, setDraft] = useState("");
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const [dictating, setDictating] = useState(false);
@@ -101,10 +106,18 @@ export function HomeView({
             <h1 className="tina-web-greeting">
               {greeting.text}, {firstName} <span aria-hidden="true">{greeting.emoji}</span>
             </h1>
-            <button type="button" className="tina-web-section-action" onClick={onOpenCapture}>
-              <WebIcon name="plus" size={15} />
-              <span>New meeting</span>
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {!meetingsOnly && (
+                <button type="button" className="tina-web-section-action" onClick={() => onNavigate("knowledge")}>
+                  <WebIcon name="bookOpen" size={15} />
+                  <span>Knowledge</span>
+                </button>
+              )}
+              <button type="button" className="tina-web-section-action" onClick={onOpenCapture}>
+                <WebIcon name="plus" size={15} />
+                <span>New meeting</span>
+              </button>
+            </div>
           </div>
 
           <div className="tina-web-section-head">
@@ -179,81 +192,76 @@ export function HomeView({
           </div>
 
           <div className="tina-web-tabs-row">
-            <div className="tina-web-tabs" role="tablist" aria-label="Meeting feed filter">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === "recent"}
-                className={`tina-web-tab ${tab === "recent" ? "active" : ""}`}
-                onClick={() => setTab("recent")}
-              >
-                Recent {recentMeetings.length > 0 ? `(${recentMeetings.length})` : ""}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === "upcoming"}
-                className={`tina-web-tab ${tab === "upcoming" ? "active" : ""}`}
-                onClick={() => setTab("upcoming")}
-              >
-                Upcoming {upcomingMeetings.length > 0 ? `(${upcomingMeetings.length})` : ""}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === "live"}
-                className={`tina-web-tab ${tab === "live" ? "active" : ""}`}
-                onClick={() => setTab("live")}
-              >
-                Live {liveMeetings.length > 0 ? `(${liveMeetings.length})` : ""}
-              </button>
-            </div>
+            <LucianSlidingTabs
+              ariaLabel="Meeting feed filter"
+              value={tab}
+              onChange={(next) => {
+                const order = { recent: 0, upcoming: 1, live: 2 };
+                setTabDir(order[next] >= order[tab] ? "right" : "left");
+                setTab(next);
+              }}
+              tabs={[
+                { id: "recent", label: "Recent", count: recentMeetings.length },
+                { id: "upcoming", label: "Upcoming", count: upcomingMeetings.length },
+                { id: "live", label: "Live", count: liveMeetings.length },
+              ]}
+            />
 
             <button type="button" className="tina-web-section-action" onClick={() => onNavigate("meetings")}>
               <span>View all</span>
             </button>
           </div>
 
-          <div className="tina-web-feed">
-            {visibleFeed.map((meeting) => {
-              const phase = meetingPhase(meeting);
-              const label = meeting.title_custom || meeting.title;
-              return (
-                <button
-                  key={meeting.id}
-                  type="button"
-                  className="tina-web-feed-row"
-                  onClick={() => onOpenMeeting(meeting.id)}
-                >
-                  <WebAvatar name={meeting.participants[0]?.name || userName} size={32} />
-                  <span className="tina-web-feed-main">
-                    <span className="tina-web-feed-title">
-                      <span>{label}</span>
-                      {phase === "live" && <span className="tina-web-status-pill live">Live</span>}
-                      {phase === "prep" && <span className="tina-web-status-pill scheduled">Upcoming</span>}
-                      {meeting.shared && <span className="tina-web-status-pill completed">Shared</span>}
-                    </span>
-                    <span className="tina-web-feed-meta">
-                      {meeting.platform} · {meeting.when}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
+          <div
+            key={tab}
+            className={`tina-web-feed u039-panel-anim ${tabDir === "left" ? "dir-left" : ""}`}
+            role="tabpanel"
+          >
+            {!listLoaded && meetings.length === 0 ? (
+              <LucianSkeletonList count={4} variant="row" label="Loading meetings…" />
+            ) : (
+              <>
+                {visibleFeed.map((meeting) => {
+                  const phase = meetingPhase(meeting);
+                  const label = meeting.title_custom || meeting.title;
+                  return (
+                    <button
+                      key={meeting.id}
+                      type="button"
+                      className="tina-web-feed-row"
+                      onClick={() => onOpenMeeting(meeting.id)}
+                    >
+                      <WebAvatar name={meeting.participants[0]?.name || userName} size={32} />
+                      <span className="tina-web-feed-main">
+                        <span className="tina-web-feed-title">
+                          <span>{label}</span>
+                          {phase === "live" && <span className="tina-web-status-pill live">Live</span>}
+                          {phase === "prep" && <span className="tina-web-status-pill scheduled">Upcoming</span>}
+                          {meeting.shared && <span className="tina-web-status-pill completed">Shared</span>}
+                        </span>
+                        <span className="tina-web-feed-meta">
+                          {meeting.platform} · {meeting.when}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
 
-            {visibleFeed.length === 0 && (
-              <div style={{ padding: "24px 8px", color: "var(--tw-text-4)", fontSize: 13.5 }}>
-                {tab === "live"
-                  ? "No live meetings right now. Click Capture to send TINA into a call."
-                  : tab === "upcoming"
-                    ? "No upcoming meetings scheduled. Connect a calendar in Settings or click Capture."
-                    : "No recent meetings yet. Start your first capture to see transcripts and notes here."}
-              </div>
+                {visibleFeed.length === 0 && (
+                  <div style={{ padding: "24px 8px", color: "var(--tw-text-4)", fontSize: 13.5 }}>
+                    {tab === "live"
+                      ? "No live meetings right now. Click Capture to send TINA into a call."
+                      : tab === "upcoming"
+                        ? "No upcoming meetings scheduled. Connect a calendar in Settings or click Capture."
+                        : "No recent meetings yet. Start your first capture to see transcripts and notes here."}
+                  </div>
+                )}
+
+                <div className="tina-web-caught-up">
+                  <span>All caught up!</span>
+                </div>
+              </>
             )}
-
-            <div className="tina-web-caught-up">
-              <span>All caught up!</span>
-            </div>
           </div>
         </div>
       </div>

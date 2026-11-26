@@ -3,12 +3,16 @@
  *  and Split-Button `Capture ▾` (Join live now | Plan / Schedule | Connect Calendar). */
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
+import { LucianCommandKButton } from "./lucian/LucianCommandKButton";
+import { LucianThemeToggle } from "./lucian/LucianThemeToggle";
+import { LucianDynamicIsland } from "./lucian/LucianDynamicIsland";
+import { emitWebToast } from "./lucian/webToast";
 import { parseMeetingInput, meetingUrlFor } from "../surfaces/meetingId";
 import { getJitsiHosts } from "../surfaces/jitsiHosts";
 import { defaultBotName } from "../surfaces/defaultBotName";
 import { readApiFailure } from "../surfaces/apiClient";
 import { presentMeetingActionFailure } from "../surfaces/meeting";
-import { refreshMeetings } from "../surfaces/liveMeetings";
+import { refreshMeetings, seedLiveMeetingFromResponse } from "../surfaces/liveMeetings";
 import { createPlannedMeeting } from "../surfaces/plannedApi";
 import type { MeetingMock } from "../surfaces/meetingModel";
 
@@ -17,7 +21,9 @@ export type CaptureModalMode = "live" | "schedule";
 export function WebTopBar({
   title,
   liveMeeting,
+  liveMeetings,
   wsConnected,
+  hideBar = false,
   onOpenMobileNav,
   onOpenSearch,
   onOpenMeeting,
@@ -29,7 +35,9 @@ export function WebTopBar({
 }: {
   title: string;
   liveMeeting?: MeetingMock;
+  liveMeetings?: MeetingMock[];
   wsConnected: boolean;
+  hideBar?: boolean;
   onOpenMobileNav: () => void;
   onOpenSearch: () => void;
   onOpenMeeting: (meetingId: string) => void;
@@ -60,7 +68,7 @@ export function WebTopBar({
 
   return (
     <>
-      <header className="tina-web-topbar">
+      {!hideBar && <header className="tina-web-topbar">
         <div className="tina-web-topbar-left">
           <button
             type="button"
@@ -79,31 +87,15 @@ export function WebTopBar({
         </div>
 
         <div className="tina-web-search-wrap">
-          <button
-            type="button"
-            className="tina-web-search-trigger"
-            onClick={onOpenSearch}
-            aria-label="Search meetings and tasks"
-          >
-            <WebIcon name="search" size={15} />
-            <span>Search meetings, tasks, or actions</span>
-            <kbd>⌘K</kbd>
-          </button>
+          <LucianCommandKButton onTrigger={onOpenSearch} />
         </div>
 
         <div className="tina-web-topbar-right">
-          {liveMeeting && (
-            <button
-              type="button"
-              className="tina-web-live-pill"
-              onClick={() => onOpenMeeting(liveMeeting.id)}
-              title="Open active live meeting"
-            >
-              <span className="tina-web-live-dot" aria-hidden="true" />
-              <span>Live now</span>
-            </button>
-          )}
-
+          <LucianDynamicIsland
+            liveMeetings={liveMeetings && liveMeetings.length > 0 ? liveMeetings : liveMeeting ? [liveMeeting] : []}
+            onOpenMeeting={onOpenMeeting}
+          />
+          <LucianThemeToggle />
           <div className="tina-web-capture-split" ref={splitRef}>
             <button
               type="button"
@@ -179,7 +171,7 @@ export function WebTopBar({
             )}
           </div>
         </div>
-      </header>
+      </header>}
 
       {captureOpen && (
         <CaptureMeetingModal
@@ -260,9 +252,11 @@ function CaptureMeetingModal({
       });
       if (!response.ok) throw await readApiFailure(response);
       const data = (await response.json().catch(() => ({}))) as { id?: number | string; meeting_id?: number | string };
+      const seededId = seedLiveMeetingFromResponse(data);
       refreshMeetings();
-      const targetId = data.meeting_id ?? data.id;
-      onCaptured(targetId != null ? String(targetId) : undefined);
+      const targetId = seededId ?? (data.meeting_id != null ? String(data.meeting_id) : data.id != null ? String(data.id) : undefined);
+      emitWebToast("TINA bot is joining the meeting");
+      onCaptured(targetId);
     } catch (err) {
       setError(presentMeetingActionFailure(err));
     } finally {
@@ -287,6 +281,7 @@ function CaptureMeetingModal({
         auto_join: autoJoin,
       });
       refreshMeetings();
+      emitWebToast("Meeting scheduled");
       onCaptured(created?.id != null ? String(created.id) : undefined);
     } catch (err) {
       setError(presentMeetingActionFailure(err));

@@ -93,7 +93,7 @@ def parser():
                 command.add_argument("--scope", choices=["global", "account"], default=None,
                                      help="Configure requires an explicit scope outside an interactive terminal")
                 if action == "configure":
-                    command.add_argument("--backend", choices=["deployment", "default", "custom", "funasr", "sherpa", "apple", "nvidia", "gipformer", "viegem"])
+                    command.add_argument("--backend", choices=["deployment", "default", "custom", "funasr", "sherpa", "apple", "nvidia", "viegem"])
                     command.add_argument("--url", help="Explicit HTTP(S) endpoint without embedded credentials or query")
                     tokens = command.add_mutually_exclusive_group()
                     tokens.add_argument("--token-env", help="Environment variable name containing the endpoint token")

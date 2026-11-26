@@ -3,6 +3,27 @@
   "service": "mcp",
   "keys": [
     {
+      "key": "TINA_MCP_READ_ONLY",
+      "class": "defaulted",
+      "default": "0",
+      "description": "Expose only meeting list and transcript tools on MCP. Requires a transport host and public origin.",
+      "targets": []
+    },
+    {
+      "key": "TINA_MCP_TRANSPORT_HOST",
+      "class": "defaulted",
+      "default": "(empty)",
+      "description": "Exact Host header of the private MCP transport in read-only mode.",
+      "targets": []
+    },
+    {
+      "key": "TINA_MCP_PUBLIC_ORIGIN",
+      "class": "defaulted",
+      "default": "(empty)",
+      "description": "Exact browser Origin allowed on the public MCP transport in read-only mode.",
+      "targets": []
+    },
+    {
       "key": "GATEWAY_URL",
       "class": "defaulted",
       "default": "http://gateway:8000",

@@ -2,7 +2,7 @@
 
 `GET /api/transcription/runtime` returns the signed-in account's selection, aggregate
 worker demand and physical worker status. `POST` accepts exactly `backend`
-(`gipformer` or `viegem`), boolean `enabled`, and nonnegative integer `revision`.
+(`viegem`), boolean `enabled`, and nonnegative integer `revision`.
 
 The route verifies the auth cookie through `currentUser`, rejects cross-origin writes,
 and attaches the verified user ID server-side. It derives a dedicated control key

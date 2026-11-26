@@ -1,0 +1,223 @@
+/* Lucian UX/UI Prompt #097 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#097 */
+
+.u097 {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.u097-dn {
+  position: relative;
+  width: 176px;
+  height: 176px;
+  margin: 2px auto 0;
+}
+
+.u097-dn svg {
+  width: 176px;
+  height: 176px;
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+
+.u097-trk {
+  fill: none;
+  stroke: var(--ux-surface-2);
+  stroke-width: 22;
+}
+
+.u097-sg {
+  fill: none;
+  stroke-width: 22;
+  pointer-events: stroke;
+  cursor: pointer;
+  transition: transform .45s var(--ux-spring), stroke-width .45s var(--ux-spring), opacity .25s;
+}
+
+.u097.has .u097-sg:not(.on) {
+  opacity: .38;
+}
+
+.u097-sg.on {
+  stroke-width: 29;
+}
+
+.u097-c {
+  position: absolute;
+  inset: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+
+.u097-c small {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ux-ink-3);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.u097-c b {
+  margin-top: 1px;
+  font-size: 16.5px;
+  font-weight: 800;
+  letter-spacing: -.035em;
+  color: var(--ux-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.u097-c span {
+  margin-top: 1px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ux-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.u097-c.sw > * {
+  animation: u097-sw .32s var(--ux-ease);
+}
+
+@keyframes u097-sw {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+}
+
+.u097-lg {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.u097-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.u097-it {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--ux-surface-2);
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ux-ink);
+  text-align: left;
+  transition: background-color .2s, opacity .25s, border-color .2s, transform .3s var(--ux-spring);
+}
+
+.u097-it:hover,
+.u097-it.on {
+  background: var(--ux-surface-3);
+}
+
+.u097-it.is-filter {
+  border-color: color-mix(in srgb, var(--ux-accent) 48%, transparent);
+  background: var(--ux-accent-soft);
+}
+
+.u097-it:active {
+  transform: scale(.97);
+}
+
+.u097-it i {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 3px;
+  background: var(--c);
+  box-shadow: inset 0 0 0 2px var(--c);
+  transition: background-color .25s;
+}
+
+.u097-it .u097-nm {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.u097-it .u097-wpm {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ux-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.u097-it small {
+  flex: none;
+  font-size: 11px;
+  font-weight: 750;
+  color: var(--ux-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.u097-row.is-off .u097-it {
+  opacity: .5;
+}
+
+.u097-row.is-off .u097-it i {
+  background: transparent;
+}
+
+.u097-row.is-off .u097-it .u097-nm {
+  text-decoration: line-through;
+}
+
+.u097-it:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 1px;
+}
+
+.u097-ex {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: var(--ux-ink-3);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color .15s, color .15s;
+}
+
+.u097-ex:hover {
+  background: var(--ux-surface-3);
+  color: var(--ux-ink);
+}
+
+.u097-ex:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 1px;
+}
+
+.u097-ex svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

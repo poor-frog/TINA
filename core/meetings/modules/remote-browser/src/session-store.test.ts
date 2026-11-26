@@ -69,6 +69,32 @@ resetLog();
 const noop = syncBrowserDataToS3({ userdataS3Path: 'x' }, liveDir);   // no endpoint/bucket
 check(noop === 0 && calls().length === 0, 'incomplete S3 config must be a no-op (0 uploads, no aws calls)');
 
+// ── 1c. IAM task role / ambient credentials are preserved when static keys are omitted ──
+const envLogFile = join(work, 'aws-env.log');
+writeFileSync(
+  join(binDir, 'aws'),
+  `#!/bin/sh\necho "KEY=\${AWS_ACCESS_KEY_ID-UNSET} SECRET=\${AWS_SECRET_ACCESS_KEY-UNSET}" >> "${envLogFile}"\nexit 0\n`,
+);
+chmodSync(join(binDir, 'aws'), 0o755);
+const prevKey = process.env.AWS_ACCESS_KEY_ID;
+const prevSecret = process.env.AWS_SECRET_ACCESS_KEY;
+delete process.env.AWS_ACCESS_KEY_ID;
+delete process.env.AWS_SECRET_ACCESS_KEY;
+try {
+  syncBrowserDataFromS3({
+    userdataS3Path: 'userdata/staging-bot-1',
+    s3Endpoint: 'https://s3.us-east-1.amazonaws.com',
+    s3Bucket: 'tina-staging-bucket',
+  }, liveDir);
+  const envLine = readFileSync(envLogFile, 'utf8').trim();
+  check(envLine === 'KEY=UNSET SECRET=UNSET',
+    `omitting static keys must NOT blank AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY (got '${envLine}')`);
+} finally {
+  if (prevKey !== undefined) process.env.AWS_ACCESS_KEY_ID = prevKey;
+  if (prevSecret !== undefined) process.env.AWS_SECRET_ACCESS_KEY = prevSecret;
+}
+installFakeAws('ok');
+
 // ── 2. upload failures are warnings, never throws (teardown safety) ─────────
 installFakeAws('fail');
 resetLog();

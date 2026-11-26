@@ -525,6 +525,25 @@ def test_prepare_links_fresh_and_empty_homes(tmp_path: Path, monkeypatch):
     assert link.is_symlink() and os.readlink(link) == target
 
 
+@pytest.mark.parametrize("existing_loop", [False, True])
+def test_prepare_uses_real_projects_directory_when_home_is_continuity_root(tmp_path, monkeypatch, existing_loop):
+    home = tmp_path / "system"
+    work = tmp_path / "workspace"
+    projects = home / ".claude" / "projects"
+    if existing_loop:
+        projects.parent.mkdir(parents=True)
+        projects.symlink_to(projects, target_is_directory=True)
+    monkeypatch.setenv("HOME", str(home))
+
+    harness = ClaudeCodeHarness()
+    harness.prepare(work, chat_root=home)
+    assert projects.is_dir() and not projects.is_symlink()
+    transcript = projects / "session.jsonl"
+    transcript.write_text("history")
+    harness.prepare(work, chat_root=home)
+    assert transcript.read_text() == "history"
+
+
 def test_prepare_repoints_stale_symlink_and_is_idempotent(tmp_path: Path, monkeypatch):
     ws = tmp_path / "ws"
     target = str(ws / ".claude" / "projects")

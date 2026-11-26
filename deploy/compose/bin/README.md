@@ -41,8 +41,7 @@ No separate CLI credential/profile database is created. API meeting/transcript/r
 are outside this release.
 
 The ASR controller reports disabled Compose profiles as stopped instead of failing the whole
-runtime status request. A Gipformer-only deployment remains controllable without VieGem;
-native MPS VieGem is still checked through its host endpoint without a Compose service.
+runtime status request. Native MPS VieGem is still checked through its host endpoint without a Compose service.
 
 ### First installation (CLI 0.4.0)
 
@@ -145,9 +144,9 @@ their pinned backend; changes apply to new sessions. Actual per-bot user overrid
 
 ```bash
 tina asr configure --scope global --backend custom \
-  --url http://host.docker.internal:18002 --clear-token --dry-run
+  --url http://host.docker.internal:18005 --clear-token --dry-run
 tina asr configure --scope global --backend custom \
-  --url http://host.docker.internal:18002 --token-env TINA_ENDPOINT_TOKEN --dry-run
+  --url http://host.docker.internal:18005 --token-env TINA_ENDPOINT_TOKEN --dry-run
 # After reviewing scope/endpoint/credential action, replace --dry-run with --yes to save.
 tina asr status --scope account
 tina asr verify --scope account

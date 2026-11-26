@@ -35,9 +35,9 @@ export type TranscriptionPrefs = {
   runtime_enabled?: boolean;
   revision?: number;
   effective?: { backend: string; label: string; model: string | null; source: "user" | "platform" | "environment" };
-  backend?: "default" | "apple" | "nvidia" | "funasr" | "sherpa" | "gipformer" | "viegem" | "custom" | null;
-  default_backend?: "deployment" | "apple" | "nvidia" | "funasr" | "sherpa" | "gipformer" | "viegem";
-  available_backends?: Array<"default" | "apple" | "nvidia" | "funasr" | "sherpa" | "gipformer" | "viegem" | "custom">;
+  backend?: "default" | "apple" | "nvidia" | "funasr" | "sherpa" | "viegem" | "custom" | null;
+  default_backend?: "deployment" | "apple" | "nvidia" | "funasr" | "sherpa" | "viegem";
+  available_backends?: Array<"default" | "apple" | "nvidia" | "funasr" | "sherpa" | "viegem" | "custom">;
   url?: string | null;
   token_set?: boolean;
   token?: string | null; // masked on read — write-only in the clear
@@ -78,16 +78,16 @@ export async function setTranscriptionPrefs(update: { backend?: string; url?: st
 
 export type AsrRuntime = {
   instance: string;
-  account: { backend: "gipformer" | "viegem" | null; enabled: boolean; revision: number };
-  counts: Record<"gipformer" | "viegem", number>;
-  workers: Record<"gipformer" | "viegem", { running: boolean; ready: boolean; device: string; draining?: boolean }>;
+  account: { backend: "viegem" | null; enabled: boolean; revision: number };
+  counts: Record<"viegem", number>;
+  workers: Record<"viegem", { running: boolean; ready: boolean; device: string; draining?: boolean }>;
   operation: { backend: string; phase: string } | null;
   last_error?: string | null;
 };
 export async function getAsrRuntime(): Promise<AsrRuntime> {
   return jsonOrThrow(await fetch("/api/transcription/runtime", { cache: "no-store" }));
 }
-export async function setAsrRuntime(backend: "gipformer" | "viegem", enabled: boolean, revision: number): Promise<AsrRuntime> {
+export async function setAsrRuntime(backend: "viegem", enabled: boolean, revision: number): Promise<AsrRuntime> {
   return jsonOrThrow(await fetch("/api/transcription/runtime", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ backend, enabled, revision }) }));
 }

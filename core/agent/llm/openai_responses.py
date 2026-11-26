@@ -19,6 +19,7 @@ from llm.citations import safe_web_source
 
 class OpenAIResponsesCompletion:
     name = "openai-responses"
+    plan_usage = False
 
     def __init__(self, *, base_url: Optional[str] = None, api_key: Optional[str] = None,
                  model: Optional[str] = None, timeout: float = 120.0,
@@ -60,8 +61,9 @@ class OpenAIResponsesCompletion:
             "input": [{"role": "user", "content": [{"type": "input_text", "text": prompt}]}],
             "store": False,
             "stream": True,
-            "max_output_tokens": int(os.environ.get("TINA_LLM_MAX_TOKENS") or "4096"),
         }
+        if not self.plan_usage:
+            payload["max_output_tokens"] = int(os.environ.get("TINA_LLM_MAX_TOKENS") or "4096")
         if system:
             payload["instructions"] = system
         if schema is not None:
@@ -118,7 +120,11 @@ class OpenAIResponsesCompletion:
                         if isinstance(delta, str):
                             text_parts.append(delta)
                     elif event_type in ("response.failed", "error"):
-                        detail = event.get("error") or event.get("message") or "Responses stream failed"
+                        detail = event.get("error") or (event.get("response") or {}).get("error")
+                        if (self.plan_usage and isinstance(detail, dict)
+                                and detail.get("code") == "subscription_sharing_usage_limit_exceeded"):
+                            raise LLMError("ChatGPT plan usage limit reached", status_code=429)
+                        detail = detail or event.get("message") or "Responses stream failed"
                         raise LLMError(f"OpenAI Responses stream failed: {str(detail)[:300]}")
                     elif event_type == "response.incomplete":
                         raise LLMError("OpenAI Responses stream did not complete")
@@ -152,3 +158,26 @@ class OpenAIResponsesCompletion:
         if web_search and (not searched or not sources):
             raise LLMError('Web search returned no completed cited answer')
         return CompletionResult(text="".join(text_parts), model=target, sources=tuple(list(sources.values())[:6]))
+
+
+class ChatGPTPlanCompletion(OpenAIResponsesCompletion):
+    name = "chatgpt-plan"
+    plan_usage = True
+
+    def __init__(self, *, timeout=120.0, transport=None):
+        token = os.environ.get("ACCESS_TOKEN", "")
+        if not token:
+            raise LLMConfigError("Connect ChatGPT plan before requesting a completion")
+        super().__init__(base_url="https://api.openai.com/v1", api_key=token,
+                         timeout=timeout, transport=transport)
+
+    def _complete(self, *args, **kwargs):
+        try:
+            return super()._complete(*args, **kwargs)
+        except LLMError as exc:
+            if os.environ.get("TINA_CHATGPT_VOICE_PILOT") == "1":
+                if exc.status_code == 429:
+                    os.write(2, b"TINA_CHATGPT_PLAN_USAGE_LIMIT\n")
+                elif isinstance(exc, LLMAuthError):
+                    os.write(2, b"TINA_CHATGPT_PLAN_RECONNECT_REQUIRED\n")
+            raise

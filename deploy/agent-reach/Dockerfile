@@ -5,5 +5,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-install-project --no-default-groups
 COPY server.py runner.py ./
+RUN install -d -m 0700 -o 65532 -g 65532 /tmp/tina-reach/.agent-reach
+VOLUME ["/tmp/tina-reach"]
 USER 65532:65532
 CMD ["python", "server.py"]

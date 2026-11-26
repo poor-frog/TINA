@@ -34,6 +34,11 @@ ENV NEXT_PUBLIC_GA_MEASUREMENT_ID=$NEXT_PUBLIC_GA_MEASUREMENT_ID
 # agent-api paths (404). Empty (default) keeps every surface. NEXT_PUBLIC_* → set BEFORE `next build`.
 ARG NEXT_PUBLIC_TERMINAL_MODE=""
 ENV NEXT_PUBLIC_TERMINAL_MODE=$NEXT_PUBLIC_TERMINAL_MODE
+# Hide AI Models & Transcription + Global Defaults in the Web SaaS Settings UI (`/`), keeping
+# model controls exclusively in `/terminal`. Set to "1" at build time for zero-flicker initial
+# render and/or at runtime via container env (read by /api/auth/me).
+ARG NEXT_PUBLIC_HIDE_MODEL_SETTINGS=""
+ENV NEXT_PUBLIC_HIDE_MODEL_SETTINGS=$NEXT_PUBLIC_HIDE_MODEL_SETTINGS
 # Bot display name baked into the client bundle (src/surfaces/defaultBotName.ts). Empty (default) →
 # the terminal omits bot_name on join and meeting-api's DEFAULT_BOT_NAME decides at RUNTIME, which is
 # the knob operators should use. Set this only to pin a name into the image; it then wins over the
@@ -63,10 +68,12 @@ FROM node:22-slim AS runtime
 # The server-side proxy gate reads the mode at REQUEST time (process.env), so the runtime stage must
 # carry the same value the bundle was built with — client gating and edge gating stay in lockstep.
 ARG NEXT_PUBLIC_TERMINAL_MODE=""
+ARG NEXT_PUBLIC_HIDE_MODEL_SETTINGS=""
 ENV NODE_ENV=production \
     PORT=3000 \
     HOST=0.0.0.0 \
-    NEXT_PUBLIC_TERMINAL_MODE=$NEXT_PUBLIC_TERMINAL_MODE
+    NEXT_PUBLIC_TERMINAL_MODE=$NEXT_PUBLIC_TERMINAL_MODE \
+    NEXT_PUBLIC_HIDE_MODEL_SETTINGS=$NEXT_PUBLIC_HIDE_MODEL_SETTINGS
 WORKDIR /app/clients/terminal
 COPY clients/terminal/package.json clients/terminal/package-lock.json ./
 # node_modules from the RUNTIME_DEPS-selected stage (prod = pruned + typescript; dev = full tree).

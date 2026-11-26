@@ -62,6 +62,7 @@ interface SegmentDTO {
   session_uid?: string | null;
   speaker?: string | null;
   text?: string | null;
+  completed?: boolean;
 }
 
 /** A persisted processed note from the durable store (`data.processed.views[].doc.notes[]`,
@@ -381,6 +382,7 @@ export async function fetchDurableTranscript(meetingId: string, strict = false):
         id: s.segment_id, revision: s.revision ?? 0, speakerId: s.speaker_id, speakerKey: s.speaker_key, speakerStatus: s.speaker_status,
         speakerRevision: s.speaker_revision ?? 0, tsMs: epochMs(s.start), endTsMs: epochMs(s.end),
         sessionUid: s.session_uid ?? undefined,
+        completed: s.completed !== false,
       }));
     const status = body.data?.processed?.views?.find(v => v.id === COPILOT_NOTES_VIEW_ID)?.status;
     const recordings = Array.isArray(body.recordings) ? body.recordings.filter((recording) => Number.isFinite(recording.id)) : [];
@@ -422,6 +424,32 @@ export function liveMeetingsNow(): MeetingMock[] {
  *  list reflects the new status immediately, even before the echoing WS frame lands. */
 export function refreshMeetings(): void {
   void snapshot();
+}
+
+/** Extract the meeting id from a `POST /api/bots` response and, when the payload includes the full
+ *  created row, optimistically seed it into the live meetings store so immediate navigation to the
+ *  new meeting opens without a "not found" or loading flash. */
+export function seedLiveMeetingFromResponse(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const body = raw as Partial<MeetingRowDTO> & { meeting_id?: number | string };
+  const target = body.meeting_id ?? body.id;
+  if (target == null) return undefined;
+  const id = String(target).trim();
+  if (!id) return undefined;
+  if (typeof body.platform === "string" && typeof body.status === "string") {
+    const seeded = toMock({
+      ...(body as MeetingRowDTO),
+      id,
+      native_meeting_id: body.native_meeting_id ?? null,
+    });
+    storeRevision += 1;
+    const idx = meetings.findIndex((m) => m.id === seeded.id);
+    meetings = idx >= 0
+      ? [...meetings.slice(0, idx), seeded, ...meetings.slice(idx + 1)]
+      : [seeded, ...meetings];
+    subs.forEach((f) => f());
+  }
+  return id;
 }
 
 /** Subscribe a component to the live `meeting.status` stream's CONNECTION state. `false` means the

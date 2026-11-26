@@ -17,6 +17,7 @@
 import type { NextRequest } from "next/server";
 import { resolveApiKey } from "../proxyAuth";
 import { MEETINGS_DOMAIN, refusedInMeetingsMode } from "../proxyMode";
+import { canUseWorkspacePilot } from "../auth/workspacePilot";
 
 export const dynamic = "force-dynamic";
 
@@ -39,10 +40,13 @@ async function upstreamFor(path: string, search: string): Promise<{ url: string;
 
 async function forward(req: NextRequest, params: Promise<{ path: string[] }>): Promise<Response> {
   const { path } = await params;
+  if (path.some(seg => !seg || seg === "." || seg === ".." || /[/%\\?#]/.test(seg))) {
+    return new Response(null, { status: 404 });
+  }
   const joined = path.join("/");
   // Meetings-only mode (NEXT_PUBLIC_TERMINAL_MODE=meetings): the agent branch is refused at the edge —
   // hiding the surfaces client-side is not enough, a hand-crafted request must not reach agent-api.
-  if (refusedInMeetingsMode(joined)) {
+  if (refusedInMeetingsMode(joined) || (!MEETINGS_DOMAIN.test(joined) && !(await canUseWorkspacePilot(joined)))) {
     return new Response(JSON.stringify({ error: "not_found", detail: "agent endpoints are disabled in meetings mode" }), { status: 404, headers: { "Content-Type": "application/json" } });
   }
   const { url, headers } = await upstreamFor(joined, req.nextUrl.search);

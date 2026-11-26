@@ -30,6 +30,7 @@ class BackendKind(str, Enum):
     docker = "docker"
     k8s = "k8s"
     process = "process"
+    ecs = "ecs"
 
 
 class Resources(BaseModel):

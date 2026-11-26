@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import HTTPException, Request, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, PositiveInt, StrictBool, field_validator
 from typing import Literal, Annotated
 
@@ -49,6 +50,7 @@ class Question(BaseModel):
     notes_preview: StrictBool = False
     assistant: StrictBool = False
     reply_to: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+    draft_document_workspace: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 def meeting_time_ms(value):
@@ -216,7 +218,7 @@ def safe_dir(reader, base, relative):
     return target
 
 
-def register(app, subject_of, read_target, reader, meeting_api_url, complete):
+def register(app, subject_of, read_target, reader, meeting_api_url, complete, list_workspaces=None):
     def content_path(base, path):
         parts = Path(path).parts
         if (not parts or Path(path).is_absolute() or Path(path).suffix != '.md'
@@ -545,6 +547,15 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         if str(row.get('user_id')) != subject:
             raise HTTPException(404, 'Meeting unavailable')
         policy = source_policy if source_policy is not None else (row.get('data') or {}).get('voice_assistant') or {}
+        if (subject == os.environ.get('TINA_CHATGPT_VOICE_OWNER')
+                and row.get('platform') == 'google_meet'
+                and (row.get('platform_specific_id') or row.get('native_meeting_id')) == os.environ.get('TINA_CHATGPT_VOICE_ROOM')
+                and os.environ.get('TINA_CHATGPT_VOICE_SECRET_ARN')):
+            if (not policy.get('include_transcript') or policy.get('agent_backend') != 'completion'
+                    or any(policy.get(key) for key in ('include_workspace_wiki', 'include_approved_actions',
+                        'allow_general_knowledge', 'allow_web_search', 'shared_meeting_ids', 'documents', 'source_profile_id'))):
+                raise HTTPException(409, 'ChatGPT plan pilot requires the current transcript only')
+            request.state.chatgpt_voice_pilot = True
         base = read_target(request, None)
         paths = resolve_profile(base, subject, policy)
         base, canonical, documents = load(request, meeting_id, with_canonical=with_canonical,
@@ -1234,10 +1245,58 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         except WorkspaceBusyError as exc:
             raise HTTPException(409, 'Workspace is busy. Retry shortly.') from exc
 
+    def draft_sources(request, meeting_id, workspace, path):
+        subject = subject_of(request)
+        row = meeting_get(meeting_api_url, subject, meeting_id, f'/meetings/{meeting_id}')
+        if row.get('status') != 'completed':
+            raise HTTPException(409, 'Meeting is not completed')
+        base = read_target(request, workspace)
+        document = related_text(base, path, required=True)
+        if not document or not document.strip():
+            raise HTTPException(404, 'Workspace document not found')
+        canonical = meeting_get(meeting_api_url, subject, meeting_id, f'/transcripts/by-id/{meeting_id}/canonical')
+        return sources_for(canonical, {path: document})
+
+    def generate_draft(request, meeting_id, workspace, path, question):
+        candidates = draft_sources(request, meeting_id, workspace, path)
+        transcript = [source for source in candidates if source['kind'] == 'transcript']
+        document = [source for source in candidates if source['kind'] == 'document']
+        if not transcript:
+            raise HTTPException(409, 'No confirmed transcript yet')
+        # Reserve context for each source type, even when one dominates the ranking.
+        selected = select_sources(transcript, question)[:12]
+        selected.extend(source | {'id': f's{index}'} for index, source in
+                        enumerate(select_sources(document, question)[:6], start=len(selected)))
+        selected = [source | {'quote': source['quote'][:900]} for source in selected]
+        request.state.post_meeting_draft = True
+        raw = complete(request, json.dumps({
+            'question': ('Prepare a draft for the user to review. ' + question.strip()),
+            'sources': selected,
+        }, ensure_ascii=False))
+        try:
+            answer = validate_answer(raw, selected)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(502, 'The draft had invalid sources. Please retry.') from exc
+        if stale({'sources': selected}, draft_sources(request, meeting_id, workspace, path)):
+            raise HTTPException(409, 'Sources changed. Generate the draft again.')
+        return answer
+
+    if list_workspaces is not None:
+        from control_plane.post_meeting_draft_jobs import register as register_draft_jobs
+        register_draft_jobs(app, subject_of, list_workspaces, meeting_api_url, reader, read_target,
+                            document_paths, related_text, draft_sources, generate_draft)
+
     @app.post('/api/workspace/meeting-knowledge/{meeting_id}/ask')
     def ask(request: Request, meeting_id: int, body: Question):
         if not body.question.strip():
             raise HTTPException(422, 'Enter a question')
+        if body.draft_document_workspace is not None:
+            if (len(body.documents) != 1 or body.assistant or body.notes_preview
+                    or body.catch_up or body.reply_to or body.meeting_ids):
+                raise HTTPException(422, 'Select one workspace document for the post-meeting draft')
+            answer = generate_draft(request, meeting_id, body.draft_document_workspace, body.documents[0], body.question)
+            return JSONResponse({'draft': True, 'meeting_id': meeting_id, **answer},
+                                headers={'Cache-Control': 'no-store'})
         if body.assistant and (body.notes_preview or body.catch_up or body.meeting_ids):
             raise HTTPException(422, 'Meeting assistant uses only this meeting and its selected documents')
         if body.notes_preview:

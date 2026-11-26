@@ -97,8 +97,10 @@ def test_event_ingress_targets_the_agent_api_path_used_by_the_gateway():
 def test_client_supplied_user_id_is_stripped_then_reinjected():
     """A spoofed X-User-Id is dropped; the gateway re-injects the RESOLVED user (anti-spoof)."""
     client, downstream = _client()
-    client.post("/agent/routines", headers={**AUTH, "x-user-id": "999"}, json={"name": "x"})
+    client.post("/agent/routines", headers={**AUTH, "x-user-id": "999", "x-gateway-verified": "forged"},
+                json={"name": "x"})
     assert downstream.last["headers"]["x-user-id"] == "7"
+    assert downstream.last["headers"]["x-gateway-verified"] == "1"
 
 
 def test_agent_write_methods_forward():

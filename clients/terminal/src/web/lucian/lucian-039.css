@@ -1,0 +1,127 @@
+/* Lucian UX/UI Prompt #039 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#039 */
+
+.u039-tabs {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--ux-surface-2);
+  box-shadow: inset 0 0 0 1px var(--ux-line);
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.u039-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.u039-tabs.is-full {
+  display: flex;
+  width: 100%;
+}
+
+.u039-pill {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: var(--w, 0px);
+  border-radius: 999px;
+  background: var(--ux-ink);
+  transform: translateX(var(--x, 4px));
+  box-shadow: 0 8px 16px -10px var(--ux-shadow-strong);
+  transition: transform .5s var(--ux-spring), width .5s var(--ux-spring), opacity .2s;
+  pointer-events: none;
+}
+
+.u039-tab {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  font-size: 12.5px;
+  font-weight: 640;
+  color: var(--ux-ink-2);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .32s var(--ux-ease);
+}
+
+.u039-tabs.is-full .u039-tab {
+  flex: 1;
+}
+
+.u039-tab:hover {
+  color: var(--ux-ink);
+}
+
+.u039-tab[aria-selected="true"] {
+  color: var(--ux-page);
+}
+
+.u039-tab:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 2px;
+}
+
+.u039-count {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: .72;
+  font-variant-numeric: tabular-nums;
+}
+
+.u039-tab[aria-selected="true"] .u039-count {
+  opacity: .85;
+}
+
+.u039-panel-anim {
+  animation: u039-slide-r .34s var(--ux-spring) both;
+}
+
+.u039-panel-anim.dir-left {
+  animation-name: u039-slide-l;
+}
+
+@keyframes u039-slide-r {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes u039-slide-l {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u039-pill,
+  .u039-tab {
+    transition: none;
+  }
+  .u039-panel-anim,
+  .u039-panel-anim.dir-left {
+    animation: none;
+  }
+}

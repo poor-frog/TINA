@@ -15,7 +15,6 @@ import re
 import stat
 import tempfile
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from urllib.parse import quote
 import threading
 from collections import defaultdict
 from dataclasses import dataclass
@@ -495,9 +494,8 @@ def _compile_workspace_job(routine: RoutineFile, *, subject: str, invocations_ur
         prompt=routine.prompt,
         routine_id=routine_id,
     )
-    job_spec = routines_mod.compile_to_job(authored, invocations_url=invocations_url)
+    job_spec = routines_mod.compile_to_job(authored, invocations_url=invocations_url, workspace=workspace)
     job_spec.pop("idempotency_key", None)
-    job_spec['request']['body']['context']['ref'] = {'uri': 'workspace://' + quote(workspace, safe='')}
     if workspace:
         job_spec['metadata']['workspace_slug'] = workspace
     job_spec["metadata"].update({
@@ -597,10 +595,13 @@ def scan_workspace_subjects(workspaces_dir: str | Path = "/workspaces") -> list[
     if not root.exists():
         return []
     subjects = {p.name for p in root.iterdir() if p.is_dir() and not p.is_symlink()
-                and not p.name.startswith('.') and not (p / 'policy/members.json').exists()}
-    attached = root / '.attached'
-    if attached.is_dir() and not attached.is_symlink():
-        subjects.update(p.name for p in attached.iterdir() if p.is_dir() and not p.is_symlink() and not p.name.startswith('.'))
+                and not p.name.startswith('.') and not p.name.startswith('_')
+                and not (p / 'policy/members.json').exists()}
+    for dirname in ('.attached', '_attached'):
+        attached = root / dirname
+        if attached.is_dir() and not attached.is_symlink():
+            subjects.update(p.name for p in attached.iterdir()
+                            if p.is_dir() and not p.is_symlink() and not p.name.startswith('.'))
     return sorted(subjects)
 
 
@@ -610,8 +611,21 @@ def reconcile_all_workspace_routines(
     invocations_url: str,
     workspaces_dir: str | Path = "/workspaces",
 ) -> list[ReconcileResult]:
+    from control_plane.system_mounts import pilot_allows
+    from control_plane.workspace_store import S3WorkspaceStore
+
     results: list[ReconcileResult] = []
-    for subject in scan_workspace_subjects(workspaces_dir):
+    pilot = os.getenv("TINA_WORKSPACE_PILOT_USER_IDS", "")
+    s3_store = S3WorkspaceStore.from_env(Path(workspaces_dir))
+    if s3_store is not None:
+        subjects = s3_store.list_user_subjects()
+    else:
+        subjects = scan_workspace_subjects(workspaces_dir)
+    if pilot:
+        subjects = sorted(s for s in subjects if pilot_allows(s, pilot))
+    for subject in subjects:
+        if s3_store is not None:
+            s3_store.sync_subject_workspaces(subject, force=False)
         results.append(
             reconcile_workspace_routines(
                 subject,

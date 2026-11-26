@@ -31,7 +31,7 @@ const result = await build({ stdin: { contents: source, loader: 'ts', resolveDir
   bundle: true, write: false, format: 'iife', platform: 'browser', plugins: [{ name: 'unused-views', setup(b) {
     b.onResolve({filter: /^\.\/(voice-activity-view|transcript-feed|translation)$/}, args => ({path: args.path, namespace:'fake'}));
     b.onLoad({filter: /.*/, namespace:'fake'}, () => ({contents:
-      'export const createVoiceActivity=()=>({}),createTranscriptFeed=()=>({}),watchTranslation=()=>()=>{};', loader:'js'}));
+      "export const createVoiceActivity=()=>({}),createTranscriptFeed=()=>({}),watchTranslation=()=>Object.assign(()=>{},{nudge(){}}),LANGUAGE_STORAGE_KEY='transcriptLanguage',parseTranscriptLanguage=v=>v==='en'?'en':'bilingual',prioritizeSegmentIds=()=>[];", loader:'js'}));
   } }],
 });
 vm.createContext(context);

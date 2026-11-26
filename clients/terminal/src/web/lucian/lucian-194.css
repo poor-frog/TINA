@@ -1,0 +1,162 @@
+/* Lucian UX/UI Prompt #194 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#194 */
+
+.u194 {
+  width: 100%;
+  max-width: 100%;
+  font-size: 13px;
+  line-height: 1.45;
+  position: relative;
+  font-variant-numeric: tabular-nums;
+}
+
+.u194 .wave {
+  height: 54px;
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  position: relative;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+.u194 .wave i {
+  flex: 1;
+  background: var(--ux-ink-3);
+  opacity: .52;
+  border-radius: 2px;
+  height: var(--h);
+}
+
+.u194 .band {
+  position: absolute;
+  left: var(--start, 20%);
+  width: var(--width, 45%);
+  top: 0;
+  bottom: 0;
+  border-left: 2.5px solid var(--ux-accent);
+  border-right: 2.5px solid var(--ux-accent);
+  background: color-mix(in srgb, var(--ux-accent) 18%, transparent);
+  transition: left .18s var(--ux-ease), width .18s var(--ux-ease);
+  pointer-events: none;
+}
+
+.u194 .cursor {
+  position: absolute;
+  left: var(--cursor, 20%);
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ux-ink);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s;
+}
+
+.u194.playing .cursor {
+  opacity: 1;
+}
+
+.u194 .wave > input {
+  position: absolute;
+  inset: 0 auto 0 -10px;
+  width: calc(100% + 20px);
+  max-width: none;
+  height: 100%;
+  touch-action: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  appearance: none;
+  -webkit-appearance: none;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.u194 .wave > input::-webkit-slider-runnable-track {
+  background: transparent;
+  height: 100%;
+}
+
+.u194 .wave > input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 54px;
+  border: 7px solid transparent;
+  border-top-width: 0;
+  border-bottom-width: 0;
+  border-radius: 2px;
+  background: var(--ux-accent);
+  background-clip: padding-box;
+  pointer-events: auto;
+  cursor: ew-resize;
+}
+
+.u194 .wave > input::-moz-range-track {
+  background: transparent;
+  height: 100%;
+}
+
+.u194 .wave > input::-moz-range-thumb {
+  width: 6px;
+  height: 54px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--ux-accent);
+  pointer-events: auto;
+  cursor: ew-resize;
+}
+
+.u194 .loop-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.u194 .loop-times {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ux-ink-2);
+}
+
+.u194 .preview {
+  border: 1px solid var(--ux-line-2);
+  background: var(--ux-surface-2);
+  color: var(--ux-ink);
+  border-radius: 8px;
+  padding: 0 11px;
+  height: 28px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color .2s var(--ux-ease), border-color .2s var(--ux-ease), color .2s var(--ux-ease);
+}
+
+.u194.playing .preview {
+  background: var(--ux-accent);
+  border-color: var(--ux-accent);
+  color: var(--ux-accent-ink);
+}
+
+.u194 :focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u194 *,
+  .u194 *::before,
+  .u194 *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -65,7 +65,7 @@ explicitly selects the optional CPU image instead. The GPU/CPU Docker endpoint p
 port 18005, preserving the existing native Desktop loopback rewrite on Mac/WSL-compatible hosts.
 Other Docker engines need equivalent host-gateway reachability or an appropriate endpoint.
 
-Gipformer's `asr` profile and model installer remain independent. Terminal starts the selected
+The VieGem model installer supplies both the ASR and FSMN assets. Terminal starts the selected
 worker and retires the previous one only after all accounts and active sessions release it. Existing
 user/global preferences are preserved; only a fresh registry receives a new VieGem default.
 
@@ -105,7 +105,6 @@ model/device and queue information, never audio, transcripts, or credentials.
 
 ```sh
 .venv/viegem/bin/python -m unittest discover -s deploy/transcription/viegem -p 'test_*.py'
-.venv/gipformer-fsmn/bin/python -m unittest discover -s deploy/transcription/gipformer -p 'test_*.py'
 ```
 
 The model-free checks cover API auth, limits, languages, errors, short/silent input and exact
@@ -226,15 +225,14 @@ Installation preserves global defaults and other accounts' transcription choices
 
 ## ASR start/stop by account
 
-Settings → Models → Transcription now controls the managed Gipformer and VieGem workers.
+Settings → Models → Transcription controls the managed VieGem worker.
 Selecting a managed model starts it and verifies authenticated audio,
 then updates only the signed-in account. Turning the account switch off disables new transcription for
 that account. It does not stop another account's worker or overwrite their preference.
 
 A worker with no enabled account demand is retired after ten idle seconds, only after all
 meeting bots/local Desktop captures have ended and its in-flight requests have drained. The UI
-shows physical worker state separately from the account's enabled state. If another account
-still selects the old model, both workers stay running. Changing a setting never transfers an
+shows physical worker state separately from the account's enabled state. Changing a setting never transfers an
 already-running capture to another model. Keep all capture on this managed host; remote unmanaged
 captures must remain operator-managed because their session lifetime is not observable here.
 

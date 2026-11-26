@@ -9,8 +9,10 @@ import {
   terminalMeetingIdFromPath,
   terminalMeetingPath,
 } from "../../app/meetingRoute";
+import { signIn } from "next-auth/react";
 import { AuthGate } from "../../app/AuthGate";
 import { WebShell } from "../WebApp";
+import { WebModelsPanel } from "../WebModelsPanel";
 import { computeSpeakerStats } from "../SpeakerTalkTime";
 import {
   EMPTY_MEETING_FILTERS,
@@ -32,6 +34,8 @@ const mockFetchDurableTranscript = vi.fn().mockResolvedValue({
   ],
   notes: [],
 });
+
+const mockFetchMeetingById = vi.fn().mockResolvedValue(null);
 
 const TODAY_ISO = new Date().toISOString();
 const YESTERDAY_START = new Date(Date.now() - 86_400_000).toISOString();
@@ -80,8 +84,15 @@ vi.mock("../../surfaces/liveMeetings", () => ({
   useLiveMeetingsLoaded: () => true,
   useLiveMeetingsConnection: () => true,
   refreshMeetings: vi.fn(),
+  seedLiveMeetingFromResponse: (raw: unknown) => {
+    if (!raw || typeof raw !== "object") return undefined;
+    const obj = raw as { id?: number | string; meeting_id?: number | string };
+    const id = obj.meeting_id ?? obj.id;
+    return id != null ? String(id) : undefined;
+  },
   liveMeetingsNow: () => [],
   getLiveMeeting: () => undefined,
+  fetchMeetingById: (...args: unknown[]) => mockFetchMeetingById(...args),
   fetchDurableTranscript: (...args: unknown[]) => mockFetchDurableTranscript(...args),
 }));
 
@@ -96,6 +107,7 @@ vi.mock("../../surfaces/MeetingKnowledge", () => ({
   MeetingKnowledge: ({ meetingId }: { meetingId: string }) => (
     <div data-testid="real-meeting-knowledge">Ask TINA Knowledge for {meetingId}</div>
   ),
+  MeetingWikiSourceStatus: () => null,
 }));
 
 vi.mock("../../surfaces/LiveAssistRunningView", () => ({
@@ -182,12 +194,20 @@ const mockMintTranscriptShare = vi.fn().mockResolvedValue({
   expires_at: "2026-12-01T00:00:00Z",
 });
 
+const mockSaveWorkspaceDocument = vi.fn().mockResolvedValue({ sha256: "abc123", commit: null, commit_error: null });
+
 vi.mock("../../surfaces/workspaceApi", async () => {
   const actual = await vi.importActual<typeof import("../../surfaces/workspaceApi")>("../../surfaces/workspaceApi");
   return {
     ...actual,
     listWorkspaceTree: vi.fn().mockResolvedValue(["kg/entities/task/follow-up.md"]),
     readWorkspaceFile: vi.fn().mockResolvedValue("---\ntitle: Ship User UI\nstatus: draft\n---\nReview rollout plan."),
+    readWorkspaceDocument: vi.fn().mockResolvedValue({
+      content: "---\ntitle: Ship User UI\nstatus: draft\n---\nReview rollout plan.",
+      sha256: "sha-task-1",
+      writable: true,
+    }),
+    saveWorkspaceDocument: (...args: unknown[]) => mockSaveWorkspaceDocument(...args),
     listSharedMemberships: (...args: unknown[]) => mockListSharedMemberships(...args),
     readAttachedWorkspaces: vi.fn().mockResolvedValue({ active: "seed", slots: { seed: { repo: null, ref: null, name: "Personal" } } }),
     readActiveSet: vi.fn().mockResolvedValue({ subject: "u_sarup", active: [{ slug: "eng-syncs", role: "shared", repo: null, ref: null, path: "/eng-syncs", write: true, primary: false }] }),
@@ -276,10 +296,12 @@ describe("computeSpeakerStats talk-time analytics", () => {
   });
 });
 
-describe("AuthGate split-screen login upgrade", () => {
+describe("AuthGate pre-login TINA landing", () => {
   const origFetch = globalThis.fetch;
 
   beforeEach(() => {
+    window.localStorage.removeItem("tina.landing.lang");
+    vi.mocked(signIn).mockClear();
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/auth/me")) return new Response("{}", { status: 401 });
@@ -298,12 +320,50 @@ describe("AuthGate split-screen login upgrade", () => {
     globalThis.fetch = origFetch;
   });
 
-  it("renders OAuth providers and first-run admin claim messaging", async () => {
+  it("renders OAuth providers and first-run admin claim messaging in VI default and EN toggle", async () => {
     render(<AuthGate><div>App</div></AuthGate>);
-    expect(await screen.findByText("Set up your instance")).toBeTruthy();
+    expect(await screen.findByText("Thiết lập không gian TINA")).toBeTruthy();
+    expect(screen.getByText("Lần đăng nhập đầu tiên = Quản trị viên")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Tiếp tục với Google/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Tiếp tục với Microsoft/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "EN" }));
+    expect(screen.getByText("Set up your instance")).toBeTruthy();
     expect(screen.getByText("First sign-in = administrator")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Continue with Google/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Continue with Microsoft/i })).toBeTruthy();
+  });
+
+  it("renders bilingual TINA landing, Chrome Extension tabs, interactive Hero scene, and Google OAuth", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/auth/me")) return new Response("{}", { status: 401 });
+      if (url.includes("/api/auth/providers")) {
+        return new Response(JSON.stringify({ google: { id: "google" } }), { status: 200 });
+      }
+      if (url.includes("/api/auth/instance")) {
+        return new Response(JSON.stringify({ admin_exists: true }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    render(<AuthGate><div>App</div></AuthGate>);
+    expect(await screen.findByText("01 · TRẢI NGHIỆM TRONG PHÒNG HỌP")).toBeTruthy();
+    expect(screen.getByText("02 · TINA CHROME EXTENSION")).toBeTruthy();
+    expect(screen.getAllByText("TINA Agent").length).toBeGreaterThan(0);
+
+    // Calling TINA switches the hero scene to its spoken answer.
+    fireEvent.click(screen.getByRole("button", { name: /Gọi “Tina ơi”/i }));
+    expect(screen.getByText(/Tuần trước nhóm chốt 2 mục/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Bắt kịp 60s/i }));
+    expect(screen.getByText(/Cửa sổ 09:40:02/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /Ask TINA/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Lưu vào Wiki/i }));
+    expect(screen.getByText(/Đã lưu vào Wiki/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Tiếp tục với Google/i }));
+    expect(signIn).toHaveBeenCalledWith("google", expect.objectContaining({ callbackUrl: expect.any(String) }));
   });
 });
 
@@ -312,19 +372,40 @@ describe("WebShell production UI (Option A & Option B)", () => {
 
   function mockEnvironment({
     admin,
+    workspacePilot,
+    hideModelSettings,
+    chatGptStatus,
     liveAssistState = { configured: false, enabled: false, can_configure: true, readonly: false, revision: 0, items: [] },
   }: {
     admin: boolean;
+    workspacePilot?: boolean;
+    hideModelSettings?: boolean;
+    chatGptStatus?: { status: number; body: Record<string, unknown> };
     liveAssistState?: Record<string, unknown>;
   }) {
     let currentState = { ...liveAssistState };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/api/auth/me")) {
-        return new Response(JSON.stringify({ user: { name: "Sarup Banskota", email: "sarup@tina.local" } }), { status: 200 });
+        return new Response(JSON.stringify({
+          user: { name: "Sarup Banskota", email: "sarup@tina.local" },
+          ...(typeof workspacePilot === "boolean" ? { workspacePilot } : {}),
+          ...(typeof hideModelSettings === "boolean" ? { hideModelSettings } : {}),
+        }), { status: 200 });
       }
       if (url.includes("/api/admin/me")) {
         return new Response(admin ? JSON.stringify({ ok: true }) : "{}", { status: admin ? 200 : 404 });
+      }
+      if (url.includes("/api/sessions/") && url.includes("/history")) {
+        return new Response(
+          JSON.stringify({
+            turns: [
+              { role: "user", text: "Earlier checklist question" },
+              { role: "agent", text: "Earlier checklist answer" },
+            ],
+          }),
+          { status: 200 },
+        );
       }
       if (url.includes("/api/sessions")) {
         return new Response(
@@ -337,11 +418,77 @@ describe("WebShell production UI (Option A & Option B)", () => {
           { status: 200 },
         );
       }
+      if (url.includes("/api/chat/reset") && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
       if (url.includes("/api/chat/approval") && init?.method === "POST") {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
+      if (url.includes("/api/meetings/") && url.includes("/voice-assistant")) {
+        return new Response(
+          JSON.stringify({
+            available: true,
+            policy: { enabled: true },
+            runtime: { state: "LISTENING" },
+            replies: [
+              {
+                request_id: "11111111-1111-4111-8111-111111111111",
+                text: "TINA đã tổng hợp 2 điểm chính từ cuộc họp vừa rồi.",
+                state: "completed",
+                created_at_ms: 15_000,
+                source_count: 1,
+                answer_kind: "meeting",
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
       if (url.includes("/api/meetings/") && url.includes("/annotate") && init?.method === "POST") {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (url.includes("/api/user/models")) {
+        if (init?.method === "PUT") {
+          const patch = JSON.parse(String(init.body || "{}")) as Record<string, string>;
+          return new Response(JSON.stringify({ mode: "openai-subscription", model: "gpt-6-luna", ...patch }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ mode: "openai-subscription", model: "gpt-6-luna" }), { status: 200 });
+      }
+      if (url.includes("/api/user/transcription")) {
+        return new Response(
+          JSON.stringify({
+            available_backends: ["default", "viegem", "custom"],
+            effective: { backend: "viegem", label: "VieGem + LM", model: null, source: "platform" },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/models/openai/status")) {
+        if (chatGptStatus) {
+          return new Response(JSON.stringify(chatGptStatus.body), { status: chatGptStatus.status });
+        }
+        return new Response(JSON.stringify({ connected: true, email: "nghixa021@gmail.com" }), { status: 200 });
+      }
+      if (url.includes("/api/models/openai/logout") && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (url.includes("/api/models/openai/catalog")) {
+        return new Response(JSON.stringify({ models: [{ id: "gpt-6-luna", name: "GPT-6 Luna" }] }), { status: 200 });
+      }
+      if (url.includes("/api/models/catalog")) {
+        return new Response(JSON.stringify({ models: [{ id: "gpt-5", name: "GPT-5" }] }), { status: 200 });
+      }
+      if (url.includes("/api/models/test")) {
+        return new Response(
+          JSON.stringify({ ok: true, mode: "openai-subscription", source: "settings", summary: "Connected as nghixa021@gmail.com" }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/admin/settings/models")) {
+        return new Response(JSON.stringify({ value: { mode: "deepseek", model: "deepseek-flash" } }), { status: 200 });
+      }
+      if (url.includes("/api/admin/settings/transcription")) {
+        return new Response(JSON.stringify({ value: { default_backend: "viegem" } }), { status: 200 });
       }
       if (url.includes("/api/meeting/jitsi-hosts")) {
         return new Response(JSON.stringify({ hosts: [] }), { status: 200 });
@@ -382,8 +529,11 @@ describe("WebShell production UI (Option A & Option B)", () => {
 
     // Navigate to Meetings Notebook -> verify date grouping & multi-dimensional Filter popover
     fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
-    expect((await screen.findAllByText("Live now")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByRole("button", { name: "Live now" })).toBeNull();
+    expect(await screen.findByText("Live now")).toBeTruthy();
     expect(screen.getByText("Yesterday")).toBeTruthy();
+    expect(screen.queryByText("Live sync")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Capture menu" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /Filters/i }));
     fireEvent.click(screen.getByRole("tab", { name: "Platform" }));
@@ -436,11 +586,16 @@ describe("WebShell production UI (Option A & Option B)", () => {
     expect(screen.getByText("Pricing Review")).toBeTruthy();
     expect(screen.queryByText("Q4 Rollout Checklist")).toBeNull();
 
-    // Send a prompt -> renders Tool Approval card + Copy/Share buttons
+    // Send a prompt with leading [Context: ...] -> renders clean context pill + Tool Approval card + Copy/Share buttons
     const composer = screen.getByLabelText("Message Ask Tina");
-    fireEvent.change(composer, { target: { value: "Schedule follow-up review" } });
+    fireEvent.change(composer, {
+      target: { value: '[Context: Space "My Space"]\n\nSchedule follow-up review' },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
+    expect(await screen.findByText("Space · My Space")).toBeTruthy();
+    expect(screen.getByText("Schedule follow-up review")).toBeTruthy();
+    expect(screen.queryByText(/\[Context:/)).toBeNull();
     expect(await screen.findByText("Create follow-up calendar invite")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Approve once/i }));
 
@@ -470,6 +625,99 @@ describe("WebShell production UI (Option A & Option B)", () => {
     });
   });
 
+  it("lets users delete individual old conversations and clear all conversations in Ask Tina", async () => {
+    const fetchMock = mockEnvironment({ admin: false });
+    render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+
+    // Open an existing conversation so we also verify deleting the active chat resets the pane
+    fireEvent.click(await screen.findByText("Q4 Rollout Checklist"));
+    expect(await screen.findByText("Earlier checklist answer")).toBeTruthy();
+
+    // Click trash button -> shows inline confirmation -> confirm Delete calls POST /api/chat/reset
+    fireEvent.click(screen.getByRole("button", { name: "Delete conversation Q4 Rollout Checklist" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/chat/reset",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ session: "sess-alpha" }),
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Q4 Rollout Checklist")).toBeNull();
+    });
+    expect(await screen.findByText("What would you like to know?")).toBeTruthy();
+    expect(screen.getByText("Pricing Review")).toBeTruthy();
+
+    // Clear all remaining conversations with inline confirmation
+    fireEvent.click(screen.getByRole("button", { name: "Clear all conversations" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete all" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/chat/reset",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ session: "sess-beta" }),
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Pricing Review")).toBeNull();
+    });
+    expect(await screen.findByText("Conversations appear here after your first question.")).toBeTruthy();
+  });
+
+  it("opens Knowledge Hub directly when clicking a kg/*.md path inside an Ask Tina reply", async () => {
+    mockEnvironment({ admin: false });
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/sessions/sess-alpha/history")) {
+        return new Response(
+          JSON.stringify({
+            turns: [
+              { role: "user", text: "tạo trang hướng dẫn knowledge" },
+              { role: "agent", text: "Bạn có thể xem trang mới tại `kg/knowledge_guide.md` nhé." },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/workspace/tree")) {
+        return new Response(JSON.stringify({ files: ["kg/knowledge_guide.md"] }), { status: 200 });
+      }
+      if (url.includes("/api/workspace/document") && url.includes("knowledge_guide.md")) {
+        return new Response(
+          JSON.stringify({
+            path: "kg/knowledge_guide.md",
+            content: "# Hướng dẫn sử dụng Knowledge\n\nNội dung chi tiết.\n",
+            sha256: "abc",
+            writable: true,
+          }),
+          { status: 200 },
+        );
+      }
+      return origFetch(input, init);
+    }) as typeof fetch;
+
+    render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+    fireEvent.click(await screen.findByText("Q4 Rollout Checklist"));
+
+    const docChip = await screen.findByText("kg/knowledge_guide.md");
+    fireEvent.click(docChip);
+
+    await waitFor(() => {
+      expect(window.location.search).toContain("nav=knowledge");
+      expect(window.location.search).toContain("doc=kg%2Fknowledge_guide.md");
+    });
+  });
+
   it("enables Live Assist on live meetings, shows Speaker Talk Time, and honors Personal/Team Settings", async () => {
     mockEnvironment({ admin: true });
     render(<WebShell initialMeetingId="101" />);
@@ -491,7 +739,68 @@ describe("WebShell production UI (Option A & Option B)", () => {
       fireEvent.click(talkTimeBtn);
     }
     expect(await screen.findByText("Talk time & metrics")).toBeTruthy();
-    expect(await screen.findByText("Linh")).toBeTruthy();
+    expect((await screen.findAllByText("Linh")).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders the 3-column Fireflies-style Meeting Workspace (Smart Search, Notes/Skills/Action Items, Ask Tina/Transcript, Bottom Player)", async () => {
+    const fetchMock = mockEnvironment({ admin: false });
+    render(<WebShell initialMeetingId="102" />);
+
+    // Center Notes document renders title, code badge, summary card, and action item creator
+    expect(await screen.findByRole("heading", { name: "Design Review" })).toBeTruthy();
+    expect(screen.getByText("#kuz-wvic-dfc")).toBeTruthy();
+    expect(screen.getByText("AI Executive Summary")).toBeTruthy();
+
+    // Add a new action item in Notes & verify Action Items tab badge increments
+    fireEvent.change(screen.getByLabelText("Add new action item"), {
+      target: { value: "Ship updated meeting detail layout" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByText("Ship updated meeting detail layout")).toBeTruthy();
+
+    // Switch to AI Skills tab & run a real grounded skill via streamChatTurn
+    fireEvent.click(screen.getByRole("tab", { name: /AI Skills/i }));
+    expect(screen.getByText("Executive Brief and Decisions")).toBeTruthy();
+
+    // Right panel Ask Tina starter streams through streamChatTurn
+    fireEvent.click(screen.getByRole("tab", { name: /Ask Tina/i }));
+    fireEvent.click(screen.getByRole("button", { name: "What were the main topics?" }));
+    expect(await screen.findByText(/Drafted follow-up summary/)).toBeTruthy();
+
+    // Toggle Smart Search via bottom player Talk time button -> click speaker filters Transcript
+    const talkTimeBtn = screen.getByRole("button", { name: /Talk time/i });
+    if (talkTimeBtn.getAttribute("aria-expanded") !== "true") {
+      fireEvent.click(talkTimeBtn);
+    }
+    expect(await screen.findByText("Smart Search")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Linh/i }));
+    expect(screen.getByRole("tab", { name: /Transcript/i }).getAttribute("aria-selected")).toBe("true");
+
+    // Clear speaker filter -> Voice Agent TTS ("TINA Agent") reply appears inline in Transcript
+    fireEvent.click(screen.getAllByRole("button", { name: /Linh/i })[0]);
+    expect(await screen.findByText("TINA Agent")).toBeTruthy();
+    expect(screen.getByText("TINA đã tổng hợp 2 điểm chính từ cuộc họp vừa rồi.")).toBeTruthy();
+    expect(screen.getByText("Nguồn (1)")).toBeTruthy();
+
+    // TINA Agent filter toggle isolates Voice Agent TTS replies cleanly
+    fireEvent.click(screen.getByRole("button", { name: /TINA Agent/i }));
+    expect(screen.getByText("TINA đã tổng hợp 2 điểm chính từ cuộc họp vừa rồi.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /TINA Agent/i }));
+
+    // Rename via detail top bar ••• menu calls POST /api/meetings/102/annotate
+    fireEvent.click(screen.getByRole("button", { name: "Meeting options" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename meeting" }));
+    fireEvent.change(screen.getByLabelText("Meeting title"), { target: { value: "Design Review Q4" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save title" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/meetings/102/annotate",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ title: "Design Review Q4" }),
+        }),
+      );
+    });
   });
 
   it("exposes Terminal link + Team admin sections (Global Defaults, ASR Workers) for admins and honors URL params", async () => {
@@ -505,6 +814,592 @@ describe("WebShell production UI (Option A & Option B)", () => {
 
     expect(await screen.findByTestId("real-asr-panel")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Global Defaults/i }));
-    expect(await screen.findByTestId("real-models-section-global")).toBeTruthy();
+    expect(await screen.findByText(/Deployment-wide defaults/i)).toBeTruthy();
+    expect(screen.getByText("Global Transcription Backend")).toBeTruthy();
+  });
+
+  it.each([
+    [200, true, "ChatGPT plan connected for Workspace"],
+    [200, false, "Workspace ChatGPT setup is unavailable for this TINA account."],
+    [503, true, "Could not check the Workspace ChatGPT connection."],
+  ] as const)("fetches Workspace ChatGPT status once and respects HTTP %s and availability %s", async (status, available, message) => {
+    vi.stubEnv("NEXT_PUBLIC_TERMINAL_MODE", "workspace-pilot");
+    try {
+      const fetchMock = mockEnvironment({ admin: false, workspacePilot: true, chatGptStatus: { status, body: { available, connected: true } } });
+      render(<WebModelsPanel />);
+      expect(await screen.findByText(message)).toBeTruthy();
+      expect(fetchMock.mock.calls.filter(([url]) => url === "/api/models/openai/status")).toHaveLength(1);
+      expect(Boolean(screen.queryByText(/staging operators only/i))).toBe(status === 200 && available);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("renders redesigned Agent Model Provider & Auth cards, ChatGPT OAuth disconnect, API key reveal, Antigravity guard, and connection test", async () => {
+    window.history.replaceState({}, "", "/?nav=settings&settingsWorkspace=personal&settingsSection=models");
+    const fetchMock = mockEnvironment({ admin: false });
+    render(<WebShell />);
+
+    // ChatGPT Plan OAuth card displays connected identity & real SVG logos render for all providers
+    expect(await screen.findByText("ChatGPT Plan Connected")).toBeTruthy();
+    expect(screen.getByText("nghixa021@gmail.com")).toBeTruthy();
+    const logoSrcs = Array.from(document.querySelectorAll("img.tina-web-provider-logo")).map((el) =>
+      el.getAttribute("src"),
+    );
+    expect(logoSrcs).toContain("/provider-logos/openai.svg");
+    expect(logoSrcs).toContain("/provider-logos/claude.svg");
+    expect(logoSrcs).toContain("/provider-logos/gemini.svg");
+    expect(logoSrcs).toContain("/provider-logos/deepseek.svg");
+    expect(logoSrcs).toContain("/provider-logos/groq.svg");
+    expect(logoSrcs).toContain("/provider-logos/aws.svg");
+    expect(logoSrcs).toContain("/provider-logos/antigravity.svg");
+
+    fireEvent.click(screen.getByRole("button", { name: /Test connection/i }));
+    expect(await screen.findByText("Connection verified")).toBeTruthy();
+    expect(screen.getByText(/Connected as nghixa021@gmail\.com/)).toBeTruthy();
+
+    // Disconnect ChatGPT calls real logout endpoint and flips card to Not linked
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/models/openai/logout",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+    expect(await screen.findByText("Connect your ChatGPT Plan")).toBeTruthy();
+
+    // Switch provider card to OpenAI API -> shows secret reveal toggle & saves via PUT /api/user/models
+    fireEvent.click(screen.getByRole("radio", { name: /OpenAI API/i }));
+    const keyInput = screen.getByLabelText("Credential") as HTMLInputElement;
+    expect(keyInput.type).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "Show API key" }));
+    expect(keyInput.type).toBe("text");
+    fireEvent.change(keyInput, { target: { value: "sk-test-12345" } });
+
+    const saveBtn = screen.getByRole("button", { name: /Save changes/i });
+    expect((saveBtn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(saveBtn);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/user/models",
+        expect.objectContaining({ method: "PUT" }),
+      );
+    });
+
+    // Switch to Antigravity CLI -> Save stays disabled until risk checkbox is acknowledged
+    fireEvent.click(screen.getByRole("radio", { name: /Antigravity CLI/i }));
+    expect(screen.getByText(/Account suspension risk/i)).toBeTruthy();
+    expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: /I have read this warning/i }));
+    expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("unlocks Ask Tina in WebShell for authorized workspace-pilot users while keeping /terminal restricted to admins", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TERMINAL_MODE", "workspace-pilot");
+    try {
+      mockEnvironment({ admin: false, workspacePilot: true });
+      const { unmount } = render(<WebShell />);
+      expect(await screen.findByRole("button", { name: "Ask Tina" })).toBeTruthy();
+      expect(screen.queryByRole("link", { name: "Open TINA Terminal" })).toBeNull();
+      unmount();
+
+      mockEnvironment({ admin: false, workspacePilot: false });
+      render(<WebShell />);
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: "Ask Tina" })).toBeNull();
+      });
+      expect(screen.queryByRole("link", { name: "Open TINA Terminal" })).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("hides AI Models & Transcription and Team Global Defaults in Web Settings when NEXT_PUBLIC_HIDE_MODEL_SETTINGS=1 (or via /api/auth/me runtime flag)", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HIDE_MODEL_SETTINGS", "1");
+    try {
+      window.history.replaceState({}, "", "/?nav=settings&settingsWorkspace=personal&settingsSection=models");
+      mockEnvironment({ admin: true });
+      const { unmount } = render(<WebShell />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("link", { name: "Open TINA Terminal" }).getAttribute("href")).toBe("/terminal");
+      });
+      // Falls back from ?settingsSection=models to Calendar & Auto-join and omits the Personal Models item
+      expect(screen.queryByRole("button", { name: /AI Models & Transcription/i })).toBeNull();
+      expect(screen.getByRole("heading", { name: "Calendar & Auto-join" })).toBeTruthy();
+
+      // Team Settings keeps Workspaces & Members + ASR Workers for admins, but hides Global Defaults
+      fireEvent.click(screen.getByRole("tab", { name: "Team" }));
+      expect(screen.getByRole("button", { name: /Workspaces & Members/i })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /ASR Workers/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /Global Defaults/i })).toBeNull();
+
+      // Settings search does not surface hidden model panels
+      fireEvent.change(screen.getByLabelText("Search settings"), { target: { value: "openai" } });
+      expect(screen.queryByRole("button", { name: /AI Models & Transcription/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Global Defaults/i })).toBeNull();
+      unmount();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    // Runtime toggle via /api/auth/me also hides model settings without rebuilding the client bundle
+    window.history.replaceState({}, "", "/?nav=settings&settingsWorkspace=team&settingsSection=global-models");
+    mockEnvironment({ admin: true, hideModelSettings: true });
+    render(<WebShell />);
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Global Defaults/i })).toBeNull();
+    });
+    expect(screen.getByRole("heading", { name: "Workspaces & Members" })).toBeTruthy();
+  });
+
+  it("auto-collapses the sidebar on Ask Tina, Meetings, Knowledge, Settings and auto-expands on Home, Tasks, Routines while preserving manual toggle", async () => {
+    mockEnvironment({ admin: false });
+    render(<WebShell />);
+
+    const sidebar = () => document.querySelector("aside.tina-web-sidebar") as HTMLElement;
+    const toggleBtn = () => document.querySelector("button.tina-web-collapse-btn") as HTMLButtonElement;
+
+    // Starts expanded on Home
+    expect(await screen.findByRole("heading", { name: /Sarup/ })).toBeTruthy();
+    expect(sidebar().classList.contains("collapsed")).toBe(false);
+    expect(toggleBtn().getAttribute("aria-expanded")).toBe("true");
+
+    // Clicking each two-pane nav destination auto-collapses the sidebar, and manual expand still works
+    for (const label of ["Ask Tina", "Meetings", "Knowledge", "Settings"] as const) {
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      expect(sidebar().classList.contains("collapsed")).toBe(true);
+      expect(toggleBtn().getAttribute("aria-expanded")).toBe("false");
+
+      // Manual expand works normally
+      fireEvent.click(toggleBtn());
+      expect(sidebar().classList.contains("collapsed")).toBe(false);
+      expect(toggleBtn().getAttribute("aria-expanded")).toBe("true");
+    }
+
+    // Clicking Home, Tasks, or Routines while collapsed auto-expands the sidebar, and manual collapse still works
+    for (const label of ["Home", "Tasks", "Routines"] as const) {
+      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+      expect(sidebar().classList.contains("collapsed")).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      expect(sidebar().classList.contains("collapsed")).toBe(false);
+      expect(toggleBtn().getAttribute("aria-expanded")).toBe("true");
+
+      // Manual collapse and expand work normally
+      fireEvent.click(toggleBtn());
+      expect(sidebar().classList.contains("collapsed")).toBe(true);
+      expect(toggleBtn().getAttribute("aria-expanded")).toBe("false");
+      fireEvent.click(toggleBtn());
+      expect(sidebar().classList.contains("collapsed")).toBe(false);
+    }
+  });
+
+  it("navigates to the newly created meeting page when clicking 'Send bot again' on a failed meeting", async () => {
+    const origEventSource = globalThis.EventSource;
+    const sseUrls: string[] = [];
+    class FakeEventSource {
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(url: string) {
+        sseUrls.push(url);
+      }
+      addEventListener() {}
+      removeEventListener() {}
+      close() {}
+    }
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+
+    try {
+      window.history.replaceState({}, "", "/meetings/109");
+      mockFetchMeetingById.mockImplementation(async (id: string) => {
+        if (id === "109") {
+          return {
+            id: "109",
+            native_id: "cfr-uyfy-enb",
+            title: "Google Meet · cfr-uyfy-enb",
+            when: "Just now",
+            status: "past",
+            live_status: "failed",
+            join_failure_summary: "Google Meet timed out waiting for admission.",
+            platform: "Google Meet",
+            participants: [],
+            mentioned: [],
+            actions: [],
+            transcript: [],
+            insights: [],
+          } as MeetingMock;
+        }
+        if (id === "110") {
+          return {
+            id: "110",
+            native_id: "cfr-uyfy-enb",
+            title: "Google Meet · cfr-uyfy-enb",
+            when: "Now · live",
+            status: "live",
+            live_status: "requested",
+            session_uid: "110",
+            platform: "Google Meet",
+            participants: [],
+            mentioned: [],
+            actions: [],
+            transcript: [],
+            insights: [],
+          } as MeetingMock;
+        }
+        return null;
+      });
+
+      const baseFetch = mockEnvironment({ admin: false });
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === "/api/bots" && init?.method === "POST") {
+          return new Response(
+            JSON.stringify({
+              id: 110,
+              platform: "google_meet",
+              native_meeting_id: "cfr-uyfy-enb",
+              status: "requested",
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return baseFetch(input, init);
+      }) as typeof fetch;
+
+      render(<WebShell initialMeetingId="109" />);
+
+      const sendAgainBtn = await screen.findByRole("button", { name: "Send bot again" });
+      fireEvent.click(sendAgainBtn);
+
+      await waitFor(() => {
+        expect(window.location.pathname).toBe("/meetings/110");
+      });
+      expect(await screen.findByRole("button", { name: "Stop bot" })).toBeTruthy();
+      expect(sseUrls.some((url) => url.includes("meeting_id=110"))).toBe(true);
+    } finally {
+      mockFetchMeetingById.mockResolvedValue(null);
+      globalThis.EventSource = origEventSource;
+    }
+  });
+
+  it("expands and collapses the Ask Tina & Transcript panel in focus mode like Fireflies", async () => {
+    window.history.replaceState({}, "", "/meetings/102");
+    mockEnvironment({ admin: false });
+
+    render(<WebShell initialMeetingId="102" />);
+
+    const sidePanel = await screen.findByLabelText("Ask Tina and Transcript");
+    expect(sidePanel.getAttribute("data-expanded")).toBe("false");
+    expect(screen.getByLabelText("Meeting notes workspace")).toBeTruthy();
+
+    // Expand from Ask Tina tab -> hides center notes workspace and marks panel expanded
+    const expandBtn = screen.getByRole("button", { name: "Expand Ask Tina and Transcript" });
+    expect(expandBtn.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(expandBtn);
+
+    expect(sidePanel.getAttribute("data-expanded")).toBe("true");
+    expect(screen.queryByLabelText("Meeting notes workspace")).toBeNull();
+    const collapseBtn = screen.getByRole("button", { name: "Collapse Ask Tina and Transcript" });
+    expect(collapseBtn.getAttribute("aria-pressed")).toBe("true");
+
+    // Switching to Transcript tab preserves expanded focus mode and keeps the toggle button visible
+    fireEvent.click(screen.getByRole("tab", { name: /Transcript/i }));
+    expect(sidePanel.getAttribute("data-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: "Collapse Ask Tina and Transcript" })).toBeTruthy();
+
+    // Escape exits focus mode and restores the split layout
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(sidePanel.getAttribute("data-expanded")).toBe("false");
+    expect(screen.getByLabelText("Meeting notes workspace")).toBeTruthy();
+
+    // Clicking expand then collapse button also restores split layout
+    fireEvent.click(screen.getByRole("button", { name: "Expand Ask Tina and Transcript" }));
+    expect(screen.queryByLabelText("Meeting notes workspace")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Ask Tina and Transcript" }));
+    expect(screen.getByLabelText("Meeting notes workspace")).toBeTruthy();
+  });
+
+  it("renders collapsible AgentActivitySteps, sidebar toggle, custom meeting scope popover, edit and retry in Ask Tina", async () => {
+    mockEnvironment({ admin: false });
+    render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+    expect(await screen.findByText("Q4 Rollout Checklist")).toBeTruthy();
+
+    // Toggle chat history sidebar via topbar button
+    const toggleBtn = screen.getByRole("button", { name: "Toggle chat history" });
+    expect(toggleBtn.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggleBtn);
+    expect(toggleBtn.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggleBtn);
+    expect(toggleBtn.getAttribute("aria-pressed")).toBe("true");
+
+    // Custom meeting scope popover grounds conversation and shows removable topbar chip
+    fireEvent.click(screen.getByRole("button", { name: "Ground on meeting" }));
+    fireEvent.click(screen.getByRole("option", { name: /Product Weekly Sync/i }));
+    expect(screen.getByRole("button", { name: "Clear meeting focus" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear meeting focus" }));
+    expect(screen.queryByRole("button", { name: "Clear meeting focus" })).toBeNull();
+
+    // Send a prompt -> emit tool calls -> renders friendly collapsible activity summary instead of raw tool pills
+    const composer = screen.getByLabelText("Message Ask Tina") as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: "Delete sample docs" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(capturedChatCallbacks?.onTool).toBeTruthy();
+    });
+    capturedChatCallbacks?.onTool?.("list_wiki");
+    capturedChatCallbacks?.onTool?.("delete_wiki");
+    capturedChatCallbacks?.onTool?.("delete_wiki");
+
+    const activitySummary = await screen.findByText(/3 steps · Browsed Knowledge library, Deleted 2 pages/i);
+    expect(activitySummary).toBeTruthy();
+    fireEvent.click(activitySummary.closest("button")!);
+    expect(await screen.findByLabelText("Agent tool activity")).toBeTruthy();
+    expect(screen.getByText("Browsed Knowledge library")).toBeTruthy();
+    expect(screen.getByText("Deleted 2 pages")).toBeTruthy();
+
+    // Edit user message puts clean text back into composer
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+    expect(composer.value).toBe("Delete sample docs");
+
+    // Retry response button re-runs the turn
+    fireEvent.click(screen.getByRole("button", { name: "Retry response" }));
+    await waitFor(() => {
+      expect(screen.getAllByText("Delete sample docs").length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it("supports Lucian #451 @-mention picker, #453 thinking text, #435 toast notifications, and #219 circular theme toggle", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    mockEnvironment({ admin: false });
+    render(<WebShell />);
+
+    // #219 Circular-reveal dark mode toggle in TopBar switches html[data-theme] and aria-label
+    const themeBtn = await screen.findByRole("button", { name: /Switch to light mode/i });
+    fireEvent.click(themeBtn);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    expect(screen.getByRole("button", { name: /Switch to dark mode/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Switch to dark mode/i }));
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+
+    // Open Ask Tina and verify #451 @-mention picker (meetings + knowledge pages + spaces)
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+    expect(await screen.findByText("Q4 Rollout Checklist")).toBeTruthy();
+
+    const composer = screen.getByLabelText("Message Ask Tina") as HTMLTextAreaElement;
+    // Trigger @ via toolbar button -> popover opens with real meeting & workspace suggestions
+    const mentionBtn = screen.getByRole("button", { name: "Mention meeting or knowledge" });
+    fireEvent.click(mentionBtn);
+    const listbox = await screen.findByRole("listbox", { name: "Mention meetings or knowledge" });
+    expect(listbox).toBeTruthy();
+    expect(mentionBtn.getAttribute("aria-expanded")).toBe("true");
+    // Blurring textarea toward the @ trigger or popover keeps the mention picker open
+    fireEvent.blur(composer, { relatedTarget: mentionBtn });
+    expect(mentionBtn.getAttribute("aria-expanded")).toBe("true");
+    // Clicking @ again toggles closed without duplicating "@ @", then re-opens cleanly
+    fireEvent.click(mentionBtn);
+    expect(mentionBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(composer.value).toBe("@");
+    fireEvent.click(mentionBtn);
+    expect(mentionBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(composer.value).toBe("@");
+    const firstOption = screen.getByRole("option", { name: /Product Weekly Sync/i });
+    expect(firstOption).toBeTruthy();
+
+    // Keyboard Enter selects active mention, inserts @Label, adds bouncing chip, and grounds meeting
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect(composer.value).toContain("@Product Weekly Sync");
+    expect(screen.getByRole("button", { name: "Remove mention Product Weekly Sync" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear meeting focus" })).toBeTruthy();
+
+    // Atomic Backspace removes the entire @Product Weekly Sync mention token
+    const trimmed = "@Product Weekly Sync";
+    fireEvent.change(composer, { target: { value: trimmed, selectionStart: trimmed.length, selectionEnd: trimmed.length } });
+    composer.setSelectionRange(trimmed.length, trimmed.length);
+    fireEvent.keyDown(composer, { key: "Backspace" });
+    expect(composer.value).toBe("");
+
+    // #457 Voice input pill button is present in Ask Tina composer
+    expect(screen.getByTestId("lucian-voice-input")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Voice input" })).toBeTruthy();
+
+    // #453 Thinking text renders while streaming before text arrives, and #435 Toast fires on Copy
+    const turnGate = { resolve: () => {} };
+    mockStreamChatTurn.mockImplementationOnce(async (_req: unknown, cbs: ChatStreamCallbacks) => {
+      capturedChatCallbacks = cbs;
+      cbs.onStarting?.();
+      cbs.onStatus?.("working");
+      await new Promise<void>((res) => {
+        turnGate.resolve = res;
+      });
+      return { sawVisibleOutput: true, terminal: true, aborted: false };
+    });
+
+    fireEvent.change(composer, { target: { value: "Summarize blockers" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    const thinking = await screen.findByTestId("lucian-thinking-text");
+    expect(thinking).toBeTruthy();
+    expect(thinking.textContent).toContain("Reading your workspace…");
+    // Expand thinking disclosure panel
+    const thinkBtn = thinking.querySelector("button")!;
+    fireEvent.click(thinkBtn);
+    expect(thinkBtn.getAttribute("aria-expanded")).toBe("true");
+
+    // Finish stream -> Copy triggers #435 stacked toast notification -> Dismiss closes it
+    capturedChatCallbacks?.onReply?.("Blocker summary ready.");
+    turnGate.resolve();
+    expect(await screen.findByText("Blocker summary ready.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy response" }));
+    expect(await screen.findByText("Copied response to clipboard")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Copied response to clipboard")).toBeNull();
+    });
+  });
+
+  it("supports Lucian Package 2: #459 Dynamic Island, #097 re-splitting Speaker Donut, #458 Voice Orb, #476 Read Aloud, #195 Chapter Rail, and #194 Audio Loop Region", async () => {
+    mockEnvironment({ admin: false });
+    render(<WebShell />);
+
+    // #459 Dynamic Island renders on TopBar for the live meeting ("Product Weekly Sync")
+    const island = await screen.findByTestId("lucian-dynamic-island");
+    expect(island).toBeTruthy();
+    const islandTap = screen.getByRole("button", { name: /Live meeting: Product Weekly Sync/i });
+    expect(islandTap.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(islandTap);
+    expect(islandTap.getAttribute("aria-expanded")).toBe("true");
+    expect(island.textContent).toContain("Product Weekly Sync");
+    // Clicking green open button jumps straight into that live meeting workspace
+    fireEvent.click(screen.getByRole("button", { name: "Open live meeting" }));
+    expect(await screen.findByRole("heading", { name: "Product Weekly Sync" })).toBeTruthy();
+
+    // Open Smart Search -> #097 Speaker Donut renders and re-splits when excluding a speaker
+    const talkTimeBtn = screen.getByRole("button", { name: /Talk time/i });
+    if (talkTimeBtn.getAttribute("aria-expanded") !== "true") {
+      fireEvent.click(talkTimeBtn);
+    }
+    const donut = await screen.findByTestId("lucian-speaker-donut");
+    expect(donut).toBeTruthy();
+    const excludeSarup = screen.getByRole("checkbox", { name: /Exclude Sarup in donut chart/i });
+    expect(excludeSarup.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(excludeSarup);
+    expect(excludeSarup.getAttribute("aria-checked")).toBe("false");
+    // Remaining speaker Linh re-splits to 100%
+    expect(donut.textContent).toContain("100%");
+    fireEvent.click(excludeSarup);
+    expect(excludeSarup.getAttribute("aria-checked")).toBe("true");
+
+    // #194 Audio Loop Region drawer toggles open in bottom player and updates loop range
+    fireEvent.click(screen.getByRole("button", { name: "Audio loop region" }));
+    const loopEditor = await screen.findByTestId("lucian-audio-loop");
+    expect(loopEditor).toBeTruthy();
+    const loopStart = screen.getByLabelText("Loop start") as HTMLInputElement;
+    fireEvent.change(loopStart, { target: { value: "30" } });
+    expect(loopStart.value).toBe("30");
+    const loopToggle = loopEditor.querySelector("button.preview") as HTMLButtonElement;
+    fireEvent.click(loopToggle);
+    expect(loopToggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Close audio drawer" }));
+
+    // Transcript tab -> #458 Voice Orb + #476 Read Aloud on Voice Agent reply + #220 Selection Tooltip mounted
+    fireEvent.click(screen.getByRole("tab", { name: /Transcript/i }));
+    expect(await screen.findByTestId("lucian-voice-orb")).toBeTruthy();
+    const readAloudBtn = await screen.findByRole("button", { name: "Read aloud" });
+    fireEvent.click(readAloudBtn);
+    expect(screen.getByRole("button", { name: "Pause read aloud" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Pause read aloud" }));
+    expect(screen.getAllByTestId("lucian-selection-tooltip").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("supports Lucian Package 3A: #471 Command K button, #046 Command Palette, #039 Sliding Pill Tabs, #014/#093 Task Checklist Celebration, and #439 Skeleton", async () => {
+    mockSaveWorkspaceDocument.mockClear();
+    mockEnvironment({ admin: false });
+    render(<WebShell />);
+
+    // #471 Command K button in TopBar opens #046 Command Palette
+    expect(await screen.findByTestId("lucian-command-k")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Search meetings and tasks" }));
+    const palette = await screen.findByTestId("lucian-command-palette");
+    expect(palette).toBeTruthy();
+
+    // Filter #046 palette to "theme" and run via Enter -> toggles dark/light mode and closes
+    const searchInput = screen.getByLabelText("Search query");
+    fireEvent.change(searchInput, { target: { value: "light / dark" } });
+    fireEvent.keyDown(searchInput, { key: "Enter" });
+    await waitFor(() => {
+      expect(screen.queryByTestId("lucian-command-palette")).toBeNull();
+    });
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    // Restore dark mode via TopBar toggle
+    fireEvent.click(screen.getByRole("button", { name: /Switch to dark mode/i }));
+
+    // #039 Sliding pill tabs on Home support arrow-key switching
+    expect(screen.getByTestId("lucian-sliding-tabs")).toBeTruthy();
+    const recentTab = screen.getByRole("tab", { name: /Recent/i });
+    fireEvent.keyDown(recentTab, { key: "ArrowRight" });
+    expect(screen.getByRole("tab", { name: /Upcoming/i }).getAttribute("aria-selected")).toBe("true");
+
+    // Open Tasks -> #014 checklist + #093 celebration when checking off the only open task
+    fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
+    const checklist = await screen.findByTestId("lucian-task-checklist");
+    expect(checklist).toBeTruthy();
+    const toggleBtn = await screen.findByRole("checkbox", { name: /Mark "Ship User UI" as done/i });
+    fireEvent.click(toggleBtn);
+    await waitFor(() => {
+      expect(mockSaveWorkspaceDocument).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByTestId("lucian-task-celebration")).toBeTruthy();
+  });
+
+  it("renders Lucian Package 3B on AuthGate pre-login Landing: #201 Automation Flow, #214 Bento Grid, #228 Cursor Glow Grid, and #211 Glow CTA", async () => {
+    window.localStorage.removeItem("tina.landing.lang");
+    vi.mocked(signIn).mockClear();
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/auth/me")) return new Response("{}", { status: 401 });
+      if (url.includes("/api/auth/providers")) {
+        return new Response(JSON.stringify({ google: { id: "google" }, microsoft: { id: "microsoft" } }), { status: 200 });
+      }
+      if (url.includes("/api/auth/instance")) {
+        return new Response(JSON.stringify({ admin_exists: true }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    render(<AuthGate><div>App</div></AuthGate>);
+    expect(await screen.findByTestId("lucian-automation-flow")).toBeTruthy();
+    const kgCard = screen.getByTestId("landing-knowledge-graph");
+    expect(kgCard).toBeTruthy();
+    expect(kgCard.getAttribute("data-selected-node")).toBe("jane");
+    expect(screen.getByTestId("lucian-bento-grid")).toBeTruthy();
+    expect(screen.getByTestId("lucian-cursor-glow-grid")).toBeTruthy();
+    expect(screen.getByTestId("lucian-glow-cta")).toBeTruthy();
+
+    // Run #201 pipeline flow button works cleanly without throwing
+    fireEvent.click(screen.getByRole("button", { name: /Chạy thử/i }));
+    expect(screen.getByRole("button", { name: /Đang chạy/i })).toBeTruthy();
+
+    // Interactive Knowledge Graph card supports focus cycling, zoom, drag/pan, and reset
+    fireEvent.click(screen.getByRole("button", { name: /Đổi tiêu điểm/i }));
+    expect(kgCard.getAttribute("data-selected-node")).toBe("acme");
+
+    const zoomBefore = screen.getByTestId("landing-kg-zoom").textContent;
+    fireEvent.click(screen.getByRole("button", { name: "Phóng to đồ thị" }));
+    expect(screen.getByTestId("landing-kg-zoom").textContent).not.toBe(zoomBefore);
+
+    const canvas = screen.getByRole("img", { name: /Đồ thị tri thức tương tác TINA/i });
+    fireEvent.pointerDown(canvas, { clientX: 120, clientY: 120, pointerId: 1 });
+    fireEvent.pointerMove(canvas, { clientX: 170, clientY: 150, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 170, clientY: 150, pointerId: 1 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Đặt lại vị trí đồ thị tri thức" }));
+    expect(kgCard.getAttribute("data-selected-node")).toBe("jane");
   });
 });

@@ -25,7 +25,7 @@ import { dirname, join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { launchPersistentBrowser, type BrowserContext } from '@tina/remote-browser';
-import { createSpeakController, startCaptureBridge } from './capture-bridge.js';
+import { buildBotBrowserArgs, createSpeakController, shouldPersistAuthSession, startCaptureBridge } from './capture-bridge.js';
 import type { BotPipeline, HintCounters } from './pipeline.js';
 import type { Invocation } from './config.js';
 import { createTtsPlayback, type TtsPlayback } from './tts-playback.js';
@@ -54,6 +54,30 @@ const FIXTURE = `<!doctype html><html><body>
 </body></html>`;
 
 async function verifyTtsStopBehavior(): Promise<void> {
+  const authBotArgs = buildBotBrowserArgs(true);
+  const anonBotArgs = buildBotBrowserArgs(false);
+  check('authenticated bot browser args omit --incognito and keep --disable-dev-shm-usage + autoplay',
+    !authBotArgs.includes('--incognito')
+    && authBotArgs.includes('--disable-dev-shm-usage')
+    && authBotArgs.includes('--autoplay-policy=no-user-gesture-required'),
+    JSON.stringify(authBotArgs));
+  check('anonymous bot browser args preserve --incognito and --disable-dev-shm-usage',
+    anonBotArgs.includes('--incognito') && anonBotArgs.includes('--disable-dev-shm-usage'),
+    JSON.stringify(anonBotArgs));
+  const featureFlags = authBotArgs.filter((a) => a.startsWith('--disable-features='));
+  check('buildBotBrowserArgs coalesces --disable-features into a single flag containing all features',
+    featureFlags.length === 1
+    && featureFlags[0].includes('IsolateOrigins')
+    && featureFlags[0].includes('site-per-process')
+    && featureFlags[0].includes('VizDisplayCompositor'),
+    JSON.stringify(featureFlags));
+  check('shouldPersistAuthSession only writes back on completed meetings',
+    shouldPersistAuthSession({ status: 'completed', completionReason: 'stopped' }) === true
+    && shouldPersistAuthSession({ status: 'failed', completionReason: 'auth_session_missing' }) === false
+    && shouldPersistAuthSession({ status: 'failed', completionReason: 'awaiting_admission_rejected' }) === false
+    && shouldPersistAuthSession(undefined) === false,
+    'write-back guard mismatch');
+
   const previousPath = process.env.PATH;
   const previousUrl = process.env.TTS_SERVICE_URL;
   const previousToken = process.env.TTS_API_TOKEN;

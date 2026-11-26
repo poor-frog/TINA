@@ -1,0 +1,484 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: TINA meeting control plane on private ECS Fargate with PostgreSQL, Valkey and S3.
+
+Parameters:
+  ClusterName: {Type: String}
+  VpcId: {Type: AWS::EC2::VPC::Id}
+  AppSubnetIds: {Type: 'List<AWS::EC2::Subnet::Id>'}
+  AppSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  RuntimeClientSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  ServiceNamespaceId: {Type: String}
+  RuntimeUrl: {Type: String}
+  AdminImage: {Type: String}
+  MeetingImage: {Type: String}
+  GatewayImage: {Type: String}
+  PostgresHost: {Type: String}
+  PostgresSecretArn: {Type: String}
+  ValkeyHost: {Type: String}
+  ValkeySecretArn: {Type: String}
+  RecordingsBucket: {Type: String}
+  TranscriptionUrl: {Type: String, Default: ''}
+  TranscriptionTokenArn: {Type: String, Default: ''}
+  EnableAsrControl: {Type: String, Default: 'false', AllowedValues: ['true', 'false']}
+  TtsUrl: {Type: String, Default: ''}
+  TtsTokenArn: {Type: String, Default: ''}
+  TtsProfileKeyArn: {Type: String, Default: ''}
+  LiveKitAgentUrl: {Type: String, Default: ''}
+  LiveKitSecretArn: {Type: String, Default: ''}
+  AgentApiUrl: {Type: String, Default: ''}
+  McpUrl: {Type: String, Default: ''}
+  McpGatewayTargetGroupArn: {Type: String, Default: ''}
+  McpOriginSecurityGroupId: {Type: String, Default: ''}
+  VoicePilotRoom: {Type: String, Default: '', AllowedPattern: '(|[a-z]{3}-[a-z]{4}-[a-z]{3}(,[a-z]{3}-[a-z]{4}-[a-z]{3})?)'}
+  VoicePilotUserIds: {Type: String, Default: '', AllowedPattern: '(|[*]|[0-9]+(,[0-9]+)*)'}
+  GatewayExtensionOrigins: {Type: String, Default: ''}
+  GoogleSecretArn: {Type: String, Default: ''}
+  FlowsApiUrl: {Type: String, Default: ''}
+  FlowsApiKeyArn: {Type: String, Default: ''}
+  DefaultBotName: {Type: String, Default: 'TINA'}
+  BotAuthenticated: {Type: String, Default: 'false', AllowedValues: ['true', 'false']}
+  BotUserdataS3Path: {Type: String, Default: 'userdata/staging-bot-1'}
+
+Conditions:
+  WithExtensionOrigins: !Not [!Equals [!Ref GatewayExtensionOrigins, '']]
+  WithGoogleSecret: !Not [!Equals [!Ref GoogleSecretArn, '']]
+  WithAuthenticatedBot: !And
+    - !Equals [!Ref BotAuthenticated, 'true']
+    - !Not [!Equals [!Ref BotUserdataS3Path, '']]
+  WithFlows: !And
+    - !Not [!Equals [!Ref FlowsApiUrl, '']]
+    - !Not [!Equals [!Ref FlowsApiKeyArn, '']]
+  WithTranscription: !And
+    - !Not [!Equals [!Ref TranscriptionUrl, '']]
+    - !Not [!Equals [!Ref TranscriptionTokenArn, '']]
+  WithAsrControl: !And
+    - !Condition WithTranscription
+    - !Equals [!Ref EnableAsrControl, 'true']
+  WithVoice: !And
+    - !Not [!Equals [!Ref TtsUrl, '']]
+    - !Not [!Equals [!Ref TtsTokenArn, '']]
+    - !Not [!Equals [!Ref TtsProfileKeyArn, '']]
+    - !Not [!Equals [!Ref LiveKitAgentUrl, '']]
+  WithLiveKitAudio: !And
+    - !Condition WithVoice
+    - !Not [!Equals [!Ref LiveKitSecretArn, '']]
+  WithAgentApi: !Not [!Equals [!Ref AgentApiUrl, '']]
+  WithMcp: !And
+    - !Not [!Equals [!Ref McpUrl, '']]
+    - !Not [!Equals [!Ref McpGatewayTargetGroupArn, '']]
+    - !Not [!Equals [!Ref McpOriginSecurityGroupId, '']]
+  HasVoicePilotRoom: !Not [!Equals [!Ref VoicePilotRoom, '']]
+  HasVoicePilotUsers: !Not [!Equals [!Ref VoicePilotUserIds, '']]
+  WithVoicePilot: !And
+    - !Condition WithVoice
+    - !Condition WithAgentApi
+    - !Or
+      - !Condition HasVoicePilotRoom
+      - !Condition HasVoicePilotUsers
+
+Resources:
+  CoreLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: {RetentionInDays: 7}
+  CoreDbPassword:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString: {PasswordLength: 40, ExcludePunctuation: true}
+  AdminToken:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  InternalSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  CoreClients:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Trusted staging clients of the TINA control plane
+      VpcId: !Ref VpcId
+  CoreIngress:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Gateway and admin health access plus meeting bot callbacks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 8000, ToPort: 8001, SourceSecurityGroupId: !GetAtt CoreClients.GroupId}
+        - !If
+          - WithAsrControl
+          - {IpProtocol: tcp, FromPort: 18007, ToPort: 18007, SourceSecurityGroupId: !GetAtt CoreClients.GroupId}
+          - !Ref 'AWS::NoValue'
+        - {IpProtocol: tcp, FromPort: 8080, ToPort: 8080, SourceSecurityGroupId: !Ref AppSecurityGroupId}
+        - !If
+          - WithMcp
+          - {IpProtocol: tcp, FromPort: 8000, ToPort: 8000, SourceSecurityGroupId: !Ref McpOriginSecurityGroupId}
+          - !Ref 'AWS::NoValue'
+  DiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: core
+      DnsConfig:
+        NamespaceId: !Ref ServiceNamespaceId
+        DnsRecords: [{Type: A, TTL: 15}]
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: PullCoreAndInjectSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer]
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-staging/admin-api'
+                  - !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-staging/meeting-api'
+                  - !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-staging/gateway'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt CoreLogs.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref CoreDbPassword
+                  - !Ref AdminToken
+                  - !Ref InternalSecret
+                  - !Ref PostgresSecretArn
+                  - !Ref ValkeySecretArn
+                  - !If [WithTranscription, !Ref TranscriptionTokenArn, !Ref 'AWS::NoValue']
+                  - !If [WithVoice, !Ref TtsTokenArn, !Ref 'AWS::NoValue']
+                  - !If [WithVoice, !Ref TtsProfileKeyArn, !Ref 'AWS::NoValue']
+                  - !If [WithLiveKitAudio, !Ref LiveKitSecretArn, !Ref 'AWS::NoValue']
+                  - !If [WithGoogleSecret, !Ref GoogleSecretArn, !Ref 'AWS::NoValue']
+                  - !If [WithFlows, !Ref FlowsApiKeyArn, !Ref 'AWS::NoValue']
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: ManageStagingRecordings
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${RecordingsBucket}'
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject, s3:AbortMultipartUpload]
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${RecordingsBucket}/recordings/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${RecordingsBucket}/signal/*'
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AWS::StackName
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '2048'
+      Memory: '4096'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: schema-init
+          Image: !Ref AdminImage
+          Essential: false
+          Environment:
+            - {Name: DB_HOST, Value: !Ref PostgresHost}
+          Secrets:
+            - {Name: MASTER_PASSWORD, ValueFrom: !Sub '${PostgresSecretArn}:password::'}
+            - {Name: DB_PASSWORD, ValueFrom: !Ref CoreDbPassword}
+          Command:
+            - python
+            - -c
+            - |
+              import asyncio
+              import os
+              import re
+              import ssl
+              import urllib.request
+
+              import asyncpg
+
+              async def main():
+                  with urllib.request.urlopen("https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem", timeout=15) as r:
+                      tls = ssl.create_default_context(cadata=r.read().decode())
+                  db = await asyncpg.connect(host=os.environ["DB_HOST"], database="tina", user="tinaadmin",
+                                             password=os.environ["MASTER_PASSWORD"], ssl=tls, timeout=12)
+                  try:
+                      password = os.environ["DB_PASSWORD"]
+                      if not re.fullmatch(r"[a-zA-Z0-9]{40}", password):
+                          raise ValueError("Unexpected staging database credential format")
+                      async with db.transaction():
+                          await db.execute("SELECT pg_advisory_xact_lock(528385)")
+                          if not await db.fetchval("SELECT 1 FROM pg_roles WHERE rolname='tina_core'"):
+                              await db.execute("CREATE ROLE tina_core LOGIN")
+                          literal = await db.fetchval("SELECT quote_literal($1::text)", password)
+                          await db.execute("ALTER ROLE tina_core PASSWORD " + literal)
+                          await db.execute("GRANT CONNECT ON DATABASE tina TO tina_core")
+                          await db.execute("GRANT USAGE, CREATE ON SCHEMA public TO tina_core")
+                      print("TINA_STAGING_DB_ROLE_READY", flush=True)
+                  finally:
+                      await db.close()
+
+              asyncio.run(main())
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref CoreLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+        - Name: admin
+          Image: !Ref AdminImage
+          Essential: true
+          DependsOn: [{ContainerName: schema-init, Condition: SUCCESS}]
+          PortMappings: [{ContainerPort: 8001}]
+          Environment:
+            - {Name: DB_HOST, Value: !Ref PostgresHost}
+            - !If
+              - WithAsrControl
+              - Name: TINA_VIEGEM_URL
+                Value: !Select [0, !Split ['/v1/audio/transcriptions', !Ref TranscriptionUrl]]
+              - !Ref 'AWS::NoValue'
+            - !If [WithFlows, {Name: TINA_FLOWS_API_URL, Value: !Ref FlowsApiUrl}, !Ref 'AWS::NoValue']
+          Secrets:
+            - {Name: DB_PASSWORD, ValueFrom: !Ref CoreDbPassword}
+            - {Name: ADMIN_API_TOKEN, ValueFrom: !Ref AdminToken}
+            - {Name: INTERNAL_API_SECRET, ValueFrom: !Ref InternalSecret}
+            - !If [WithAsrControl, {Name: TINA_VIEGEM_TOKEN, ValueFrom: !Ref TranscriptionTokenArn}, !Ref 'AWS::NoValue']
+            - !If [WithFlows, {Name: TINA_FLOWS_API_KEY, ValueFrom: !Ref FlowsApiKeyArn}, !Ref 'AWS::NoValue']
+          Command:
+            - python
+            - -c
+            - |
+              import os
+              import sys
+              import urllib.request
+              from urllib.parse import quote
+              from pathlib import Path
+
+              ca_path = Path("/tmp/rds-ca.pem")
+              with urllib.request.urlopen("https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem", timeout=15) as response:
+                  ca_path.write_bytes(response.read())
+              os.environ["PGSSLROOTCERT"] = str(ca_path)
+              password = quote(os.environ.pop("DB_PASSWORD"), safe="")
+              host = os.environ.pop("DB_HOST")
+              os.environ["DATABASE_URL"] = f"postgresql+asyncpg://tina_core:{password}@{host}:5432/tina?ssl=verify-full"
+              os.execv(sys.executable, [sys.executable, "-m", "admin_api"])
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=4).close()"]
+            Interval: 15
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 30
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref CoreLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+        - !If
+          - WithAsrControl
+          - Name: asr-control
+            Image: !Ref AdminImage
+            Essential: false
+            DependsOn: [{ContainerName: admin, Condition: HEALTHY}]
+            PortMappings: [{ContainerPort: 18007}]
+            Command: [python, /app/asr-control/asr-controller.py]
+            Environment:
+              - {Name: ADMIN_API_URL, Value: 'http://127.0.0.1:8001'}
+            Secrets:
+              - {Name: TINA_INTERNAL_API_SECRET, ValueFrom: !Ref InternalSecret}
+            HealthCheck:
+              Command:
+                - CMD
+                - python
+                - -c
+                - |
+                  import hashlib, hmac, os, urllib.request
+                  secret = os.environ["TINA_INTERNAL_API_SECRET"]
+                  key = hmac.new(secret.encode(), b"tina-asr-control:v1", hashlib.sha256).hexdigest()
+                  request = urllib.request.Request("http://127.0.0.1:18007/health",
+                                                   headers={"X-ASR-Control-Key": key})
+                  urllib.request.urlopen(request, timeout=3).close()
+              Interval: 15
+              Timeout: 5
+              Retries: 3
+            LogConfiguration:
+              LogDriver: awslogs
+              Options: {awslogs-group: !Ref CoreLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+          - !Ref 'AWS::NoValue'
+        - Name: meeting
+          Image: !Ref MeetingImage
+          Essential: true
+          DependsOn: [{ContainerName: admin, Condition: HEALTHY}]
+          PortMappings: [{ContainerPort: 8080}]
+          Environment:
+            - {Name: DB_HOST, Value: !Ref PostgresHost}
+            - {Name: VALKEY_HOST, Value: !Ref ValkeyHost}
+            - {Name: ADMIN_API_URL, Value: http://127.0.0.1:8001}
+            - {Name: RUNTIME_API_URL, Value: !Ref RuntimeUrl}
+            - {Name: MEETING_API_URL, Value: http://core.tina-staging.local:8080}
+            - {Name: DEFAULT_BOT_NAME, Value: !Ref DefaultBotName}
+            - {Name: RECORDING_ENABLED, Value: 'true'}
+            - {Name: S3_ENDPOINT, Value: !Sub 'https://s3.${AWS::Region}.amazonaws.com'}
+            - {Name: MINIO_BUCKET, Value: !Ref RecordingsBucket}
+            - !If [WithAuthenticatedBot, {Name: BOT_AUTHENTICATED, Value: 'true'}, !Ref 'AWS::NoValue']
+            - !If [WithAuthenticatedBot, {Name: BOT_USERDATA_S3_PATH, Value: !Ref BotUserdataS3Path}, !Ref 'AWS::NoValue']
+            - !If [WithAuthenticatedBot, {Name: BOT_S3_ENDPOINT, Value: !Sub 'https://s3.${AWS::Region}.amazonaws.com'}, !Ref 'AWS::NoValue']
+            - !If [WithAuthenticatedBot, {Name: BOT_S3_BUCKET, Value: !Ref RecordingsBucket}, !Ref 'AWS::NoValue']
+            - !If
+              - WithTranscription
+              - {Name: TRANSCRIPTION_SERVICE_URL, Value: !Ref TranscriptionUrl}
+              - !Ref AWS::NoValue
+            - !If
+              - WithTranscription
+              - {Name: TRANSCRIPTION_MODEL, Value: 5CD-AI/VieGem-ASR}
+              - !Ref AWS::NoValue
+            - !If [WithVoice, {Name: TTS_SERVICE_URL, Value: !Ref TtsUrl}, !Ref 'AWS::NoValue']
+            - !If [WithVoice, {Name: LIVEKIT_AGENT_URL, Value: !Ref LiveKitAgentUrl}, !Ref 'AWS::NoValue']
+            - !If [WithLiveKitAudio, {Name: TINA_LIVEKIT_AUDIO, Value: '1'}, !Ref 'AWS::NoValue']
+            - !If [WithAgentApi, {Name: AGENT_API_URL, Value: !Ref AgentApiUrl}, !Ref 'AWS::NoValue']
+            - !If [WithVoicePilot, {Name: TINA_MEETING_VOICE, Value: '1'}, !Ref 'AWS::NoValue']
+            - !If [WithVoicePilot, {Name: TINA_MEETING_VOICE_AGENT_BACKEND, Value: completion}, !Ref 'AWS::NoValue']
+            - !If [HasVoicePilotRoom, {Name: TINA_MEETING_VOICE_PILOT_ROOM, Value: !Ref VoicePilotRoom}, !Ref 'AWS::NoValue']
+            - !If [HasVoicePilotUsers, {Name: TINA_MEETING_VOICE_PILOT_USER_IDS, Value: !Ref VoicePilotUserIds}, !Ref 'AWS::NoValue']
+            - !If [WithVoicePilot, {Name: TINA_VOICE_TURN_SHADOW, Value: '0'}, !Ref 'AWS::NoValue']
+            - !If [WithFlows, {Name: TINA_FLOWS_API_URL, Value: !Ref FlowsApiUrl}, !Ref 'AWS::NoValue']
+          Secrets:
+            - {Name: DB_PASSWORD, ValueFrom: !Ref CoreDbPassword}
+            - {Name: VALKEY_PASSWORD, ValueFrom: !Ref ValkeySecretArn}
+            - {Name: ADMIN_TOKEN, ValueFrom: !Ref AdminToken}
+            - {Name: INTERNAL_API_SECRET, ValueFrom: !Ref InternalSecret}
+            - !If
+              - WithTranscription
+              - {Name: TRANSCRIPTION_SERVICE_TOKEN, ValueFrom: !Ref TranscriptionTokenArn}
+              - !Ref AWS::NoValue
+            - !If [WithVoice, {Name: TTS_API_TOKEN, ValueFrom: !Ref TtsTokenArn}, !Ref 'AWS::NoValue']
+            - !If [WithVoice, {Name: TINA_TTS_PROFILE_KEY, ValueFrom: !Ref TtsProfileKeyArn}, !Ref 'AWS::NoValue']
+            - !If [WithLiveKitAudio, {Name: LIVEKIT_API_SECRET, ValueFrom: !Ref LiveKitSecretArn}, !Ref 'AWS::NoValue']
+            - !If [WithFlows, {Name: TINA_FLOWS_API_KEY, ValueFrom: !Ref FlowsApiKeyArn}, !Ref 'AWS::NoValue']
+            - !If
+              - WithGoogleSecret
+              - {Name: GOOGLE_CLIENT_ID, ValueFrom: !Sub '${GoogleSecretArn}:client_id::'}
+              - !Ref 'AWS::NoValue'
+            - !If
+              - WithGoogleSecret
+              - {Name: GOOGLE_CLIENT_SECRET, ValueFrom: !Sub '${GoogleSecretArn}:client_secret::'}
+              - !Ref 'AWS::NoValue'
+          Command:
+            - python
+            - -c
+            - |
+              import os
+              import sys
+              import urllib.request
+              from urllib.parse import quote
+              from pathlib import Path
+
+              ca_path = Path("/tmp/rds-ca.pem")
+              with urllib.request.urlopen("https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem", timeout=15) as response:
+                  ca_path.write_bytes(response.read())
+              os.environ["PGSSLROOTCERT"] = str(ca_path)
+              password = quote(os.environ.pop("DB_PASSWORD"), safe="")
+              host = os.environ.pop("DB_HOST")
+              os.environ["DATABASE_URL"] = f"postgresql+asyncpg://tina_core:{password}@{host}:5432/tina?ssl=verify-full"
+              password = quote(os.environ.pop("VALKEY_PASSWORD"), safe="")
+              host = os.environ.pop("VALKEY_HOST")
+              os.environ["REDIS_URL"] = f"rediss://:{password}@{host}:6379/0"
+              os.execv(sys.executable, [sys.executable, "-m", "meeting_api"])
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=4).close()"]
+            Interval: 15
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 30
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref CoreLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+        - Name: gateway
+          Image: !Ref GatewayImage
+          Essential: true
+          DependsOn: [{ContainerName: meeting, Condition: HEALTHY}]
+          PortMappings: [{ContainerPort: 8000}]
+          Environment:
+            - !If [WithMcp, {Name: MCP_URL, Value: !Ref McpUrl}, !Ref 'AWS::NoValue']
+            - !If [WithAgentApi, {Name: AGENT_API_URL, Value: !Ref AgentApiUrl}, !Ref 'AWS::NoValue']
+            - !If [WithExtensionOrigins, {Name: TINA_GATEWAY_EXTENSION_ORIGINS, Value: !Ref GatewayExtensionOrigins}, !Ref 'AWS::NoValue']
+            - {Name: VALKEY_HOST, Value: !Ref ValkeyHost}
+            - {Name: ADMIN_API_URL, Value: http://127.0.0.1:8001}
+            - {Name: MEETING_API_URL, Value: http://127.0.0.1:8080}
+            # Edge per-IP rate limiting is enforced by CloudFront WAF (TinaEdgeRatePerIP) on real
+            # client IPs; the internal VPC gateway receives all Terminal proxy traffic from one
+            # container IP, while Gateway's per-user rate limiter still guards each user key.
+            - {Name: GUARD_ENABLED, Value: 'false'}
+          Secrets:
+            - {Name: VALKEY_PASSWORD, ValueFrom: !Ref ValkeySecretArn}
+            - {Name: INTERNAL_API_SECRET, ValueFrom: !Ref InternalSecret}
+          Command:
+            - python
+            - -c
+            - |
+              import os
+              import sys
+              from urllib.parse import quote
+
+              password = quote(os.environ.pop("VALKEY_PASSWORD"), safe="")
+              host = os.environ.pop("VALKEY_HOST")
+              os.environ["REDIS_URL"] = f"rediss://:{password}@{host}:6379/0"
+              os.execv(sys.executable, [sys.executable, "-m", "gateway"])
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4).close()"]
+            Interval: 15
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 30
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref CoreLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+
+  CoreService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ClusterName
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      PlatformVersion: '1.4.0'
+      LoadBalancers: !If
+        - WithMcp
+        - [{ContainerName: gateway, ContainerPort: 8000, TargetGroupArn: !Ref McpGatewayTargetGroupArn}]
+        - !Ref 'AWS::NoValue'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetIds
+          SecurityGroups: [!Ref AppSecurityGroupId, !Ref RuntimeClientSecurityGroupId, !GetAtt CoreIngress.GroupId]
+      ServiceRegistries:
+        - RegistryArn: !GetAtt DiscoveryService.Arn
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+
+Outputs:
+  ServiceName:
+    Value: !GetAtt CoreService.Name
+  ClientSecurityGroupId:
+    Value: !GetAtt CoreClients.GroupId
+  AdminTokenArn:
+    Value: !Ref AdminToken
+  LogGroup:
+    Value: !Ref CoreLogs
+  GatewayUrl:
+    Value: http://core.tina-staging.local:8000
+  AsrControlUrl:
+    Condition: WithAsrControl
+    Value: http://core.tina-staging.local:18007

@@ -43,8 +43,11 @@ function removeIngestSecret() {
 let txUrl = process.env.TRANSCRIPTION_SERVICE_URL || env.TRANSCRIPTION_SERVICE_URL || '';
 if (txUrl) {
   const endpoint = new URL(txUrl);
+  const legacyPort = process.env.GIPFORMER_HOST_PORT || env.GIPFORMER_HOST_PORT || '18002';
   if (endpoint.hostname === 'host.docker.internal') endpoint.hostname = '127.0.0.1';
-  txUrl = endpoint.toString().replace(/\/+$/, '');
+  const retired = endpoint.hostname === 'gipformer' ||
+    (['127.0.0.1', 'localhost'].includes(endpoint.hostname) && endpoint.port === legacyPort);
+  txUrl = retired ? '' : endpoint.toString().replace(/\/+$/, '');
 }
 let initialMeetings = [];
 if (process.env.TINA_DESKTOP_RESTORE_FILE) {

@@ -3,13 +3,6 @@
   "revision": "dd9227dcd8705c13f33bdbe59728d546ab94480f",
   "upstream_code_revision": "0cac5b183d2e1a9e3429ff69080e09cc62ebdf9b",
   "license": "MIT",
-  "vad_repo": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
-  "vad_files": {
-    "model.pt": "b3be75be477f0780277f3bae0fe489f48718f585f3a6e45d7dd1fbb1a4255fc5",
-    "config.yaml": "486861ca26ddb79081663b6179cb204c6bfae71c52f04aafc48a9e9d8dde1e93",
-    "am.mvn": "6820fef9687708c4fc3fab2530179c8fcea6262daa25514380056cd8f6eb1754",
-    "configuration.json": "7bce8867e37d55c3dd8f672695ced18077a2be199ea529a5d432d5350fc0acba"
-  },
   "files": {
     "encoder.int8.onnx": "b528768939c7711a889be81a718ea7f2ee50d0d2d384d53f399e15b44bd9408c",
     "decoder.int8.onnx": "e0a156b5454722a524230f9e35d5d928cfcdd3723437b418e5bd5e04f1c3a101",

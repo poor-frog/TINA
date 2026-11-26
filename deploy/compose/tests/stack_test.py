@@ -272,6 +272,7 @@ def test_05_recording_to_storage(stack):
     )
     assert code == 200, f"upload → {code} {receipt}"
     recording_id = receipt["recording_id"]
+    STATE["recording_meeting_id"] = meeting_id
     storage_path = receipt["storage_path"]
     assert storage_path.startswith(f"recordings/{user_id}/{recording_id}/{session_uid}/audio/")
 
@@ -298,6 +299,54 @@ def test_05_recording_to_storage(stack):
     STATE["storage_chunk_key"] = next(k for k in chunk_keys if k.endswith("000000.wav"))
     STATE["storage_master_key"] = next(k for k in master_keys if k.endswith("master.wav"))
     print(f"\n[5/recording] chunk → storage:{STATE['storage_chunk_key']} ; master → storage:{STATE['storage_master_key']}")
+
+
+@pytest.mark.skipif(os.getenv("COMPOSE_DRAFT_VERIFY") != "1", reason="requires an isolated completion fixture")
+def test_05b_post_meeting_draft(stack):
+    meeting_id = STATE["recording_meeting_id"]
+    payload = json.dumps({
+        "type": "transcription", "meeting_id": meeting_id,
+        "segments": [{"segment_id": "release-draft", "start": 0.0, "end": 1.0,
+                      "text": "Nhóm sẽ kiểm thử báo cáo.", "language": "vi",
+                      "speaker": "Tester", "completed": True}],
+    })
+    stack.redis_cli("XADD", "transcription_segments", "*", "payload", payload)
+    headers = {"X-API-Key": STATE["token_full"], "Content-Type": "application/json"}
+    end = time.monotonic() + 20
+    while time.monotonic() < end:
+        status, canonical = http("GET", f"{stack.gateway}/transcripts/by-id/{meeting_id}/canonical",
+                                 headers=headers)
+        if status == 200 and any(s["segment_id"] == "release-draft" for s in canonical["segments"]):
+            break
+        time.sleep(.25)
+    else:
+        pytest.fail("Confirmed transcript did not reach the canonical endpoint")
+    stack.psql(f"UPDATE meetings SET status='completed',end_time=NOW() WHERE id={meeting_id};")
+    workspace = stack.gateway + "/agent/workspace"
+    status, created = http("POST", f"{workspace}/new", headers=headers,
+                           body=b'{"name":"Release draft fixture"}')
+    assert status == 201
+    selection = {"workspace": created["slug"], "path": "notes/checklist.md"}
+    status, _ = http("PUT", f"{workspace}/document", headers=headers, body=json.dumps({
+        "slug": selection["workspace"], "path": selection["path"],
+        "content": "Tài liệu yêu cầu kiểm tra bản ghi thử nghiệm.",
+    }).encode())
+    assert status == 200
+    endpoint = f"{workspace}/meeting-knowledge/{meeting_id}/draft-job"
+    status, created = http("POST", endpoint, headers=headers, body=json.dumps(selection).encode())
+    assert status == 202
+    end = time.monotonic() + 120
+    while time.monotonic() < end:
+        status, response = http("GET", endpoint, headers=headers)
+        assert status == 200
+        saved = response["job"]
+        assert saved["id"] == created["job"]["id"]
+        if saved["status"] == "completed":
+            assert {item["kind"] for item in saved["answer"]["sources"]} == {"transcript", "document"}
+            return
+        assert saved["status"] == "running"
+        time.sleep(.5)
+    pytest.fail("Compose draft did not complete")
 
 
 # ── 6c. continue_meeting ─────────────────────────────────────────────────────────────────────────

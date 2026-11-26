@@ -1,0 +1,154 @@
+/* PrivateInfraIso — Warm Paper / Studio Light + TINA Brand Teal & Mint isometric stage */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 2px solid #0c0d0a;
+  border-radius: 22px;
+  box-shadow: 5px 5px 0 #0c0d0a;
+  background:
+    radial-gradient(ellipse at 72% 28%, rgba(110, 231, 183, 0.2), transparent 56%),
+    radial-gradient(ellipse at 18% 82%, rgba(23, 107, 91, 0.06), transparent 52%),
+    #faf8f3;
+  color: #0c0d0a;
+}
+
+.stageWrap {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 18px 10px;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+}
+
+.nodeHit {
+  cursor: pointer;
+}
+
+/* Animated isometric data packets */
+.flow {
+  stroke-dasharray: 0.01 18;
+  animation: tinaIsoFlow 1.15s linear infinite;
+}
+
+.flowFast {
+  animation-duration: 0.58s;
+}
+
+.blink {
+  animation: tinaIsoBlink 2.6s step-end infinite;
+}
+
+.ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tinaIsoRing 1.7s ease-out infinite;
+}
+
+@keyframes tinaIsoFlow {
+  to {
+    stroke-dashoffset: -18px;
+  }
+}
+
+@keyframes tinaIsoBlink {
+  0%,
+  68% {
+    opacity: 1;
+  }
+  70%,
+  100% {
+    opacity: 0.24;
+  }
+}
+
+@keyframes tinaIsoRing {
+  0% {
+    opacity: 0.72;
+    transform: scale(0.88);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.36);
+  }
+}
+
+/* Minimal compact footer */
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 18px 14px;
+  border-top: 1px solid #e2ddd0;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pill {
+  min-height: 28px;
+  padding: 0 11px;
+  border: 1.5px solid #d5cfc0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #5a584f;
+  font: 600 11px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.pill:hover {
+  color: #0c0d0a;
+  border-color: #0c0d0a;
+}
+
+.pillActive {
+  background: #0c0d0a;
+  border-color: #0c0d0a;
+  color: #6ee7b7;
+}
+
+.pillActive:hover {
+  background: #176b5b;
+  border-color: #176b5b;
+  color: #ffffff;
+}
+
+.metaRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.caption {
+  color: #2f312c;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow,
+  .blink,
+  .ring {
+    animation: none !important;
+  }
+  .ring {
+    opacity: 0;
+  }
+}

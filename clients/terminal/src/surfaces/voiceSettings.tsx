@@ -24,10 +24,17 @@ function pronunciationMap(text:string):Record<string,string>{
   return result;
 }
 
-export function VoiceSettings(){
+export function VoiceSettings({
+  hideModelHint = false,
+  voiceOnly = false,
+}: {
+  hideModelHint?: boolean;
+  voiceOnly?: boolean;
+} = {}){
   const [tab,setTab]=useState<'voice'|'behavior'|'meeting'>('voice'),prefix=useId();
   const [loaded,setLoaded]=useState(false);
   const [speechVoice,setSpeechVoice]=useState('auto'),[terms,setTerms]=useState(''),[savedSpeech,setSavedSpeech]=useState({voice:'auto',terms:''});
+  const savedPronunciationsRef=useRef<Record<string,string>>({});
   const [services,setServices]=useState<Services|null>(null),[backend,setBackend]=useState('Unavailable');
   const [saved,setSaved]=useState('default'),[value,setValue]=useState('default');
   const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[checking,setChecking]=useState(false),[previewBusy,setPreviewBusy]=useState(false);
@@ -39,31 +46,42 @@ export function VoiceSettings(){
   const defaultVoice=services?.voice_pipeline_configured&&(value==='on'||(value==='default'&&services.default_prepare_new_bots));
   useEffect(()=>{
     alive.current=true;const abort=new AbortController();
+    const asrReq=voiceOnly
+      ?Promise.resolve(new Response(JSON.stringify({effective:undefined}),{status:200}))
+      :fetch('/api/user/transcription',{cache:'no-store',signal:abort.signal});
     void Promise.all([fetch('/api/user/voice',{cache:'no-store',signal:abort.signal}),
       fetch('/api/bots/voice/services',{cache:'no-store',signal:abort.signal}),
-      fetch('/api/user/transcription',{cache:'no-store',signal:abort.signal})]).then(async([prefs,status,asr])=>{
+      asrReq]).then(async([prefs,status,asr])=>{
         if(!prefs.ok||!status.ok)throw Error('Could not load voice settings.');
         const [p,s,t]=await Promise.all([prefs.json(),status.json(),asr.ok?asr.json():{effective:undefined}]);
         if(abort.signal.aborted)return;
         const selection=p.prepare_new_bots==null?'default':p.prepare_new_bots?'on':'off';
-        setSaved(selection);setValue(selection);setServices(s);setBackend(t.effective?.label||'Choose a model in Settings → Models → Transcription');
-        const speech={voice:p.speech_voice==='Trúc Ly'?'auto':p.speech_voice||'auto',terms:Object.entries(p.pronunciations||{}).map(([key,value])=>`${key} = ${value}`).join('\n')};
+        setSaved(selection);setValue(selection);setServices(s);setBackend(t.effective?.label||(hideModelHint?'Managed by workspace deployment':'Choose a model in Settings → Models → Transcription'));
+        const defaultName=s?.tts?.voice||'Trúc Ly';
+        savedPronunciationsRef.current=p.pronunciations&&typeof p.pronunciations==='object'?p.pronunciations:{};
+        const speech={voice:!p.speech_voice||p.speech_voice==='Trúc Ly'||p.speech_voice===defaultName?'auto':p.speech_voice,
+          terms:Object.entries(savedPronunciationsRef.current).map(([key,val])=>`${key} = ${val}`).join('\n')};
         setSpeechVoice(speech.voice);setTerms(speech.terms);setSavedSpeech(speech);setLoaded(true);
       }).catch(()=>{if(!abort.signal.aborted)setError('Could not load voice settings.');})
       .finally(()=>{if(!abort.signal.aborted)setLoading(false);});
     return()=>{alive.current=false;abort.abort();controller.current?.abort();audio.current?.pause();};
-  },[]);
-  useEffect(()=>{if(!audioUrl)return;void audio.current?.play().catch(()=>{if(alive.current)setNotice('Press Play to hear the preview.');});
+  },[hideModelHint,voiceOnly]);
+  useEffect(()=>{if(!audioUrl)return;void audio.current?.play()?.catch(()=>{if(alive.current)setNotice('Press Play to hear the preview.');});
     return()=>URL.revokeObjectURL(audioUrl);},[audioUrl]);
   useEffect(()=>{controller.current?.abort();audio.current?.pause();setAudioUrl('');setPreviewBusy(false);},[speechVoice,terms]);
   async function save(){
     setBusy(true);setError('');setNotice('');
-    try{const pronunciations=pronunciationMap(terms);
+    try{const pronunciations=voiceOnly?savedPronunciationsRef.current:pronunciationMap(terms);
       const r=await fetch('/api/user/voice',{method:'PUT',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({prepare_new_bots:value==='default'?null:value==='on',
           ...(services?.tts.profiles_supported===false?{}:{speech_voice:speechVoice,pronunciations})})});
       if(!r.ok)throw Error('Could not save voice preferences.');
-      if(alive.current){setSaved(value);setSavedSpeech({voice:speechVoice,terms});setNotice('Saved. Applies to new Google Meet bots.');}
+      if(alive.current){
+        setSaved(value);
+        setSavedSpeech({voice:speechVoice,terms});
+        if(!voiceOnly)savedPronunciationsRef.current=pronunciations;
+        setNotice(voiceOnly?'Voice saved. Applies to your upcoming meetings.':'Saved. Applies to new Google Meet bots.');
+      }
     }catch(e){if(alive.current)setError((e as Error).message);}finally{if(alive.current)setBusy(false);}
   }
   async function check(){
@@ -75,22 +93,105 @@ export function VoiceSettings(){
   async function preview(){
     controller.current?.abort();const abort=new AbortController();controller.current=abort;
     setPreviewBusy(true);setError('');setNotice('');audio.current?.pause();
-    try{const pronunciations=pronunciationMap(terms);const r=await fetch('/api/bots/voice/preview',{method:'POST',signal:abort.signal,
+    try{const pronunciations=voiceOnly?savedPronunciationsRef.current:pronunciationMap(terms);const r=await fetch('/api/bots/voice/preview',{method:'POST',signal:abort.signal,
       headers:{'Content-Type':'application/json'},body:JSON.stringify({voice:speechVoice,pronunciations})});
       if(!r.ok)throw Error(r.status===429?'Wait a few seconds before trying again.':'Could not create the preview. Check TTS.');
       const blob=await r.blob();if(!abort.signal.aborted&&alive.current)setAudioUrl(URL.createObjectURL(blob));
     }catch(e){if(!abort.signal.aborted&&alive.current)setError((e as Error).message);}
     finally{if(alive.current&&!abort.signal.aborted)setPreviewBusy(false);}
   }
-  const dirty=saved!==value||savedSpeech.voice!==speechVoice||savedSpeech.terms!==terms;
+  const dirty=voiceOnly?savedSpeech.voice!==speechVoice:(saved!==value||savedSpeech.voice!==speechVoice||savedSpeech.terms!==terms);
   let pronunciationError='';
-  try{pronunciationMap(terms);}catch(e){pronunciationError=(e as Error).message;}
-  const selectedVoice=speechVoice==='auto'?(services?.tts.voice||'Trúc Ly')
+  if(!voiceOnly){try{pronunciationMap(terms);}catch(e){pronunciationError=(e as Error).message;}}
+  const defaultVoiceId=services?.tts.voice||'Trúc Ly';
+  const selectedVoice=speechVoice==='auto'?defaultVoiceId
     :services?.tts.voices?.find(voice=>voice.id===speechVoice)?.label||speechVoice;
   const speechStatus=loading?'Checking…':services?.tts.ready?services.tts.busy?'Synthesizing…':'Ready':services?.tts.configured?'Offline':'Not configured';
+  const defaultPreset=(services?.tts.voices||[]).find(voice=>voice.id===defaultVoiceId);
+  const voiceOptions:Array<{value:string;label:string;region?:string;isDefault?:boolean}>=[
+    {value:'auto',label:defaultPreset?.label||defaultVoiceId,region:defaultPreset?.region,isDefault:true},
+    ...(services?.tts.voices||[])
+      .filter(voice=>voice.id!==defaultVoiceId)
+      .map(voice=>({value:voice.id,label:voice.label,region:voice.region})),
+  ];
   function discard(){
     controller.current?.abort();audio.current?.pause();setAudioUrl('');setPreviewBusy(false);
     setValue(saved);setSpeechVoice(savedSpeech.voice);setTerms(savedSpeech.terms);setError('');setNotice('');
+  }
+  if(voiceOnly){
+    const profilesDisabled=services?.tts.profiles_supported===false;
+    return <div className={`${styles.root} ${styles.voiceOnlyRoot}`} aria-label="Voice assistant settings" aria-busy={loading}>
+      <section className={styles.voiceHero} aria-label="Selected agent voice">
+        <div className={styles.voiceHeroLeft}>
+          <div className={styles.voiceAvatar} aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" x2="12" y1="19" y2="22"/>
+            </svg>
+          </div>
+          <div className={styles.voiceHeroCopy}>
+            <span className={styles.eyebrow}>Active agent voice</span>
+            <div className={styles.voiceHeroNameRow}>
+              <strong>{loading?'Loading…':selectedVoice}</strong>
+              <span className={`${styles.statusPill} ${services?.tts.ready?styles.statusReady:styles.statusMuted}`}>
+                <span className={styles.statusDot} aria-hidden="true"/>
+                {speechStatus}
+              </span>
+            </div>
+          </div>
+        </div>
+        <button type="button" className={styles.primary} disabled={!loaded||busy||previewBusy||!services?.tts.ready} onClick={preview}>
+          {previewBusy?'Preparing preview…':'Preview voice'}
+        </button>
+      </section>
+
+      {audioUrl&&<div className={styles.previewBox}>
+        <audio ref={audio} controls src={audioUrl} aria-label="TINA voice preview" className={styles.audio}/>
+        <p className={styles.helper}>Preview plays in your browser only.</p>
+      </div>}
+
+      <section className={styles.voicePickerCard} aria-label="Choose agent voice">
+        <div className={styles.voicePickerHead}>
+          <h2>Choose how TINA sounds</h2>
+          <p className={styles.lead}>Pick a voice for your meeting assistant, then preview how it introduces itself.</p>
+        </div>
+        <div className={styles.voiceGrid} role="radiogroup" aria-label="Voice preset">
+          {voiceOptions.map(option=>{
+            const selected=speechVoice===option.value;
+            const disabled=!loaded||busy||(profilesDisabled&&option.value!=='auto');
+            return <button key={option.value} type="button" role="radio" aria-checked={selected}
+              disabled={disabled}
+              className={`${styles.voiceCard} ${selected?styles.voiceCardSelected:''}`}
+              onClick={()=>setSpeechVoice(option.value)}>
+              <div className={styles.voiceCardTop}>
+                <span className={styles.voiceCardName}>{option.label}</span>
+                {selected&&<span className={styles.voiceCheck} aria-hidden="true">✓</span>}
+              </div>
+              <div className={styles.voiceCardMeta}>
+                {option.isDefault&&<span className={styles.voiceTagDefault}>Default</span>}
+                {option.region&&<span className={styles.voiceTag}>{option.region}</span>}
+                {!option.isDefault&&!option.region&&<span className={styles.voiceTag}>Voice preset</span>}
+              </div>
+            </button>;
+          })}
+        </div>
+        {profilesDisabled&&<p role="status" className={styles.helper}>Speech profiles are not configured on this deployment.</p>}
+        {services&&!services.voice_pipeline_configured&&<p role="status" className={styles.helper}>Voice assistant is currently disabled in deployment settings.</p>}
+      </section>
+
+      {error&&<p role="alert" className={styles.error}>{error}</p>}
+      {notice&&<p role="status" className={styles.notice}>{notice}</p>}
+
+      <footer className={`${styles.footer} ${styles.voiceOnlyFooter} ${dirty?styles.voiceOnlyFooterDirty:''}`}>
+        <div className={styles.footerCopy}>
+          <p role="status">{loading?'Loading voices…':!loaded?'Voice settings unavailable':dirty?'Unsaved changes':'All changes saved'}</p>
+          <span>Applies to your voice assistant in upcoming meetings</span>
+        </div>
+        <button type="button" className={styles.discard} disabled={!dirty||busy} onClick={discard}>Discard</button>
+        <button type="button" className={styles.primary} disabled={!loaded||busy||!dirty} onClick={save}>{busy?'Saving…':'Save changes'}</button>
+      </footer>
+    </div>;
   }
   return <div className={styles.root} aria-label="Voice assistant settings" aria-busy={loading}>
     <div className={styles.summary}>

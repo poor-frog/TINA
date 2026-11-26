@@ -19,7 +19,7 @@ import { meetingPhase, type MeetingMock } from "./meetingModel";
 import { ApiError, presentError, readApiFailure } from "./apiClient";
 import { serviceDenialFromError, type ServiceDenialPresentation } from "./serviceDenial";
 import { ServiceDenialPanel } from "./ServiceDenialPanel";
-import { useLiveMeetings, useLiveMeetingsConnection, useLiveMeetingsLoaded, liveMeetingsNow, refreshMeetings } from "./liveMeetings";
+import { useLiveMeetings, useLiveMeetingsConnection, useLiveMeetingsLoaded, getLiveMeeting, liveMeetingsNow, refreshMeetings, seedLiveMeetingFromResponse } from "./liveMeetings";
 import { usePreviewPinTab } from "./previewPinTab";
 import { defaultBotName } from "./defaultBotName";
 import { discordChannelUrl, meetingUrlFor } from "./meetingId";
@@ -299,7 +299,14 @@ type MeetingActionFailure = {
   denial?: ServiceDenialPresentation | null;
 };
 type MeetingActionFailureHandler = (failure: MeetingActionFailure) => void;
-type RowAction = { id: string; label: string; tone: "accent" | "live" | "muted"; run: (onFailure?: MeetingActionFailureHandler) => Promise<void> | void };
+export type MeetingActionSuccess = { meetingId?: string };
+type MeetingActionSuccessHandler = (result: MeetingActionSuccess) => void;
+type RowAction = {
+  id: string;
+  label: string;
+  tone: "accent" | "live" | "muted";
+  run: (onFailure?: MeetingActionFailureHandler, onSuccess?: MeetingActionSuccessHandler) => Promise<void> | void;
+};
 
 /** A non-ok action response as a STRUCTURED failure (status + backend detail + the intact body),
  *  never a raw string. Shared with `getJson`'s error path so both edges produce the same object. */
@@ -321,10 +328,22 @@ export function presentMeetingActionFailure(error: unknown): string {
   return presentError(error).headline;
 }
 
-async function runMeetingAction(action: Omit<MeetingActionFailure, "message">, request: Promise<Response>, onFailure?: MeetingActionFailureHandler): Promise<void> {
+async function runMeetingAction(
+  action: Omit<MeetingActionFailure, "message">,
+  request: Promise<Response>,
+  onFailure?: MeetingActionFailureHandler,
+  onSuccess?: MeetingActionSuccessHandler,
+  extractMeetingId = false,
+): Promise<void> {
   try {
     const r = await request;
     if (!r.ok) throw await readFailure(r);
+    let meetingId: string | undefined;
+    if (extractMeetingId && typeof r.json === "function") {
+      const body = await r.json().catch(() => null);
+      meetingId = seedLiveMeetingFromResponse(body);
+    }
+    onSuccess?.({ meetingId });
   } catch (error) {
     // Operator channel keeps the full plumbing (P18); the UI channel gets the presented truth.
     console.warn("meeting action failed", { ...action, message: String(error instanceof Error ? error.message : error) });
@@ -353,7 +372,7 @@ export function actionsFor(m: MeetingMock): RowAction[] {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ intent: state, ...(at ? { at } : {}) }),
     }), onFailure);
-  const send = (onFailure?: MeetingActionFailureHandler) =>
+  const send = (onFailure?: MeetingActionFailureHandler, onSuccess?: MeetingActionSuccessHandler) =>
     runMeetingAction({ actionId: "send", actionLabel: "Send now", native }, fetch("/api/bots", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -362,7 +381,7 @@ export function actionsFor(m: MeetingMock): RowAction[] {
         ...(m.meeting_url || constructedUrl ? { meeting_url: meetingUrlFor({ platform: platformSlug, native_meeting_id: native }, m.meeting_url || constructedUrl!) } : {}),
         bot_name: defaultBotName(),
       }),
-    }), onFailure);
+    }), onFailure, onSuccess, true);
   // Delete a PLANNED row — ROW-id addressed (a link-less plan has no platform/native path).
   const del = (onFailure?: MeetingActionFailureHandler) =>
     runMeetingAction({ actionId: "delete", actionLabel: "Delete", native }, fetch(`/api/meetings/${encodeURIComponent(m.id)}`, { method: "DELETE" }), onFailure);
@@ -437,7 +456,21 @@ function autoRetryMessage(m: MeetingMock): string | null {
 
 /** Status badge (only when meaningful) + a small ▾ menu of action→transition items for one meeting row.
  *  The ▾ is revealed on row hover (or while its menu is open) to keep the list quiet at rest. */
-function RowActions({ m, showBadge, reveal, onActionStart, onActionFailure }: { m: MeetingMock; showBadge: boolean; reveal: boolean; onActionStart?: () => void; onActionFailure?: MeetingActionFailureHandler }) {
+function RowActions({
+  m,
+  showBadge,
+  reveal,
+  onActionStart,
+  onActionFailure,
+  onActionSuccess,
+}: {
+  m: MeetingMock;
+  showBadge: boolean;
+  reveal: boolean;
+  onActionStart?: () => void;
+  onActionFailure?: MeetingActionFailureHandler;
+  onActionSuccess?: (actionId: string, result: MeetingActionSuccess) => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const acts = actionsFor(m);
@@ -459,7 +492,7 @@ function RowActions({ m, showBadge, reveal, onActionStart, onActionFailure }: { 
       {open && (
         <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, minWidth: 132, background: "var(--panel)", border: "1px solid var(--line2)", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,.28)", padding: 4, zIndex: 40 }}>
           {acts.map((a) => (
-            <button key={a.id} onClick={(e) => { e.stopPropagation(); setOpen(false); onActionStart?.(); void a.run(onActionFailure); }}
+            <button key={a.id} onClick={(e) => { e.stopPropagation(); setOpen(false); onActionStart?.(); void a.run(onActionFailure, (res) => onActionSuccess?.(a.id, res)); }}
               style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", color: a.tone === "live" ? "var(--danger)" : a.tone === "muted" ? "var(--t2)" : "var(--accent)", borderRadius: 6, padding: "6px 9px", fontSize: 12, fontWeight: 550, cursor: "pointer" }}
               onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--panel2)")} onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}>
               {a.label}
@@ -485,6 +518,7 @@ export function meetingTab(m: MeetingMock): TabDescriptor {
 const BADGE_STATUSES = new Set(["idle", "scheduled", "requested", "joining", "awaiting_admission", "needs_help", "stopping"]);
 
 function MeetingRow({ m }: { m: MeetingMock }) {
+  const layout = useService(LayoutServiceId);
   const nav = usePreviewPinTab<HTMLDivElement>(meetingTab(m));
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [hover, setHover] = useState(false);
@@ -512,7 +546,25 @@ function MeetingRow({ m }: { m: MeetingMock }) {
         {inRoom && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", flex: "none" }} />}
         <span style={{ fontSize: 13, color: live ? "var(--t1)" : "var(--t2)", fontWeight: live ? 600 : 400, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
         {m.shared && <span title="Shared with you (you don't own this meeting)" style={{ flex: "none", fontSize: 9.5, color: "var(--t3)", border: "1px solid var(--line)", borderRadius: 5, padding: "0 5px" }}>shared</span>}
-        {(m.native_id || isIntent) && !m.shared && <RowActions m={m} showBadge={showBadge} reveal={hover} onActionStart={() => setActionFailure(null)} onActionFailure={setActionFailure} />}
+        {(m.native_id || isIntent) && !m.shared && (
+          <RowActions
+            m={m}
+            showBadge={showBadge}
+            reveal={hover}
+            onActionStart={() => setActionFailure(null)}
+            onActionFailure={setActionFailure}
+            onActionSuccess={(actionId, res) => {
+              if ((actionId === "resend" || actionId === "send") && res.meetingId) {
+                const next = getLiveMeeting(res.meetingId);
+                layout.openTab(
+                  next
+                    ? meetingTab(next)
+                    : { id: `meeting:${res.meetingId}`, title: label, kind: "meeting", params: { meetingId: res.meetingId } },
+                );
+              }
+            }}
+          />
+        )}
       </div>
       <div style={{ fontSize: 11, color: inRoom ? "var(--green)" : "var(--t3)", marginTop: 1, paddingLeft: inRoom ? 13 : 0 }}>{inRoom ? "live" : m.when}</div>
       {retryMessage && (
@@ -856,7 +908,15 @@ export function ModelChips() {
  *  is in the call, Re-send once it stopped/completed/failed. Reuses the row-action map verbatim
  *  (same endpoints, same status vocabulary) — only bot actions surface here; row management
  *  (schedule/cancel/delete) stays in the sidebar menu. */
-export function BotControls({ m, connected = true }: { m: MeetingMock; connected?: boolean }) {
+export function BotControls({
+  m,
+  connected = true,
+  onOpenMeeting,
+}: {
+  m: MeetingMock;
+  connected?: boolean;
+  onOpenMeeting?: (meetingId: string) => void;
+}) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const acts = actionsFor(m).filter((a) => a.id === "stop" || a.id === "resend" || a.id === "send");
@@ -879,7 +939,16 @@ export function BotControls({ m, connected = true }: { m: MeetingMock; connected
             onClick={() => {
               if (disabled) return;
               setErr(null); setBusy(true);
-              void Promise.resolve(a.run((f) => setErr(f.message))).finally(() => setBusy(false));
+              void Promise.resolve(
+                a.run(
+                  (f) => setErr(f.message),
+                  (res) => {
+                    if ((a.id === "resend" || a.id === "send") && res.meetingId && res.meetingId !== m.id) {
+                      onOpenMeeting?.(res.meetingId);
+                    }
+                  },
+                ),
+              ).finally(() => setBusy(false));
             }}
             style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "transparent",
               border: `1px solid ${danger ? "var(--danger)" : "var(--line2)"}`,
@@ -1230,7 +1299,25 @@ function MeetingTab({ id, params }: TabProps) {
               style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 var(--space-3)", border: "1px solid var(--line2)", borderRadius: 7, background: "transparent", color: "var(--accent)", fontSize: "var(--ui-type-meta)", fontWeight: 600, cursor: "pointer" }}>
               {knowledgeOpen ? "Close TINA" : "Ask TINA"}
             </button>}
-            {m && <BotControls m={m} connected={connected} />}
+            {m && (
+              <BotControls
+                m={m}
+                connected={connected}
+                onOpenMeeting={(newId) => {
+                  const next = getLiveMeeting(newId);
+                  layout.openTab(
+                    next
+                      ? meetingTab(next)
+                      : {
+                          id: `meeting:${newId}`,
+                          title: (m.title_custom ?? (m.native_id ?? m.title)).replace(/^Google Meet · /, ""),
+                          kind: "meeting",
+                          params: { meetingId: newId },
+                        },
+                  );
+                }}
+              />
+            )}
             {m?.id && !m.shared && <ShareSessionButton key={m.id} meetingId={m.id} />}
           </div>
         {liveAssistError && !liveAssistState?.enabled && <div role="alert" style={{ margin: "0 0 8px", color: "var(--danger)", fontSize: 11.5 }}>{liveAssistError}</div>}

@@ -18,7 +18,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'deploy/transcription/viegem'))
 from engine import VieGemEngine, name_biased_decoder
-from gipformer.engine import read_audio, speech_ranges, RATE
+from asr_audio import read_audio, speech_ranges, RATE
 
 
 def wake(text):

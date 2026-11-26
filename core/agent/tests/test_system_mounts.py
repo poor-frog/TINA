@@ -118,6 +118,23 @@ def test_build_mount_set_degrades_without_global(tmp_path):
     assert [m["role"] for m in stack] == ["private", "system"]  # _global skipped, _system always present
 
 
+def test_in_store_global_workspace_seeds_idempotently_and_omits_host_source(tmp_path):
+    root = tmp_path / "ws"
+    gdir = system_mounts.ensure_global_workspace(root / "_global")
+    assert (gdir / ".git").exists()
+    assert (gdir / "README.md").is_file()
+    assert (gdir / "CLAUDE.md").is_file()
+    assert (gdir / "docs" / "tina-handbook.md").is_file()
+    assert (gdir / "mail" / "follow-up.md").is_file()
+
+    # In-store _global omits host bind `source` so S3 sync sidecar can hydrate it cleanly
+    settings = load_settings(workspaces_dir=str(root), global_system_workspace_path=str(gdir))
+    m = global_mount(settings, str(root))
+    assert m is not None and m["role"] == "global" and m["write"] is False
+    assert "source" not in m
+    assert m["path"] == str(root / "_global")
+
+
 def test_build_mount_set_survives_a_broken_system_tier(tmp_path, monkeypatch):
     """A failure creating _system must NOT abort the dispatch — it degrades to just the active set + logs."""
     root = tmp_path / "ws"

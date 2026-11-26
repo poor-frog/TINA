@@ -7,7 +7,7 @@ set it to `0` and start a new bot to disable observations.
 
 At a same-caller quiet boundary with covered ASR text, the bot asynchronously submits an audio snapshot
 to a separate native subprocess. It can observe before the lexical pause delay expires. It never waits
-for scores or changes ASR requests. VieGem + KenLM + FSMN and Gipformer + FSMN retain their pipelines.
+for scores or changes ASR requests. The selected ASR backend retains its existing pipeline.
 
 | Model | Input | Runtime |
 |---|---|---|

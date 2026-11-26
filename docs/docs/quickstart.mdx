@@ -1,19 +1,20 @@
 ---
 title: "Quickstart"
-description: "Clone TINA, provide the private release key, and start the local speech stack."
+description: "Clone TINA, unlock its private deployment config, and start the configured TINA stack."
 ---
 
 ---
 
-This walkthrough starts TINA with local Gipformer speech recognition and VieNeu Enhanced
-speech synthesis. It preserves an existing deployment's configuration and data.
+This walkthrough starts the configured TINA deployment: its Compose project, Google sign-in,
+speech recognition, VieNeu Enhanced speech synthesis, and agent services. It preserves the
+deployment's existing configuration and data.
 
 ## Prerequisites
 
 - macOS with OrbStack or Docker Desktop, or Linux with Docker Engine **≥ v26** and Docker Compose
   supporting `up --wait`. Building the source stack needs about **8 vCPUs / 16 GB RAM**.
 - `git`, `make`, Python **3.10+**, a local Docker context, Dotenvx, and the private `.env.keys` file
-  matching this release's encrypted TTS configuration and model bundle.
+  matching this repository's encrypted `deploy/compose/.env` and TTS release bundle.
 
 ## 1. Clone the repository
 
@@ -39,15 +40,23 @@ Or use npm: `npm install --global @dotenvx/dotenvx`.
 Copy the existing `.env.keys` from your private password manager or secure backup to the repository
 root. Keep the matching `.env.keys` file private and outside Git.
 
-## 4. Start
+## 4. Preview and start
+
+Configure `TINA_VIEGEM_TOKEN` in the selected encrypted env for managed VieGem, or set
+`TRANSCRIPTION_SERVICE_URL` for an external OpenAI-compatible ASR service. `make all` downloads
+and verifies the managed ASR assets and unlocks the encrypted TTS bundle when configured.
 
 ```bash
-make all
+make plan     # read-only: confirm the project and selected profiles
+make all      # build, start, wait for readiness, and print the API key + URLs
 ```
 
-On a fresh checkout this seeds local Compose settings, downloads the pinned Gipformer models,
-and unlocks the encrypted TTS bundle downloaded from GitHub. Use the Terminal and API URLs reported
-at the end. Agent questions require a provider configured in **Settings → Models**.
+This starts the existing `tina-production` project and retains its database, recordings, and
+workspaces. Use the Terminal and API URLs reported at the end (defaults: Terminal
+`http://127.0.0.1:23000`, API gateway `http://127.0.0.1:28056`). The matching Google OAuth
+credentials are already in the encrypted config, and agent questions require a provider
+configured in **Settings → Models**. On a new database, the first successful sign-in becomes
+administrator.
 
 <Note>
 Keep both the private Dotenvx key and any provisioned API key secret. If you do not have
@@ -61,10 +70,8 @@ the matching Dotenvx key, do not invent a replacement: use the separate [fresh-i
     Open the Terminal URL printed by `make all` and follow the local sign-in setup.
   </Step>
   <Step title="Configure speech recognition">
-    The `asr` Compose profile starts Gipformer 1.5 + FSMN-VAD. If your account has a transcription
-    preference that overrides the platform default, select Gipformer under Settings → Models. See
-    the [Gipformer guide](https://github.com/poor-frog/TINA/blob/main/deploy/transcription/gipformer/README.md)
-    and [transcription configuration](/configuration#transcription-stt).
+    Under Settings → Models → Transcription, select VieGem + LM or configure an external endpoint.
+    See [transcription configuration](/configuration#transcription-stt).
   </Step>
   <Step title="Send a bot to a meeting">
     Start a Google Meet, Zoom, or Teams call, copy the join URL, and add it from the UI. A bot joins

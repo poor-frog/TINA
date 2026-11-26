@@ -9,12 +9,12 @@ vi.mock("../settingsApi", async (importOriginal) => ({
   getTranscriptionPrefs: vi.fn(), setTranscriptionPrefs: vi.fn(),
   getAsrRuntime: vi.fn(), setAsrRuntime: vi.fn(), testTranscription: vi.fn(),
 }));
-type Backend = "gipformer" | "viegem";
-const saved = (backend: Backend = "viegem") => ({ backend, available_backends: ["gipformer", "viegem"] as Backend[],
-  effective: { backend, label: backend === "viegem" ? "VieGem + LM" : "Gipformer 1.5", model: "model", source: "user" as const } });
-const state = (backend: Backend = "viegem", enabled = true): api.AsrRuntime => ({ instance: "fixture",
-  account: { backend, enabled, revision: 4 }, counts: { gipformer: 0, viegem: 1 },
-  workers: { gipformer: { running: false, ready: false, device: "cpu" }, viegem: { running: true, ready: true, device: "mps" } }, operation: null });
+type Backend = "viegem";
+const saved = (backend: Backend = "viegem") => ({ backend, available_backends: ["viegem"] as Backend[],
+  effective: { backend, label: "VieGem + LM", model: "model", source: "user" as const } });
+const state = (backend: Backend | null = "viegem", enabled = true): api.AsrRuntime => ({ instance: "fixture",
+  account: { backend, enabled, revision: 4 }, counts: { viegem: 1 },
+  workers: { viegem: { running: true, ready: true, device: "mps" } }, operation: null });
 async function transcription() {
   render(<ModelsSection />);
   fireEvent.click(screen.getByRole("tab", { name: "Transcription" }));
@@ -36,7 +36,7 @@ beforeEach(() => {
 
 describe("compact transcription picker", () => {
   it("selects a model immediately, needs no token or Save, and restores selection", async () => {
-    vi.mocked(api.getAsrRuntime).mockResolvedValue(state("gipformer"));
+    vi.mocked(api.getAsrRuntime).mockResolvedValue(state(null));
     const panel = await transcription();
     expect(panel.queryByRole("button", { name: "Save" })).toBeNull();
     expect(panel.queryByLabelText("Backend")).toBeNull();
@@ -51,7 +51,7 @@ describe("compact transcription picker", () => {
   });
   it("does not forward a stored custom token when choosing managed ASR", async () => {
     vi.mocked(api.getTranscriptionPrefs).mockResolvedValue({ ...saved(), backend: "custom", url: "https://own.example", token: "********1234" });
-    vi.mocked(api.getAsrRuntime).mockResolvedValue(state("gipformer"));
+    vi.mocked(api.getAsrRuntime).mockResolvedValue(state(null));
     const panel = await transcription();
     fireEvent.click(panel.getByRole("radio", { name: "VieGem + LM" }));
     await waitFor(() => expect(api.setAsrRuntime).toHaveBeenCalledWith("viegem", true, 4));
@@ -78,8 +78,9 @@ describe("compact transcription picker", () => {
   });
   it("preserves selection and retains an action error if startup fails", async () => {
     vi.mocked(api.setAsrRuntime).mockRejectedValue(new Error("ASR audio probe failed"));
+    vi.mocked(api.getAsrRuntime).mockResolvedValue(state("viegem", false));
     const panel = await transcription();
-    fireEvent.click(panel.getByRole("radio", { name: "Gipformer 1.5" }));
+    fireEvent.click(panel.getByRole("radio", { name: "VieGem + LM" }));
     await waitFor(() => expect(panel.getByRole("alert")).toBeTruthy());
     expect((panel.getByRole("radio", { name: "VieGem + LM" }) as HTMLInputElement).checked).toBe(true);
   });
@@ -89,25 +90,26 @@ describe("compact transcription picker", () => {
     fireEvent.click(panel.getByRole("radio", { name: "VieGem + LM" }));
     await waitFor(() => expect(api.setAsrRuntime).toHaveBeenCalledWith("viegem", true, 4));
   });
-  it("clears a previous connection result when changing the selected model", async () => {
+  it("clears a previous connection result when pausing the selected model", async () => {
     vi.mocked(api.testTranscription).mockResolvedValue({ ok: true, summary: "OK" });
     const panel = await transcription();
     fireEvent.click(panel.getByRole("button", { name: "Test connection" }));
     await waitFor(() => expect(panel.getByText("Connection verified. Your model is ready.")).toBeTruthy());
-    fireEvent.click(panel.getByRole("radio", { name: "Gipformer 1.5" }));
+    fireEvent.click(panel.getByRole("switch", { name: "Transcription for my account" }));
     await waitFor(() => expect(api.setAsrRuntime).toHaveBeenCalled());
     await waitFor(() => expect(panel.queryByText("Connection verified. Your model is ready.")).toBeNull());
   });
   it("restores focus to the chosen radio after asynchronous startup", async () => {
     let finish!: (value: api.AsrRuntime) => void;
     vi.mocked(api.setAsrRuntime).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    vi.mocked(api.getAsrRuntime).mockResolvedValue(state(null));
     const panel = await transcription();
-    const radio = panel.getByRole("radio", { name: "Gipformer 1.5" });
+    const radio = panel.getByRole("radio", { name: "VieGem + LM" });
     radio.focus(); fireEvent.click(radio);
     await waitFor(() => expect(api.setAsrRuntime).toHaveBeenCalled());
     radio.blur(); // Browsers blur a focused radio while its fieldset is disabled.
-    finish(state("gipformer"));
+    finish(state());
     await waitFor(() => expect(document.activeElement).toBe(radio));
-    expect(radio.getAttribute("aria-describedby")).toBe("asr-gipformer-detail asr-gipformer-state");
+    expect(radio.getAttribute("aria-describedby")).toBe("asr-viegem-detail asr-viegem-state");
   });
 });

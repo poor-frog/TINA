@@ -1,0 +1,176 @@
+/* Lucian UX/UI Prompt theme tokens · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/
+   Mapped to MeetTina's dark (Obsidian Teal default), light (Porcelain Teal), and Landing theme tokens. */
+
+.tina-web,
+.tina-login-shell,
+:root[data-theme="dark"] .ux {
+  color-scheme: dark;
+  --ux-page: var(--tw-bg, #0d0e11);
+  --ux-surface: var(--tw-card, #131518);
+  --ux-surface-2: var(--tw-chrome, #1a1d21);
+  --ux-surface-3: var(--tw-raised, #25292e);
+  --ux-ink: var(--tw-text, #f5f7f6);
+  --ux-ink-2: var(--tw-text-2, #cfd6d3);
+  --ux-ink-3: var(--tw-text-3, #929e99);
+  --ux-line: rgba(255, 255, 255, 0.08);
+  --ux-line-2: rgba(255, 255, 255, 0.16);
+  --ux-accent: var(--tw-mint, #91d7be);
+  --ux-accent-2: #5fb8a0;
+  --ux-accent-soft: rgba(145, 215, 190, 0.16);
+  --ux-accent-ink: #081c18;
+  --ux-mint: #7ee8c0;
+  --ux-warn: #ffb26b;
+  --ux-danger: var(--tw-danger, #f08d90);
+  --ux-glass: rgba(255, 255, 255, 0.07);
+  --ux-glass-line: rgba(255, 255, 255, 0.18);
+  --ux-shadow: rgba(0, 0, 0, 0.45);
+  --ux-shadow-strong: rgba(0, 0, 0, 0.72);
+  --ux-grad: linear-gradient(120deg, #91d7be, #48c9a8 55%, #b5e8d1);
+  --ux-ease: cubic-bezier(.2, .8, .2, 1);
+  --ux-spring: cubic-bezier(.34, 1.45, .64, 1);
+}
+
+html[data-theme="light"] .tina-web,
+html[data-theme="light"] .tina-login-shell,
+:root[data-theme="light"] .ux {
+  color-scheme: light;
+  --ux-page: var(--tw-bg, #f6f8f7);
+  --ux-surface: var(--tw-card, #ffffff);
+  --ux-surface-2: var(--tw-raised, #eef2f0);
+  --ux-surface-3: #e1e8e5;
+  --ux-ink: var(--tw-text, #111815);
+  --ux-ink-2: var(--tw-text-2, #36423d);
+  --ux-ink-3: var(--tw-text-3, #5b6963);
+  --ux-line: rgba(17, 24, 21, 0.09);
+  --ux-line-2: rgba(17, 24, 21, 0.17);
+  --ux-accent: var(--tw-teal, #176b5b);
+  --ux-accent-2: #1d8a74;
+  --ux-accent-soft: rgba(23, 107, 91, 0.12);
+  --ux-accent-ink: #ffffff;
+  --ux-mint: #119c72;
+  --ux-warn: #d6731e;
+  --ux-danger: var(--tw-danger, #c43b42);
+  --ux-glass: rgba(255, 255, 255, 0.68);
+  --ux-glass-line: rgba(255, 255, 255, 0.9);
+  --ux-shadow: rgba(15, 23, 42, 0.12);
+  --ux-shadow-strong: rgba(15, 23, 42, 0.24);
+  --ux-grad: linear-gradient(120deg, #176b5b, #1d8a74 55%, #119c72);
+  --ux-ease: cubic-bezier(.2, .8, .2, 1);
+  --ux-spring: cubic-bezier(.34, 1.45, .64, 1);
+}
+
+/* Pre-login Landing warm editorial paper & obsidian card bridges
+   Selector specificity beats :root[data-theme="dark"] .ux and .root h1..h4 inside TinaLanding. */
+.tina-landing-ux,
+.tina-landing-ux .ux,
+:root[data-theme] .tina-landing-ux .ux {
+  color-scheme: light;
+  --ux-page: #f3f0e8;
+  --ux-surface: #ffffff;
+  --ux-surface-2: #f1ede2;
+  --ux-surface-3: #e4dfd1;
+  --ux-ink: #0c0d0a;
+  --ux-ink-2: #2f312b;
+  --ux-ink-3: #5a584f;
+  --ux-line: rgba(12, 13, 10, 0.12);
+  --ux-line-2: rgba(12, 13, 10, 0.22);
+  --ux-accent: #176b5b;
+  --ux-accent-2: #119c72;
+  --ux-accent-soft: rgba(23, 107, 91, 0.12);
+  --ux-accent-ink: #ffffff;
+  --ux-mint: #10b981;
+  --ux-warn: #d97706;
+  --ux-danger: #b42318;
+  --ux-glass: rgba(255, 255, 255, 0.72);
+  --ux-glass-line: rgba(255, 255, 255, 0.92);
+  --ux-shadow: rgba(15, 17, 12, 0.14);
+  --ux-shadow-strong: rgba(15, 17, 12, 0.28);
+  --ux-grad: linear-gradient(120deg, #176b5b, #10b981 55%, #6ee7b7);
+  --ux-ease: cubic-bezier(.2, .8, .2, 1);
+  --ux-spring: cubic-bezier(.34, 1.45, .64, 1);
+}
+
+.tina-landing-ux-dark,
+.tina-landing-ux-dark .ux,
+:root[data-theme] .tina-landing-ux-dark .ux {
+  color-scheme: dark;
+  --ux-page: #0c0d0a;
+  --ux-surface: #121412;
+  --ux-surface-2: #191c18;
+  --ux-surface-3: #232823;
+  --ux-ink: #f5f7f5;
+  --ux-ink-2: #c9d1cb;
+  --ux-ink-3: #8c968f;
+  --ux-line: rgba(255, 255, 255, 0.1);
+  --ux-line-2: rgba(255, 255, 255, 0.18);
+  --ux-accent: #6ee7b7;
+  --ux-accent-2: #34d399;
+  --ux-accent-soft: rgba(110, 231, 183, 0.16);
+  --ux-accent-ink: #081c18;
+  --ux-mint: #6ee7b7;
+  --ux-warn: #ffb26b;
+  --ux-danger: #f08d90;
+  --ux-glass: rgba(255, 255, 255, 0.08);
+  --ux-glass-line: rgba(255, 255, 255, 0.2);
+  --ux-shadow: rgba(0, 0, 0, 0.45);
+  --ux-shadow-strong: rgba(0, 0, 0, 0.72);
+  --ux-grad: linear-gradient(120deg, #6ee7b7, #2dd4bf 55%, #b5e8d1);
+  --ux-ease: cubic-bezier(.2, .8, .2, 1);
+  --ux-spring: cubic-bezier(.34, 1.45, .64, 1);
+}
+
+.tina-landing-ux .ux :is(h1, h2, h3, h4),
+.tina-landing-ux-dark .ux :is(h1, h2, h3, h4) {
+  color: var(--ux-ink);
+}
+
+.ux,
+.ux *,
+.ux *::before,
+.ux *::after {
+  box-sizing: border-box;
+}
+
+.ux {
+  font-family: inherit;
+  color: var(--ux-ink);
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -.01em;
+  -webkit-tap-highlight-color: transparent;
+  overflow-wrap: break-word;
+}
+
+:where(.ux) :is(button, input, textarea, select) {
+  font: inherit;
+  color: inherit;
+}
+
+:where(.ux) button {
+  cursor: pointer;
+}
+
+.tina-web .ux button:active,
+.tina-web button.ux:active {
+  scale: none;
+}
+
+.ux :focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 3px;
+}
+
+.ux [hidden] {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ux,
+  .ux *,
+  .ux *::before,
+  .ux *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

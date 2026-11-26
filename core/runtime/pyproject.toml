@@ -13,6 +13,7 @@ dependencies = [
     "fakeredis>=2.20,<3",
     "croniter>=2,<6",
     "requests-unixsocket>=0.3,<0.5",
+    "boto3>=1.39,<2",
 ]
 
 [dependency-groups]

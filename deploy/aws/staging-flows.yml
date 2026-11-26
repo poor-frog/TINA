@@ -1,0 +1,240 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private TINA Flows API and worker, using an isolated database on staging RDS.
+Metadata:
+  AWSToolsMetrics: {AWSAgentToolkit: 'true'}
+Parameters:
+  ClusterName: {Type: String}
+  VpcId: {Type: 'AWS::EC2::VPC::Id'}
+  AppSubnetIds: {Type: 'List<AWS::EC2::Subnet::Id>'}
+  AppSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  CoreClientSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  ServiceNamespaceId: {Type: String}
+  PostgresHost: {Type: String}
+  PostgresSecretArn: {Type: String}
+  CoreAdminTokenArn: {Type: String}
+  CoreInternalSecretArn: {Type: String}
+  FlowsImage: {Type: String, AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'}
+  FlowsRepositoryArn: {Type: String}
+  AgentApiUrl: {Type: String, Default: ''}
+  AgentApiClientSecurityGroupId: {Type: String, Default: ''}
+  ResendSecretArn: {Type: String, Default: ''}
+  ResendFrom: {Type: String, Default: ''}
+
+Conditions:
+  WithAgentApi: !Not [!Equals [!Ref AgentApiUrl, '']]
+  WithAgentApiSg: !Not [!Equals [!Ref AgentApiClientSecurityGroupId, '']]
+  WithResend: !And
+    - !Not [!Equals [!Ref ResendSecretArn, '']]
+    - !Not [!Equals [!Ref ResendFrom, '']]
+
+Resources:
+  DatabasePassword:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      GenerateSecretString: {PasswordLength: 40, ExcludePunctuation: true}
+  FlowsApiKey:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      GenerateSecretString: {PasswordLength: 48, ExcludePunctuation: true}
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties: {RetentionInDays: 7}
+  Ingress:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Private Flows API from TINA staging core clients
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8200
+          ToPort: 8200
+          SourceSecurityGroupId: !Ref CoreClientSecurityGroupId
+  Discovery:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: flows
+      DnsConfig:
+        NamespaceId: !Ref ServiceNamespaceId
+        DnsRecords: [{Type: A, TTL: 15}]
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: LoadFlowsImageAndCredentials
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer]
+                Resource: !Ref FlowsRepositoryArn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt Logs.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref PostgresSecretArn
+                  - !Ref DatabasePassword
+                  - !Ref FlowsApiKey
+                  - !Ref CoreAdminTokenArn
+                  - !Ref CoreInternalSecretArn
+                  - !If [WithResend, !Ref ResendSecretArn, !Ref 'AWS::NoValue']
+  Task:
+    Type: AWS::ECS::TaskDefinition
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Run API and queue worker from the same image with their own Postgres database.
+        must: Both services wait for database provisioning. Only the provisioning container receives the RDS master credential. Mailbox is a separate opt-in service.
+    Properties:
+      Family: !Ref AWS::StackName
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '512'
+      Memory: '1024'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: db-init
+          Image: !Ref FlowsImage
+          Essential: false
+          Environment:
+            - {Name: FLOWS_DB_HOST, Value: !Ref PostgresHost}
+          Secrets:
+            - {Name: RDS_MASTER, ValueFrom: !Ref PostgresSecretArn}
+            - {Name: FLOWS_DB_PASSWORD, ValueFrom: !Ref DatabasePassword}
+          Command:
+            - python
+            - -c
+            - |
+              import json
+              import os
+              from pathlib import Path
+              import psycopg
+              from psycopg import sql
+
+              host = os.environ["FLOWS_DB_HOST"]
+              master = json.loads(os.environ.pop("RDS_MASTER"))
+              password = os.environ.pop("FLOWS_DB_PASSWORD")
+              with psycopg.connect(host=host, dbname="postgres", user=master["username"],
+                                   password=master["password"], sslmode="require", autocommit=True) as conn:
+                  conn.execute("SELECT pg_advisory_lock(23117516)")
+                  if not conn.execute("SELECT 1 FROM pg_roles WHERE rolname = 'tina_flows'").fetchone():
+                      conn.execute("CREATE ROLE tina_flows LOGIN")
+                  conn.execute(sql.SQL("ALTER ROLE tina_flows PASSWORD {}").format(sql.Literal(password)))
+                  if not conn.execute("SELECT 1 FROM pg_database WHERE datname = 'tina_flows'").fetchone():
+                      conn.execute("CREATE DATABASE tina_flows")
+                  conn.execute("REVOKE CONNECT ON DATABASE tina_flows FROM PUBLIC")
+                  conn.execute("GRANT CONNECT ON DATABASE tina_flows TO tina_flows")
+              with psycopg.connect(host=host, dbname="tina_flows", user=master["username"],
+                                   password=master["password"], sslmode="require") as conn:
+                  conn.execute("GRANT USAGE, CREATE ON SCHEMA public TO tina_flows")
+              with psycopg.connect(host=host, dbname="tina_flows", user="tina_flows",
+                                   password=password, sslmode="require") as conn:
+                  conn.execute(Path("/app/schema.sql").read_text())
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+        - Name: api
+          Image: !Ref FlowsImage
+          Essential: true
+          DependsOn: [{ContainerName: db-init, Condition: SUCCESS}]
+          PortMappings: [{ContainerPort: 8200}]
+          Environment:
+            - {Name: FLOWS_DB_HOST, Value: !Ref PostgresHost}
+            - {Name: TINA_FLOWS_API_HOST, Value: '0.0.0.0'}
+            - {Name: TINA_FLOWS_API_PORT, Value: '8200'}
+            - {Name: TINA_FLOWS_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}
+            - {Name: TINA_FLOWS_GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
+            - !If [WithAgentApi, {Name: TINA_FLOWS_AGENT_API_URL, Value: !Ref AgentApiUrl}, !Ref 'AWS::NoValue']
+            - !If [WithResend, {Name: TINA_RESEND_FROM, Value: !Ref ResendFrom}, !Ref 'AWS::NoValue']
+          Secrets:
+            - {Name: FLOWS_DB_PASSWORD, ValueFrom: !Ref DatabasePassword}
+            - {Name: TINA_FLOWS_API_KEY, ValueFrom: !Ref FlowsApiKey}
+            - {Name: TINA_FLOWS_ADMIN_KEY, ValueFrom: !Ref CoreAdminTokenArn}
+            - {Name: TINA_INTERNAL_API_SECRET, ValueFrom: !Ref CoreInternalSecretArn}
+            - !If [WithResend, {Name: TINA_RESEND_API_KEY, ValueFrom: !Ref ResendSecretArn}, !Ref 'AWS::NoValue']
+          Command:
+            - python
+            - -c
+            - |
+              import os
+              from urllib.parse import quote
+              password = quote(os.environ.pop("FLOWS_DB_PASSWORD"), safe="")
+              host = os.environ["FLOWS_DB_HOST"]
+              os.environ["TINA_FLOWS_DB_URL"] = f"postgresql+psycopg://tina_flows:{password}@{host}/tina_flows?sslmode=require"
+              os.execvp("python", ["python", "-m", "flows_integrations.flows_api"])
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8200/health', timeout=3).close()"]
+            Interval: 15
+            Timeout: 5
+            Retries: 4
+            StartPeriod: 20
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+        - Name: worker
+          Image: !Ref FlowsImage
+          Essential: true
+          DependsOn: [{ContainerName: api, Condition: HEALTHY}]
+          Environment:
+            - {Name: FLOWS_DB_HOST, Value: !Ref PostgresHost}
+            - {Name: TINA_FLOWS_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}
+            - {Name: TINA_FLOWS_GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
+            - !If [WithAgentApi, {Name: TINA_FLOWS_AGENT_API_URL, Value: !Ref AgentApiUrl}, !Ref 'AWS::NoValue']
+            - !If [WithResend, {Name: TINA_RESEND_FROM, Value: !Ref ResendFrom}, !Ref 'AWS::NoValue']
+          Secrets:
+            - {Name: FLOWS_DB_PASSWORD, ValueFrom: !Ref DatabasePassword}
+            - {Name: TINA_FLOWS_API_KEY, ValueFrom: !Ref FlowsApiKey}
+            - {Name: TINA_FLOWS_ADMIN_KEY, ValueFrom: !Ref CoreAdminTokenArn}
+            - {Name: TINA_INTERNAL_API_SECRET, ValueFrom: !Ref CoreInternalSecretArn}
+            - !If [WithResend, {Name: TINA_RESEND_API_KEY, ValueFrom: !Ref ResendSecretArn}, !Ref 'AWS::NoValue']
+          Command:
+            - python
+            - -c
+            - |
+              import os
+              from urllib.parse import quote
+              password = quote(os.environ.pop("FLOWS_DB_PASSWORD"), safe="")
+              host = os.environ["FLOWS_DB_HOST"]
+              os.environ["TINA_FLOWS_DB_URL"] = f"postgresql+psycopg://tina_flows:{password}@{host}/tina_flows?sslmode=require"
+              os.execvp("python", ["python", "-m", "flows_worker"])
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ClusterName
+      TaskDefinition: !Ref Task
+      DesiredCount: 1
+      LaunchType: FARGATE
+      PlatformVersion: '1.4.0'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetIds
+          SecurityGroups:
+            - !Ref AppSecurityGroupId
+            - !Ref CoreClientSecurityGroupId
+            - !GetAtt Ingress.GroupId
+            - !If [WithAgentApiSg, !Ref AgentApiClientSecurityGroupId, !Ref 'AWS::NoValue']
+      ServiceRegistries:
+        - RegistryArn: !GetAtt Discovery.Arn
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+Outputs:
+  FlowsUrl: {Value: 'http://flows.tina-staging.local:8200'}
+  ServiceName: {Value: !GetAtt Service.Name}
+  TaskDefinitionArn: {Value: !Ref Task}
+  LogGroup: {Value: !Ref Logs}
+  ApiKeyArn: {Value: !Ref FlowsApiKey}

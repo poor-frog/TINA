@@ -1,0 +1,211 @@
+/* Lucian UX/UI Prompt #451 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#451 */
+
+.u451-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 2px 4px;
+}
+
+.u451-m {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--ux-accent);
+  background: var(--ux-accent-soft);
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ux-accent) 26%, transparent);
+}
+
+.u451-m.is-pop {
+  animation: u451-pop .55s cubic-bezier(.34, 1.7, .5, 1) both;
+}
+
+@keyframes u451-pop {
+  0% {
+    transform: scale(.5) translateY(3px);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+  }
+}
+
+.u451-m-rm {
+  width: 15px;
+  height: 15px;
+  border: 0;
+  border-radius: 4px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: inherit;
+  opacity: .72;
+  transition: opacity .15s, background-color .15s;
+}
+
+.u451-m-rm:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--ux-accent) 20%, transparent);
+}
+
+.u451-at {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: none;
+  color: var(--ux-ink-3);
+  transition: background-color .2s var(--ux-ease), color .2s var(--ux-ease), transform .45s var(--ux-spring);
+}
+
+.u451-at:hover,
+.u451-at[aria-expanded="true"] {
+  background: var(--ux-surface-2);
+  background: light-dark(var(--ux-surface-2), var(--ux-surface-3));
+  color: var(--ux-ink);
+}
+
+.u451-at:active {
+  transform: scale(.88);
+  transition-duration: .2s, .2s, .1s;
+}
+
+.u451-at svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.u451-at:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 2px;
+}
+
+.u451-pop {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: min(296px, calc(100vw - 32px));
+  max-height: 242px;
+  overflow-y: auto;
+  padding: 5px;
+  border-radius: 14px;
+  background: var(--ux-surface);
+  background: light-dark(var(--ux-surface), var(--ux-surface-2));
+  box-shadow: 0 0 0 1px var(--ux-line-2), 0 24px 44px -18px var(--ux-shadow-strong), 0 4px 10px -4px var(--ux-shadow);
+  transform-origin: 18px 100%;
+  opacity: 0;
+  transform: translateY(6px) scale(.92);
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity .14s var(--ux-ease), transform .2s var(--ux-ease), visibility 0s linear .2s;
+}
+
+.u451-pop.is-open {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity .16s var(--ux-ease), transform .52s cubic-bezier(.3, 1.45, .5, 1), visibility 0s;
+}
+
+.u451-lb {
+  position: relative;
+}
+
+.u451-pill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 38px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ux-ink) 7%, transparent);
+  transform: translateY(var(--u451-py, 0px));
+  transition: transform .42s cubic-bezier(.3, 1.5, .5, 1);
+  pointer-events: none;
+}
+
+.u451-o {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 9px;
+  border-radius: 10px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: height .32s var(--ux-ease), opacity .2s var(--ux-ease), transform .32s var(--ux-ease);
+}
+
+.u451-av {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: #ffffff;
+  background: linear-gradient(145deg, var(--u451-a), var(--u451-b));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22), inset 0 -3px 6px rgba(0, 0, 0, .12);
+}
+
+.u451-nm {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ux-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color .15s;
+}
+
+.u451-nm mark {
+  background: none;
+  color: var(--ux-ink);
+  font-weight: 700;
+}
+
+.u451-o[aria-selected="true"] .u451-nm {
+  color: var(--ux-ink);
+}
+
+.u451-rl {
+  flex: none;
+  font-size: 11px;
+  color: var(--ux-ink-3);
+}
+
+.u451-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

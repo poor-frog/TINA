@@ -8,10 +8,88 @@ from jsonschema import Draft202012Validator
 
 from llm import LLMError, LLMStructuredOutputUnsupported
 from llm.openai_compat import OpenAICompatCompletion
-from llm.openai_responses import OpenAIResponsesCompletion
+from llm.openai_responses import ChatGPTPlanCompletion, OpenAIResponsesCompletion
 from shared.meeting_knowledge import PREFIX
 from shared.voice_schema import voice_schema
 from shared.voice_knowledge import validate_voice_answer, voice_tool_calls
+
+
+def test_worker_timing_logging_keeps_allowlisted_fields_only(caplog):
+    from uuid import uuid4
+    from control_plane.meeting_voice_completion import _log_worker_timings
+
+    started = {'type': 'voice_stage', 'request_id': str(uuid4()), 'span_id': str(uuid4()),
+               'stage': 'verify', 'elapsed_ms': 0, 'status': 'started', 'detail': 'synthetic-private-text'}
+    with caplog.at_level('INFO'):
+        _log_worker_timings(('provider error synthetic-private-text\n' + json.dumps(started) + '\n' +
+                            json.dumps(started | {'stage': 'synthetic-private-text'})).encode())
+    assert 'stage=verify elapsed_ms=0 status=started' in caplog.text
+    assert 'synthetic-private-text' not in caplog.text
+
+
+def test_chatgpt_plan_uses_oauth_and_preserves_rate_limit(monkeypatch):
+    monkeypatch.setenv("ACCESS_TOKEN", "test-plan-token")
+    monkeypatch.setenv("TINA_LLM_MODEL", "plan-model")
+
+    def handle(request):
+        payload = json.loads(request.content)
+        assert request.url == "https://api.openai.com/v1/responses"
+        assert request.headers["Authorization"] == "Bearer test-plan-token"
+        assert payload["store"] is False and payload["stream"] is True
+        assert "max_output_tokens" not in payload and "tools" not in payload
+        event = {"type": "response.failed", "response": {"error": {
+            "code": "subscription_sharing_usage_limit_exceeded"}}}
+        return httpx.Response(200, text=f"data: {json.dumps(event)}\n\n")
+
+    with pytest.raises(LLMError) as error:
+        ChatGPTPlanCompletion(transport=httpx.MockTransport(handle)).complete("Fixture")
+    assert error.value.status_code == 429
+
+
+@pytest.mark.parametrize('failure,marker,expected,http', [
+    ('connection', '', 'reconnect_required', 503),
+    ('provider', 'TINA_CHATGPT_PLAN_RECONNECT_REQUIRED', 'reconnect_required', 503),
+    ('provider', 'TINA_CHATGPT_PLAN_USAGE_LIMIT', 'usage_limit', 429),
+])
+def test_voice_completion_marks_chatgpt_failure_without_switching_provider(monkeypatch, failure, marker, expected, http):
+    from fastapi import HTTPException
+    from control_plane import aws_voice_chatgpt, meeting_voice_completion
+    from control_plane.openai_auth import ChatGPTAuthError
+
+    seen = []
+
+    def token(_):
+        if failure == 'connection':
+            raise ChatGPTAuthError('fixture')
+        return 'placeholder'
+
+    def run(*_, env, **kwargs):
+        assert env['TINA_LLM_PROVIDER'] == 'chatgpt-plan'
+        return SimpleNamespace(stderr=marker, stdout='', returncode=1)
+
+    monkeypatch.setenv('TINA_CHATGPT_VOICE_MODEL', 'gpt-6-luna')
+    monkeypatch.setattr(aws_voice_chatgpt, 'access_token', token)
+    monkeypatch.setattr(meeting_voice_completion.subprocess, 'run', run)
+    monkeypatch.setattr(meeting_voice_completion, '_store_provider_issue', lambda *args: seen.append(args[-1]))
+    with pytest.raises(HTTPException) as error:
+        meeting_voice_completion.complete({'request_id': 'fixture', 'voice_turn': {'meeting_id': 1, 'holder': 'session:fixture'}},
+                                         {}, 'redis://fixture', chatgpt_plan=True)
+    assert error.value.status_code == http and seen == [expected]
+
+
+@pytest.mark.parametrize(('mode', 'expected_url'), [('voice_web', 'http://reach.test:8080'), ('voice', None)])
+def test_completion_worker_receives_reach_url_only_for_public_lookup(monkeypatch, mode, expected_url):
+    from control_plane import meeting_voice_completion
+
+    monkeypatch.setenv('TINA_AGENT_REACH_URL', 'http://reach.test:8080')
+
+    def run(*_, env, **kwargs):
+        assert env.get('TINA_AGENT_REACH_URL') == expected_url
+        return SimpleNamespace(stderr='', stdout='{}', returncode=0)
+
+    monkeypatch.setattr(meeting_voice_completion.subprocess, 'run', run)
+    payload = {'request_id': 'fixture', 'voice_turn': {'meeting_id': 1, 'holder': 'session:fixture'}}
+    assert meeting_voice_completion.complete(payload, {'mode': mode}, 'redis://fixture') == '{}'
 
 
 @pytest.mark.parametrize('expired', [False, True])
@@ -183,3 +261,135 @@ def test_voice_uses_completion_port_even_when_chat_runner_is_codex(monkeypatch,m
         'request_id':'api-only','text':json.dumps(source)})}})
     assert calls and events[0]['type']=='message-delta' and events[-1]['type']=='turn-complete'
     if mode=='voice':assert VERIFY_SYSTEM in calls and json.loads(events[0]['text'])['verification']==['approved']
+
+
+def test_bedrock_converse_complete_structured_enforces_tool_choice_and_keeps_complete_plain(monkeypatch):
+    from llm.bedrock_converse import BedrockConverseCompletion, _STRUCTURED_TOOL_NAME
+    from llm.errors import LLMAuthError, LLMResponseError
+
+    seen = []
+
+    class FakeClient:
+        def converse(self, **request):
+            seen.append(request)
+            if 'toolConfig' in request:
+                return {
+                    'stopReason': 'tool_use',
+                    'output': {'message': {'content': [
+                        {'toolUse': {'toolUseId': 't1', 'name': _STRUCTURED_TOOL_NAME,
+                                     'input': {'claims': [{'text': 'Lan làm demo.', 'source_ids': ['s0']}],
+                                               'clarification': None, 'follow_up': None, 'tool_calls': None}}},
+                    ]}},
+                    'usage': {'inputTokens': 12, 'outputTokens': 18},
+                }
+            return {
+                'stopReason': 'end_turn',
+                'output': {'message': {'content': [{'text': 'plain reply'}]}},
+                'usage': {'inputTokens': 5, 'outputTokens': 3},
+            }
+
+    monkeypatch.setenv('TINA_LLM_MODEL', 'amazon.nova-lite-v1:0')
+    adapter = BedrockConverseCompletion(client=FakeClient())
+    schema = voice_schema('answer', [{'id': 's0'}])
+    structured = adapter.complete_structured('Ai làm demo?', system='voice', schema=schema)
+    assert json.loads(structured.text)['claims'][0]['source_ids'] == ['s0']
+    assert structured.usage == {'input_tokens': 12, 'output_tokens': 18}
+    assert seen[0]['toolConfig']['toolChoice'] == {'tool': {'name': _STRUCTURED_TOOL_NAME}}
+    assert seen[0]['toolConfig']['tools'][0]['toolSpec']['inputSchema'] == {'json': schema}
+
+    plain = adapter.complete('ordinary task')
+    assert plain.text == 'plain reply' and 'toolConfig' not in seen[1]
+
+    class UnsupportedClient:
+        def converse(self, **request):
+            exc = RuntimeError('validation failed')
+            exc.response = {
+                'ResponseMetadata': {'HTTPStatusCode': 400},
+                'Error': {'Code': 'ValidationException', 'Message': 'This model does not support toolChoice.'},
+            }
+            raise exc
+
+    with pytest.raises(LLMStructuredOutputUnsupported):
+        BedrockConverseCompletion(client=UnsupportedClient()).complete_structured('synthetic', system='voice', schema=schema)
+
+    class AuthErrorClient:
+        def converse(self, **request):
+            exc = RuntimeError('denied')
+            exc.response = {
+                'ResponseMetadata': {'HTTPStatusCode': 403},
+                'Error': {'Code': 'AccessDeniedException', 'Message': 'Access denied'},
+            }
+            raise exc
+
+    with pytest.raises(LLMAuthError):
+        BedrockConverseCompletion(client=AuthErrorClient()).complete_structured('synthetic', system='voice', schema=schema)
+
+    class MissingToolClient:
+        def converse(self, **request):
+            return {'stopReason': 'end_turn', 'output': {'message': {'content': [{'text': 'unstructured'}]}}}
+
+    with pytest.raises(LLMResponseError):
+        BedrockConverseCompletion(client=MissingToolClient()).complete_structured('synthetic', system='voice', schema=schema)
+
+
+def test_resolve_voice_model_env_and_local_completion_model_isolation(monkeypatch):
+    from control_plane import meeting_voice_completion
+
+    # OpenAI API BYO model -> openai-responses, strips AWS IAM credentials from subprocess
+    openai_env = meeting_voice_completion.resolve_voice_model_env(
+        {'mode': 'openai-api', 'api_key': 'sk-test-key', 'model': 'gpt-5', 'meeting_model': 'gpt-5-mini'},
+    )
+    assert openai_env['TINA_LLM_PROVIDER'] == 'openai-responses'
+    assert openai_env['TINA_LLM_MODEL'] == 'gpt-5-mini'
+    assert openai_env['TINA_LLM_API_KEY'] == 'sk-test-key'
+
+    # Groq BYO model -> openai-compat
+    groq_env = meeting_voice_completion.resolve_voice_model_env(
+        {'mode': 'groq', 'api_key': 'gsk-test-key', 'model': 'openai/gpt-oss-20b'},
+    )
+    assert groq_env['TINA_LLM_PROVIDER'] == 'openai-compat'
+    assert groq_env['TINA_LLM_MODEL'] == 'openai/gpt-oss-20b'
+
+    # Bedrock IAM role (no bearer api_key) -> bedrock-converse, keeps AWS IAM credentials
+    monkeypatch.setenv('TINA_WORKSPACE_PILOT_USER_IDS', '*')
+    bedrock_iam = meeting_voice_completion.resolve_voice_model_env(
+        {'mode': 'bedrock', 'region': 'us-east-1', 'model': 'us.anthropic.claude-sonnet-4-6'},
+    )
+    assert bedrock_iam == {
+        'TINA_LLM_PROVIDER': 'bedrock-converse',
+        'TINA_LLM_MODEL': 'us.anthropic.claude-sonnet-4-6',
+        'AWS_REGION': 'us-east-1',
+        'AWS_DEFAULT_REGION': 'us-east-1',
+    }
+
+    # Bedrock Bearer token -> anthropic, strips AWS IAM credentials
+    bedrock_bearer = meeting_voice_completion.resolve_voice_model_env(
+        {'mode': 'bedrock', 'region': 'us-east-1', 'api_key': 'bearer-tok', 'model': 'anthropic.claude-3-5-sonnet'},
+    )
+    assert bedrock_bearer['TINA_LLM_PROVIDER'] == 'anthropic'
+    assert bedrock_bearer['AWS_BEARER_TOKEN_BEDROCK'] == 'bearer-tok'
+
+    # Subscription mode without Secrets Manager pilot falls back to deployment default ({})
+    assert meeting_voice_completion.resolve_voice_model_env({'mode': 'openai-subscription'}) == {}
+
+    # Verify subprocess credential isolation in complete()
+    monkeypatch.setenv('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI', '/v2/credentials/test')
+    monkeypatch.setenv('TINA_LLM_PROVIDER', 'bedrock-converse')
+    monkeypatch.setenv('TINA_LLM_MODEL', 'amazon.nova-lite-v1:0')
+    seen_envs = []
+
+    def fake_run(*_, env, **kwargs):
+        seen_envs.append(dict(env))
+        return SimpleNamespace(stderr='', stdout='{"claims":[]}', returncode=0)
+
+    monkeypatch.setattr(meeting_voice_completion.subprocess, 'run', fake_run)
+    payload = {'request_id': 'voice-model-test', 'voice_turn': {'meeting_id': 1, 'holder': 's:1'}}
+    meeting_voice_completion.complete(payload, {'mode': 'voice'}, 'redis://fixture', model_env=openai_env)
+    assert seen_envs[0]['TINA_LLM_PROVIDER'] == 'openai-responses'
+    assert seen_envs[0]['TINA_LLM_MODEL'] == 'gpt-5-mini'
+    assert 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI' not in seen_envs[0]
+
+    meeting_voice_completion.complete(payload, {'mode': 'voice'}, 'redis://fixture', model_env=bedrock_iam)
+    assert seen_envs[1]['TINA_LLM_PROVIDER'] == 'bedrock-converse'
+    assert seen_envs[1]['TINA_LLM_MODEL'] == 'us.anthropic.claude-sonnet-4-6'
+    assert seen_envs[1]['AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'] == '/v2/credentials/test'

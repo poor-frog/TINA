@@ -42,7 +42,7 @@
   "core/meetings/contracts/transcript-revision.v1": "adaf19c8c99bb21019726a206fdca34fc8cee0aaac5328c21a4c8024c5a3b7ba",
   "core/meetings/contracts/transcript.v1": "2a351b86af66849531dfd5e6d9bb3f24d3b513c4d99e36ac24a4abda75efaefd",
   "core/meetings/contracts/webhook.v1": "e6b1fe19dbb4ecf71c86948452d0a1fbf3febcb9fcc9df52c8cde26951642d32",
-  "core/runtime/contracts/runtime.v1": "91055d8b14201cac1f99ef6e8c13f8556b0ece2edf94c7d90652ffed4670baf0",
+  "core/runtime/contracts/runtime.v1": "4e2ab5ca632dfe3c67e1353754c184d7a034e8752a8617201e9ee8005d34037f",
   "core/runtime/contracts/schedule.v1": "1ee54ffef6c1be896d5a920cc8383b3a6e324b07530a69b02522fa555d4fc958",
   "deploy/contracts/config.v1": "a14c262feda834344081cd7e2d6e280c52ef127b5f1aba48e10847f79440e24f",
   "deploy/contracts/execution-targets.v1": "431f2efdd308b42ea70059ac43bf41aa33595dc94bef9863ff3d4177303478cf"

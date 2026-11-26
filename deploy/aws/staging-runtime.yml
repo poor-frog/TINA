@@ -1,0 +1,487 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: TINA Runtime service on private ECS Fargate subnets with dynamic workspace provisioning.
+
+Parameters:
+  ClusterName:
+    Type: String
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  AppSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  AppSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+  RuntimeImage:
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'
+  RuntimeRepositoryArn:
+    Type: String
+  RuntimeTaskRoleArn:
+    Type: String
+  BotTaskDefinitionArn:
+    Type: String
+  BotImage:
+    Type: String
+  InvocationBucket:
+    Type: String
+  ValkeyHost:
+    Type: String
+  ValkeySecretArn:
+    Type: String
+  WorkspaceWorkerImage: {Type: String, Default: '', AllowedPattern: '(|[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64})'}
+  WorkspaceTasks: {Type: String, Default: '{}'}
+  WorkspaceTaskArns: {Type: CommaDelimitedList, Default: ''}
+  WorkspaceRoleArns: {Type: CommaDelimitedList, Default: ''}
+  WorkspaceFileSystemId: {Type: String, Default: ''}
+  DynamicWorkspaceTaskRoleArn: {Type: String, Default: ''}
+  DynamicWorkspaceExecutionRoleArn: {Type: String, Default: ''}
+  DynamicWorkspaceSecurityGroupId: {Type: String, Default: ''}
+  DynamicWorkspaceLogGroup: {Type: String, Default: ''}
+  WorkspaceStorage: {Type: String, Default: efs, AllowedValues: [efs, s3]}
+  EphemeralWorkspaceTaskDefinitionArn: {Type: String, Default: ''}
+  EphemeralWorkspaceTaskRoleArn: {Type: String, Default: ''}
+  EphemeralWorkspaceExecutionRoleArn: {Type: String, Default: ''}
+  EphemeralWorkspaceSecurityGroupId: {Type: String, Default: ''}
+  NovaWorkspaceTaskDefinitionArn: {Type: String, Default: ''}
+  NovaWorkspaceTaskRoleArn: {Type: String, Default: ''}
+  NovaWorkspaceOwnerIds: {Type: String, Default: '', AllowedPattern: '(|[*]|[1-9][0-9]*(,[1-9][0-9]*)*)'}
+  WorkspaceS3BrokerRoleArn: {Type: String, Default: ''}
+  WorkspaceS3Bucket: {Type: String, Default: ''}
+  WorkspaceS3DataKeyArn: {Type: String, Default: ''}
+  DraftWorkerImage:
+    Type: String
+    Default: ''
+    AllowedPattern: '(|[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64})'
+  DraftValkeySecurityGroupId:
+    Type: String
+    Default: ''
+  OwnerQuota: {Type: Number, Default: 3, MinValue: 1, MaxValue: 50}
+  GlobalQuota: {Type: Number, Default: 20, MinValue: 1, MaxValue: 500}
+  ReaperTickSec: {Type: Number, Default: 30, MinValue: 5, MaxValue: 300}
+  WorkspaceIdleTimeoutSec: {Type: Number, Default: 300, MinValue: 60, MaxValue: 3600}
+  WorkspaceMaxLifetimeSec: {Type: Number, Default: 3600, MinValue: 300, MaxValue: 86400}
+  BotAloneSilenceWindowMs: {Type: String, Default: ''}
+  BotSpeakerMinAudioSec: {Type: String, Default: ''}
+  BotSpeakerSubmitIntervalSec: {Type: String, Default: ''}
+  BotSpeakerConfirmThreshold: {Type: String, Default: ''}
+  BotSpeakerMaxBufferSec: {Type: String, Default: '20'}
+  BotSpeakerIdleTimeoutSec: {Type: String, Default: ''}
+
+Conditions:
+  WithWorkspaceWorker: !Not [!Equals [!Ref WorkspaceWorkerImage, '']]
+  WithPinnedWorkspaces: !And
+    - !Condition WithWorkspaceWorker
+    - !Not [!Equals [!Join ['', !Ref WorkspaceTaskArns], '']]
+    - !Not [!Equals [!Join ['', !Ref WorkspaceRoleArns], '']]
+  WithDynamicWorkspace: !And
+    - !Condition WithWorkspaceWorker
+    - !Not [!Equals [!Ref WorkspaceFileSystemId, '']]
+    - !Not [!Equals [!Ref DynamicWorkspaceTaskRoleArn, '']]
+    - !Not [!Equals [!Ref DynamicWorkspaceExecutionRoleArn, '']]
+    - !Not [!Equals [!Ref DynamicWorkspaceSecurityGroupId, '']]
+    - !Not [!Equals [!Ref DynamicWorkspaceLogGroup, '']]
+  WithS3Workspace: !And
+    - !Condition WithWorkspaceWorker
+    - !Not [!Equals [!Ref EphemeralWorkspaceTaskDefinitionArn, '']]
+    - !Not [!Equals [!Ref WorkspaceS3BrokerRoleArn, '']]
+    - !Not [!Equals [!Ref WorkspaceS3Bucket, '']]
+    - !Not [!Equals [!Ref WorkspaceS3DataKeyArn, '']]
+  WithNovaWorkspace: !And
+    - !Condition WithS3Workspace
+    - !Not [!Equals [!Ref NovaWorkspaceTaskDefinitionArn, '']]
+    - !Not [!Equals [!Ref NovaWorkspaceTaskRoleArn, '']]
+    - !Not [!Equals [!Ref NovaWorkspaceOwnerIds, '']]
+  WithDraftWorker: !Not [!Equals [!Ref DraftWorkerImage, '']]
+
+Resources:
+  RuntimeWorkspacePermissions:
+    Type: AWS::IAM::Policy
+    Condition: WithPinnedWorkspaces
+    Properties:
+      PolicyName: StartPinnedWorkspaceWorkers
+      Roles: [!Select [1, !Split ['/', !Ref RuntimeTaskRoleArn]]]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: ecs:RunTask
+            Resource: !Ref WorkspaceTaskArns
+            Condition:
+              ArnEquals: {'ecs:cluster': !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'}
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !Ref WorkspaceRoleArns
+            Condition:
+              StringEquals: {'iam:PassedToService': ecs-tasks.amazonaws.com}
+  RuntimeDynamicWorkspacePermissions:
+    Type: AWS::IAM::Policy
+    Condition: WithDynamicWorkspace
+    Properties:
+      PolicyName: ManageDynamicWorkspaceWorkers
+      Roles: [!Select [1, !Split ['/', !Ref RuntimeTaskRoleArn]]]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - elasticfilesystem:DescribeAccessPoints
+              - ecs:RegisterTaskDefinition
+              - ecs:DescribeTaskDefinition
+              - ecs:ListTaskDefinitionFamilies
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - elasticfilesystem:CreateAccessPoint
+              - elasticfilesystem:TagResource
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/${WorkspaceFileSystemId}'
+              - !Sub 'arn:${AWS::Partition}:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:access-point/*'
+          - Effect: Allow
+            Action: ecs:RunTask
+            Resource: !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/tina-staging-ws-*'
+            Condition:
+              ArnEquals: {'ecs:cluster': !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'}
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: [!Ref DynamicWorkspaceTaskRoleArn, !Ref DynamicWorkspaceExecutionRoleArn]
+            Condition:
+              StringEquals: {'iam:PassedToService': ecs-tasks.amazonaws.com}
+  RuntimeS3WorkspacePermissions:
+    Type: AWS::IAM::Policy
+    Condition: WithS3Workspace
+    Properties:
+      PolicyName: ManageS3EphemeralWorkspaceWorkers
+      Roles: [!Select [1, !Split ['/', !Ref RuntimeTaskRoleArn]]]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: ecs:DescribeTaskDefinition
+            Resource: '*'
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Resource: !Ref WorkspaceS3BrokerRoleArn
+          - Effect: Allow
+            Action: ecs:RunTask
+            Resource: !Ref EphemeralWorkspaceTaskDefinitionArn
+            Condition:
+              ArnEquals: {'ecs:cluster': !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'}
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: [!Ref EphemeralWorkspaceTaskRoleArn, !Ref EphemeralWorkspaceExecutionRoleArn]
+            Condition:
+              StringEquals: {'iam:PassedToService': ecs-tasks.amazonaws.com}
+  RuntimeNovaWorkspacePermissions:
+    Type: AWS::IAM::Policy
+    Condition: WithNovaWorkspace
+    Properties:
+      PolicyName: StartNovaWorkspaceWorker
+      Roles: [!Select [1, !Split ['/', !Ref RuntimeTaskRoleArn]]]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: ecs:RunTask
+            Resource: !Ref NovaWorkspaceTaskDefinitionArn
+            Condition:
+              ArnEquals: {'ecs:cluster': !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'}
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !Ref NovaWorkspaceTaskRoleArn
+            Condition:
+              StringEquals: {'iam:PassedToService': ecs-tasks.amazonaws.com}
+  RuntimeLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+  RuntimeClients:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Staging control-plane services permitted to call Runtime
+      VpcId: !Ref VpcId
+  RuntimeIngress:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Runtime API from staging application tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8090
+          ToPort: 8090
+          SourceSecurityGroupId: !GetAtt RuntimeClients.GroupId
+  DraftNetwork:
+    Type: AWS::EC2::SecurityGroup
+    Condition: WithDraftWorker
+    Properties:
+      GroupDescription: Private TINA post-meeting draft worker
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 6379, ToPort: 6379, DestinationSecurityGroupId: !Ref DraftValkeySecurityGroupId}
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+  DraftValkeyIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: WithDraftWorker
+    Properties:
+      GroupId: !Ref DraftValkeySecurityGroupId
+      SourceSecurityGroupId: !GetAtt DraftNetwork.GroupId
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+  DraftLogs:
+    Type: AWS::Logs::LogGroup
+    Condition: WithDraftWorker
+    Properties: {RetentionInDays: 7}
+  DraftExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: WithDraftWorker
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: LoadDraftWorkerAndInvocation
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer]
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-staging/agent-api'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt DraftLogs.Arn
+              - {Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref ValkeySecretArn}
+              - Effect: Allow
+                Action: s3:GetBucketLocation
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${InvocationBucket}'
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${InvocationBucket}/runtime-invocations/draft/*'
+  DraftTaskRole:
+    Type: AWS::IAM::Role
+    Condition: WithDraftWorker
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: InvokeNovaLite
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-lite-v1:0'
+  DraftTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Condition: WithDraftWorker
+    Properties:
+      Family: !Sub '${AWS::StackName}-post-meeting-draft'
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '512'
+      Memory: '1024'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt DraftExecutionRole.Arn
+      TaskRoleArn: !GetAtt DraftTaskRole.Arn
+      ContainerDefinitions:
+        - Name: draft
+          Image: !Ref DraftWorkerImage
+          Essential: true
+          ReadonlyRootFilesystem: true
+          EntryPoint: [python, -m, worker.post_meeting_draft]
+          Environment:
+            - {Name: VALKEY_HOST, Value: !Ref ValkeyHost}
+            - {Name: TINA_LLM_PROVIDER, Value: bedrock-converse}
+            - {Name: TINA_LLM_MODEL, Value: 'amazon.nova-lite-v1:0'}
+          Secrets:
+            - {Name: VALKEY_PASSWORD, ValueFrom: !Ref ValkeySecretArn}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref DraftLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+  RuntimeDraftPermissions:
+    Type: AWS::IAM::Policy
+    Condition: WithDraftWorker
+    Properties:
+      PolicyName: ManagePinnedDraftTasks
+      Roles: [!Select [1, !Split ['/', !Ref RuntimeTaskRoleArn]]]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: ecs:RunTask
+            Resource: !Ref DraftTaskDefinition
+            Condition:
+              ArnEquals: {'ecs:cluster': !Sub 'arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}'}
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: [!GetAtt DraftExecutionRole.Arn, !GetAtt DraftTaskRole.Arn]
+            Condition:
+              StringEquals: {'iam:PassedToService': ecs-tasks.amazonaws.com}
+  DiscoveryNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Name: tina-staging.local
+      Vpc: !Ref VpcId
+  DiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: runtime
+      DnsConfig:
+        NamespaceId: !Ref DiscoveryNamespace
+        DnsRecords: [{Type: A, TTL: 15}]
+  RuntimeExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PullRuntimeAndReadValkeySecret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer]
+                Resource: !Ref RuntimeRepositoryArn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt RuntimeLogs.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref ValkeySecretArn
+  RuntimeTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AWS::StackName
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '256'
+      Memory: '512'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt RuntimeExecutionRole.Arn
+      TaskRoleArn: !Ref RuntimeTaskRoleArn
+      ContainerDefinitions:
+        - Name: runtime
+          Image: !Ref RuntimeImage
+          Essential: true
+          PortMappings: [{ContainerPort: 8090, Protocol: tcp}]
+          Environment:
+            - {Name: AWS_REGION, Value: !Ref 'AWS::Region'}
+            - {Name: RUNTIME_BACKEND, Value: ecs}
+            - {Name: RUNTIME_ECS_WORKSPACE_STORAGE, Value: !Ref WorkspaceStorage}
+            - !If [WithWorkspaceWorker, {Name: RUNTIME_ECS_WORKSPACE_IMAGE, Value: !Ref WorkspaceWorkerImage}, !Ref AWS::NoValue]
+            - !If [WithWorkspaceWorker, {Name: RUNTIME_ECS_WORKSPACE_TASKS, Value: !Ref WorkspaceTasks}, !Ref AWS::NoValue]
+            - !If [WithNovaWorkspace, {Name: RUNTIME_ECS_NOVA_WORKSPACE_TASK_DEFINITION, Value: !Ref NovaWorkspaceTaskDefinitionArn}, !Ref AWS::NoValue]
+            - !If [WithNovaWorkspace, {Name: RUNTIME_ECS_NOVA_WORKSPACE_OWNERS, Value: !Ref NovaWorkspaceOwnerIds}, !Ref AWS::NoValue]
+            - !If [WithS3Workspace, {Name: RUNTIME_ECS_EPHEMERAL_TASK_DEFINITION, Value: !Ref EphemeralWorkspaceTaskDefinitionArn}, !Ref AWS::NoValue]
+            - !If [WithS3Workspace, {Name: RUNTIME_ECS_EPHEMERAL_SECURITY_GROUP, Value: !Ref EphemeralWorkspaceSecurityGroupId}, !Ref AWS::NoValue]
+            - !If [WithS3Workspace, {Name: RUNTIME_ECS_WORKSPACE_S3_BROKER_ROLE_ARN, Value: !Ref WorkspaceS3BrokerRoleArn}, !Ref AWS::NoValue]
+            - !If [WithS3Workspace, {Name: RUNTIME_ECS_WORKSPACE_S3_BUCKET, Value: !Ref WorkspaceS3Bucket}, !Ref AWS::NoValue]
+            - !If [WithS3Workspace, {Name: RUNTIME_ECS_WORKSPACE_S3_KMS_KEY_ARN, Value: !Ref WorkspaceS3DataKeyArn}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_EFS_ID, Value: !Ref WorkspaceFileSystemId}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_TASK_ROLE_ARN, Value: !Ref DynamicWorkspaceTaskRoleArn}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_EXEC_ROLE_ARN, Value: !Ref DynamicWorkspaceExecutionRoleArn}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_SECURITY_GROUP, Value: !Ref DynamicWorkspaceSecurityGroupId}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_LOG_GROUP, Value: !Ref DynamicWorkspaceLogGroup}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_VALKEY_HOST, Value: !Ref ValkeyHost}, !Ref AWS::NoValue]
+            - !If [WithDynamicWorkspace, {Name: RUNTIME_ECS_WORKSPACE_VALKEY_SECRET_ARN, Value: !Ref ValkeySecretArn}, !Ref AWS::NoValue]
+            - {Name: RUNTIME_ECS_CLUSTER, Value: !Ref ClusterName}
+            - {Name: RUNTIME_ECS_BOT_TASK_DEFINITION, Value: !Ref BotTaskDefinitionArn}
+            - {Name: RUNTIME_ECS_SUBNETS, Value: !Join [',', !Ref AppSubnetIds]}
+            - {Name: RUNTIME_ECS_SECURITY_GROUPS, Value: !Ref AppSecurityGroupId}
+            - {Name: RUNTIME_ECS_INVOCATION_BUCKET, Value: !Ref InvocationBucket}
+            - !If [WithDraftWorker, {Name: RUNTIME_ECS_DRAFT_TASK_DEFINITION, Value: !Ref DraftTaskDefinition}, !Ref 'AWS::NoValue']
+            - !If [WithDraftWorker, {Name: RUNTIME_ECS_DRAFT_SECURITY_GROUP, Value: !GetAtt DraftNetwork.GroupId}, !Ref 'AWS::NoValue']
+            - !If [WithDraftWorker, {Name: AGENT_WORKER_IMAGE, Value: !Ref DraftWorkerImage}, !Ref 'AWS::NoValue']
+            - {Name: BROWSER_IMAGE, Value: !Ref BotImage}
+            - {Name: VALKEY_HOST, Value: !Ref ValkeyHost}
+            - {Name: RUNTIME_OWNER_QUOTA, Value: !Sub '${OwnerQuota}'}
+            - {Name: RUNTIME_GLOBAL_QUOTA, Value: !Sub '${GlobalQuota}'}
+            - {Name: RUNTIME_REAPER_TICK_SEC, Value: !Sub '${ReaperTickSec}'}
+            - {Name: RUNTIME_WORKSPACE_IDLE_TIMEOUT_SEC, Value: !Sub '${WorkspaceIdleTimeoutSec}'}
+            - {Name: RUNTIME_WORKSPACE_MAX_LIFETIME_SEC, Value: !Sub '${WorkspaceMaxLifetimeSec}'}
+            - {Name: BOT_ALONE_SILENCE_WINDOW_MS, Value: !Ref BotAloneSilenceWindowMs}
+            - {Name: BOT_SPEAKER_MIN_AUDIO_SEC, Value: !Ref BotSpeakerMinAudioSec}
+            - {Name: BOT_SPEAKER_SUBMIT_INTERVAL_SEC, Value: !Ref BotSpeakerSubmitIntervalSec}
+            - {Name: BOT_SPEAKER_CONFIRM_THRESHOLD, Value: !Ref BotSpeakerConfirmThreshold}
+            - {Name: BOT_SPEAKER_MAX_BUFFER_SEC, Value: !Ref BotSpeakerMaxBufferSec}
+            - {Name: BOT_SPEAKER_IDLE_TIMEOUT_SEC, Value: !Ref BotSpeakerIdleTimeoutSec}
+          Secrets:
+            - {Name: VALKEY_PASSWORD, ValueFrom: !Ref ValkeySecretArn}
+          Command:
+            - python
+            - -c
+            - |
+              import os
+              import sys
+              from urllib.parse import quote
+
+              password = quote(os.environ.pop("VALKEY_PASSWORD"), safe="")
+              host = os.environ.pop("VALKEY_HOST")
+              os.environ["REDIS_URL"] = f"rediss://:{password}@{host}:6379/0?ssl_check_hostname=True&ssl_cert_reqs=required"
+              os.execv(sys.executable, [sys.executable, "-m", "runtime_kernel"])
+          HealthCheck:
+            Command:
+              - CMD
+              - python
+              - -c
+              - "import urllib.request; urllib.request.urlopen('http://localhost:8090/health', timeout=3).close()"
+            Interval: 15
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 30
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref RuntimeLogs
+              awslogs-stream-prefix: ecs
+  RuntimeService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ClusterName
+      TaskDefinition: !Ref RuntimeTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      PlatformVersion: '1.4.0'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetIds
+          SecurityGroups: [!Ref AppSecurityGroupId, !GetAtt RuntimeIngress.GroupId]
+      ServiceRegistries:
+        - RegistryArn: !GetAtt DiscoveryService.Arn
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+
+Outputs:
+  RuntimeUrl:
+    Value: http://runtime.tina-staging.local:8090
+  RuntimeServiceName:
+    Value: !GetAtt RuntimeService.Name
+  RuntimeLogGroup:
+    Value: !Ref RuntimeLogs
+  RuntimeClientSecurityGroupId:
+    Value: !GetAtt RuntimeClients.GroupId
+  DraftTaskDefinitionArn:
+    Condition: WithDraftWorker
+    Value: !Ref DraftTaskDefinition
+  DraftLogGroup:
+    Condition: WithDraftWorker
+    Value: !Ref DraftLogs
+
+

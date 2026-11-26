@@ -1,0 +1,343 @@
+/* Lucian UX/UI Prompt #014 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#014 */
+
+.u014 {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.u014-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 4px 2px;
+}
+
+.u014-head b {
+  display: block;
+  font-size: 16px;
+  font-weight: 740;
+  letter-spacing: -.025em;
+  color: var(--ux-ink);
+}
+
+.u014-sub {
+  position: relative;
+  display: block;
+  min-width: 180px;
+  height: 18px;
+  margin-top: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--ux-ink-3);
+}
+
+.u014-sub span {
+  display: block;
+  line-height: 18px;
+  transition: transform .5s var(--ux-spring), opacity .3s var(--ux-ease);
+}
+
+.u014-sub span + span {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translateY(100%);
+  opacity: 0;
+  color: var(--ux-mint);
+  font-weight: 650;
+}
+
+.u014.is-all .u014-sub span:first-child {
+  transform: translateY(-100%);
+  opacity: 0;
+}
+
+.u014.is-all .u014-sub span + span {
+  transform: none;
+  opacity: 1;
+}
+
+.u014-ring {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex: none;
+}
+
+.u014-ring svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.u014-ring circle {
+  fill: none;
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+
+.u014-ring .bg {
+  stroke: var(--ux-surface-3);
+}
+
+.u014-ring .fg {
+  stroke: var(--ux-accent);
+  stroke-dasharray: 125.7;
+  stroke-dashoffset: calc(125.7 * (1 - var(--p, 0)));
+  transition: stroke-dashoffset .7s var(--ux-spring), stroke .4s var(--ux-ease);
+}
+
+.u014.is-all .u014-ring .fg {
+  stroke: var(--ux-mint);
+}
+
+.u014-num {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11.5px;
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+  color: var(--ux-ink);
+  transition: opacity .3s, transform .5s var(--ux-spring);
+}
+
+.u014-done {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ux-mint);
+  color: var(--ux-accent-ink);
+  transform: scale(0);
+  transition: transform .55s var(--ux-spring);
+}
+
+.u014-done svg {
+  width: 15px;
+  height: 15px;
+  transform: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.u014.is-all .u014-num {
+  opacity: 0;
+  transform: scale(.5);
+}
+
+.u014.is-all .u014-done {
+  transform: none;
+}
+
+.u014-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.u014-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: var(--ux-surface-2);
+  transition: background-color .22s var(--ux-ease), border-color .22s var(--ux-ease);
+}
+
+.u014-item:hover {
+  background: var(--ux-surface-3);
+}
+
+.u014-item.is-selected {
+  border-color: color-mix(in srgb, var(--ux-accent) 42%, transparent);
+  background: var(--ux-accent-soft);
+}
+
+.u014-chk-btn {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: none;
+  flex: none;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.u014-chk-btn:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+
+.u014-box {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px var(--ux-line-2);
+  transition: box-shadow .3s var(--ux-ease), transform .45s var(--ux-spring);
+}
+
+.u014-box::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: linear-gradient(140deg, var(--ux-accent), var(--ux-mint));
+  transform: scale(0);
+  transition: transform .45s var(--ux-spring);
+}
+
+.u014-box svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: var(--ux-accent-ink);
+  stroke-width: 2.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.u014-box path {
+  stroke-dasharray: 18;
+  stroke-dashoffset: 18;
+  transition: stroke-dashoffset .35s var(--ux-ease);
+}
+
+.u014-chk-btn:hover .u014-box {
+  box-shadow: inset 0 0 0 2px var(--ux-accent);
+}
+
+.u014-chk-btn:active .u014-box {
+  transform: scale(.86);
+}
+
+.u014-chk-btn[aria-checked="true"] .u014-box {
+  box-shadow: none;
+}
+
+.u014-chk-btn[aria-checked="true"] .u014-box::before {
+  transform: scale(1);
+}
+
+.u014-chk-btn[aria-checked="true"] .u014-box path {
+  stroke-dashoffset: 0;
+  transition-delay: .12s;
+}
+
+.u014-open {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.u014-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.u014-t {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -.015em;
+  color: var(--ux-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color .4s var(--ux-ease);
+}
+
+.u014-t::after {
+  content: "";
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  top: 52%;
+  height: 1.8px;
+  border-radius: 2px;
+  background: var(--ux-ink-3);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform .45s var(--ux-ease);
+}
+
+.u014-item.is-checked .u014-t {
+  color: var(--ux-ink-3);
+}
+
+.u014-item.is-checked .u014-t::after {
+  transform: scaleX(1);
+  transition-delay: .15s;
+}
+
+.u014-meta {
+  font-size: 11.5px;
+  color: var(--ux-ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.u014-tag {
+  margin-left: auto;
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: capitalize;
+  background: color-mix(in srgb, var(--k, var(--ux-accent)) 15%, transparent);
+  color: var(--k, var(--ux-accent));
+  white-space: nowrap;
+  transition: opacity .4s var(--ux-ease);
+}
+
+.u014-item.is-checked .u014-tag {
+  opacity: .5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u014-sub span,
+  .u014-ring .fg,
+  .u014-num,
+  .u014-done,
+  .u014-box,
+  .u014-box::before,
+  .u014-box path,
+  .u014-t,
+  .u014-t::after {
+    transition: none;
+  }
+}

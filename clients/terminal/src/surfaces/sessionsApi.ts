@@ -8,8 +8,8 @@ import { getJson } from "./apiClient";
 export interface SessionSummary {
   session: string;
   title?: string | null;
-  created?: string | null;
-  last_active?: string | null;
+  created?: string | number | null;
+  last_active?: string | number | null;
 }
 
 export interface SessionHistory { turns: { role: string; text: string; ops?: unknown[]; commit?: unknown }[] }
@@ -22,4 +22,12 @@ export async function listSessions(): Promise<SessionSummary[]> {
 export async function sessionHistory(session: string, signal?: AbortSignal): Promise<SessionHistory> {
   const data = await getJson<{ turns?: SessionHistory["turns"] }>(`/api/sessions/${encodeURIComponent(session)}/history`, { signal });
   return { turns: data.turns ?? [] };
+}
+
+export async function deleteSession(session: string): Promise<void> {
+  await getJson<{ ok?: boolean }>(`/api/chat/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session }),
+  });
 }

@@ -21,6 +21,7 @@ import {
   getBrowserSessionArgs,
   CDP_DEBUG_ARGS,
 } from './args';
+import { resolveBrowserProxy } from './browser';
 import { validateLoggedIn, AUTH_COOKIES, AUTH_LOGIN_URLS } from './validate';
 import type { AuthPlatform } from './types';
 
@@ -39,17 +40,42 @@ check(authArgs.includes('--disable-blink-features=AutomationControlled'),
 check(!authArgs.includes('--incognito'),
   'authenticated args must NOT be incognito (wipes stored cookies)');
 check(authArgs.includes('--no-sandbox'), 'authenticated args must include --no-sandbox (container)');
+check(authArgs.includes('--disable-dev-shm-usage'), 'authenticated args must include --disable-dev-shm-usage (Fargate 64MB /dev/shm)');
 
 const sessionArgs = getBrowserSessionArgs();
 for (const bad of FORBIDDEN) {
   check(!sessionArgs.includes(bad), `session args must NOT contain ${bad}`);
 }
+check(sessionArgs.includes('--disable-dev-shm-usage'), 'session args must include --disable-dev-shm-usage (Fargate 64MB /dev/shm)');
 // session mode must expose CDP so an agent can attach over the gateway proxy
 for (const cdp of CDP_DEBUG_ARGS) {
   check(sessionArgs.includes(cdp), `session args must carry CDP debug arg ${cdp}`);
 }
 check(CDP_DEBUG_ARGS.includes('--remote-debugging-port=9222'),
   'CDP_DEBUG_ARGS must bind the debugging port 9222');
+
+// ── 1b. proxy config parsing (residential proxy support) ────────────────────
+check(resolveBrowserProxy({}) === undefined, 'unset BOT_PROXY_URL yields undefined');
+const httpProxy = resolveBrowserProxy({ BOT_PROXY_URL: 'http://alice:p%40ss@proxy.example.com:8080' });
+check(httpProxy?.server === 'http://proxy.example.com:8080'
+  && httpProxy?.username === 'alice'
+  && httpProxy?.password === 'p@ss'
+  && !!httpProxy?.bypass?.includes('.tina-staging.local'),
+  `http proxy with embedded credentials parsed cleanly: ${JSON.stringify(httpProxy)}`);
+const socksProxy = resolveBrowserProxy({
+  BOT_PROXY_URL: 'socks5://10.20.30.40:1080',
+  BOT_PROXY_USERNAME: 'u1',
+  BOT_PROXY_PASSWORD: 's1',
+  BOT_PROXY_BYPASS: 'localhost,.internal',
+});
+check(socksProxy?.server === 'socks5://10.20.30.40:1080'
+  && socksProxy?.username === 'u1'
+  && socksProxy?.password === 's1'
+  && socksProxy?.bypass === 'localhost,.internal',
+  `socks5 proxy with explicit env overrides parsed cleanly: ${JSON.stringify(socksProxy)}`);
+let badProxyThrew = false;
+try { resolveBrowserProxy({ BOT_PROXY_URL: 'ftp://bad.example.com:21' }); } catch { badProxyThrew = true; }
+check(badProxyThrew, 'unsupported BOT_PROXY_URL protocol must throw loudly');
 
 // ── 2. validateLoggedIn decision matrix (stub Page) ──────────────────────────
 type Cookie = { name: string; value: string };

@@ -2,11 +2,172 @@
  "contract": "config.v1",
  "service": "runtime",
  "keys": [
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_TASKS",
+      "class": "defaulted",
+      "default": "{}",
+      "targets": [],
+      "description": "Pinned per-subject task definitions and security groups for workspace workloads."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_IMAGE",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Immutable image for the optional workspace-agent profile."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_STORAGE",
+      "class": "defaulted",
+      "default": "efs",
+      "targets": [],
+      "description": "Default workspace storage backend on ECS: efs or s3."
+    },
+    {
+      "key": "RUNTIME_ECS_EPHEMERAL_TASK_DEFINITION",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Single static Fargate task definition ARN for S3-backed ephemeral workspaces."
+    },
+    {
+      "key": "RUNTIME_ECS_EPHEMERAL_SECURITY_GROUP",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Security group ID for S3-backed ephemeral workspace tasks."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_S3_BROKER_ROLE_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "IAM role assumed by Runtime with a per-turn scoped STS Session Policy."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_S3_BUCKET",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Encrypted S3 bucket backing ephemeral workspaces."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_S3_KMS_KEY_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "KMS CMK ARN used to encrypt/decrypt S3 workspace snapshots."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_EFS_ID",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "EFS file system ID used for dynamic per-mount workspace access points (fallback)."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_TASK_ROLE_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "IAM task role ARN for dynamically provisioned EFS workspace workers."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_EXEC_ROLE_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "IAM execution role ARN for dynamically provisioned EFS workspace workers."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_SECURITY_GROUP",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "VPC security group ID for dynamically provisioned EFS workspace workers."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_LOG_GROUP",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "CloudWatch log group name for dynamically provisioned EFS workspace workers."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_VALKEY_HOST",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Valkey host injected into dynamically provisioned workspace stream sidecars."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_VALKEY_SECRET_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Valkey auth secret ARN injected into dynamically provisioned workspace stream sidecars."
+    },
+    {
+      "key": "RUNTIME_ECS_WORKSPACE_FAMILY_PREFIX",
+      "class": "defaulted",
+      "default": "tina-staging-ws",
+      "targets": [],
+      "description": "ECS task definition family prefix for dynamically provisioned EFS workspace workers."
+    },
+  {
+   "key": "RUNTIME_ECS_CLUSTER",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Cluster name required by the ECS backend."
+  },
+  {
+   "key": "RUNTIME_ECS_SUBNETS",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Private subnet IDs required by the ECS backend."
+  },
+  {
+   "key": "RUNTIME_ECS_SECURITY_GROUPS",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Security groups used by meeting bot tasks on ECS."
+  },
+  {
+   "key": "RUNTIME_ECS_INVOCATION_BUCKET",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Private bucket required for ECS invocation objects."
+  },
+  {
+   "key": "RUNTIME_ECS_BOT_TASK_DEFINITION",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Pinned meeting bot task definition required by the ECS backend."
+  },
+  {
+   "key": "RUNTIME_ECS_DRAFT_TASK_DEFINITION",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Pinned source-only draft worker definition when the pilot is enabled."
+  },
+  {
+   "key": "RUNTIME_ECS_DRAFT_SECURITY_GROUP",
+   "class": "defaulted",
+   "default": "",
+   "targets": [],
+   "description": "Private security group required when the ECS draft worker is enabled."
+  },
   {
    "key": "RUNTIME_BACKEND",
    "class": "defaulted",
    "default": "docker",
-   "description": "spawn backend: docker (host socket API), k8s (Pods via kubectl under the runtime's RBAC), process (child processes — lite)",
+   "description": "spawn backend: docker (host socket API), k8s (Pods via kubectl under the runtime's RBAC), process (child processes — lite), ecs (Fargate meeting-bot tasks)",
    "targets": [
     "helm",
     "lite"
@@ -386,6 +547,90 @@
     "compose",
     "helm"
    ]
+  },
+  {
+   "key": "VALKEY_HOST",
+   "class": "defaulted",
+   "default": "(unset — ECS dynamic/ephemeral workspace stream host fallback)",
+   "description": "Valkey hostname injected by AWS ECS Fargate runtime templates.",
+   "targets": []
+  },
+  {
+   "key": "AWS_REGION",
+   "class": "defaulted",
+   "default": "us-east-1",
+   "description": "AWS region for ECS/STS/S3 API clients.",
+   "targets": []
+  },
+  {
+   "key": "AWS_DEFAULT_REGION",
+   "class": "defaulted",
+   "default": "us-east-1",
+   "description": "Fallback AWS region for ECS/STS/S3 API clients.",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_ECS_NOVA_WORKSPACE_TASK_DEFINITION",
+   "class": "defaulted",
+   "default": "(unset — Nova workspace task definition disabled)",
+   "description": "Pinned Fargate task definition ARN for Bedrock Nova workspace turns.",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_ECS_NOVA_WORKSPACE_OWNERS",
+   "class": "defaulted",
+   "default": "(unset — no subjects routed to Nova workspace task)",
+   "description": "Comma-separated numeric owner IDs (or *) routed to the dedicated Nova workspace task definition.",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_OWNER_QUOTA",
+   "class": "defaulted",
+   "default": "(unset — no per-owner active workload cap)",
+   "description": "Maximum concurrent active sandbox workloads allowed per owner before returning HTTP 429.",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_GLOBAL_QUOTA",
+   "class": "defaulted",
+   "default": "(unset — no deployment-wide active workload cap)",
+   "description": "Maximum concurrent active sandbox workloads allowed across the entire runtime deployment before returning HTTP 429.",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_REAPER_TICK_SEC",
+   "class": "defaulted",
+   "default": "30",
+   "description": "Interval in seconds for the background idle/max-lifetime workload reaper (0 disables).",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_WORKSPACE_IDLE_TIMEOUT_SEC",
+   "class": "defaulted",
+   "default": "300",
+   "description": "Default idle timeout in seconds for workspace-agent sandboxes before the reaper stops them.",
+   "targets": []
+  },
+  {
+   "key": "RUNTIME_WORKSPACE_MAX_LIFETIME_SEC",
+   "class": "defaulted",
+   "default": "3600",
+   "description": "Hard maximum lifetime in seconds for workspace-agent sandboxes regardless of activity.",
+   "targets": []
+  },
+  {
+   "key": "TINA_EGRESS_ALLOWLIST",
+   "class": "defaulted",
+   "default": "(built-in LLM/Bedrock/GitHub/PyPI/npm allowlist)",
+   "description": "Comma-separated domain allowlist enforced by runtime_kernel.egress_proxy for HTTPS CONNECT egress.",
+   "targets": []
+  },
+  {
+   "key": "TINA_EGRESS_PROXY_PORT",
+   "class": "defaulted",
+   "default": "3128",
+   "description": "Listening TCP port for runtime_kernel.egress_proxy.",
+   "targets": []
   }
  ],
  "capabilities": {

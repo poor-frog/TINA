@@ -17,6 +17,8 @@ import { BEDROCK_REGIONS, fallbackChoicesForMode } from "./modelCatalog";
 import { AsrStatusPanel } from "./asrStatus";
 import { TranscriptionPicker } from "./transcriptionPicker";
 import { VoiceSettings } from './voiceSettings';
+import { workspacePilotMode } from "../app/mode";
+import { WorkspaceChatGPTConnection } from "./WorkspaceChatGPTConnection";
 import transcriptionStyles from "./transcriptionPicker.module.css";
 import navigationStyles from "./settingsNavigation.module.css";
 import modelStyles from "./agentModelSettings.module.css";
@@ -27,7 +29,6 @@ type SectionId = "calendar" | "models" | "voice" | "asr" | "tokens" | "github" |
 type ModelSettingsScope = "agent" | "transcription" | "global";
 // shortcut: recognize legacy custom URLs; managed VieGem selections resolve their endpoint on the server.
 const TRANSCRIPTION_PRESETS: Record<string, { url: string; label: string }> = {
-  gipformer: { url: "http://host.docker.internal:18002", label: "Gipformer 1.5 · FSMN-VAD" },
   viegem: { url: "http://host.docker.internal:18005", label: "VieGem + LM" },
 };
 
@@ -91,6 +92,10 @@ const field: CSSProperties = { width: "100%", boxSizing: "border-box", fontSize:
 const btn: CSSProperties = { fontSize: 13, padding: "6px 14px", borderRadius: 7, border: "1px solid var(--line)", background: "var(--panel2)", color: "var(--t1)", cursor: "pointer" };
 
 export function ChatGPTPlanConnection() {
+  return workspacePilotMode() ? <WorkspaceChatGPTConnection /> : <LocalChatGPTPlanConnection />;
+}
+
+function LocalChatGPTPlanConnection() {
   const [connected, setConnected] = useState(false);
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -407,7 +412,7 @@ export function ModelsSection({ initialScope = "agent" }: { initialScope?: Model
   const [runtime, setRuntime] = useState<AsrRuntime | null>(null);
   const [runtimeError, setRuntimeError] = useState("");
   const [runtimeFetchError, setRuntimeFetchError] = useState("");
-  const [runtimeTarget, setRuntimeTarget] = useState<"gipformer" | "viegem" | null>(null);
+  const [runtimeTarget, setRuntimeTarget] = useState<"viegem" | null>(null);
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeVersion, setRuntimeVersion] = useState(0);
   const [otherProvidersOpen, setOtherProvidersOpen] = useState(false);
@@ -420,7 +425,7 @@ export function ModelsSection({ initialScope = "agent" }: { initialScope?: Model
     const timer = window.setInterval(() => void refresh(), 3000);
     return () => { active = false; window.clearInterval(timer); };
   }, [scope]);
-  const changeRuntime = async (backend: "gipformer" | "viegem", enabled: boolean) => {
+  const changeRuntime = async (backend: "viegem", enabled: boolean) => {
     setRuntimeBusy(true); setRuntimeTarget(backend); setRuntimeError("");
     try {
       const current = await getAsrRuntime();

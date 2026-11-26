@@ -106,8 +106,7 @@ The CUDA configuration/tests do not substitute for validation on a real NVIDIA m
 The subsequent RTX 5060 Laptop/WSL2 startup and audio probe is recorded in the
 [VieGem worker README](../transcription/viegem/README.md#windows-wsl2-cuda-verification--2026-11-05).
 
-Gipformer's `asr` profile has its own token-free model-install job independent of VieGem/device.
-Docker VieGem uses a separate job; native MPS prepares the same pinned cache on the host.
+VieGem uses a token-free model-install job for Docker or prepares the same verified cache for native MPS.
 Inference mounts cached weights read-only and receives tokens from the selected dotenvx env,
 without mounting private keys. The shared Mac/Desktop endpoint stays at host port 18005;
 Docker engines must provide host-gateway reachability for that published endpoint.
@@ -327,15 +326,14 @@ transcript included; with the real bot it drives a dead synthetic meeting to a t
 
 ## ASR start/stop by account
 
-Settings → Models → Transcription now controls the managed Gipformer and VieGem workers.
+Settings → Models → Transcription controls the managed VieGem worker.
 Selecting a managed model starts it and verifies authenticated audio,
 then updates only the signed-in account. Turning the account switch off disables new transcription for
 that account. It does not stop another account's worker or overwrite their preference.
 
 A worker with no enabled account demand is retired after ten idle seconds, only after all
 meeting bots/local Desktop captures have ended and its in-flight requests have drained. The UI
-shows physical worker state separately from the account's enabled state. If another account
-still selects the old model, both workers stay running. Changing a setting never transfers an
+shows physical worker state separately from the account's enabled state. Changing a setting never transfers an
 already-running capture to another model. Keep all capture on this managed host; remote unmanaged
 captures must remain operator-managed because their session lifetime is not observable here.
 
@@ -359,3 +357,16 @@ in the shared model volume. Bot inference mounts the cache read-only. A separate
 content-free score/timing observations only; existing VAD/ASR endpointing and transcript writes remain
 the authority. Set `TINA_VOICE_TURN_SHADOW=0` and start a new bot to disable observations.
 See [shadow mode](../../docs/tina-turn-shadow.md) for limits and evaluation requirements.
+
+### Upgrade from managed Gipformer
+
+The old `asr` profile and built-in Gipformer endpoint are retired. Configure
+`TINA_VIEGEM_TOKEN` in the existing private environment to use managed VieGem,
+or configure an active external transcription endpoint. Accounts that selected
+Gipformer inherit the current deployment default. A saved Gipformer platform
+default resolves to VieGem when its URL and credential are available.
+
+If a previous Compose deployment still runs Gipformer, end any captures first and stop the old
+service in that same Docker context and Compose project before running `make all`. The deployment
+guard detects running services that are absent from the new Compose file. Keep its model cache
+if you still run standalone benchmarks.

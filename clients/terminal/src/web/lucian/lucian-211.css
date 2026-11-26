@@ -1,0 +1,248 @@
+/* Lucian UX/UI Prompt #211 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#211 */
+
+@property --u211-b {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@property --u211-a {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.u211 {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 28px 48px;
+  border-radius: 30px;
+  overflow: hidden;
+  isolation: isolate;
+  background: radial-gradient(80% 60% at 50% 100%, color-mix(in srgb, var(--ux-accent) 20%, transparent), transparent 72%), var(--ux-surface);
+  box-shadow: 0 0 0 1.5px var(--ux-line-2), 0 30px 64px -32px var(--ux-shadow-strong);
+  color: var(--ux-ink);
+  text-align: center;
+}
+
+.u211::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background-image: linear-gradient(var(--ux-line) 1px, transparent 1px), linear-gradient(90deg, var(--ux-line) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: center;
+  -webkit-mask: radial-gradient(64% 55% at 50% 65%, #000, transparent 78%);
+  mask: radial-gradient(64% 55% at 50% 65%, #000, transparent 78%);
+  opacity: .75;
+}
+
+.u211-bm {
+  position: absolute;
+  left: 50%;
+  top: 66%;
+  z-index: -1;
+  width: 420px;
+  height: 420px;
+  margin: -210px 0 0 -210px;
+  border-radius: 50%;
+  background: conic-gradient(from var(--u211-b), transparent 0 70%, color-mix(in srgb, #6ee7b7 44%, transparent) 80%, color-mix(in srgb, #2dd4bf 38%, transparent) 86%, transparent 92%);
+  filter: blur(26px);
+  opacity: .55;
+  animation: u211-b 9s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes u211-b {
+  to { --u211-b: 360deg; }
+}
+
+.u211-tg {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px 0 10px;
+  border-radius: 999px;
+  background: var(--ux-surface-2);
+  box-shadow: inset 0 0 0 1px var(--ux-line-2), 0 4px 12px -8px var(--ux-shadow-strong);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ux-ink-2);
+}
+
+.u211-tg em {
+  font-style: normal;
+  letter-spacing: -1px;
+  color: #6ee7b7;
+  font-size: 11px;
+}
+
+.u211 .u211-h {
+  margin: 18px 0 0;
+  font-size: clamp(28px, 4.4vw, 48px);
+  line-height: 1.08;
+  font-weight: 850;
+  letter-spacing: -.035em;
+  color: var(--ux-ink);
+}
+
+.u211-gr {
+  background: linear-gradient(90deg, #6ee7b7, #2dd4bf, #a7f3d0, #fbbf24, #6ee7b7);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: u211-g 6s linear infinite;
+}
+
+@keyframes u211-g {
+  to { background-position: -200% 0; }
+}
+
+.u211-p {
+  margin: 14px auto 0;
+  max-width: 560px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ux-ink-2);
+}
+
+.u211-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 28px;
+  isolation: isolate;
+}
+
+.u211-bt {
+  position: relative;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: conic-gradient(from var(--u211-a), #6ee7b7, #2dd4bf, #fbbf24, #34d399, #6ee7b7);
+  font: inherit;
+  cursor: pointer;
+  animation: u211-r 4s linear infinite;
+  transition: transform .3s cubic-bezier(.3, 1.6, .5, 1), box-shadow .3s;
+  box-shadow: 0 12px 28px -12px rgba(110, 231, 183, .55);
+}
+
+.u211-bt::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  background: inherit;
+  filter: blur(14px);
+  opacity: .35;
+  z-index: -1;
+  transition: opacity .3s;
+}
+
+.u211-bt:hover {
+  transform: translateY(-2px);
+  animation-duration: 1.4s;
+}
+
+.u211-bt:hover::before {
+  opacity: .75;
+}
+
+.u211-bt:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 4px;
+}
+
+@keyframes u211-r {
+  to { --u211-a: 360deg; }
+}
+
+.u211-in {
+  position: relative;
+  margin: 2px;
+  height: calc(100% - 4px);
+  padding: 0 22px;
+  border-radius: inherit;
+  background: #0d1613;
+  color: #f5fbf8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  font-size: 14.5px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.u211-ar {
+  width: 15px;
+  height: 15px;
+  transition: transform .3s cubic-bezier(.3, 1.6, .5, 1);
+}
+
+.u211-bt:hover .u211-ar {
+  transform: translateX(4px);
+}
+
+.u211-gh {
+  height: 48px;
+  padding: 0 20px;
+  border-radius: 999px;
+  background: var(--ux-surface-2);
+  box-shadow: inset 0 0 0 1px var(--ux-line-2);
+  display: inline-flex;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ux-ink);
+  transition: background-color .2s var(--ux-ease);
+}
+
+.u211-gh:hover {
+  background: var(--ux-surface-3);
+}
+
+.u211-ns {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 20px;
+  font-size: 12px;
+  font-weight: 620;
+  color: var(--ux-ink-3);
+}
+
+.u211-ns span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.u211-ns svg {
+  width: 12px;
+  height: 12px;
+  color: #6ee7b7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u211-bt,
+  .u211-bm,
+  .u211-gr {
+    animation: none;
+  }
+  .u211-bt,
+  .u211-ar {
+    transition: none;
+  }
+}

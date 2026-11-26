@@ -3,6 +3,148 @@
   "service": "agent-api",
   "keys": [
     {
+      "key": "TINA_CHATGPT_WORKSPACE_OWNER",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Primary subject that consented to use a separate subscription for workspace jobs."
+    },
+    {
+      "key": "TINA_CHATGPT_WORKSPACE_SECRET_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Secrets Manager reference for the workspace-only ChatGPT connection."
+    },
+    {
+      "key": "TINA_WORKSPACE_PILOT_USER_IDS",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Numeric staging subjects (or *) permitted to dispatch workspace chat and scheduled work."
+    },
+    {
+      "key": "TINA_WORKSPACE_BEDROCK_MODEL",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Optional default AWS Bedrock Claude inference profile ID for staging workspace accounts without BYO or ChatGPT credentials."
+    },
+    {
+      "key": "TINA_WORKSPACE_BEDROCK_OWNER",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Optional comma-separated staging subjects (or *) routed to Bedrock Nova workspace mode."
+    },
+    {
+      "key": "TINA_WORKSPACE_STORAGE",
+      "class": "defaulted",
+      "default": "efs",
+      "targets": [],
+      "description": "Workspace persistence backend: efs (default) or s3 (ephemeral Fargate SSD + KMS-encrypted S3 snapshots)."
+    },
+    {
+      "key": "TINA_S3_WORKSPACE_BUCKET",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "KMS-encrypted S3 bucket storing durable workspace snapshots when TINA_WORKSPACE_STORAGE=s3."
+    },
+    {
+      "key": "TINA_S3_WORKSPACE_KMS_KEY_ID",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "KMS key ARN/ID for workspace snapshots and manifests on S3."
+    },
+    {
+      "key": "TINA_S3_SECRETS_KMS_KEY_ID",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Dedicated KMS key ARN/ID strictly for per-user GitHub tokens on S3 (agent-api only)."
+    },
+    {
+      "key": "TINA_S3_WORKSPACE_USERS",
+      "class": "defaulted",
+      "default": "*",
+      "targets": [],
+      "description": "Numeric subject IDs (or *) routed to S3 ephemeral workers when TINA_WORKSPACE_STORAGE=s3."
+    },
+    {
+      "key": "TINA_S3_MIGRATE_FROM_EFS_DIR",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Optional read-only EFS mount path to idempotently migrate into S3 at agent-api startup."
+    },
+    {
+      "key": "TINA_POST_MEETING_ECS_DRAFT",
+      "class": "defaulted",
+      "default": "0",
+      "targets": [],
+      "description": "Dispatch authorized post-meeting drafts on ECS when set to 1."
+    },
+    {
+      "key": "TINA_MEETING_VOICE_LOCAL_COMPLETION",
+      "class": "defaulted",
+      "default": "0",
+      "targets": [],
+      "description": "Use the local completion process in Agent API for meeting voice when set to 1."
+    },
+    {
+      "key": "TINA_LOCAL_COMPLETION_POOL",
+      "class": "defaulted",
+      "default": "0",
+      "targets": [],
+      "description": "Use an isolated local completion pool in Agent API for stateless non-voice tasks (dictation polish/translate, meeting translations, discussion review, meeting Q&A, post-meeting report) when set to 1."
+    },
+    {
+      "key": "TINA_CHATGPT_VOICE_SECRET_ARN",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Secrets Manager reference for the explicitly connected voice pilot account."
+    },
+    {
+      "key": "TINA_CHATGPT_VOICE_OWNER",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Account authorized to use the staging voice subscription."
+    },
+    {
+      "key": "TINA_CHATGPT_VOICE_ROOM",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Meeting room authorized for the subscription voice pilot."
+    },
+    {
+      "key": "TINA_CHATGPT_VOICE_MODEL",
+      "class": "defaulted",
+      "default": "",
+      "targets": [],
+      "description": "Subscribed model selected for an enabled voice pilot."
+    },
+    {
+      "key": "TINA_CHATGPT_VOICE_PILOT",
+      "class": "defaulted",
+      "default": "0",
+      "targets": [],
+      "description": "Marks an isolated subscription voice job for content-free tracing."
+    },
+    {
+      "key": "TINA_DRAFT_PILOT_USER_IDS",
+      "class": "defaulted",
+      "default": "",
+      "targets": [
+        "compose"
+      ],
+      "description": "Comma-separated account IDs eligible for post-meeting draft jobs."
+    },
+    {
       "key": "TINA_VOICE_EMBED_DIR",
       "class": "defaulted",
       "default": "~/.cache/tina/voice-retrieval",
@@ -456,6 +598,13 @@
       "default": "(unset — an openai-api provider entry must carry its own api_key)",
       "secret": true,
       "description": "OpenAI API key fallback for mode=openai-api when the provider entry has no api_key; dispatch stamps it into the Codex worker as OPENAI_API_KEY. Read from the process env only — no deploy surface plumbs it",
+      "targets": []
+    },
+    {
+      "key": "AWS_DEFAULT_REGION",
+      "class": "defaulted",
+      "default": "us-east-1",
+      "description": "Fallback AWS region used when AWS_REGION is unset for Bedrock and S3 workspace operations.",
       "targets": []
     }
   ],

@@ -1,0 +1,107 @@
+/* Lucian UX/UI Prompt #220 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#220 */
+
+.u220-s {
+  border-radius: 3px;
+  background-image: linear-gradient(
+    color-mix(in srgb, #fde047 68%, transparent),
+    color-mix(in srgb, #fde047 68%, transparent)
+  );
+  background-repeat: no-repeat;
+  background-size: 0% 42%;
+  background-position: 0 88%;
+  transition: background-size .6s cubic-bezier(.3, .9, .3, 1), background-color .2s, color .2s;
+}
+
+.u220-s.is-hl {
+  background-size: 100% 42%;
+}
+
+.u220-tip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--ux-ink);
+  color: var(--ux-surface);
+  box-shadow: 0 10px 24px -10px var(--ux-shadow-strong), 0 0 0 1px var(--ux-line);
+  transform: translate(-50%, -100%) scale(.85);
+  transform-origin: 50% 100%;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s var(--ux-ease), transform .25s cubic-bezier(.3, 1.6, .5, 1);
+  z-index: 130;
+}
+
+.u220-tip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  margin-left: -5px;
+  border: 5px solid transparent;
+  border-bottom: 0;
+  border-top-color: var(--ux-ink);
+}
+
+.u220-tip.is-on {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, calc(-100% - 8px)) scale(1);
+}
+
+.u220-tip button {
+  height: 28px;
+  min-width: 30px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ux-surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color .15s;
+}
+
+.u220-tip button:hover {
+  background: color-mix(in srgb, var(--ux-surface) 14%, transparent);
+}
+
+.u220-tip button:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: -2px;
+}
+
+.u220-tip svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.u220-cp .u220-ok {
+  display: none;
+}
+
+.u220-cp.is-ok .u220-ok {
+  display: block;
+}
+
+.u220-cp.is-ok .u220-cpi {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u220-s,
+  .u220-tip {
+    transition: none;
+  }
+}

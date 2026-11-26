@@ -659,7 +659,7 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
     from shared.voice_trace import voice_span
     from shared.meeting_knowledge import PREFIX, SYSTEM, validate_answer
     from shared.voice_knowledge import (VOICE_SYSTEM, VOICE_TOOLS, VOICE_PLAN_SYSTEM, VOICE_INTENT_SYSTEM, VOICE_SOURCE_SYSTEM, VOICE_REPAIR_SYSTEM, VOICE_FORMAT_SYSTEM, GENERAL_SYSTEM, VERIFY_SYSTEM,
-        validate_voice_answer, verify_voice_reply, voice_tool_calls)
+        normalize_empty_voice_answer, validate_voice_answer, verify_voice_reply, voice_tool_calls)
     from shared.voice_summary import MAP_SYSTEM, SELECT_SYSTEM
     from shared.voice_task_flow import TASK_FLOW_SYSTEM, TaskPatch
     from shared.voice_decision_flow import DECISION_SYSTEM, EVIDENCE_SYSTEM, DecisionPatch, EvidenceVerdict, checked_evidence
@@ -711,7 +711,7 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                 with voice_span(stage, trace_id):
                     result = generate_text(provider, prompt, system, schema, use_harness=use_harness)
             check_current()
-            return result
+            return normalize_empty_voice_answer(result) if mode == 'voice' and len(result) <= 50000 else result
         def generate_text(provider, prompt, system, schema, *, use_harness=True):
             if use_harness and source.get('use_sandbox_agent') is True and mode in (
                     'voice_plan', 'voice', 'voice_general', 'voice_web', 'voice_summary_map') and system not in (
@@ -744,9 +744,9 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
         if mode in ('voice_plan','voice_source_intent'):
             provider_timeout = min(provider_timeout, voice_deadline-time.monotonic())
             if provider_timeout <= 0: raise TimeoutError('Voice retrieval budget exhausted')
-        provider = None if mode == 'meeting_assistant' else completion_from_env(timeout=provider_timeout)
+        use_local_assistant = mode == 'meeting_assistant' and os.environ.get('TINA_LOCAL_COMPLETION_POOL') == '1'
+        provider = None if (mode == 'meeting_assistant' and not use_local_assistant) else completion_from_env(timeout=provider_timeout)
         if mode == 'meeting_assistant':
-            from worker.voice_sandbox import complete as assistant_complete
             schema = {
                 'type': 'object', 'additionalProperties': False, 'required': ['claims'],
                 'properties': {'claims': {'type': 'array', 'items': {
@@ -756,8 +756,12 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                     }},
                 }}},
             }
-            text = assistant_complete(payload['text'], SYSTEM, schema, timeout=40,
-                                      current=check_current, meeting_assistant=True)
+            if use_local_assistant:
+                text = generate(provider, payload['text'], SYSTEM, schema, use_harness=False)
+            else:
+                from worker.voice_sandbox import complete as assistant_complete
+                text = assistant_complete(payload['text'], SYSTEM, schema, timeout=40,
+                                          current=check_current, meeting_assistant=True)
             validate_answer(text, answer_sources)
         elif mode == 'voice_summary_select':
             text = generate(completion_from_env(timeout=15), payload['text'], SELECT_SYSTEM)
@@ -1044,20 +1048,28 @@ def _run_dictation_translate(stream, out_topic: str, start: dict) -> None:
 
 # ── the harness loop (redis + the turn injected) ─────────────────────────────────────────────────
 
-def serve(stream: _Stream, *, out_topic: str, in_topic: str, turn: TurnFn, start: dict, idle_ms: int) -> None:
+def serve(stream: _Stream, *, out_topic: str, in_topic: str, turn: TurnFn, start: dict, idle_ms: int,
+          sync_client=None) -> None:
     """Run the entrypoint turn (if any), then serve interactive messages on ``in_topic`` until idle.
 
     Each turn's UnitEvents are XADD'd to ``out_topic`` (tagged with a turn id), followed by a
     ``turn-complete`` marker. An empty blocking read (idle) returns — the process exits and the
     container is reaped (TTL-on-idle). A ``{"type":"stop"}`` message exits immediately.
 
-    Every turn opens with a ``turn-accepted`` event — the worker's LIVENESS ACK. It flips the UI
-    off "Starting agent" the moment the turn is picked up (long before the first model token) and
-    is the evidence the dispatcher's warm-delivery watchdog waits on: no accepted event = the
-    message was NOT taken (worker exited in the race window) → the dispatcher respawns. A warm
-    in-topic message carries a ``nonce`` the ack echoes so the watchdog can match ITS delivery.
+    When ``sync_client`` is wired (``TINA_WORKSPACE_SYNC_SIDECAR=1``), warm follow-up turns refresh
+    from S3 before running and EVERY turn commits back to S3 BEFORE emitting ``turn-complete``.
     """
+    drain_requested = False
+
     def run_message(prompt: str, turn_id: str, nonce: str | None = None) -> None:
+        nonlocal drain_requested
+        if sync_client is not None and turn_id != "t0":
+            try:
+                ref = sync_client.refresh()
+                if isinstance(ref, dict) and ref.get("drain_after_turn"):
+                    drain_requested = True
+            except Exception as exc:  # noqa: BLE001
+                log.warning("workspace sync refresh failed before %s: %s", turn_id, exc)
         ack: dict = {"type": "turn-accepted", "turn_id": turn_id}
         if nonce:
             ack["nonce"] = nonce
@@ -1065,15 +1077,20 @@ def serve(stream: _Stream, *, out_topic: str, in_topic: str, turn: TurnFn, start
         approval_port = McpApprovalBroker(stream, out_topic, cursor, turn_id=turn_id)
         for ev in turn(prompt, approval_port):
             stream.xadd(out_topic, {"event": json.dumps({**ev, "turn_id": turn_id})})
+        if sync_client is not None:
+            try:
+                res = sync_client.commit()
+                if isinstance(res, dict) and res.get("drain_after_turn"):
+                    drain_requested = True
+            except Exception as exc:  # noqa: BLE001
+                log.exception("workspace sync commit failed after %s", turn_id)
+                stream.xadd(out_topic, {"event": json.dumps({
+                    "type": "error",
+                    "message": f"Workspace sync to S3 failed: {exc}",
+                    "turn_id": turn_id,
+                })})
         stream.xadd(out_topic, {"event": json.dumps({"type": "turn-complete", "turn_id": turn_id})})
 
-    # Anchor the in-topic cursor at the BOOT-TIME tail, before the entrypoint turn runs. The
-    # dispatcher pre-delivers each chat message to the in topic BEFORE asking the runtime to spawn
-    # (warm delivery): on a COLD spawn that same prompt arrives as the entrypoint, so everything
-    # already in the stream at boot must be SKIPPED (no double turn) — while a message that lands
-    # DURING the entrypoint turn (previously invisible to a "$" read, a lost turn) is consumed
-    # right after it. Streams without history anchor at 0-0; a stream object without xrevrange
-    # (older test fakes) keeps the legacy "$" behavior.
     last = "$"
     xrevrange = getattr(stream, "xrevrange", None)
     if xrevrange is not None:
@@ -1087,10 +1104,12 @@ def serve(stream: _Stream, *, out_topic: str, in_topic: str, turn: TurnFn, start
     first = start_prompt(start)
     if first:
         run_message(first, "t0")
+        if drain_requested:
+            return
 
     n = 0
     while True:
-        if cursor.stop_requested:
+        if cursor.stop_requested or drain_requested:
             return
         msg = cursor.read_next(block=idle_ms)
         if msg is None:
@@ -1125,7 +1144,11 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
     _warn = preflight_provider_guard()
     if _warn:
         log.warning("agent-api worker: %s", _warn)
-    client = redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    if os.getenv('TINA_WORKSPACE_STREAM_SIDECAR') == '1':
+        from worker.workspace_stream import WorkspaceStream
+        client = WorkspaceStream(os.environ['TINA_OWNER'], os.environ['TINA_UNIT_ID'])
+    else:
+        client = redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
     out_topic = os.environ["TINA_UNIT_OUT_TOPIC"]
     idle_ms = int(os.environ.get("TINA_IDLE_TIMEOUT_SEC", "120")) * 1000
     start = json.loads(os.environ.get("TINA_START", "{}"))
@@ -1159,6 +1182,11 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
         from worker.discussion_review import run as run_discussion_review
         run_discussion_review(client, out_topic, start)
         return
+
+    sync_client = None
+    if os.getenv("TINA_WORKSPACE_SYNC_SIDECAR") == "1":
+        from worker.workspace_sync import WorkspaceSyncClient
+        sync_client = WorkspaceSyncClient()
 
     transcript_stream = os.environ.get("TINA_TRANSCRIPT_STREAM")
     if transcript_stream:  # a live meeting dispatch — consume the transcript, emit cards
@@ -1215,6 +1243,11 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
             if errors:
                 log.warning("agent-api worker: meeting envelope schema errors: %s", "; ".join(errors[:3]))
             persist_envelope(meeting_envelope_file, envelope, workspace=work)
+            if sync_client is not None:
+                try:
+                    sync_client.commit()
+                except Exception:  # noqa: BLE001 — beat mirror commit is best-effort
+                    log.warning("agent-api worker: meeting beat S3 sync commit failed", exc_info=True)
         # write_meeting_doc=false ⇒ no doc_turn (independent of `enabled`, which gates the live beats).
         doc_turn = None
         if cfg.write_meeting_doc and document_id is not None:
@@ -1222,36 +1255,43 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
                 work, cards, native=document_id, meeting_id=native, session_uid=session_uid,
                 platform=platform, date=date, title=title, model=cfg.model,
             )
-        serve_meeting(
-            client, transcript_stream=transcript_stream, out_topic=out_topic,
-            card_turn=lambda segs: meeting_card_turn(
-                work, segs, model=cfg.model, card_kinds=cfg.card_kinds, steering=cfg.steering,
-                polish_rules=cfg.polish_rules, tag_rules=cfg.tag_rules,
-            ),
-            idle_ms=idle_ms, beat_segments=cfg.cadence_segments,
-            doc_turn=doc_turn, enabled=cfg.enabled,
-            start_id=os.environ.get("TINA_TRANSCRIPT_START_ID", "0"),
-            # P0 (cross-tenant leak fix): BOTH the processed-notes stream AND its cursor key on the
-            # meetings-domain ROW id (TINA_MEETING_NUMERIC_ID) — unique per meeting run, so neither a
-            # re-sent bot on the same native link NOR a different tenant on the same link can ever
-            # mix/clobber/read another meeting's processed doc. The meeting-api db-writer (which knows
-            # its own row ids) drains proc:meeting:{row_id} into that meeting row's data JSONB (durable).
-            # The cursor is now a position in the ROW-KEYED transcript stream tc:meeting:{row_id} (each
-            # row has its own stream), so it too MUST be row-scoped — a shared native-keyed cursor would
-            # resume one row from another row's position (and leak progress across tenants).
-            proc_stream=f"proc:meeting:{row_id}",
-            cursor_key=f"proc:meeting:{row_id}:cursor",
-            on_proc_note=on_proc_note,
-            on_envelope=on_envelope,
-            # Provenance stamped on every processed-notes entry: what pipeline/provider/model
-            # produced this cleaned view — persisted verbatim into the durable view's `params`
-            # (meeting.data processed views) by the meeting-api db-writer (reproducibility).
-            proc_params={
-                "pipeline": "meeting-copilot/proc-notes", "version": 1,
-                "provider": os.environ.get("TINA_LLM_PROVIDER"),
-                "model": cfg.model or os.environ.get("TINA_LLM_MODEL"),
-            },
-        )
+        try:
+            serve_meeting(
+                client, transcript_stream=transcript_stream, out_topic=out_topic,
+                card_turn=lambda segs: meeting_card_turn(
+                    work, segs, model=cfg.model, card_kinds=cfg.card_kinds, steering=cfg.steering,
+                    polish_rules=cfg.polish_rules, tag_rules=cfg.tag_rules,
+                ),
+                idle_ms=idle_ms, beat_segments=cfg.cadence_segments,
+                doc_turn=doc_turn, enabled=cfg.enabled,
+                start_id=os.environ.get("TINA_TRANSCRIPT_START_ID", "0"),
+                # P0 (cross-tenant leak fix): BOTH the processed-notes stream AND its cursor key on the
+                # meetings-domain ROW id (TINA_MEETING_NUMERIC_ID) — unique per meeting run, so neither a
+                # re-sent bot on the same native link NOR a different tenant on the same link can ever
+                # mix/clobber/read another meeting's processed doc. The meeting-api db-writer (which knows
+                # its own row ids) drains proc:meeting:{row_id} into that meeting row's data JSONB (durable).
+                # The cursor is now a position in the ROW-KEYED transcript stream tc:meeting:{row_id} (each
+                # row has its own stream), so it too MUST be row-scoped — a shared native-keyed cursor would
+                # resume one row from another row's position (and leak progress across tenants).
+                proc_stream=f"proc:meeting:{row_id}",
+                cursor_key=f"proc:meeting:{row_id}:cursor",
+                on_proc_note=on_proc_note,
+                on_envelope=on_envelope,
+                # Provenance stamped on every processed-notes entry: what pipeline/provider/model
+                # produced this cleaned view — persisted verbatim into the durable view's `params`
+                # (meeting.data processed views) by the meeting-api db-writer (reproducibility).
+                proc_params={
+                    "pipeline": "meeting-copilot/proc-notes", "version": 1,
+                    "provider": os.environ.get("TINA_LLM_PROVIDER"),
+                    "model": cfg.model or os.environ.get("TINA_LLM_MODEL"),
+                },
+            )
+        finally:
+            if sync_client is not None:
+                try:
+                    sync_client.commit()
+                except Exception:  # noqa: BLE001
+                    log.exception("agent-api worker: final meeting S3 sync commit failed")
     else:  # chat / routine / event — run the entrypoint, then serve interactive messages
         trigger = os.environ.get("TINA_UNIT_TRIGGER", "message")
         if trigger in ("event", "transcription"):
@@ -1271,5 +1311,5 @@ def main() -> None:  # pragma: no cover — the container entrypoint (wired in t
                 work, prompt, model=model, allowed_tools=chat_tools, session=session,
                 approval_port=approval_port, **turn_policy,
             ),
-            start=start, idle_ms=idle_ms,
+            start=start, idle_ms=idle_ms, sync_client=sync_client,
         )

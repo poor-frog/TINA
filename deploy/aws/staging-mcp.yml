@@ -1,0 +1,134 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Private read-only TINA MCP and Gateway routing on the staging ALB.
+
+Parameters:
+  ClusterName: {Type: String}
+  VpcId: {Type: 'AWS::EC2::VPC::Id'}
+  AppSubnetIds: {Type: 'List<AWS::EC2::Subnet::Id>'}
+  ServiceNamespaceId: {Type: String}
+  CoreIngressSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  CoreClientSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  ListenerArn: {Type: String}
+  PublicOrigin: {Type: String}
+  McpImage: {Type: String, AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'}
+
+Resources:
+  Ingress:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: MCP access from the staging Gateway
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 8010, ToPort: 8010, SourceSecurityGroupId: !Ref CoreIngressSecurityGroupId}
+  Discovery:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: mcp
+      DnsConfig:
+        NamespaceId: !Ref ServiceNamespaceId
+        DnsRecords: [{Type: A, TTL: 15}]
+  GatewayTargets:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      Port: 8000
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 15
+      HealthyThresholdCount: 2
+  McpRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ListenerArn
+      Priority: 20
+      Conditions:
+        - {Field: path-pattern, Values: ['/mcp']}
+      Actions:
+        - {Type: forward, TargetGroupArn: !Ref GatewayTargets}
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties: {RetentionInDays: 7}
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {'aws:SourceAccount': !Ref 'AWS::AccountId'}}
+      Policies:
+        - PolicyName: PullMcpAndWriteLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: 'ecr:GetAuthorizationToken', Resource: '*'}
+              - Effect: Allow
+                Action: [ecr:BatchGetImage, ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer]
+                Resource: !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/tina-staging/mcp'
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt Logs.Arn
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref AWS::StackName
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '256'
+      Memory: '512'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: mcp
+          Image: !Ref McpImage
+          Essential: true
+          User: '65532:65532'
+          Environment:
+            - {Name: PYTHONDONTWRITEBYTECODE, Value: '1'}
+            - {Name: TINA_ENV, Value: production}
+            - {Name: GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
+            - {Name: TINA_MCP_READ_ONLY, Value: '1'}
+            - {Name: TINA_MCP_TRANSPORT_HOST, Value: 'mcp.tina-staging.local:8010'}
+            - {Name: TINA_MCP_PUBLIC_ORIGIN, Value: !Ref PublicOrigin}
+          ReadonlyRootFilesystem: true
+          PortMappings: [{ContainerPort: 8010}]
+          HealthCheck:
+            Command: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=4).close()"]
+            Interval: 15
+            Timeout: 5
+            Retries: 4
+            StartPeriod: 30
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+  Mcp:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ClusterName
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      PlatformVersion: '1.4.0'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetIds
+          SecurityGroups: [!GetAtt Ingress.GroupId, !Ref CoreClientSecurityGroupId]
+      ServiceRegistries:
+        - RegistryArn: !GetAtt Discovery.Arn
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+        # MCP sessions are in memory, so use one task even during a rollout.
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+
+
+Outputs:
+  ServiceName: {Value: !GetAtt Mcp.Name}
+  McpUrl: {Value: 'http://mcp.tina-staging.local:8010'}
+  PublicMcpUrl: {Value: !Sub '${PublicOrigin}/mcp'}
+  GatewayTargetGroupArn: {Value: !Ref GatewayTargets}
+  TaskDefinitionArn: {Value: !Ref TaskDefinition}

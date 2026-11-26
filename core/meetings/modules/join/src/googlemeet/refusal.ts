@@ -67,12 +67,50 @@ export async function throwIfGoogleJoinRefused(page: Page, context: string): Pro
   }
 }
 
+export interface KnockRetryOptions {
+  /** Signed-in Google profile: preserve cookies/storage across retries. */
+  authenticated?: boolean;
+  /** Delay before retrying after attempt N (1-indexed). Defaults to 2s/3.5s + jitter. */
+  backoffMs?: (attempt: number) => number;
+  /** Injectable sleeper for deterministic tests. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const DEFAULT_KNOCK_BACKOFF_MS = [2000, 3500];
+
+function defaultKnockBackoffMs(attempt: number): number {
+  const base = DEFAULT_KNOCK_BACKOFF_MS[Math.min(Math.max(attempt - 1, 0), DEFAULT_KNOCK_BACKOFF_MS.length - 1)];
+  return base + Math.floor(Math.random() * 1000);
+}
+
+async function clearAnonymousPageSession(page: Page): Promise<boolean> {
+  let cleared = false;
+  try {
+    const ctx = typeof (page as any)?.context === "function" ? (page as any).context() : undefined;
+    if (ctx && typeof ctx.clearCookies === "function") {
+      await ctx.clearCookies();
+      cleared = true;
+    }
+  } catch { /* best-effort */ }
+  try {
+    if (typeof (page as any)?.evaluate === "function") {
+      await (page as any).evaluate(() => {
+        try { localStorage.clear(); } catch { /* ignore */ }
+        try { sessionStorage.clear(); } catch { /* ignore */ }
+      });
+      cleared = true;
+    }
+  } catch { /* best-effort */ }
+  return cleared;
+}
+
 /** Retry only Google's typed flaky refusal; all other outcomes keep their existing handling. */
 export async function knockUntilGoogleAccepts(
   page: Page,
   timeoutMs: number,
   knock: (remainingMs: number) => Promise<boolean>,
   now: () => number = Date.now,
+  options?: KnockRetryOptions,
 ): Promise<boolean> {
   const deadline = now() + timeoutMs;
   for (let attempt = 1; ; attempt++) {
@@ -84,7 +122,25 @@ export async function knockUntilGoogleAccepts(
       if (attempt >= GOOGLE_JOIN_MAX_KNOCKS || deadline - now() <= 0) {
         throw new GoogleJoinRefusedError(error.evidence, attempt);
       }
-      log(`Retrying Google Meet join after refusal ${attempt}/${GOOGLE_JOIN_MAX_KNOCKS}: ${error.evidence}`);
+      const cleared = options?.authenticated ? false : await clearAnonymousPageSession(page);
+      const remainingBeforeSleep = Math.max(deadline - now(), 0);
+      const rawDelay = (options?.backoffMs ?? defaultKnockBackoffMs)(attempt);
+      const delayMs = Math.min(Math.max(0, rawDelay), remainingBeforeSleep);
+      const sleepFn = options?.sleep
+        ?? (now === Date.now && typeof (page as any)?.waitForTimeout === "function"
+          ? (ms: number) => (page as any).waitForTimeout(ms)
+          : undefined);
+      log(
+        `Retrying Google Meet join after refusal ${attempt}/${GOOGLE_JOIN_MAX_KNOCKS}: ${error.evidence}`
+        + (cleared ? " (cleared anonymous cookies/storage)" : "")
+        + (sleepFn && delayMs > 0 ? ` in ${delayMs}ms` : ""),
+      );
+      if (sleepFn && delayMs > 0) {
+        await sleepFn(delayMs);
+        if (deadline - now() <= 0) {
+          throw new GoogleJoinRefusedError(error.evidence, attempt);
+        }
+      }
     }
   }
 }

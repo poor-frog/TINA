@@ -1,0 +1,309 @@
+/* Lucian UX/UI Prompt #459 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#459 */
+
+.u459 {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  max-width: 100%;
+  z-index: 60;
+}
+
+.u459-at {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  transition: transform .55s cubic-bezier(.3, 1.5, .5, 1);
+}
+
+.u459-at.is-drag {
+  transition: none;
+}
+
+.u459-i {
+  position: relative;
+  width: 214px;
+  max-width: calc(100vw - 24px);
+  height: 36px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #000000;
+  color: #ffffff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .13), 0 14px 30px -14px rgba(0, 0, 0, .75);
+  box-shadow: 0 0 0 1px light-dark(rgba(0, 0, 0, .12), rgba(255, 255, 255, .14)), 0 14px 30px -14px light-dark(rgba(0, 0, 0, .38), rgba(0, 0, 0, .9));
+  transition:
+    width .58s cubic-bezier(.3, 1.32, .5, 1),
+    height .58s cubic-bezier(.3, 1.32, .5, 1),
+    border-radius .58s cubic-bezier(.3, 1.2, .5, 1),
+    transform .45s cubic-bezier(.34, 1.6, .5, 1);
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.u459.is-expanded .u459-at {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+.u459-i.is-press {
+  transform: scale(.965);
+  transition-duration: .58s, .58s, .58s, .12s;
+}
+
+.u459-tap {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.u459 .u459-tap:focus-visible {
+  outline: none;
+}
+
+.u459-i:has(.u459-tap:focus-visible) {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 3px;
+}
+
+.u459-v {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  opacity: 0;
+  visibility: hidden;
+  filter: blur(6px);
+  transform: translateX(-50%) scale(.9);
+  transform-origin: 50% 0;
+  pointer-events: none;
+  transition: opacity .16s var(--ux-ease), filter .16s var(--ux-ease), transform .3s var(--ux-ease), visibility 0s linear .16s;
+}
+
+.u459-v.is-on {
+  opacity: 1;
+  visibility: visible;
+  filter: none;
+  transform: translateX(-50%);
+  transition: opacity .3s var(--ux-ease) .13s, filter .3s var(--ux-ease) .13s, transform .5s cubic-bezier(.3, 1.4, .5, 1) .1s, visibility 0s;
+}
+
+.u459-v button {
+  pointer-events: auto;
+}
+
+.u459-cp {
+  width: 168px;
+  max-width: calc(100vw - 24px);
+  height: 36px;
+  padding: 0 13px;
+}
+
+.u459-xp {
+  width: 316px;
+  max-width: calc(100vw - 24px);
+  height: 84px;
+  padding: 0 16px;
+}
+
+.u459-grn {
+  color: #30d158;
+}
+
+.u459-ct {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.u459-live-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #30d158;
+  box-shadow: 0 0 0 3px rgba(48, 209, 88, .25);
+}
+
+.u459-cp-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.u459-eq {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 14px;
+}
+
+.u459-eq i {
+  width: 2.5px;
+  height: 14px;
+  border-radius: 2px;
+  background: #7ee8c0;
+  transform-origin: 50% 50%;
+  animation: u459-eq .9s ease-in-out infinite alternate;
+}
+
+.u459-eq i:nth-child(2) {
+  animation-duration: .62s;
+  animation-delay: -.3s;
+}
+
+.u459-eq i:nth-child(3) {
+  animation-duration: .78s;
+  animation-delay: -.5s;
+}
+
+.u459-eq i:nth-child(4) {
+  animation-duration: .55s;
+  animation-delay: -.1s;
+}
+
+@keyframes u459-eq {
+  0% {
+    transform: scaleY(.25);
+  }
+  100% {
+    transform: scaleY(1);
+  }
+}
+
+.u459-who {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  flex: 1;
+}
+
+.u459-av {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  background: linear-gradient(150deg, #176b5b, #30d158);
+}
+
+.u459-wt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.u459-wt small {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, .62);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.u459-wt b {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.u459-bs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.u459-cb {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  transition: transform .4s cubic-bezier(.34, 1.6, .5, 1), filter .15s;
+}
+
+.u459-cb:hover {
+  filter: brightness(1.15);
+}
+
+.u459-cb:active {
+  transform: scale(.88);
+  transition-duration: .1s;
+}
+
+.u459-cb svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.u459-cb.is-grn {
+  background: #30d158;
+  color: #05200e;
+}
+
+.u459-cb.is-gry {
+  background: rgba(255, 255, 255, .17);
+  color: #ffffff;
+}
+
+.u459 .u459-cb:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+.u459-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .u459-i,
+  .u459-cp {
+    width: 168px;
+  }
+  .u459-cp-title {
+    display: none;
+  }
+}

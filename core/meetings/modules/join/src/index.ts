@@ -127,7 +127,7 @@ export async function joinMeeting(page: Page, opts: JoinOptions): Promise<JoinRe
       return waitForGoogleMeetingAdmission(
         page, Math.max(remainingMs - (Date.now() - startedAt), 0), botConfig,
       );
-    });
+    }, Date.now, { authenticated: !!botConfig.authenticated });
   } else {
     // Explicit refusal, never a fallthrough: an unknown platform used to silently run the GOOGLE
     // MEET join flow against whatever URL it was handed — the wrong flow on the wrong site, failing

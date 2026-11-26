@@ -217,6 +217,35 @@ async def test_new_room_defaults_on_and_continuation_preserves_explicit_room_cho
     assert json.loads(runtime.specs[-1]['env']['BOT_CONFIG'])['transcriptionServiceUrl']=='http://asr.test'
 
 
+@pytest.mark.parametrize('pilot_rooms', ['abc-defg-hij', 'abc-defg-hij,uvw-xyza-bcd'])
+async def test_voice_pilot_shares_only_transcript_and_only_in_named_rooms(monkeypatch, pilot_rooms):
+    from meeting_api.bot_spawn import service
+
+    async def context(user):
+        return {'transcription': {'url': 'http://asr.test', 'token': 'synthetic'}}
+
+    monkeypatch.setattr(service, '_fetch_bot_context', context)
+    monkeypatch.setenv('TTS_SERVICE_URL', 'http://tts.test')
+    monkeypatch.setenv('TINA_MEETING_VOICE', '1')
+    monkeypatch.setenv('TINA_MEETING_VOICE_PILOT_ROOM', pilot_rooms)
+    monkeypatch.setenv('ADMIN_TOKEN', SECRET)
+    repo, runtime = InMemoryMeetingRepo(), FakeRuntimeClient()
+    for room in ('abc-defg-hij', 'klm-nopq-rst', 'uvw-xyza-bcd'):
+        await request_bot(repo, runtime, user_id=USER, platform='google_meet', native_meeting_id=room,
+                          voice_agent_enabled=True, token_secret=SECRET)
+    pilot, other, second = repo._meetings.values()
+    assert pilot['data']['voice_assistant_capable'] is True
+    policy = pilot['data']['voice_assistant']
+    assert policy['enabled'] and policy['include_transcript']
+    assert policy['engine'] == 'livekit' and policy['agent_backend'] == 'completion'
+    assert not any(policy[k] for k in ('allow_web_search', 'allow_general_knowledge', 'include_workspace_wiki'))
+    assert 'TINA_VOICE_TOKEN' in runtime.specs[0]['env']
+    assert other['data']['voice_assistant_capable'] is False
+    assert 'TINA_VOICE_TOKEN' not in runtime.specs[1]['env']
+    assert second['data']['voice_assistant_capable'] is (',' in pilot_rooms)
+    assert ('TINA_VOICE_TOKEN' in runtime.specs[2]['env']) is (',' in pilot_rooms)
+
+
 def test_iso_utc_marks_naive_utc_with_z():
     # Meeting time columns are naive but hold UTC. Serializing must emit a Z marker so a browser
     # parses it as UTC and renders local — a bare isoformat is read as LOCAL (the 6h-skew bug).

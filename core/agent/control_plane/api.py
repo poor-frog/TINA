@@ -74,12 +74,14 @@ from control_plane import git_credentials as git_creds
 from control_plane import system_mounts
 from control_plane.workspace_membership import MembershipError, MembershipIndex, InMemoryMembershipIndex
 from control_plane.dispatch import (
+    WORKSPACE_NOVA_MODEL,
     Dispatcher,
     MODEL_AUTH_ENV_ALLOWLIST,
     ModelConfigRefreshError,
     build_mount_set,
     overlay_model_config,
     worker_cwd,
+    workspace_uses_nova,
 )
 from control_plane.events import event_to_invocation
 from shared.ports import SchedulerPort, StreamReader
@@ -1191,6 +1193,206 @@ def create_app(
     app.state.live_meetings = live
     app.state.scheduler = scheduler
     settings = dispatcher.settings if dispatcher is not None else None
+    from control_plane.workspace_store import S3WorkspaceStore
+
+    s3_store = S3WorkspaceStore.from_env(wsr.root, redis_url=redis_url)
+    app.state.s3_workspace_store = s3_store
+    if s3_store is not None:
+        migrate_src = (os.getenv("TINA_S3_MIGRATE_FROM_EFS_DIR") or "").strip()
+        if migrate_src and Path(migrate_src).is_dir():
+            try:
+                with s3_store.distributed_lock("efs-migration", timeout=120.0):
+                    s3_store.migrate_from_efs(Path(migrate_src))
+            except Exception:  # noqa: BLE001
+                logger.exception("startup EFS->S3 workspace migration failed")
+        try:
+            with s3_store.distributed_lock("s3-system-compact", timeout=120.0):
+                s3_store.compact_bloated_system_snapshots()
+        except Exception:  # noqa: BLE001
+            logger.warning("startup S3 system compaction skipped", exc_info=True)
+        global_src = (getattr(settings, "global_system_workspace_path", "") or "").strip() if settings else ""
+        if global_src:
+            gpath = Path(global_src)
+            if gpath.resolve() == (wsr.root / system_mounts.GLOBAL_SLUG).resolve():
+                try:
+                    with s3_store.distributed_lock("s3-global-seed", timeout=60.0):
+                        s3_store.ensure_synced(gpath, force=True)
+                        if not (gpath / ".git").exists():
+                            system_mounts.ensure_global_workspace(gpath)
+                            s3_store.push_if_changed(gpath, actor="system", force=True)
+                except Exception:  # noqa: BLE001
+                    logger.warning("startup S3 _global workspace hydration skipped", exc_info=True)
+
+        @app.middleware("http")
+        async def _s3_workspace_sync_middleware(request: Request, call_next):
+            path = request.url.path
+            sync_prefixes = (
+                "/api/workspace", "/api/sessions", "/api/routines",
+                "/api/chat", "/api/models", "/invocations",
+                "/api/internal/meeting-voice",
+                "/api/meeting-translations", "/api/discussion-reviews",
+            )
+            if not path.startswith(sync_prefixes) or path.startswith("/api/workspace/git-token"):
+                return await call_next(request)
+            if path.startswith("/api/internal/meeting-voice"):
+                expected_secret = os.environ.get("TINA_INTERNAL_API_SECRET", "")
+                supplied_secret = request.headers.get("x-internal-secret", "")
+                if not expected_secret or not hmac.compare_digest(expected_secret.encode(), supplied_secret.encode()):
+                    return await call_next(request)
+
+            method = request.method.upper()
+            is_voice_write = (
+                path.startswith("/api/internal/meeting-voice/")
+                and (path.endswith("/task-flow") or path.endswith("/decision-flow"))
+            )
+            is_write = method in ("POST", "PUT", "PATCH", "DELETE") and (
+                path.startswith("/api/workspace")
+                or path.startswith("/api/routines")
+                or path.startswith("/api/meeting-translations")
+                or path.startswith("/api/discussion-reviews")
+                or is_voice_write
+            )
+            subject = (request.headers.get("x-user-id") or "").strip()
+            if not subject and settings is not None:
+                subject = (settings.agent_default_subject or "").strip()
+
+            # O(1) invite target resolution before preview/accept
+            if path == "/api/workspace/invites/preview":
+                tok = (request.query_params.get("token") or "").strip()
+                if tok:
+                    await run_in_threadpool(s3_store.sync_invite_target, membership_mod.hash_token(tok))
+                return await call_next(request)
+
+            invite_target_ws: Optional[str] = None
+            if path == "/api/workspace/invites/accept" and method == "POST":
+                try:
+                    raw = await request.body()
+                    parsed = json.loads(raw) if raw else {}
+                    tok = str(parsed.get("token") or "").strip()
+                    if tok:
+                        invite_target_ws = await run_in_threadpool(
+                            s3_store.sync_invite_target, membership_mod.hash_token(tok),
+                        )
+                except Exception:  # noqa: BLE001
+                    pass
+
+            if not subject or not subject.isdecimal():
+                return await call_next(request)
+
+            try:
+                memberships = await run_in_threadpool(mindex.list, subject)
+            except Exception:  # noqa: BLE001
+                memberships = []
+
+            extra_shared: set[str] = set()
+            for qk in ("workspace_id", "slug"):
+                qv = (request.query_params.get(qk) or "").strip()
+                if qv and not qv.startswith(".") and not qv.startswith("_") and not qv.isdecimal():
+                    extra_shared.add(qv)
+            if invite_target_ws:
+                extra_shared.add(invite_target_ws)
+            if method in ("POST", "PUT") and path in (
+                "/api/workspace/push", "/api/workspace/pull", "/api/workspace/publish",
+                "/api/workspace/document", "/api/workspace/document/move",
+                "/api/workspace/document/move/preview", "/api/workspace/document/delete",
+            ):
+                try:
+                    raw = await request.body()
+                    parsed = json.loads(raw) if raw else {}
+                    bslug = str(parsed.get("slug") or "").strip() if isinstance(parsed, dict) else ""
+                    if (bslug and bslug not in ("seed", "seed-prev")
+                            and not bslug.startswith(".") and not bslug.startswith("_")
+                            and not bslug.isdecimal()):
+                        extra_shared.add(bslug)
+                except Exception:  # noqa: BLE001
+                    pass
+            parts = path.strip("/").split("/")
+            # e.g. /api/workspace/<wid>/leave|unshare|share-enable|archive or /api/workspace/shared/<wid>/active
+            if len(parts) >= 4 and parts[0] == "api" and parts[1] == "workspace":
+                cand = parts[3] if parts[2] == "shared" and len(parts) >= 5 else parts[2]
+                if (cand and cand not in ("tree", "file", "search", "document", "git", "git-token",
+                                          "git-remote-status", "init", "active", "attached",
+                                          "shared", "purpose", "new", "upload", "activate", "deactivate",
+                                          "rename", "swap", "publish", "push", "pull", "members", "invites",
+                                          "meeting-knowledge")
+                        and not cand.startswith(".") and not cand.startswith("_") and not cand.isdecimal()):
+                    extra_shared.add(cand)
+
+            include_sys = (
+                path.startswith("/api/sessions")
+                or path == "/api/chat"
+                or path == "/api/workspace/init"
+                or (request.query_params.get("slug") == "_system")
+            )
+            include_global = request.query_params.get("slug") == system_mounts.GLOBAL_SLUG
+
+            def _pre_sync(force: bool) -> set[str]:
+                s3_store.sync_subject_workspaces(
+                    subject, memberships=memberships, include_system=include_sys, force=force,
+                )
+                if include_global:
+                    try:
+                        s3_store.ensure_synced(wsr.root / system_mounts.GLOBAL_SLUG, force=force)
+                    except Exception:  # noqa: BLE001
+                        pass
+                for wid in extra_shared:
+                    try:
+                        s3_store.ensure_synced(wsr.root / wid, force=force)
+                    except Exception:  # noqa: BLE001
+                        pass
+                # Snapshot existing top-level shared dir names to catch newly created shared wikis
+                if not wsr.root.exists():
+                    return set()
+                return {
+                    p.name for p in wsr.root.iterdir()
+                    if p.is_dir() and not p.is_symlink()
+                    and not p.name.startswith(".") and not p.name.startswith("_")
+                    and not p.name.isdecimal()
+                }
+
+            def _post_push(before_shared: set[str]) -> None:
+                s3_store.push_attach_state(subject)
+                targets: list[Path] = [wsr.root / subject]
+                # Workspace writes must not publish a cached copy of the worker's chat history.
+                if path == "/api/workspace/init":
+                    targets.append(wsr.root / "_system" / subject)
+                att_dir = wsr.root / "_attached" / subject
+                if att_dir.is_dir():
+                    for slot in sorted(att_dir.iterdir()):
+                        if slot.is_dir() and not slot.is_symlink() and not slot.name.startswith("."):
+                            targets.append(slot)
+                for entry in memberships:
+                    wid = (entry.get("workspace_id") or "").strip() if isinstance(entry, dict) else ""
+                    if wid and not wid.startswith(".") and not wid.startswith("_") and not wid.isdecimal():
+                        extra_shared.add(wid)
+                if wsr.root.exists():
+                    after_shared = {
+                        p.name for p in wsr.root.iterdir()
+                        if p.is_dir() and not p.is_symlink()
+                        and not p.name.startswith(".") and not p.name.startswith("_")
+                        and not p.name.isdecimal()
+                    }
+                    extra_shared.update(after_shared - before_shared)
+                for wid in sorted(extra_shared):
+                    p = wsr.root / wid
+                    if p.is_dir():
+                        targets.append(p)
+                for p in dict.fromkeys(targets):
+                    try:
+                        s3_store.push_if_changed(p, actor=subject, protect_policy=False)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("S3 write-through push failed for %s", p)
+
+            if is_write:
+                with s3_store.distributed_lock(f"subject:{subject}"):
+                    before = await run_in_threadpool(_pre_sync, True)
+                    response = await call_next(request)
+                    if response.status_code < 400:
+                        await run_in_threadpool(_post_push, before)
+                    return response
+
+            await run_in_threadpool(_pre_sync, False)
+            return await call_next(request)
     # The SSE ownership gate's owner-lookup (P0): default = HTTP to meeting-api; injectable for L2 tests.
     _meeting_owner_lookup = meeting_owner_lookup or _http_meeting_owner_lookup(
         settings.meeting_api_url if settings is not None else "")
@@ -1262,7 +1464,16 @@ def create_app(
             chat_model = model_config.get("model") or provider_default
             streaming_model = model_config.get("meeting_model") or chat_model
         else:
-            chat_model = model_config.get("model") or settings.agent_model or settings.llm_model or "default"
+            from control_plane.aws_voice_chatgpt import workspace_connected
+            from control_plane.system_mounts import pilot_allows
+
+            pilot_fallback = None
+            if pilot_allows(subject) and not model_config.get("mode"):
+                if workspace_connected(subject):
+                    pilot_fallback = "gpt-6-luna"
+                elif (os.getenv("TINA_WORKSPACE_BEDROCK_MODEL") or "").strip():
+                    pilot_fallback = os.getenv("TINA_WORKSPACE_BEDROCK_MODEL", "").strip()
+            chat_model = model_config.get("model") or pilot_fallback or settings.agent_model or settings.llm_model or "default"
             streaming_model = (
                 model_config.get("meeting_model")
                 or model_config.get("model")
@@ -1283,6 +1494,8 @@ def create_app(
         if model_config.get("mode") == "openai-subscription":
             from control_plane.openai_auth import profile_status
             chatgpt_connected = profile_status(subject)["connected"]
+        if workspace_uses_nova(subject, model_config):
+            chat_model = WORKSPACE_NOVA_MODEL
         return {
             "chat_model": chat_model,
             "agent_model": chat_model,
@@ -1395,7 +1608,10 @@ def create_app(
         else:
             prefix, session = units.DICTATION_TRANSLATE_PREFIX, "dictation-translate"
         payload = {"request_id": request_id, "text": text}
-        if task == 'knowledge':
+        ecs_draft = (task == 'knowledge'
+                     and getattr(request.state, 'post_meeting_draft', False)
+                     and os.environ.get('TINA_POST_MEETING_ECS_DRAFT') == '1')
+        if task == 'knowledge' and not ecs_draft:
             from shared.voice_trace import voice_trace_id
             trace_id = voice_trace_id.get()
             if trace_id is None:
@@ -1423,6 +1639,16 @@ def create_app(
                     payload['voice_turn'] = {'meeting_id': mid, 'holder': held}
             elif sandbox_voice:
                 raise HTTPException(409, 'Current voice turn required for sandbox')
+            if os.environ.get('TINA_MEETING_VOICE_LOCAL_COMPLETION') == '1' and str(source.get('mode', '')).startswith('voice'):
+                from control_plane.meeting_voice_completion import complete, resolve_voice_model_env
+                chatgpt_plan = getattr(request.state, 'chatgpt_voice_pilot', False)
+                model_env = None if chatgpt_plan else resolve_voice_model_env(
+                    dispatcher.resolve_model_config(subject),
+                    allowlist=settings.model_allowlist if settings else "",
+                    subject=subject,
+                )
+                return complete(payload, source, redis_url,
+                                chatgpt_plan=chatgpt_plan, model_env=model_env)
         if target_language is not None:
             payload["target_language"] = target_language
         if context:
@@ -1430,6 +1656,33 @@ def create_app(
         if speaker:
             payload["speaker"] = speaker[:120]
         inline = prefix + json.dumps(payload, ensure_ascii=False)
+        knowledge_mode = str(source.get("mode", "")) if task == "knowledge" and not ecs_draft else ""
+        if (os.environ.get("TINA_LOCAL_COMPLETION_POOL") == "1"
+                and not ecs_draft
+                and not knowledge_mode.startswith("voice")
+                and not (task == "knowledge" and not ecs_draft and sandbox_voice)):
+            from control_plane.local_completion import complete as run_local_completion
+            from control_plane.meeting_voice_completion import resolve_voice_model_env
+            timeout_s = 60.0
+            if task == "discussion":
+                try:
+                    window_count = max(1, len(json.loads(text).get("windows", [])))
+                except (ValueError, TypeError):
+                    window_count = 1
+                timeout_s = min(300.0, 60.0 + window_count * 30.0)
+            model_env = resolve_voice_model_env(
+                dispatcher.resolve_model_config(subject),
+                allowlist=settings.model_allowlist if settings else "",
+                subject=subject,
+            )
+            return run_local_completion(
+                task=task,
+                inline=inline,
+                session_id=f"{session}-{request_id}",
+                label=label,
+                timeout_seconds=timeout_s,
+                model_env=model_env,
+            )
         invocation = units.make_dispatch(
             subject=subject,
             trigger="message",
@@ -1438,14 +1691,17 @@ def create_app(
             context={"kind": "none", "session": f"{session}-{request_id}"},
         )
         try:
-            unit_id = dispatcher.dispatch(invocation)
+            if ecs_draft:
+                unit_id = dispatcher.dispatch(invocation, trusted_post_meeting_draft=True)
+            else:
+                unit_id = dispatcher.dispatch(invocation)
         except Exception as exc:  # noqa: BLE001 — do not expose the transcript or dispatch details
             logger.warning("transcript completion dispatch failed task=%s error=%s", task, type(exc).__name__)
             raise HTTPException(status_code=503, detail=f"{label} is unavailable") from exc
 
         output_parts: list[str] = []
         translation_complete = False
-        deadline_seconds = 60.0
+        deadline_seconds = 180.0 if ecs_draft else 60.0
         if task == 'discussion':
             try:
                 window_count = max(1, len(json.loads(text).get('windows', [])))
@@ -1513,6 +1769,11 @@ def create_app(
             raise HTTPException(status_code=502, detail=f"{label} is unavailable") from exc
         finally:
             if voice_redis is not None: voice_redis.close()
+            if ecs_draft and time.monotonic() >= deadline:
+                try:
+                    dispatcher.stop_workload(unit_id)
+                except Exception:
+                    logger.warning("post-meeting draft stop failed")
             if redis_url:
                 try:
                     import redis as _redis
@@ -1615,17 +1876,34 @@ def create_app(
     register_meeting_translation(app, subject_of, wsr.root, settings.meeting_api_url if settings else '',
                                  _translate_meeting_phrase)
 
+    @app.get("/api/models/openai/workspace-status", include_in_schema=False)
+    def openai_workspace_status(request: Request):
+        from control_plane.aws_voice_chatgpt import workspace_status
+        from control_plane.openai_auth import ChatGPTAuthError
+
+        subject = subject_of(request)
+        try:
+            return JSONResponse(workspace_status(subject), headers={"Cache-Control": "no-store"})
+        except ChatGPTAuthError as exc:
+            raise HTTPException(503, str(exc)) from exc
+
     @app.get("/api/models/openai/catalog")
     def openai_model_catalog(request: Request):
         """Return only the displayable model IDs for the caller's connected ChatGPT account."""
         import urllib.error
         import urllib.request
 
+        from control_plane.aws_voice_chatgpt import workspace_access_token, workspace_connected
         from control_plane.openai_auth import ChatGPTAuthError, access_token
 
         subject = subject_of(request)
         try:
-            token = access_token(subject)
+            if workspace_connected(subject):
+                if settings is None:
+                    raise HTTPException(503, "Workspace ChatGPT is temporarily unavailable.")
+                token = workspace_access_token(subject, settings.redis_url)
+            else:
+                token = access_token(subject)
             req = urllib.request.Request(
                 "https://api.openai.com/v1/models",
                 headers={"Authorization": f"Bearer {token}"},
@@ -1666,8 +1944,22 @@ def create_app(
         return {"models": models}
 
     @app.post("/invocations", status_code=202)
-    def invocations(invocation: dict = Body(...)):
+    def invocations(request: Request, invocation: dict = Body(...)):
         """The dispatcher sink — any trigger source POSTs a unit.v1 dispatch here."""
+        pilot = os.getenv("TINA_WORKSPACE_PILOT_USER_IDS", "")
+        if pilot and invocation.get("trigger") in ("message", "scheduled"):
+            from control_plane.system_mounts import pilot_allows
+
+            # Interactive pilot turns enter via the authenticated chat route.
+            identity = invocation.get("identity")
+            if (invocation["trigger"] != "scheduled" or not isinstance(identity, dict)
+                    or not pilot_allows(str(identity.get("subject") or ""), pilot)):
+                raise HTTPException(403, "Workspace callback unavailable")
+            supplied = request.headers.get("X-Tina-Routine-Signature", "").encode()
+            if not supplied or not os.getenv("TINA_INTERNAL_API_SECRET") or not hmac.compare_digest(
+                supplied, routines_mod.callback_signature(invocation).encode()
+            ):
+                raise HTTPException(403, "Invalid workspace routine signature")
         try:
             workload_id = dispatcher.dispatch(invocation)
         except ValidationError as e:  # non-conformant unit.v1 envelope — fail loud (P18)
@@ -1942,7 +2234,12 @@ def create_app(
         # branch returns `<grounding> + body.prompt`, so the user's words are the exact suffix; insert the
         # sentinel right before them (no-op when nothing was folded). The kg/mounts preambles the worker
         # prepends land before `prompt`, hence before the sentinel too — so they're stripped as well.
-        if body.prompt and prompt.endswith(body.prompt) and len(prompt) > len(body.prompt):
+        from control_plane.system_mounts import pilot_allows
+        bedrock_workspace = pilot_allows(subject) and (
+            pilot_allows(subject, os.getenv("TINA_WORKSPACE_BEDROCK_OWNER", ""))
+            or bool((os.getenv("TINA_WORKSPACE_BEDROCK_MODEL") or "").strip())
+        )
+        if body.prompt and prompt.endswith(body.prompt) and (len(prompt) > len(body.prompt) or bedrock_workspace):
             prompt = prompt[: len(prompt) - len(body.prompt)] + CONTEXT_SENTINEL + body.prompt
         # Attribute this turn's commits to the human editor by EMAIL (gateway-injected, trusted) rather
         # than the bare subject id — the git author NAME becomes the email; the synthetic author email
@@ -1975,7 +2272,8 @@ def create_app(
                 # never block a turn; the worker-side auth taxonomy still catches it cleanly.
                 if capability_state("model_inference") == NOT_CONFIGURED:
                     cfg = dispatcher.resolve_model_config(subject)
-                    if cfg is not None and not _has_custom_model_endpoint(cfg):
+                    from control_plane.aws_voice_chatgpt import workspace_connected
+                    if cfg is not None and not _has_custom_model_endpoint(cfg) and not workspace_connected(subject) and not bedrock_workspace:
                         return StreamingResponse(
                             _sse([{"type": "error", "message": _model_creds_error_message()},
                                   {"type": "turn-complete"}]),
@@ -2215,6 +2513,11 @@ def create_app(
         # it can only ever resolve to THIS subject's own .system store — never another user's.
         if target == system_mounts.SYSTEM_SLUG:
             return system_mounts.system_store_path(wsr.root, subject)
+        if target == system_mounts.GLOBAL_SLUG:
+            gmount = system_mounts.global_mount(settings, str(wsr.root)) if settings is not None else None
+            if gmount is None:
+                raise HTTPException(status_code=404, detail="global workspace not configured")
+            return Path(gmount.get("source") or gmount["path"])
         mounts = active_workspaces(wsr.root, subject)  # own actives (real .attached paths); may raise ValueError
         try:
             mounts = mounts + shared_active_mounts(wsr.root, subject, mindex.list(subject))
@@ -2253,7 +2556,8 @@ def create_app(
 
     from control_plane.meeting_knowledge import register as register_meeting_knowledge
     register_meeting_knowledge(app, subject_of, _read_target, wsr, settings.meeting_api_url if settings else '',
-                               lambda request, text: _transcript_completion(request, text=text, task='knowledge'))
+                               lambda request, text: _transcript_completion(request, text=text, task='knowledge'),
+                               list_workspaces=lambda request: ws_active(request)['active'])
 
     def _private_write_target(request, slug):
         subject = subject_of(request)
@@ -2263,40 +2567,58 @@ def create_app(
             return base
         raise HTTPException(403, 'Only private writable workspaces can be edited here')
 
+    def _document_write_target(request, slug):
+        subject = subject_of(request)
+        target = (slug or "").strip()
+        if target in (system_mounts.GLOBAL_SLUG, system_mounts.SYSTEM_SLUG):
+            raise HTTPException(403, 'Platform and system workspaces cannot be edited here')
+        base = _read_target(request, slug)
+        own = active_workspaces(wsr.root, subject)
+        if base == wsr.workspace_dir(subject) or any(Path(m.path) == base and m.write for m in own):
+            return base
+        if target and membership_mod.is_member(wsr.root, target, subject) in ("owner", "contributor"):
+            return base
+        raise HTTPException(403, 'Only writable personal or owner/contributor shared workspaces can be edited here')
+
     from control_plane.workspace_documents import register as register_workspace_documents
-    register_workspace_documents(app, subject_of, _read_target, _private_write_target, wsr)
+    register_workspace_documents(app, subject_of, _read_target, _document_write_target, wsr)
 
     from control_plane.discussion_review import register as register_discussion_review
     register_discussion_review(app, subject_of, _private_write_target, wsr, settings.meeting_api_url if settings else '',
                                lambda request, text: _transcript_completion(request, text=text, task='discussion'))
 
     @app.post("/api/workspace/upload")
-    async def ws_upload(request: Request, files: list[UploadFile] = File(...)):
+    async def ws_upload(request: Request, files: list[UploadFile] = File(...), slug: Optional[str] = None):
         if not files:
             raise HTTPException(status_code=400, detail="no files uploaded")
         subject = subject_of(request)
-        try:
-            memberships = mindex.list(subject)
-        except Exception:  # noqa: BLE001 — match dispatch's private-only fallback
-            logger.warning("membership-index lookup failed for upload subject=%s — selecting private mounts only",
-                           subject)
-            memberships = None
-        mounts = build_mount_set(dispatcher.settings, subject, memberships)
-        try:
-            worker_path = Path(worker_cwd(wsr.root, subject, mounts)).resolve()
-            workspace_root = Path(wsr.root).resolve()
-        except (OSError, RuntimeError, ValueError):
-            raise HTTPException(status_code=409, detail="no mounted workspace available")
-        if worker_path == workspace_root or workspace_root not in worker_path.parents:
-            raise HTTPException(status_code=400, detail="invalid mounted workspace")
-        selected = next(
-            (mount for mount in mounts if Path(mount["path"]).resolve() == worker_path),
-            None,
-        )
-        if selected is None:
-            raise HTTPException(status_code=409, detail="worker workspace is not mounted")
-        if selected.get("write") is not True:
-            raise HTTPException(status_code=403, detail="selected workspace is read-only")
+        workspace_root = Path(wsr.root).resolve()
+        if slug and slug.strip():
+            worker_path = _document_write_target(request, slug).resolve()
+            if worker_path == workspace_root or workspace_root not in worker_path.parents:
+                raise HTTPException(status_code=400, detail="invalid target workspace")
+        else:
+            try:
+                memberships = mindex.list(subject)
+            except Exception:  # noqa: BLE001 — match dispatch's private-only fallback
+                logger.warning("membership-index lookup failed for upload subject=%s — selecting private mounts only",
+                               subject)
+                memberships = None
+            mounts = build_mount_set(dispatcher.settings, subject, memberships)
+            try:
+                worker_path = Path(worker_cwd(wsr.root, subject, mounts)).resolve()
+            except (OSError, RuntimeError, ValueError):
+                raise HTTPException(status_code=409, detail="no mounted workspace available")
+            if worker_path == workspace_root or workspace_root not in worker_path.parents:
+                raise HTTPException(status_code=400, detail="invalid mounted workspace")
+            selected = next(
+                (mount for mount in mounts if Path(mount["path"]).resolve() == worker_path),
+                None,
+            )
+            if selected is None:
+                raise HTTPException(status_code=409, detail="worker workspace is not mounted")
+            if selected.get("write") is not True:
+                raise HTTPException(status_code=403, detail="selected workspace is read-only")
         uploads = worker_path / "uploads"
         try:
             uploads.mkdir(parents=True, exist_ok=True)
@@ -2946,6 +3268,11 @@ def create_app(
         except MembershipError as exc:
             raise _member_error(exc)
         # The client composes the accept URL; we hand back the token + id + terms once.
+        if s3_store is not None:
+            try:
+                s3_store.record_invite_index(membership_mod.hash_token(minted.token), body.workspace_id)
+            except Exception:  # noqa: BLE001
+                logger.warning("could not index minted invite on S3", exc_info=True)
         return {
             "id": minted.id, "token": minted.token, "role": minted.role,
             "workspace_id": body.workspace_id, "expires_at": minted.expires_at,
@@ -3182,7 +3509,7 @@ def create_app(
                     t = json.loads(r.read())
                 if t.get("disabled"):
                     return {"ok": False, "source": "settings", "summary": "Transcription is stopped for this account; start it in Settings"}
-                if t.get("backend") in ("apple", "nvidia", "custom", "funasr", "sherpa", "gipformer", "viegem"):
+                if t.get("backend") in ("apple", "nvidia", "custom", "funasr", "sherpa", "viegem"):
                     # An explicitly selected backend must be the one tested. Never green the
                     # selection by falling back to a different env endpoint when it is absent.
                     url, token, source = t.get("url") or "", t.get("token") or "", "settings"

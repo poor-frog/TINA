@@ -54,7 +54,7 @@ async function proxy(req: NextRequest, write: boolean) {
       let value;
       try { value = JSON.parse(new TextDecoder().decode(bytes)); } catch { return NextResponse.json({ detail: "Invalid request" }, { status: 422, headers }); }
       if (!value || typeof value !== "object" || Object.keys(value).sort().join(",") !== "backend,enabled,revision"
-          || !["gipformer", "viegem"].includes(value.backend) || typeof value.enabled !== "boolean"
+          || value.backend !== "viegem" || typeof value.enabled !== "boolean"
           || !Number.isSafeInteger(value.revision) || value.revision < 0) {
         return NextResponse.json({ detail: "Invalid ASR selection" }, { status: 422, headers });
       }

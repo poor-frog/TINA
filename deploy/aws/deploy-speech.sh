@@ -22,7 +22,32 @@ if aws ssm get-parameter --region us-east-1 --name /tina/demo/ghcr-token \
   unset GHCR_PAT
 fi
 COMPOSE="$SOURCE/deploy/aws/speech.compose.yml"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE" config --quiet
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE" up -d --no-build --pull always --wait gipformer
+compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE")
+"${compose[@]}" config --quiet
+"${compose[@]}" pull viegem viegem-models
+"${compose[@]}" run --rm --no-deps viegem-models
+
+# The retired service used the same private host port. Cut over only the Speech project.
+legacy=$(docker ps -q --filter label=com.docker.compose.project=tina-speech \
+  --filter label=com.docker.compose.service=gipformer)
+if [[ -n "$legacy" && "$legacy" == *$'\n'* ]]; then
+  echo 'ERROR: Multiple running legacy Speech workers. Resolve the port ownership before deploying.'
+  exit 1
+fi
+if [[ -n "$legacy" ]]; then
+  owner=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$legacy")
+  if [[ "$owner" != "$COMPOSE" ]]; then
+    echo 'ERROR: Legacy Speech worker belongs to a different Compose file.'
+    exit 1
+  fi
+  docker stop "$legacy" >/dev/null
+fi
+if ! "${compose[@]}" up -d --no-build --pull never --wait viegem; then
+  if [[ -n "$legacy" ]]; then
+    "${compose[@]}" stop viegem
+    docker start "$legacy" >/dev/null
+  fi
+  exit 1
+fi
 printf '\nASR STATUS\n'; docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 curl --fail --show-error --max-time 10 http://127.0.0.1:18002/health

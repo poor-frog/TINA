@@ -43,6 +43,28 @@ def setup(tmp_path, monkeypatch):
 
 ROOT = '/api/workspace/meeting-knowledge/1'
 
+def test_post_meeting_draft_uses_both_sources_without_saving(setup, monkeypatch):
+    client, _, base, calls = setup
+    fetch = api.meeting_get
+
+    def completed_meeting(url, subject, meeting_id, path):
+        result = fetch(url, subject, meeting_id, path)
+        return result | {'status': 'completed'} if path == '/meetings/1' else result
+
+    monkeypatch.setattr(api, 'meeting_get', completed_meeting)
+    payload = {'question': 'Ai gửi demo và khi nào ra mắt?',
+               'draft_document_workspace': 'shared', 'documents': ['kg/entities/meeting/abc.md']}
+    assert client.post(ROOT + '/ask', json=payload, headers={'x-user-id': 'stranger'}).status_code == 404
+    assert client.post(ROOT + '/ask', json=payload | {'documents': ['../private.md']}).status_code == 404
+    assert not calls
+    result = client.post(ROOT + '/ask', json=payload)
+    assert result.status_code == 200, result.text
+    assert result.json()['draft'] is True
+    assert result.headers['Cache-Control'] == 'no-store'
+    assert {source['kind'] for source in calls[-1]['sources']} == {'transcript', 'document'}
+    assert not (base / '.meeting-knowledge').exists()
+
+
 def test_meeting_assistant_receives_full_confirmed_context_and_keeps_follow_up_scoped(setup):
     client, canonical, _, calls = setup
     first = canonical['segments'][0]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Account-scoped ASR resource demand; owns only this deployment's two known workers."""
+"""Account-scoped ASR resource demand; owns only this deployment's VieGem worker."""
 import json
 import hashlib
 import hmac
@@ -18,7 +18,8 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import urllib.request
 import urllib.error
 
-BACKENDS = ("gipformer", "viegem")
+BACKENDS = ("viegem",)
+MODEL = "5CD-AI/VieGem-ASR"
 
 
 def request_json(url, headers=None, payload=None, method=None, timeout=8):
@@ -70,27 +71,24 @@ class Workers:
         return (isinstance(env, dict) and env.get("TINA_VIEGEM_HOST") == "127.0.0.1"
                 and env.get("TINA_VIEGEM_ENV_FILE") == str(self.selected.env_file.resolve()))
 
-    def credential(self, backend):
-        if backend == "viegem":
-            return self.identity_env.get("TINA_VIEGEM_TOKEN", "")
-        return self.selected.services["gipformer"]["environment"].get("TINA_GIPFORMER_TOKEN", "")
+    def credential(self):
+        return self.identity_env.get("TINA_VIEGEM_TOKEN", "")
     def status(self, backend):
         if backend not in self.selected.services and not (
                 backend == "viegem" and self.selected.viegem_device == "mps"):
             return {"running": False, "ready": False,
-                    "device": self.selected.viegem_device if backend == "viegem" else "cpu"}
+                    "device": self.selected.viegem_device}
         try:
             info = request_json(self.endpoint(backend) + "/status", timeout=1)
             model = info["model"]
-            expected = "5CD-AI/VieGem-ASR" if backend == "viegem" else "g-group-ai-lab/gipformer1.5-68M-rnnt"
-            if model["asr_model"] != expected:
+            if model["asr_model"] != MODEL:
                 raise ControlError(503, "Unexpected worker on ASR port")
             recent = info.get("recent") or []
             completed = max((row["at_ms"] + (row.get("total_ms") or 0) for row in recent), default=0)
             return {"running": True, "ready": not info.get("draining", False), "device": model["device"],
                     "draining": info.get("draining", False), "idle_seconds": max(0, time.time() - completed / 1000)}
         except ControlError:
-            return {"running": False, "ready": False, "device": self.selected.viegem_device if backend == "viegem" else "cpu"}
+            return {"running": False, "ready": False, "device": self.selected.viegem_device}
     def owned_container(self, backend):
         import stack
         ids = stack.run(["docker", "ps", "-aq", "--filter", f"label=com.docker.compose.project={self.selected.project}",
@@ -116,9 +114,9 @@ class Workers:
                 self.drain(backend, False)
                 entry = importlib.util.spec_from_file_location("asr_probe", ROOT / "deploy/contracts/config.v1/preflight.py")
                 module = importlib.util.module_from_spec(entry); entry.loader.exec_module(module)
-                kind, body = module.audio_probe_body("5CD-AI/VieGem-ASR" if backend == "viegem" else "custom")
+                kind, body = module.audio_probe_body(MODEL)
                 req = urllib.request.Request(self.endpoint(backend) + "/v1/audio/transcriptions", data=body,
-                    headers={"Content-Type": kind, "Authorization": "Bearer " + self.credential(backend)})
+                    headers={"Content-Type": kind, "Authorization": "Bearer " + self.credential()})
                 try:
                     with urllib.request.urlopen(req, timeout=20) as response:
                         if response.status == 200 and isinstance(json.load(response).get("text"), str):
@@ -155,7 +153,7 @@ class Workers:
             except ControlError:
                 return True
         try:
-            # shortcut: any local capture protects both workers; narrow per-session holds when Desktop exposes them.
+            # shortcut: any local capture protects the worker; narrow per-session holds when Desktop exposes them.
             info = request_json("http://127.0.0.1:8056/health", timeout=1)
             return type(info.get("live_sessions")) is not int or info["live_sessions"] > 0
         except ControlError:
@@ -191,7 +189,7 @@ class Controller:
         data = self.identity.read(user_id)
         account = data["account"]
         return {"instance": self.instance, "account": {k: account[k] for k in ("backend", "enabled", "revision")},
-                "counts": data["counts"], "workers": {name: self.workers.status(name) for name in BACKENDS},
+                "counts": {name: data["counts"][name] for name in BACKENDS}, "workers": {name: self.workers.status(name) for name in BACKENDS},
                 "operation": self.operation, "last_error": self.last_error}
 
     def select(self, user_id, backend, enabled, revision):
@@ -250,8 +248,8 @@ class Controller:
         try:
             data = self.identity.read()
             self.persist(data["counts"])
-            for backend, count in data["counts"].items():
-                if count and self.clock() >= self.retry_after.get(backend, 0):
+            for backend in BACKENDS:
+                if data["counts"][backend] and self.clock() >= self.retry_after.get(backend, 0):
                     state = self.workers.status(backend)
                     if not state["running"] or state.get("draining"):
                         self.operation = {"backend": backend, "phase": "starting"}

@@ -1,0 +1,155 @@
+/* Lucian UX/UI Prompt #250 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#250 */
+
+.u250-wrap {
+  position: sticky;
+  top: 8px;
+  z-index: 35;
+  width: 100%;
+  max-width: 100%;
+  pointer-events: none;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows .38s var(--ux-ease);
+}
+
+.u250-wrap.is-open {
+  grid-template-rows: 1fr;
+  margin-bottom: 10px;
+}
+
+.u250-inner {
+  min-height: 0;
+  overflow: hidden;
+  padding: 2px 0;
+}
+
+.u250-br {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 5px 7px 5px 14px;
+  border-radius: 14px;
+  background: var(--ux-ink);
+  color: var(--ux-surface);
+  font-size: 12px;
+  font-weight: 750;
+  box-shadow: 0 14px 30px -14px var(--ux-shadow-strong), 0 0 0 1px var(--ux-line);
+  transform: translateY(-130%);
+  opacity: 0;
+  pointer-events: auto;
+  transition: transform .45s cubic-bezier(.3, 1.3, .5, 1), opacity .25s var(--ux-ease), background-color .3s var(--ux-ease);
+}
+
+.u250-wrap.is-open .u250-br {
+  transform: none;
+  opacity: 1;
+}
+
+.u250-br.is-warn {
+  animation: u250-sh .45s;
+  background: #be123c;
+  color: #ffffff;
+}
+
+@keyframes u250-sh {
+  20%, 60% {
+    transform: translateX(-6px);
+  }
+  40%, 80% {
+    transform: translateX(6px);
+  }
+}
+
+.u250-br.is-ok {
+  background: #059669;
+  color: #ffffff;
+}
+
+.u250-tx {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.u250-br button {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+  flex: none;
+  transition: opacity .15s, background-color .15s, transform .2s var(--ux-spring);
+}
+
+.u250-br button:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.u250-cx {
+  background: color-mix(in srgb, var(--ux-surface) 16%, transparent);
+  color: var(--ux-surface);
+}
+
+.u250-cx:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ux-surface) 24%, transparent);
+}
+
+.u250-sv {
+  position: relative;
+  min-width: 56px;
+  background: var(--ux-surface);
+  color: var(--ux-ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.u250-sv i {
+  display: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--ux-ink) 25%, transparent);
+  border-top-color: var(--ux-ink);
+  animation: u250-sp .7s linear infinite;
+}
+
+.u250-sv.is-busy i {
+  display: block;
+}
+
+.u250-sv.is-busy b {
+  display: none;
+}
+
+.u250-br.is-ok button {
+  visibility: hidden;
+}
+
+@keyframes u250-sp {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.u250-br button:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u250-wrap,
+  .u250-br {
+    transition: none;
+  }
+  .u250-br.is-warn {
+    animation: none;
+  }
+}

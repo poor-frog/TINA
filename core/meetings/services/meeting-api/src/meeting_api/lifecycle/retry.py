@@ -70,6 +70,30 @@ def is_transient(reason: Optional[CompletionReason]) -> bool:
     return classify_retry(reason) is RetryClass.TRANSIENT
 
 
+def is_retryable_join_refusal(
+    reason: Optional[CompletionReason],
+    *,
+    join_evidence: Optional[dict] = None,
+    reason_detail: Optional[str] = None,
+) -> bool:
+    """Narrow retry exception for Google Meet's flaky pre-admission anti-abuse 403 block.
+
+    Host denials (``attribution == "host_action"`` or ordinary ``awaiting_admission_rejected``
+    without the ``google_meet_join_refused`` marker) remain strictly permanent and never retry.
+    """
+    if reason is not CompletionReason.AWAITING_ADMISSION_REJECTED:
+        return False
+    evidence_detail = ""
+    if isinstance(join_evidence, dict):
+        if join_evidence.get("attribution") == "host_action":
+            return False
+        raw = join_evidence.get("detail")
+        if isinstance(raw, str):
+            evidence_detail = raw
+    combined = f"{evidence_detail}\n{reason_detail or ''}".lower()
+    return "google_meet_join_refused" in combined
+
+
 def next_retry_state(
     current: dict,
     reason: Optional[CompletionReason],
@@ -78,6 +102,8 @@ def next_retry_state(
     stop_requested: bool = False,
     now: Optional[datetime] = None,
     policy: Optional[RetryPolicy] = None,
+    join_evidence: Optional[dict] = None,
+    reason_detail: Optional[str] = None,
 ) -> dict:
     """Return the persisted state after a failed attempt; only unserved transient failures retry."""
     policy = policy or RetryPolicy()
@@ -87,7 +113,10 @@ def next_retry_state(
     state = {"attempt": attempt, "max_attempts": max_attempts}
     if stop_requested:
         return {**state, "state": "cancelled"}
-    if failure_stage not in {"requested", "joining", "awaiting_admission"} or not is_transient(reason):
+    retryable = is_transient(reason) or is_retryable_join_refusal(
+        reason, join_evidence=join_evidence, reason_detail=reason_detail
+    )
+    if failure_stage not in {"requested", "joining", "awaiting_admission"} or not retryable:
         return {**state, "state": "not_retryable"}
     if attempt >= max_attempts:
         return {**state, "state": "exhausted"}
@@ -97,6 +126,23 @@ def next_retry_state(
         "state": "scheduled",
         "next_at": ((now or datetime.now(timezone.utc)) + timedelta(seconds=delay)).isoformat(),
     }
+
+
+def _extract_reason_detail(data: dict) -> Optional[str]:
+    """Extract a normalized failure reason string from meeting.data for retry fallback matching."""
+    parts: List[str] = []
+    reason = data.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        parts.append(reason.strip())
+    last_error = data.get("last_error")
+    if isinstance(last_error, str) and last_error.strip():
+        parts.append(last_error.strip())
+    elif isinstance(last_error, dict):
+        for key in ("reason", "error_details"):
+            val = last_error.get(key)
+            if isinstance(val, str) and val.strip():
+                parts.append(val.strip())
+    return "\n".join(parts) if parts else None
 
 
 def persist_retry_transition(data: dict, previous_status: str, status: str) -> None:
@@ -113,7 +159,13 @@ def persist_retry_transition(data: dict, previous_status: str, status: str) -> N
             reason = CompletionReason(data.get("completion_reason"))
         except ValueError:
             reason = None
-        state = next_retry_state(current, reason, data.get("failure_stage"))
+        state = next_retry_state(
+            current,
+            reason,
+            data.get("failure_stage"),
+            join_evidence=data.get("join_evidence"),
+            reason_detail=_extract_reason_detail(data),
+        )
     elif status == "active":
         state["state"] = "succeeded"
     elif status == "completed":
@@ -174,10 +226,19 @@ class JoinRetryController:
         self.policy = policy or RetryPolicy()
 
     def on_join_failure(
-        self, meeting_id: int, reason: Optional[CompletionReason], attempt: int
+        self,
+        meeting_id: int,
+        reason: Optional[CompletionReason],
+        attempt: int,
+        *,
+        join_evidence: Optional[dict] = None,
+        reason_detail: Optional[str] = None,
     ) -> RetryOutcome:
         reason_v = reason.value if reason is not None else None
-        if not is_transient(reason):
+        retryable = is_transient(reason) or is_retryable_join_refusal(
+            reason, join_evidence=join_evidence, reason_detail=reason_detail
+        )
+        if not retryable:
             return RetryOutcome(action="permanent", attempt=attempt, reason=reason_v)
 
         next_attempt = attempt + 1

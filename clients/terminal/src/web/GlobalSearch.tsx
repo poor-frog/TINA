@@ -1,16 +1,12 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { WebIcon } from "./Icons";
+import { applyTheme, getTheme } from "../app/theme";
+import { LucianCommandPalette, type LucianCommandItem } from "./lucian/LucianCommandPalette";
+import { emitWebToast } from "./lucian/webToast";
+import { friendlyPageTitle } from "./knowledgeFriendly";
 import type { MeetingMock } from "../surfaces/meetingModel";
+import { searchWorkspaceContent, type WorkspaceSearchHit } from "../surfaces/workspaceApi";
 import type { WebNavView } from "./Sidebar";
-
-interface SearchHit {
-  id: string;
-  label: string;
-  detail: string;
-  kind: "meeting" | "action";
-  run: () => void;
-}
 
 export function WebGlobalSearch({
   open,
@@ -20,6 +16,7 @@ export function WebGlobalSearch({
   terminalHref,
   onClose,
   onOpenMeeting,
+  onOpenKnowledgeDoc,
   onNavigate,
   onOpenCapture,
 }: {
@@ -30,14 +27,17 @@ export function WebGlobalSearch({
   terminalHref: string;
   onClose: () => void;
   onOpenMeeting: (meetingId: string) => void;
+  onOpenKnowledgeDoc?: (docPath: string, wsSlug?: string) => void;
   onNavigate: (view: Exclude<WebNavView, "meeting">) => void;
   onOpenCapture: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [wikiHits, setWikiHits] = useState<Array<WorkspaceSearchHit & { wsSlug?: string; wsLabel: string }>>([]);
 
   useEffect(() => {
     if (!open) {
       setQuery("");
+      setWikiHits([]);
       return;
     }
     const onKey = (e: KeyboardEvent) => {
@@ -47,9 +47,59 @@ export function WebGlobalSearch({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const hits = useMemo<SearchHit[]>(() => {
+  useEffect(() => {
+    if (!open || meetingsOnly) {
+      setWikiHits([]);
+      return;
+    }
+    const q = query.trim();
+    if (q.length < 2) {
+      setWikiHits([]);
+      return;
+    }
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      void Promise.all([
+        searchWorkspaceContent(q)
+          .then((r) => r.hits.map((h) => ({ ...h, wsSlug: undefined, wsLabel: "My Space" })))
+          .catch(() => []),
+        searchWorkspaceContent(q, { slug: "_global" })
+          .then((r) => r.hits.map((h) => ({ ...h, wsSlug: "_global", wsLabel: "Templates & Guides" })))
+          .catch(() => []),
+      ]).then(([own, glob]) => {
+        if (!alive) return;
+        const dedup = new Map<string, WorkspaceSearchHit & { wsSlug?: string; wsLabel: string }>();
+        for (const h of [...own, ...glob]) {
+          const key = `${h.wsSlug || ""}:${h.path}`;
+          if (!dedup.has(key)) dedup.set(key, h);
+        }
+        setWikiHits([...dedup.values()].slice(0, 6));
+      });
+    }, 180);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [open, meetingsOnly, query]);
+
+  const items = useMemo<LucianCommandItem[]>(() => {
     const q = query.trim().toLowerCase();
-    const meetingHits: SearchHit[] = meetings
+
+    const knowledgeHits: LucianCommandItem[] = wikiHits.map((h) => ({
+      id: `kb:${h.wsSlug || "personal"}:${h.path}:${h.line}`,
+      group: "Knowledge",
+      label: friendlyPageTitle(h.path),
+      detail: `${h.wsLabel} · ${h.text}`,
+      icon: "bookOpen",
+      gradient: "linear-gradient(140deg,#22C3A6,#0EA5E9)",
+      run: () => {
+        if (onOpenKnowledgeDoc) onOpenKnowledgeDoc(h.path, h.wsSlug);
+        else onNavigate("knowledge");
+        onClose();
+      },
+    }));
+
+    const meetingHits: LucianCommandItem[] = meetings
       .filter((m) => {
         if (!q) return true;
         return `${m.title} ${m.title_custom ?? ""} ${m.native_id ?? ""} ${m.platform}`.toLowerCase().includes(q);
@@ -57,21 +107,25 @@ export function WebGlobalSearch({
       .slice(0, 8)
       .map((m) => ({
         id: `m:${m.id}`,
+        group: "Meetings",
         label: m.title_custom || m.title,
         detail: `${m.platform} · ${m.when}`,
-        kind: "meeting",
+        icon: "video",
+        gradient: "linear-gradient(140deg,#176B5B,#10B981)",
         run: () => {
           onOpenMeeting(m.id);
           onClose();
         },
       }));
 
-    const rawActions: SearchHit[] = [
+    const rawActions: LucianCommandItem[] = [
       {
         id: "act:capture",
+        group: "Commands",
         label: "Capture or schedule a meeting",
         detail: "Send TINA bot to Google Meet, Zoom, Teams, Jitsi, or Discord",
-        kind: "action",
+        icon: "capture",
+        shortcut: "Bot",
         run: () => {
           onClose();
           onOpenCapture();
@@ -81,19 +135,32 @@ export function WebGlobalSearch({
         ? [
             {
               id: "act:ask",
+              group: "Commands",
               label: "Ask Tina",
               detail: "Chat across meetings and workspace knowledge",
-              kind: "action" as const,
+              icon: "tinaAsk" as const,
               run: () => {
                 onNavigate("ask");
                 onClose();
               },
             },
             {
+              id: "act:knowledge",
+              group: "Commands",
+              label: "Open Knowledge",
+              detail: "My Space, Team Spaces, Templates & Guides, and Connections Map",
+              icon: "bookOpen" as const,
+              run: () => {
+                onNavigate("knowledge");
+                onClose();
+              },
+            },
+            {
               id: "act:tasks",
+              group: "Commands",
               label: "Open Tasks",
               detail: "Workspace action items and task files",
-              kind: "action" as const,
+              icon: "listChecks" as const,
               run: () => {
                 onNavigate("tasks");
                 onClose();
@@ -101,9 +168,10 @@ export function WebGlobalSearch({
             },
             {
               id: "act:routines",
+              group: "Commands",
               label: "Open Routines",
               detail: "Scheduled autonomous agents",
-              kind: "action" as const,
+              icon: "skills" as const,
               run: () => {
                 onNavigate("routines");
                 onClose();
@@ -112,10 +180,24 @@ export function WebGlobalSearch({
           ]
         : []),
       {
+        id: "act:theme",
+        group: "Commands",
+        label: "Toggle light / dark mode",
+        detail: "Switch between Obsidian Dark and Porcelain Light themes",
+        icon: "sparkleSmall",
+        run: () => {
+          const next = getTheme() === "dark" ? "light" : "dark";
+          applyTheme(next);
+          emitWebToast(`Switched to ${next} mode`);
+          onClose();
+        },
+      },
+      {
         id: "act:settings",
+        group: "Commands",
         label: "Open Settings",
         detail: "Models, transcription ASR, calendars, tokens, and voice",
-        kind: "action",
+        icon: "settings",
         run: () => {
           onNavigate("settings");
           onClose();
@@ -125,9 +207,10 @@ export function WebGlobalSearch({
         ? [
             {
               id: "act:terminal",
+              group: "Commands",
               label: "Open TINA Terminal (Dev Workbench)",
               detail: terminalHref,
-              kind: "action" as const,
+              icon: "terminal" as const,
               run: () => {
                 window.location.href = terminalHref;
               },
@@ -135,54 +218,28 @@ export function WebGlobalSearch({
           ]
         : []),
     ];
-    const actions = rawActions.filter((a) => !q || `${a.label} ${a.detail}`.toLowerCase().includes(q));
 
-    return [...meetingHits, ...actions];
-  }, [query, meetings, meetingsOnly, canOpenTerminal, terminalHref, onOpenMeeting, onClose, onOpenCapture, onNavigate]);
+    const actions = rawActions.filter((a) => !q || `${a.label} ${a.detail}`.toLowerCase().includes(q));
+    return [...knowledgeHits, ...meetingHits, ...actions];
+  }, [
+    query,
+    meetings,
+    wikiHits,
+    meetingsOnly,
+    canOpenTerminal,
+    terminalHref,
+    onOpenMeeting,
+    onOpenKnowledgeDoc,
+    onClose,
+    onOpenCapture,
+    onNavigate,
+  ]);
 
   if (!open) return null;
 
   return (
     <div className="tina-web-backdrop" role="dialog" aria-modal="true" aria-label="Search" onClick={onClose}>
-      <div className="tina-web-modal" onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid var(--tw-line-soft)" }}>
-          <WebIcon name="search" size={16} />
-          <input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search meetings or jump to a view…"
-            aria-label="Search query"
-            style={{ flex: 1, border: 0, outline: 0, background: "transparent", color: "var(--tw-text)", fontSize: 14 }}
-          />
-          <button type="button" className="tina-web-icon-btn" aria-label="Close search" onClick={onClose}>
-            <WebIcon name="close" size={15} />
-          </button>
-        </div>
-
-        <div style={{ maxHeight: 420, overflowY: "auto", padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
-          {hits.map((hit) => (
-            <button
-              key={hit.id}
-              type="button"
-              onClick={hit.run}
-              className="tina-web-feed-row"
-              style={{ minHeight: 46, padding: "8px 12px" }}
-            >
-              <WebIcon name={hit.kind === "meeting" ? "video" : "sparkleSmall"} size={15} />
-              <span className="tina-web-feed-main">
-                <span className="tina-web-feed-title">{hit.label}</span>
-                <span className="tina-web-feed-meta">{hit.detail}</span>
-              </span>
-            </button>
-          ))}
-          {hits.length === 0 && (
-            <div style={{ padding: "24px 12px", textAlign: "center", color: "var(--tw-text-4)", fontSize: 13 }}>
-              No matching meetings or commands.
-            </div>
-          )}
-        </div>
-      </div>
+      <LucianCommandPalette query={query} onQueryChange={setQuery} items={items} onClose={onClose} />
     </div>
   );
 }

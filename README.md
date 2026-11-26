@@ -92,9 +92,8 @@ on a new instance becomes administrator. To connect the browser extension,
 follow the [local extension setup](clients/extension/README.md#connect-to-local-compose).
 
 Set up a transcription backend and Agent model in **Settings → Models** to use live transcription
-and Ask TINA. For a local CPU backend, see [Gipformer](deploy/transcription/gipformer/README.md).
-For native Apple Silicon MPS or Docker CUDA on Linux/WSL2, see
-[VieGem](deploy/transcription/viegem/README.md). Wake word and spoken replies require a TTS token and
+and Ask TINA. The managed [VieGem](deploy/transcription/viegem/README.md) backend supports
+CPU, native Apple Silicon MPS, and Docker CUDA on Linux/WSL2. Wake word and spoken replies require a TTS token and
 trained artifacts. See [meeting voice setup](deploy/compose/README.md#meeting-voice).
 
 If you already run TINA from a checkout that tracks `deploy/compose/.env`, back up that file and
@@ -103,15 +102,14 @@ your deployment settings and volumes.
 
 ## ASR start/stop by account
 
-Settings → Models → Transcription now controls the managed Gipformer and VieGem workers.
+Settings → Models → Transcription controls the managed VieGem worker.
 Selecting a managed model starts it and verifies authenticated audio,
 then updates only the signed-in account. Turning the account switch off disables new transcription for
 that account. It does not stop another account's worker or overwrite their preference.
 
 A worker with no enabled account demand is retired after ten idle seconds, only after all
 meeting bots/local Desktop captures have ended and its in-flight requests have drained. The UI
-shows physical worker state separately from the account's enabled state. If another account
-still selects the old model, both workers stay running. Changing a setting never transfers an
+shows physical worker state separately from the account's enabled state. Changing a setting never transfers an
 already-running capture to another model. Keep all capture on this managed host; remote unmanaged
 captures must remain operator-managed because their session lifetime is not observable here.
 

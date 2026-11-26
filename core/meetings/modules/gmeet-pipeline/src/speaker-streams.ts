@@ -81,6 +81,10 @@ interface SpeakerBuffer {
   /** A hard-cap request is in flight for the window ending at this buffered-sample index
    *  (`callbackStampedFrames` only); its response finalizes that window and keeps the rest. */
   capCutSample?: number;
+  /** Wall-clock start of the currently in-flight ASR request (for adaptive rollover headroom). */
+  lastSubmitAtMs?: number;
+  /** Recent ASR round-trip duration (seconds) so slow CPU backends roll over before 30s overflow. */
+  recentRttSec: number;
 }
 
 export interface SpeakerStreamManagerConfig {
@@ -222,6 +226,7 @@ export class SpeakerStreamManager {
       lastConfirmedText: '',
       pendingDraftText: '',
       pendingDraftStartMs: now,
+      recentRttSec: 0,
     });
 
     const timer = setInterval(() => this.trySubmit(speakerId), this.submitInterval * 1000);
@@ -247,7 +252,9 @@ export class SpeakerStreamManager {
       const lost=Math.max(0,buffer.totalSamples-buffer.confirmedSamples)+Math.max(0,audioData.length-capacity);
       this.onOverflow?.(lost);
       const pending=buffer.inFlight;
-      this.clearStaleDraft(buffer);
+      // Preserve any already-transcribed visible draft as confirmed before resetting the window
+      // instead of retracting and wiping it off the user's screen during slow-ASR overflow.
+      this.finalizePendingDraft(buffer);
       this.fullReset(buffer);
       buffer.inFlight=pending; // the old request must finish before a new generation can submit
       if(audioData.length>capacity) {
@@ -340,6 +347,11 @@ export class SpeakerStreamManager {
     this.diagnose('result',buffer,'asr-response');
 
     buffer.inFlight = false;
+    if (buffer.lastSubmitAtMs !== undefined) {
+      const rttSec = Math.max(0, (Date.now() - buffer.lastSubmitAtMs) / 1000);
+      buffer.lastSubmitAtMs = undefined;
+      buffer.recentRttSec = Math.max(rttSec, buffer.recentRttSec * 0.5);
+    }
 
     // Discard stale responses: if the buffer was reset (generation bumped)
     // while a Whisper request was in flight, this response is for audio that
@@ -703,7 +715,8 @@ export class SpeakerStreamManager {
     // dedup-vs-lastConfirmedText guard on purpose — the pending row carries this exact text
     // as completed:false and MUST be replaced by a completed:true row of the same id.
     const covered = Math.min(buffer.lastTranscriptEndSample ?? buffer.submittedEndSample ?? buffer.totalSamples, buffer.totalSamples);
-    const endMs = covered > 0 ? (this.callbackStampedFrames ? this.captureTimeAt(buffer, covered) : buffer.windowStartMs + covered / this.sampleRate * 1000) : startMs;
+    const rawEndMs = covered > 0 ? (this.callbackStampedFrames ? this.captureTimeAt(buffer, covered) : buffer.windowStartMs + covered / this.sampleRate * 1000) : startMs;
+    const endMs = rawEndMs > startMs ? Math.min(rawEndMs, startMs + this.maxBufferDuration * 1000) : rawEndMs;
     if (Number.isFinite(endMs) && endMs > startMs && endMs - startMs <= this.maxBufferDuration * 1000 && text !== buffer.lastConfirmedText && this.onSegmentConfirmed && !this.hallucinationFilter(text)) {
       this.diagnose('confirm',buffer,'pending-promotion');
       this.onSegmentConfirmed(buffer.speakerId, buffer.speakerName, text, startMs, endMs, `${buffer.speakerId}:${buffer.sequenceNumber}`, buffer.lastLanguage);
@@ -752,7 +765,8 @@ export class SpeakerStreamManager {
       // Reserve a cadence plus the next capture frame; feedAudio can run just before the timer.
       const limit = Math.min(this.maxBufferDuration, this.maxRetainedDuration);
       const frameSec = (buffer.chunks.at(-1)?.length ?? 0) / this.sampleRate;
-      const rolloverAt = Math.max(this.minAudioDuration, limit - Math.min(this.submitInterval + frameSec, limit / 2));
+      const latencyReserve = Math.min(buffer.recentRttSec, limit / 2);
+      const rolloverAt = Math.max(this.minAudioDuration, limit - Math.min(this.submitInterval + frameSec + latencyReserve, limit / 2));
       if (unconfirmedSec >= rolloverAt) buffer.capCutSample = this.quietCutSample(buffer, 4);
       await this.submitBuffer(buffer, buffer.capCutSample);
     } else this.diagnose('wait',buffer,'minimum-audio');
@@ -806,6 +820,7 @@ export class SpeakerStreamManager {
 
     buffer.submittedEndSample = end;
     buffer.inFlight = true;
+    buffer.lastSubmitAtMs = Date.now();
     this.requestIds.set(buffer.speakerId,++this.requestSequence);
     this.diagnose('submit',buffer,buffer.capCutSample!==undefined?'hard-cap':buffer.idleSubmitted?'final':'interval');
     this.submitGeneration.set(buffer.speakerId, buffer.generation);
@@ -814,6 +829,7 @@ export class SpeakerStreamManager {
       this.onSegmentReady(buffer.speakerId, buffer.speakerName, combined);
     } catch (err: any) {
       buffer.inFlight = false;
+      buffer.lastSubmitAtMs = undefined;
       // P18: surface the transcription submit failure with its typed kind — do not swallow it.
       log(`[SpeakerStreams] [STT-FAULT] ${err?.kind ?? 'error'} submitting for ` +
           `"${buffer.speakerName}": ${String(err?.message ?? err)}`);
@@ -1118,6 +1134,8 @@ export class SpeakerStreamManager {
     buffer.submittedEndSample = undefined;
     buffer.lastTranscriptEndSample = undefined;
     buffer.capCutSample = undefined;
+    buffer.lastSubmitAtMs = undefined;
+    buffer.recentRttSec = 0;
     buffer.generation++;
   }
 }

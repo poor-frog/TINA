@@ -3,15 +3,16 @@
  *  (`?nav=settings&settingsWorkspace=personal|team&settingsSection=<id>`).
  *  100% wired to real TINA APIs & panels — zero mock toggles or placeholder billing controls. */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { hideModelSettings as hideModelSettingsEnv } from "../app/mode";
 import { applyTheme, useTheme, type Theme } from "../app/theme";
 import { CalendarConnectionsPanel } from "../surfaces/calendarConnections";
-import { ModelsSection } from "../surfaces/settings";
 import { VoiceSettings } from "../surfaces/voiceSettings";
 import { AsrStatusPanel } from "../surfaces/asrStatus";
 import { GitHubTokenCard, TokensPanel } from "../surfaces/tokens";
 import { WebAvatar } from "./Avatar";
 import { WebIcon, type WebIconName } from "./Icons";
 import { SharedWorkspacesPanel } from "./SharedWorkspacesPanel";
+import { WebModelsPanel } from "./WebModelsPanel";
 import type { WebUser } from "./useWebIdentity";
 
 export type SettingsWorkspace = "personal" | "team";
@@ -36,72 +37,74 @@ interface SectionDef {
   icon: WebIconName;
   keywords: string;
   adminOnly?: boolean;
+  modelSettings?: boolean;
 }
 
 const SECTIONS: readonly SectionDef[] = [
-  // Personal workspace
+  // Personal workspace — ordered for everyday users first, developer tools neatly at the bottom
   {
     id: "calendar",
     workspace: "personal",
     group: "Meetings",
     label: "Calendar & Auto-join",
-    description: "Connect Google or Microsoft calendars so TINA tracks your upcoming meetings and joins automatically.",
+    description: "Connect Google or Outlook calendars so TINA tracks upcoming calls and joins automatically.",
     icon: "calendar",
     keywords: "calendar google microsoft outlook schedule auto join meeting recording",
   },
   {
     id: "models",
     workspace: "personal",
-    group: "AI & Capture",
+    group: "AI & Voice",
     label: "AI Models & Transcription",
-    description: "Choose your personal agent LLM provider, ChatGPT plan, and speech-to-text transcription backend.",
+    description: "Choose which AI powers your chats, meeting summaries, and speech-to-text transcription.",
     icon: "cpu",
-    keywords: "models llm claude openai chatgpt gemini deepseek groq bedrock transcription stt asr gipformer viegem",
+    keywords: "models llm claude openai chatgpt gemini deepseek groq bedrock transcription stt asr viegem",
+    modelSettings: true,
   },
   {
     id: "voice",
     workspace: "personal",
-    group: "AI & Capture",
+    group: "AI & Voice",
     label: "Voice Assistant",
-    description: "Configure voice dictation, wake words, and real-time voice interaction preferences.",
+    description: "Choose the voice TINA uses when speaking in your meetings and preview how it sounds.",
     icon: "mic",
-    keywords: "voice dictation microphone audio speech tts",
-  },
-  {
-    id: "tokens",
-    workspace: "personal",
-    group: "Developer & Connections",
-    label: "API Tokens & MCP",
-    description: "Create and revoke personal access tokens for MCP clients, CLI integrations, and scripts.",
-    icon: "key",
-    keywords: "api tokens mcp cli keys authentication secret",
-  },
-  {
-    id: "github",
-    workspace: "personal",
-    group: "Developer & Connections",
-    label: "GitHub",
-    description: "Store a reusable GitHub Personal Access Token for pushing and pulling workspace repositories.",
-    icon: "github",
-    keywords: "github git pat token repository sync push pull",
+    keywords: "voice assistant speaker audio speech tts preview preset",
   },
   {
     id: "appearance",
     workspace: "personal",
     group: "Preferences",
     label: "Appearance",
-    description: "Switch between TINA Obsidian Dark and Paper Light themes across your workspace.",
+    description: "Switch between Obsidian Dark and Paper Light themes across your workspace.",
     icon: "sun",
     keywords: "appearance theme dark light mode color interface display",
   },
   {
     id: "account",
     workspace: "personal",
-    group: "Profile",
+    group: "Preferences",
     label: "Account",
-    description: "Review your signed-in identity, workspace role, and session controls.",
+    description: "Review your profile, role, and active session controls.",
     icon: "user",
     keywords: "account profile user email sign out logout terminal admin",
+  },
+  {
+    id: "github",
+    workspace: "personal",
+    group: "Developer & Connections",
+    label: "GitHub",
+    description: "Connect a GitHub token to back up and sync Knowledge spaces with your repositories.",
+    icon: "github",
+    keywords: "github git pat token repository sync push pull",
+  },
+  {
+    id: "tokens",
+    workspace: "personal",
+    group: "Developer & Connections",
+    label: "API Tokens & MCP",
+    description: "Create and revoke personal access tokens for MCP clients, CLI tools, and scripts.",
+    icon: "key",
+    keywords: "api tokens mcp cli keys authentication secret",
   },
   // Team workspace
   {
@@ -109,7 +112,7 @@ const SECTIONS: readonly SectionDef[] = [
     workspace: "team",
     group: "Team Workspace",
     label: "Workspaces & Members",
-    description: "Create shared workspaces, mount team knowledge bases, manage member roles, and mint invite links.",
+    description: "Create shared spaces, manage team access, and invite collaborators with a link.",
     icon: "users",
     keywords: "team shared workspace members invite link collaboration permissions role",
   },
@@ -118,17 +121,18 @@ const SECTIONS: readonly SectionDef[] = [
     workspace: "team",
     group: "Deployment Admin",
     label: "Global Defaults",
-    description: "Set deployment-wide default LLM and transcription endpoints for everyone without personal overrides.",
+    description: "Set organization-wide default AI models and speech-to-text settings.",
     icon: "globe",
     keywords: "global admin default models transcription deployment funasr sherpa viegem apple nvidia",
     adminOnly: true,
+    modelSettings: true,
   },
   {
     id: "asr-status",
     workspace: "team",
     group: "Deployment Admin",
     label: "ASR Workers",
-    description: "Inspect live speech-recognition worker health, queue saturation, and p50/p95 latency telemetry.",
+    description: "Inspect live speech-recognition worker health, queue depth, and latency telemetry.",
     icon: "shield",
     keywords: "asr status workers diagnostics latency queue telemetry health speech recognition",
     adminOnly: true,
@@ -146,7 +150,16 @@ function defaultSectionFor(workspace: SettingsWorkspace): SettingsSectionId {
   return workspace === "team" ? "workspaces" : "calendar";
 }
 
-function readSettingsRouteFromUrl(isAdmin: boolean): { workspace: SettingsWorkspace; section: SettingsSectionId } {
+function isSectionAvailable(s: SectionDef, isAdmin: boolean, hideModels: boolean): boolean {
+  if (s.adminOnly && !isAdmin) return false;
+  if (s.modelSettings && hideModels) return false;
+  return true;
+}
+
+function readSettingsRouteFromUrl(
+  isAdmin: boolean,
+  hideModels: boolean,
+): { workspace: SettingsWorkspace; section: SettingsSectionId } {
   if (typeof window === "undefined") {
     return { workspace: "personal", section: "calendar" };
   }
@@ -154,7 +167,7 @@ function readSettingsRouteFromUrl(isAdmin: boolean): { workspace: SettingsWorksp
   const rawWs = params.get("settingsWorkspace");
   const rawSec = params.get("settingsSection");
 
-  const matchedSec = SECTIONS.find((s) => s.id === rawSec && (!s.adminOnly || isAdmin));
+  const matchedSec = SECTIONS.find((s) => s.id === rawSec && isSectionAvailable(s, isAdmin, hideModels));
   if (matchedSec) {
     return { workspace: matchedSec.workspace, section: matchedSec.id };
   }
@@ -183,23 +196,28 @@ export function SettingsView({
   user = DEFAULT_USER,
   isAdmin = false,
   canOpenTerminal = false,
+  hideModelSettings = hideModelSettingsEnv(),
   terminalHref = "/terminal",
   onSignOut,
 }: {
   user?: WebUser;
   isAdmin?: boolean;
   canOpenTerminal?: boolean;
+  hideModelSettings?: boolean;
   terminalHref?: string;
   onSignOut?: () => void;
 } = {}) {
   const pendingAdminSectionRef = useRef<SettingsSectionId | null>(
     typeof window !== "undefined" && !isAdmin
       ? (SECTIONS.find(
-          (s) => s.id === new URLSearchParams(window.location.search).get("settingsSection") && s.adminOnly,
+          (s) =>
+            s.id === new URLSearchParams(window.location.search).get("settingsSection") &&
+            s.adminOnly &&
+            !(hideModelSettings && s.modelSettings),
         )?.id ?? null)
       : null,
   );
-  const initial = useMemo(() => readSettingsRouteFromUrl(isAdmin), [isAdmin]);
+  const initial = useMemo(() => readSettingsRouteFromUrl(isAdmin, hideModelSettings), [isAdmin, hideModelSettings]);
   const [workspace, setWorkspace] = useState<SettingsWorkspace>(initial.workspace);
   const [section, setSection] = useState<SettingsSectionId>(initial.section);
   const [search, setSearch] = useState("");
@@ -210,12 +228,23 @@ export function SettingsView({
     if (!isAdmin || !pendingAdminSectionRef.current) return;
     const pendingId = pendingAdminSectionRef.current;
     pendingAdminSectionRef.current = null;
-    const adminMatch = SECTIONS.find((s) => s.id === pendingId && s.adminOnly);
+    const adminMatch = SECTIONS.find(
+      (s) => s.id === pendingId && s.adminOnly && !(hideModelSettings && s.modelSettings),
+    );
     if (adminMatch) {
       setWorkspace(adminMatch.workspace);
       setSection(adminMatch.id);
     }
-  }, [isAdmin]);
+  }, [isAdmin, hideModelSettings]);
+
+  // If a runtime feature flag hides model settings after initial render, move away cleanly.
+  useEffect(() => {
+    if (!hideModelSettings) return;
+    const currentDef = SECTIONS.find((s) => s.id === section);
+    if (currentDef?.modelSettings) {
+      setSection(defaultSectionFor(workspace));
+    }
+  }, [hideModelSettings, section, workspace]);
 
   useEffect(() => {
     if (pendingAdminSectionRef.current) return;
@@ -225,17 +254,17 @@ export function SettingsView({
   useEffect(() => {
     const onPopState = () => {
       pendingAdminSectionRef.current = null;
-      const next = readSettingsRouteFromUrl(isAdmin);
+      const next = readSettingsRouteFromUrl(isAdmin, hideModelSettings);
       setWorkspace(next.workspace);
       setSection(next.section);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [isAdmin]);
+  }, [isAdmin, hideModelSettings]);
 
   const availableSections = useMemo(
-    () => SECTIONS.filter((item) => !item.adminOnly || isAdmin),
-    [isAdmin],
+    () => SECTIONS.filter((item) => isSectionAvailable(item, isAdmin, hideModelSettings)),
+    [isAdmin, hideModelSettings],
   );
 
   const selectWorkspace = useCallback(
@@ -319,15 +348,11 @@ export function SettingsView({
           </div>
         );
       case "models":
-        return (
-          <div className="tina-web-settings-card tina-web-settings-embed">
-            <ModelsSection key="personal-models" initialScope="agent" />
-          </div>
-        );
+        return <WebModelsPanel key="personal-models" scopeMode="personal" />;
       case "voice":
         return (
-          <div className="tina-web-settings-card tina-web-settings-embed">
-            <VoiceSettings />
+          <div className="tina-web-settings-stack">
+            <VoiceSettings voiceOnly hideModelHint={hideModelSettings} />
           </div>
         );
       case "tokens":
@@ -434,11 +459,7 @@ export function SettingsView({
       case "workspaces":
         return <SharedWorkspacesPanel />;
       case "global-models":
-        return (
-          <div className="tina-web-settings-card tina-web-settings-embed">
-            <ModelsSection key="global-defaults" initialScope="global" />
-          </div>
-        );
+        return <WebModelsPanel key="global-defaults" scopeMode="global" />;
       case "asr-status":
         return (
           <div className="tina-web-settings-card tina-web-settings-embed">

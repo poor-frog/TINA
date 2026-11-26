@@ -1,8 +1,18 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { WebIcon } from "./Icons";
+import { LucianSlidingTabs } from "./lucian/LucianSlidingTabs";
+import { LucianSkeletonList } from "./lucian/LucianSkeletonCard";
+import { LucianTaskChecklist } from "./lucian/LucianTaskChecklist";
+import { emitWebToast } from "./lucian/webToast";
+import { patchFrontmatterField } from "./knowledgeFriendly";
 import { Markdown } from "../ui-kit/Markdown";
-import { listWorkspaceTree, readWorkspaceFile } from "../surfaces/workspaceApi";
+import {
+  listWorkspaceTree,
+  readWorkspaceDocument,
+  readWorkspaceFile,
+  saveWorkspaceDocument,
+} from "../surfaces/workspaceApi";
 import { presentError } from "../surfaces/apiClient";
 
 interface TaskItem {
@@ -13,6 +23,10 @@ interface TaskItem {
   due?: string;
   assignee?: string;
   body: string;
+}
+
+function isTaskDone(state: string): boolean {
+  return state === "done" || state === "accepted" || state === "completed";
 }
 
 function parseTaskFile(path: string, content: string): TaskItem {
@@ -44,6 +58,7 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
   const [filter, setFilter] = useState<"all" | "open" | "done">("all");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [togglingPath, setTogglingPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -71,17 +86,58 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
 
   useEffect(() => {
     void load();
-    const onChanged = () => void load();
+    const onChanged = (e: Event) => {
+      if ((e as CustomEvent<{ source?: string }>).detail?.source === "tasks-view") return;
+      void load();
+    };
     window.addEventListener("tina:tasks-changed", onChanged);
     return () => window.removeEventListener("tina:tasks-changed", onChanged);
   }, [load]);
 
+  const handleToggleDone = useCallback(
+    async (path: string, nextDone: boolean) => {
+      const target = tasks.find((t) => t.path === path);
+      if (!target || togglingPath === path) return;
+      const prevState = target.state;
+      const nextState = nextDone ? "done" : "open";
+
+      setTasks((cur) => cur.map((t) => (t.path === path ? { ...t, state: nextState } : t)));
+      setTogglingPath(path);
+      setError(null);
+
+      try {
+        const doc = await readWorkspaceDocument(path);
+        const patched = patchFrontmatterField(doc.content, "status", nextState);
+        await saveWorkspaceDocument({
+          path,
+          content: patched,
+          expected_sha256: doc.sha256,
+          commit: false,
+          commit_message: `${nextDone ? "Complete" : "Reopen"} task ${target.title}`,
+        });
+        emitWebToast(nextDone ? `Completed “${target.title}”` : `Reopened “${target.title}”`);
+        window.dispatchEvent(new CustomEvent("tina:tasks-changed", { detail: { source: "tasks-view" } }));
+      } catch (err) {
+        setTasks((cur) => cur.map((t) => (t.path === path ? { ...t, state: prevState } : t)));
+        const msg = presentError(err).headline;
+        setError(msg);
+        emitWebToast({ message: msg, tone: "error" });
+      } finally {
+        setTogglingPath((cur) => (cur === path ? null : cur));
+      }
+    },
+    [tasks, togglingPath],
+  );
+
+  const doneCount = useMemo(() => tasks.filter((t) => isTaskDone(t.state)).length, [tasks]);
+  const openCount = tasks.length - doneCount;
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return tasks.filter((t) => {
-      const isDone = t.state === "done" || t.state === "accepted" || t.state === "completed";
-      if (filter === "open" && isDone) return false;
-      if (filter === "done" && !isDone) return false;
+      const done = isTaskDone(t.state);
+      if (filter === "open" && done) return false;
+      if (filter === "done" && !done) return false;
       if (!q) return true;
       return `${t.title} ${t.state} ${t.assignee ?? ""} ${t.body}`.toLowerCase().includes(q);
     });
@@ -118,18 +174,16 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 20 }}>
-          <div className="tina-web-tabs">
-            {(["all", "open", "done"] as const).map((f) => (
-              <button
-                key={f}
-                type="button"
-                className={`tina-web-tab ${filter === f ? "active" : ""}`}
-                onClick={() => setFilter(f)}
-              >
-                {f === "all" ? "All" : f === "open" ? "Open / Draft" : "Completed"}
-              </button>
-            ))}
-          </div>
+          <LucianSlidingTabs
+            ariaLabel="Task status filter"
+            value={filter}
+            onChange={setFilter}
+            tabs={[
+              { id: "all", label: "All", count: tasks.length },
+              { id: "open", label: "Open / Draft", count: openCount },
+              { id: "done", label: "Completed", count: doneCount },
+            ]}
+          />
           <input
             type="search"
             className="tina-web-filter-input"
@@ -147,42 +201,33 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
         )}
 
         <div className="tina-web-tasks-grid">
-          <div className="tina-web-panel" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {loading && <div style={{ padding: 12, color: "var(--tw-text-4)", fontSize: 13 }}>Loading tasks…</div>}
-            {!loading && visible.length === 0 && (
+          <div className="tina-web-panel" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {loading && tasks.length === 0 ? (
+              <LucianSkeletonList count={4} variant="row" label="Loading tasks…" />
+            ) : visible.length === 0 ? (
               <div style={{ padding: "24px 12px", textAlign: "center", color: "var(--tw-text-4)", fontSize: 13.5 }}>
                 No tasks found. Ask Tina to draft action items from a meeting.
               </div>
+            ) : (
+              <LucianTaskChecklist
+                tasks={visible.map((task) => ({
+                  path: task.path,
+                  title: task.title,
+                  state: task.state,
+                  done: isTaskDone(task.state),
+                  priority: task.priority,
+                  meta:
+                    [task.assignee, task.due ? `Due ${task.due}` : "", task.priority].filter(Boolean).join(" · ") ||
+                    task.path,
+                }))}
+                totalCount={tasks.length}
+                doneCount={doneCount}
+                selectedPath={selected?.path ?? null}
+                togglingPath={togglingPath}
+                onSelect={setSelectedPath}
+                onToggleDone={(path, nextDone) => void handleToggleDone(path, nextDone)}
+              />
             )}
-            {visible.map((task) => {
-              const active = selected?.path === task.path;
-              const pillClass = ["done", "accepted", "draft", "rejected", "pending", "open"].includes(task.state)
-                ? task.state
-                : "open";
-              return (
-                <button
-                  key={task.path}
-                  type="button"
-                  onClick={() => setSelectedPath(task.path)}
-                  className="tina-web-feed-row"
-                  style={{
-                    minHeight: 54,
-                    border: active ? "1px solid rgba(145, 215, 190, 0.28)" : "1px solid transparent",
-                    background: active ? "rgba(23, 107, 91, 0.14)" : undefined,
-                  }}
-                >
-                  <span className="tina-web-feed-main">
-                    <span className="tina-web-feed-title">
-                      <span>{task.title}</span>
-                      <span className={`tina-web-task-pill ${pillClass}`}>{task.state}</span>
-                    </span>
-                    <span className="tina-web-feed-meta">
-                      {[task.assignee, task.due ? `Due ${task.due}` : "", task.priority].filter(Boolean).join(" · ") || task.path}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
           </div>
 
           <div className="tina-web-panel">

@@ -1,0 +1,192 @@
+/* Lucian UX/UI Prompt #093 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#093 */
+
+.u093-wrap {
+  position: relative;
+  overflow: hidden;
+}
+
+.u093-bar {
+  height: 7px;
+  margin: 2px 4px 6px;
+  border-radius: 999px;
+  background: var(--ux-surface-3);
+  overflow: hidden;
+}
+
+.u093-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #22c3a6, #10b981 60%, #ffb547);
+  transform-origin: 0 50%;
+  transform: scaleX(var(--p, 0));
+  transition: transform .6s var(--ux-spring);
+}
+
+.u093-p {
+  position: absolute;
+  z-index: 6;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.u093-cf {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.u093-win {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 18px 16px;
+  margin-top: 6px;
+  border-radius: 20px;
+  background: var(--ux-surface-2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ux-mint) 36%, var(--ux-line)), 0 18px 36px -24px var(--ux-shadow-strong);
+  text-align: center;
+  animation: u093-rise .6s var(--ux-spring) both;
+}
+
+@keyframes u093-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.u093-bdg {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 22px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(140deg, #22c3a6, #10b981 55%, #ffb547);
+  color: #ffffff;
+  animation: u093-pop .65s var(--ux-spring) .1s both;
+}
+
+@keyframes u093-pop {
+  from {
+    transform: scale(.35) rotate(-22deg);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.u093-bdg svg {
+  width: 32px;
+  height: 32px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.u093-bdg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  animation: u093-wave 1.1s .35s var(--ux-ease);
+}
+
+@keyframes u093-wave {
+  0% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 color-mix(in srgb, #10b981 50%, transparent);
+  }
+  100% {
+    opacity: 0;
+    box-shadow: 0 0 0 24px color-mix(in srgb, #10b981 0%, transparent);
+  }
+}
+
+.u093-wt {
+  margin: 12px 0 0;
+  font-size: 16.5px;
+  font-weight: 820;
+  letter-spacing: -.03em;
+  color: var(--ux-ink);
+}
+
+.u093-ws {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--ux-ink-3);
+}
+
+.u093-st {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  margin-top: 12px;
+  padding: 0 13px 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #ffb547 16%, transparent);
+  font-size: 12.5px;
+  font-weight: 760;
+  color: var(--ux-ink);
+}
+
+.u093-st svg {
+  width: 15px;
+  height: 15px;
+}
+
+.u093-again {
+  margin-top: 12px;
+  height: 34px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--ux-ink);
+  color: var(--ux-page);
+  font-size: 12.5px;
+  font-weight: 720;
+  cursor: pointer;
+  transition: transform .3s var(--ux-spring);
+}
+
+.u093-again:active {
+  transform: scale(.97);
+}
+
+.u093-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u093-bar i {
+    transition: none;
+  }
+  .u093-win,
+  .u093-bdg,
+  .u093-bdg::after {
+    animation: none;
+  }
+}

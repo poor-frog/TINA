@@ -4,7 +4,7 @@ Tai lieu mo ta chi tiet cach hoat dong cua he thong giong noi trong TINA tu luc 
 
 Với `TINA_LIVEKIT_AUDIO=1`, NS Low chạy trong dịch vụ LiveKit qua WebSocket riêng, rồi PCM được
 chia cho transcript, Silero và KWS. Cả cửa sổ ASR transcript lẫn câu hỏi voice đi qua adapter
-`livekit.agents.stt.STT` đến đúng VieGem/Gipformer đã chọn cho bot. LocalAgreement và nơi lưu
+`livekit.agents.stt.STT` đến đúng ASR đã chọn cho bot. LocalAgreement và nơi lưu
 transcript không đổi; transcript liên tục không tự kích hoạt LLM. Smart Turn/Namo vẫn chỉ quan sát.
 Xem [cấu hình và giới hạn audio bridge](../deploy/livekit/README.md#local-audio-bridge).
 
@@ -27,7 +27,7 @@ flowchart TD
 
     subgraph S2["2. VAD va ASR (Xu ly song song)"]
         PCMBridge -->|"Tee PCM"| SileroVAD["Native Silero VAD (Sidecar)<br/>(Bat diem dung noi speech_end)"]
-        PCMBridge -->|"Buffered Window"| ASR["ASR Backend (Local HTTP)<br/>(VieGem + KenLM hoac Gipformer 1.5 + FSMN-VAD)"]
+        PCMBridge -->|"Buffered Window"| ASR["ASR Backend (Local HTTP)<br/>(VieGem + KenLM + FSMN-VAD)"]
         ASR -->|"ASR Hypotheses (Text + Timestamps)"| GMeetPipe["Gmeet Pipeline<br/>(Timeline va LocalAgreement)"]
     end
 
@@ -66,7 +66,7 @@ sequenceDiagram
     participant Bot as GMeet Bot (Browser/Worklet)
     participant KWS as LiveKit WakeWord
     participant VAD as Native Silero VAD
-    participant ASR as ASR Engine (VieGem/Gipformer)
+    participant ASR as ASR Engine
     participant Trigger as VoiceTrigger (MeetingVoice)
     participant API as Meeting API va Agent (RAG)
     participant TTS as VieNeu-TTS (Truc Ly)
@@ -134,7 +134,7 @@ stateDiagram-v2
 ### 4.2. VAD va Nhan dang giong noi (Silero VAD & Local ASR)
 - **Silero VAD cuc bo**: [meeting-voice.ts](file:///Users/jky/orca/pre-TINA/TINA/core/meetings/services/bot/src/meeting-voice.ts) khoi tao process con Python chay Silero VAD (~644 KB) o che do `--vad-only` tren CPU. Silero theo doi tung kenh de bat chinh xac mau am thanh ket thuc tieng noi (`speech_end`), loai bo khoang lang thua o cuoi cau.
 - **ASR Engine tu host**:
-  - Mo hinh: **VieGem CTC + KenLM + FSMN-VAD** ([engine.py (VieGem)](file:///Users/jky/orca/pre-TINA/TINA/deploy/transcription/viegem/engine.py)) hoac **Gipformer 1.5 + FSMN-VAD**.
+  - Mo hinh: **VieGem CTC + KenLM + FSMN-VAD** ([engine.py (VieGem)](file:///Users/jky/orca/pre-TINA/TINA/deploy/transcription/viegem/engine.py)).
   - Toi uu tu khoa: KenLM duoc cau hinh name bias uu tien nhan dien tu `"tina"`.
   - [transcription-client.ts](file:///Users/jky/orca/pre-TINA/TINA/core/meetings/modules/whisper/src/transcription-client.ts) gui cac cua so am thanh dinh ky (chu ky 2 giay hoac khi co su kien ngat cau tu VAD) qua HTTP cuc bo.
 
@@ -209,7 +209,7 @@ Ngoai luong voice bot trong Google Meet o tren, TINA con cung cap mot cong cu ch
 ```mermaid
 flowchart TD
     AUDIO["Người dùng gọi TINA và đặt câu hỏi"]
-    AUDIO --> ASR["ASR hiện tại<br/>VieGem hoặc Gipformer"]
+    AUDIO --> ASR["ASR hiện tại<br/>VieGem hoặc endpoint đã cấu hình"]
     ASR --> LK["LiveKit Agents"]
     LK --> GRAPH["LangGraph<br/>Chọn tool và phạm vi tra cứu"]
 
