@@ -141,6 +141,8 @@ export function MeetingSidePanel({
   onSegmentClick,
   pendingPrompt,
   onConsumePendingPrompt,
+  expanded = false,
+  onToggleExpand,
 }: {
   meetingId: string;
   meeting?: MeetingMock;
@@ -168,6 +170,8 @@ export function MeetingSidePanel({
   onSegmentClick?: (segmentId: string) => void;
   pendingPrompt: string | null;
   onConsumePendingPrompt: () => void;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
 }) {
   const [askMode, setAskMode] = useState<"chat" | "citations">("chat");
   const [messages, setMessages] = useState<SideMessage[]>([]);
@@ -477,7 +481,11 @@ export function MeetingSidePanel({
   const totalBadgeCount = lines.length + voiceReplies.length;
 
   return (
-    <aside className={styles.sidePanel} aria-label="Ask Tina and Transcript">
+    <aside
+      className={`${styles.sidePanel} ${expanded ? styles.sidePanelExpanded : ""}`}
+      data-expanded={expanded ? "true" : "false"}
+      aria-label="Ask Tina and Transcript"
+    >
       <div className={styles.sideTabs} role="tablist" aria-label="Meeting side panel">
         {!meetingsOnly && (
           <button
@@ -505,8 +513,8 @@ export function MeetingSidePanel({
           {totalBadgeCount > 0 && <span className={styles.tabBadge}>{totalBadgeCount}</span>}
         </button>
 
-        {!meetingsOnly && effectiveTab === "ask" && (
-          <div className={styles.sideModeToggle}>
+        <div className={styles.sideHeaderActions}>
+          {!meetingsOnly && effectiveTab === "ask" && (
             <button
               type="button"
               className={`${styles.ghostBtn} ${askMode === "citations" ? styles.ghostBtnActive : ""}`}
@@ -516,8 +524,20 @@ export function MeetingSidePanel({
             >
               {askMode === "citations" ? "Chat" : "Wiki citations"}
             </button>
-          </div>
-        )}
+          )}
+          {onToggleExpand && (
+            <button
+              type="button"
+              className={`${styles.iconBtn} ${expanded ? styles.iconBtnActive : ""}`}
+              aria-label={expanded ? "Collapse Ask Tina and Transcript" : "Expand Ask Tina and Transcript"}
+              aria-pressed={expanded}
+              title={expanded ? "Restore split view (Esc)" : "Expand Ask Tina & Transcript"}
+              onClick={onToggleExpand}
+            >
+              <WebIcon name={expanded ? "minimize" : "maximize"} size={15} />
+            </button>
+          )}
+        </div>
       </div>
 
       {effectiveTab === "ask" && !meetingsOnly ? (

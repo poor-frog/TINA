@@ -318,6 +318,7 @@ export function MeetingDetailView({
     typeof window !== "undefined" ? window.innerWidth >= 1180 : false,
   );
   const [fullscreenDoc, setFullscreenDoc] = useState(false);
+  const [fullscreenSide, setFullscreenSide] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
 
@@ -394,6 +395,8 @@ export function MeetingDetailView({
     setChatgptPlanIssue(null);
     setMoreMenuOpen(false);
     setToolsMenuOpen(false);
+    setFullscreenDoc(false);
+    setFullscreenSide(false);
     setRenameOpen(false);
     setPlaybackActive(false);
     setPlaybackPosition(null);
@@ -434,6 +437,20 @@ export function MeetingDetailView({
       window.removeEventListener("keydown", onKey);
     };
   }, [moreMenuOpen, toolsMenuOpen]);
+
+  // Allow Escape to exit expanded focus mode when not inside a modal, popover, or text input.
+  useEffect(() => {
+    if (!fullscreenSide && !fullscreenDoc) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || renameOpen || moreMenuOpen || toolsMenuOpen) return;
+      const tag = (document.activeElement as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      setFullscreenSide(false);
+      setFullscreenDoc(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreenSide, fullscreenDoc, renameOpen, moreMenuOpen, toolsMenuOpen]);
 
   // Fetch single meeting detail if not yet in live meetings list
   useEffect(() => {
@@ -1722,7 +1739,7 @@ export function MeetingDetailView({
         <>
           <div className={styles.body}>
             {/* Zone 1: Left Smart Search + Speaker Talk Time */}
-            {smartSearchOpen && !fullscreenDoc && (
+            {smartSearchOpen && !fullscreenDoc && !fullscreenSide && (
               <MeetingSmartSearch
                 meeting={m}
                 lines={allLines}
@@ -1757,6 +1774,7 @@ export function MeetingDetailView({
             )}
 
             {/* Zone 2: Center Structured Meeting Document */}
+            {!fullscreenSide && (
             <section className={styles.centerMain} aria-label="Meeting notes workspace">
               <div className={styles.centerTabsRow}>
                 <div className={styles.docTabList} role="tablist" aria-label="Meeting document tabs">
@@ -1887,7 +1905,10 @@ export function MeetingDetailView({
                     className={`${styles.iconBtn} ${fullscreenDoc ? styles.iconBtnActive : ""}`}
                     aria-label={fullscreenDoc ? "Exit fullscreen notes" : "Fullscreen notes"}
                     title={fullscreenDoc ? "Show side panels" : "Expand notes"}
-                    onClick={() => setFullscreenDoc((v) => !v)}
+                    onClick={() => {
+                      setFullscreenSide(false);
+                      setFullscreenDoc((v) => !v);
+                    }}
                   >
                     <WebIcon name={fullscreenDoc ? "minimize" : "maximize"} size={15} />
                   </button>
@@ -2282,6 +2303,7 @@ export function MeetingDetailView({
                 </div>
               )}
             </section>
+            )}
 
             {/* Zone 3: Right Ask Tina & Transcript Panel */}
             {!fullscreenDoc && (
@@ -2312,6 +2334,11 @@ export function MeetingDetailView({
                 onSegmentClick={canPlayMeetingAudio && audioFragments.length ? seekSegment : undefined}
                 pendingPrompt={pendingAskPrompt}
                 onConsumePendingPrompt={() => setPendingAskPrompt(null)}
+                expanded={fullscreenSide}
+                onToggleExpand={() => {
+                  setFullscreenDoc(false);
+                  setFullscreenSide((v) => !v);
+                }}
               />
             )}
           </div>
@@ -2333,6 +2360,7 @@ export function MeetingDetailView({
             onCopyTranscript={() => void copyFullTranscript()}
             onToggleSmartSearch={() => {
               setFullscreenDoc(false);
+              setFullscreenSide(false);
               setSmartSearchOpen((v) => !v);
             }}
             onPositionChange={(pos) => {

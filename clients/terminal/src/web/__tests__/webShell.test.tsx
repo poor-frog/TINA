@@ -1073,4 +1073,41 @@ describe("WebShell production UI (Option A & Option B)", () => {
       globalThis.EventSource = origEventSource;
     }
   });
+
+  it("expands and collapses the Ask Tina & Transcript panel in focus mode like Fireflies", async () => {
+    window.history.replaceState({}, "", "/meetings/102");
+    mockEnvironment({ admin: false });
+
+    render(<WebShell initialMeetingId="102" />);
+
+    const sidePanel = await screen.findByLabelText("Ask Tina and Transcript");
+    expect(sidePanel.getAttribute("data-expanded")).toBe("false");
+    expect(screen.getByLabelText("Meeting notes workspace")).toBeTruthy();
+
+    // Expand from Ask Tina tab -> hides center notes workspace and marks panel expanded
+    const expandBtn = screen.getByRole("button", { name: "Expand Ask Tina and Transcript" });
+    expect(expandBtn.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(expandBtn);
+
+    expect(sidePanel.getAttribute("data-expanded")).toBe("true");
+    expect(screen.queryByLabelText("Meeting notes workspace")).toBeNull();
+    const collapseBtn = screen.getByRole("button", { name: "Collapse Ask Tina and Transcript" });
+    expect(collapseBtn.getAttribute("aria-pressed")).toBe("true");
+
+    // Switching to Transcript tab preserves expanded focus mode and keeps the toggle button visible
+    fireEvent.click(screen.getByRole("tab", { name: /Transcript/i }));
+    expect(sidePanel.getAttribute("data-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: "Collapse Ask Tina and Transcript" })).toBeTruthy();
+
+    // Escape exits focus mode and restores the split layout
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(sidePanel.getAttribute("data-expanded")).toBe("false");
+    expect(screen.getByLabelText("Meeting notes workspace")).toBeTruthy();
+
+    // Clicking expand then collapse button also restores split layout
+    fireEvent.click(screen.getByRole("button", { name: "Expand Ask Tina and Transcript" }));
+    expect(screen.queryByLabelText("Meeting notes workspace")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Ask Tina and Transcript" }));
+    expect(screen.getByLabelText("Meeting notes workspace")).toBeTruthy();
+  });
 });

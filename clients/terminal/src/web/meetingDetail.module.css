@@ -1191,6 +1191,56 @@
   background: var(--mt-surface);
 }
 
+.sidePanelExpanded {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  border-left: 0;
+  background: var(--mt-bg);
+}
+
+.sidePanelExpanded .sideTabs {
+  padding: 0 var(--space-6);
+}
+
+.sidePanelExpanded .sideBody {
+  padding: var(--space-6);
+}
+
+.sidePanelExpanded .askHero,
+.sidePanelExpanded .starterList,
+.sidePanelExpanded .skillChips,
+.sidePanelExpanded .chatList,
+.sidePanelExpanded .composer {
+  width: 100%;
+  max-width: 920px;
+  margin-inline: auto;
+}
+
+.sidePanelExpanded .sideFoot {
+  padding: 0 var(--space-6) var(--space-5);
+}
+
+.sidePanelExpanded .transcriptControls {
+  padding: var(--space-4) var(--space-6);
+}
+
+.sidePanelExpanded .transcriptControls > * {
+  width: 100%;
+  max-width: 1040px;
+  margin-inline: auto;
+}
+
+.sidePanelExpanded .transcriptScroll {
+  padding: var(--space-4) var(--space-6) var(--space-8);
+}
+
+.sidePanelExpanded .transcriptScroll > * {
+  width: 100%;
+  max-width: 1040px;
+  margin-inline: auto;
+}
+
 .sideTabs {
   display: flex;
   align-items: stretch;
@@ -1235,11 +1285,12 @@
   flex: none;
 }
 
-.sideModeToggle {
+.sideModeToggle,
+.sideHeaderActions {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: var(--space-2);
 }
 
 .sideBody {
@@ -2048,7 +2099,7 @@
     width: 264px;
   }
 
-  .sidePanel {
+  .sidePanel:not(.sidePanelExpanded) {
     flex-basis: 360px;
     width: 360px;
   }
@@ -2086,6 +2137,11 @@
     min-height: 420px;
     border-left: 0;
     border-top: var(--mt-hairline) solid var(--mt-line-soft);
+  }
+
+  .sidePanelExpanded {
+    flex: 1 1 auto;
+    border-top: 0;
   }
 
   .skillsGrid {
