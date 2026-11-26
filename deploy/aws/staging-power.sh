@@ -7,7 +7,7 @@ PROFILE="${AWS_PROFILE:-tina}"
 REGION="${AWS_REGION:-us-east-1}"
 CLUSTER="${TINA_ECS_CLUSTER:-tina-foundation-ecs}"
 RDS_ID="${TINA_RDS_ID:-tina-staging-datastores-postgres-spq5zinq2xpt}"
-STAGE_URL="${TINA_STAGE_URL:-https://d2eanx74y89uq2.cloudfront.net}"
+STAGE_URL="${TINA_STAGE_URL:-https://meettina.pages.dev}"
 
 CORE_SERVICES=(
   "tina-staging-workspace-s3-EgressProxyService-s0ihtPvdiwuy"
@@ -43,7 +43,7 @@ Commands:
   status       Show running/desired counts for all 11 ECS services, ephemeral tasks, and RDS state.
   sleep        Scale all 11 ECS services to 0, stop idle ephemeral tasks, and stop RDS (unless --keep-rds).
   sleep-heavy  Scale only heavy speech services (VieGem + Voice, 4 vCPU / 16 GiB) to 0; keep web/chat/wiki live.
-  wake         Start RDS (if stopped), scale all 11 ECS services back to 1, and verify CloudFront health.
+  wake         Start RDS (if stopped), scale all 11 ECS services back to 1, and verify edge health.
   wake-lite    Start RDS (if stopped) and wake 9 web/agent services (leave VieGem + Voice at 0).
 EOF
 }
