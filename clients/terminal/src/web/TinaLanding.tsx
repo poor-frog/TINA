@@ -8,6 +8,11 @@ import { HeroMeetingScene } from "./HeroMeetingScene";
 import { LANDING_COPY, type LandingLang } from "./landingCopy";
 import { PrivateInfraIso } from "./PrivateInfraIso";
 import { StepScene } from "./StepScene";
+import "./lucian/lucianTokens.css";
+import { LucianAutomationFlow } from "./lucian/LucianAutomationFlow";
+import { LucianBentoGrid } from "./lucian/LucianBentoGrid";
+import { LucianCursorGlowGrid } from "./lucian/LucianCursorGlowGrid";
+import { LucianGlowCta } from "./lucian/LucianGlowCta";
 import styles from "./tinaLanding.module.css";
 
 const LANG_STORAGE_KEY = "tina.landing.lang";
@@ -603,6 +608,8 @@ export function TinaLanding({
               </article>
             </div>
 
+            <LucianAutomationFlow lang={lang} />
+
             <div className={styles.proofBanner}>
               <strong>
                 {copy.how.proofPrefix}
@@ -636,6 +643,8 @@ export function TinaLanding({
               <p className={styles.sectionSub}>{copy.useCases.sub}</p>
             </div>
 
+            <LucianBentoGrid lang={lang} />
+
             <div className={styles.cardGrid3}>
               {copy.useCases.surfaces.map((surface) => (
                 <article key={surface.tag} className={`${styles.modeCard} ${styles.inkCard}`}>
@@ -649,15 +658,7 @@ export function TinaLanding({
 
             <div className={styles.casesBlock}>
               <h3 className={styles.casesSubhead}>{copy.useCases.casesHeading}</h3>
-              <div className={styles.useCaseGrid2}>
-                {copy.useCases.cases.map((uc) => (
-                  <article key={uc.num} className={styles.useCaseCard}>
-                    <span className={styles.miniLabel}>{uc.num}</span>
-                    <h4>{uc.title}</h4>
-                    <p>{uc.body}</p>
-                  </article>
-                ))}
-              </div>
+              <LucianCursorGlowGrid items={copy.useCases.cases} ariaLabel={copy.useCases.casesHeading} />
             </div>
           </div>
         </section>
@@ -774,27 +775,17 @@ export function TinaLanding({
         {/* FINAL CTA */}
         <section className={styles.ctaSection} id="home-cta">
           <div className={styles.container}>
-            <div className={styles.ctaInner}>
-              <h2>
-                {copy.cta.titleLine1}
-                <br />
-                <span className={styles.serif}>{copy.cta.titleSerif}</span>
-              </h2>
-              <p>{copy.cta.sub}</p>
-              <div className={styles.ctaActions}>
-                <button
-                  type="button"
-                  className={`${styles.button} ${styles.buttonLime}`}
-                  onClick={triggerPrimarySignIn}
-                >
-                  <span>{claiming ? copy.cta.primaryClaim : copy.cta.primary}</span>
-                  <span aria-hidden="true">→</span>
-                </button>
-                <a className={`${styles.button} ${styles.buttonSoft}`} href="#home-hero">
-                  {copy.cta.backToTop}
-                </a>
-              </div>
-            </div>
+            <LucianGlowCta
+              lang={lang}
+              titleLine1={copy.cta.titleLine1}
+              titleSerif={copy.cta.titleSerif}
+              sub={copy.cta.sub}
+              primaryLabel={claiming ? copy.cta.primaryClaim : copy.cta.primary}
+              secondaryLabel={copy.cta.backToTop}
+              secondaryHref="#home-hero"
+              serifClassName={styles.serif}
+              onPrimaryClick={triggerPrimarySignIn}
+            />
           </div>
         </section>
       </main>

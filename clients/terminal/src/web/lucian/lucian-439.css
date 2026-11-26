@@ -1,0 +1,100 @@
+/* Lucian UX/UI Prompt #439 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#439 */
+
+.u439-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.u439-c {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--ux-surface);
+  background: light-dark(var(--ux-surface), var(--ux-surface-2));
+  box-shadow: 0 0 0 1px var(--ux-line);
+}
+
+.u439-c.is-chat {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.u439-sk i {
+  display: block;
+  border-radius: 7px;
+  background: var(--ux-surface-3);
+  background-image: linear-gradient(100deg, transparent 30%, light-dark(rgba(255, 255, 255, .75), rgba(255, 255, 255, .07)) 50%, transparent 70%);
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  animation: u439-sh 1.25s ease-in-out infinite;
+  animation-delay: var(--d, 0s);
+}
+
+@keyframes u439-sh {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -30% 0;
+  }
+}
+
+.u439-av-sk {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+}
+
+.u439-lines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.u439-lines .a {
+  width: 58%;
+  height: 13px;
+}
+
+.u439-lines .b {
+  width: 38%;
+  height: 10px;
+}
+
+.u439-lines .c {
+  width: 82%;
+  height: 12px;
+}
+
+.u439-pill-sk {
+  flex: none;
+  width: 64px;
+  height: 22px;
+  border-radius: 999px;
+}
+
+.u439-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u439-sk i {
+    animation: none;
+    background-image: none;
+  }
+}

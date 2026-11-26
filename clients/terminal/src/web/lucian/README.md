@@ -26,3 +26,14 @@ Ported micro-interaction primitives from the [Lucian UX/UI Prompt](https://lucia
 - `LucianSpeakerDonut.tsx` + `lucian-097.css` — `#097` Interactive SVG speaker talk-time donut chart that pops slices on hover and smoothly re-splits remaining shares when speakers are excluded/included.
 - `LucianUnsavedBar.tsx` + `lucian-250.css` — `#250` Sticky sliding unsaved-changes bar (`Unsaved changes: N`, Discard, Save with spinner & Saved confirmation) used in `KnowledgeDocEditor` and `WebModelsPanel`.
 - `LucianSelectionFormatting.tsx` + `lucian-140.css` — `#140` Contextual Markdown selection formatting bar (`B`, `I`, `</>`, `[[ ]]`) with live `aria-pressed` indicators in `KnowledgeDocEditor`.
+
+### Package 3 — App Shell, Navigation, Tasks & Pre-Login Landing
+- `LucianCommandKButton.tsx` + `lucian-471.css` — `#471` 3D keycap `⌘K` / `Ctrl+K` trigger button on `TopBar` with sequential sink/spring animation, ripple, and modifier breathing prompt.
+- `LucianCommandPalette.tsx` + `lucian-046.css` — `#046` Unfolding command palette in `GlobalSearch` with gliding highlight bar, query match `<mark>`, keyboard navigation, and theme toggle command.
+- `LucianSlidingTabs.tsx` + `lucian-039.css` — `#039` Spring-gliding pill tabs with directional panel motion and arrow-key roving focus across `HomeView`, `MeetingsView`, `MeetingSidePanel`, and `TasksView`.
+- `LucianTaskChecklist.tsx` + `lucian-014.css` + `lucian-093.css` — `#014` Progress-ring checklist with stroke-drawn check & strikethrough sweep paired with `#093` 8-dot burst, gradient progress bar, and canvas confetti completion celebration in `TasksView`.
+- `LucianSkeletonCard.tsx` + `lucian-439.css` — `#439` Shimmering skeleton card lists (`row` and `chat` variants) for initial loading states across `HomeView`, `MeetingsView`, `TasksView`, and `AskTinaView`.
+- `LucianAutomationFlow.tsx` + `lucian-201.css` — `#201` Interactive bilingual 4-node TINA meeting pipeline flow on `TinaLanding` with animated SVG connector dots and step timers.
+- `LucianBentoGrid.tsx` + `lucian-214.css` — `#214` 5-tile living bento feature grid on `TinaLanding` with hover/focus mini-scenes (live typing, search bars, talk-time bars, security shield pulse, platform marquee).
+- `LucianCursorGlowGrid.tsx` + `lucian-228.css` — `#228` Cursor-lit cross-gap spotlight card borders for the enterprise use cases grid on `TinaLanding`.
+- `LucianGlowCta.tsx` + `lucian-211.css` — `#211` Rotating conic-beam & glow-border sign-up CTA section at the bottom of `TinaLanding`.

@@ -40,12 +40,14 @@ TINA Terminal workbench at `/terminal`.
   agent task-step timeline (`#454`), morphing tool approval card (`#455`), morphing voice dictation
   pill (`#457`), and real `/routine` prompt compilation.
 - **Lucian micro-interaction layer (`lucian/`)**: Ported MIT primitives from Lucian UX/UI Prompt
-  bridged onto TINA's dark/light palette (`lucianTokens.css`), including the global stacked toast
-  deck (`#435` `LucianToastStack` + `webToast.ts`) in `WebApp.tsx`, circular-reveal dark/light mode
-  toggle (`#219` `LucianThemeToggle`) and live-meeting Dynamic Island (`#459` `LucianDynamicIsland`)
-  in `TopBar.tsx`, selection quote-share tooltip (`#220`), AI voice orb (`#458`), word-by-word read
-  aloud (`#476`), chapter rail (`#195`), audio loop region (`#194`), re-splitting speaker donut
-  (`#097`), unsaved-changes bar (`#250`), and contextual selection formatting (`#140`).
+  bridged onto TINA's dark/light/landing palettes (`lucianTokens.css`), including the global stacked
+  toast deck (`#435`), circular-reveal dark/light toggle (`#219`), live-meeting Dynamic Island
+  (`#459`), 3D `⌘K` button (`#471`), unfolding command palette (`#046`), sliding pill tabs (`#039`),
+  task checklist with completion confetti celebration (`#014`, `#093`), shimmering skeleton lists
+  (`#439`), selection quote-share tooltip (`#220`), AI voice orb (`#458`), word-by-word read aloud
+  (`#476`), chapter rail (`#195`), audio loop region (`#194`), re-splitting speaker donut (`#097`),
+  unsaved-changes bar (`#250`), selection formatting (`#140`), and pre-login Landing scenes
+  (`#201` automation flow, `#214` living bento grid, `#228` cursor-lit borders, `#211` glow CTA).
 - **Knowledge Hub (`KnowledgeView.tsx` + `knowledgeFriendly.ts` + `constellationGraph.ts` + `KnowledgeDocEditor.tsx` + `KnowledgeCopilotDrawer.tsx` + `KnowledgeGraphCanvas.tsx` + `knowledgeView.module.css`)**:
   Notion-style, non-tech-friendly Knowledge library mounted directly at `/?nav=knowledge` (with URL
   deep-linking `?nav=knowledge&ws=&doc=&tab=` and Back/Forward reading history), uniting Private

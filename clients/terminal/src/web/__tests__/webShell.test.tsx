@@ -194,12 +194,20 @@ const mockMintTranscriptShare = vi.fn().mockResolvedValue({
   expires_at: "2026-12-01T00:00:00Z",
 });
 
+const mockSaveWorkspaceDocument = vi.fn().mockResolvedValue({ sha256: "abc123", commit: null, commit_error: null });
+
 vi.mock("../../surfaces/workspaceApi", async () => {
   const actual = await vi.importActual<typeof import("../../surfaces/workspaceApi")>("../../surfaces/workspaceApi");
   return {
     ...actual,
     listWorkspaceTree: vi.fn().mockResolvedValue(["kg/entities/task/follow-up.md"]),
     readWorkspaceFile: vi.fn().mockResolvedValue("---\ntitle: Ship User UI\nstatus: draft\n---\nReview rollout plan."),
+    readWorkspaceDocument: vi.fn().mockResolvedValue({
+      content: "---\ntitle: Ship User UI\nstatus: draft\n---\nReview rollout plan.",
+      sha256: "sha-task-1",
+      writable: true,
+    }),
+    saveWorkspaceDocument: (...args: unknown[]) => mockSaveWorkspaceDocument(...args),
     listSharedMemberships: (...args: unknown[]) => mockListSharedMemberships(...args),
     readAttachedWorkspaces: vi.fn().mockResolvedValue({ active: "seed", slots: { seed: { repo: null, ref: null, name: "Personal" } } }),
     readActiveSet: vi.fn().mockResolvedValue({ subject: "u_sarup", active: [{ slug: "eng-syncs", role: "shared", repo: null, ref: null, path: "/eng-syncs", write: true, primary: false }] }),
@@ -1308,5 +1316,71 @@ describe("WebShell production UI (Option A & Option B)", () => {
     expect(screen.getByRole("button", { name: "Pause read aloud" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Pause read aloud" }));
     expect(screen.getAllByTestId("lucian-selection-tooltip").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("supports Lucian Package 3A: #471 Command K button, #046 Command Palette, #039 Sliding Pill Tabs, #014/#093 Task Checklist Celebration, and #439 Skeleton", async () => {
+    mockSaveWorkspaceDocument.mockClear();
+    mockEnvironment({ admin: false });
+    render(<WebShell />);
+
+    // #471 Command K button in TopBar opens #046 Command Palette
+    expect(await screen.findByTestId("lucian-command-k")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Search meetings and tasks" }));
+    const palette = await screen.findByTestId("lucian-command-palette");
+    expect(palette).toBeTruthy();
+
+    // Filter #046 palette to "theme" and run via Enter -> toggles dark/light mode and closes
+    const searchInput = screen.getByLabelText("Search query");
+    fireEvent.change(searchInput, { target: { value: "light / dark" } });
+    fireEvent.keyDown(searchInput, { key: "Enter" });
+    await waitFor(() => {
+      expect(screen.queryByTestId("lucian-command-palette")).toBeNull();
+    });
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    // Restore dark mode via TopBar toggle
+    fireEvent.click(screen.getByRole("button", { name: /Switch to dark mode/i }));
+
+    // #039 Sliding pill tabs on Home support arrow-key switching
+    expect(screen.getByTestId("lucian-sliding-tabs")).toBeTruthy();
+    const recentTab = screen.getByRole("tab", { name: /Recent/i });
+    fireEvent.keyDown(recentTab, { key: "ArrowRight" });
+    expect(screen.getByRole("tab", { name: /Upcoming/i }).getAttribute("aria-selected")).toBe("true");
+
+    // Open Tasks -> #014 checklist + #093 celebration when checking off the only open task
+    fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
+    const checklist = await screen.findByTestId("lucian-task-checklist");
+    expect(checklist).toBeTruthy();
+    const toggleBtn = await screen.findByRole("checkbox", { name: /Mark "Ship User UI" as done/i });
+    fireEvent.click(toggleBtn);
+    await waitFor(() => {
+      expect(mockSaveWorkspaceDocument).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByTestId("lucian-task-celebration")).toBeTruthy();
+  });
+
+  it("renders Lucian Package 3B on AuthGate pre-login Landing: #201 Automation Flow, #214 Bento Grid, #228 Cursor Glow Grid, and #211 Glow CTA", async () => {
+    window.localStorage.removeItem("tina.landing.lang");
+    vi.mocked(signIn).mockClear();
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/auth/me")) return new Response("{}", { status: 401 });
+      if (url.includes("/api/auth/providers")) {
+        return new Response(JSON.stringify({ google: { id: "google" }, microsoft: { id: "microsoft" } }), { status: 200 });
+      }
+      if (url.includes("/api/auth/instance")) {
+        return new Response(JSON.stringify({ admin_exists: true }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    render(<AuthGate><div>App</div></AuthGate>);
+    expect(await screen.findByTestId("lucian-automation-flow")).toBeTruthy();
+    expect(screen.getByTestId("lucian-bento-grid")).toBeTruthy();
+    expect(screen.getByTestId("lucian-cursor-glow-grid")).toBeTruthy();
+    expect(screen.getByTestId("lucian-glow-cta")).toBeTruthy();
+
+    // Run #201 pipeline flow button works cleanly without throwing
+    fireEvent.click(screen.getByRole("button", { name: /Chạy thử/i }));
+    expect(screen.getByRole("button", { name: /Đang chạy/i })).toBeTruthy();
   });
 });

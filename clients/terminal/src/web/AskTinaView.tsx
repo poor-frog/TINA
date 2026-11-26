@@ -8,6 +8,7 @@ import { AgentActivitySteps, describeAgentTool } from "./AgentActivitySteps";
 import { LucianThinkingText } from "./lucian/LucianThinkingText";
 import { LucianToolApprovalCard } from "./lucian/LucianToolApprovalCard";
 import { LucianVoiceInputButton } from "./lucian/LucianVoiceInputButton";
+import { LucianSkeletonList } from "./lucian/LucianSkeletonCard";
 import {
   LucianMentionChips,
   LucianMentionPopover,
@@ -1158,13 +1159,8 @@ export function AskTinaView({
             )}
 
             {historyLoading ? (
-              <div className="tina-web-ask-loading" role="status">
-                <span className="tina-web-typing-dots" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </span>
-                <span>Loading conversation…</span>
+              <div className="tina-web-ask-loading" style={{ padding: "12px 0" }}>
+                <LucianSkeletonList count={3} variant="chat" label="Loading conversation…" />
               </div>
             ) : messages.length === 0 ? (
               <div className="tina-web-ask-hero">

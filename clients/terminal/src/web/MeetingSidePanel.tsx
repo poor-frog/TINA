@@ -13,6 +13,7 @@ import { LucianThinkingText } from "./lucian/LucianThinkingText";
 import { LucianSelectionTooltip } from "./lucian/LucianSelectionTooltip";
 import { LucianVoiceOrb, type VoiceOrbState } from "./lucian/LucianVoiceOrb";
 import { LucianReadAloud } from "./lucian/LucianReadAloud";
+import { LucianSlidingTabs } from "./lucian/LucianSlidingTabs";
 import { emitWebToast } from "./lucian/webToast";
 import { Markdown } from "../ui-kit/Markdown";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
@@ -509,32 +510,32 @@ export function MeetingSidePanel({
       data-expanded={expanded ? "true" : "false"}
       aria-label="Ask Tina and Transcript"
     >
-      <div className={styles.sideTabs} role="tablist" aria-label="Meeting side panel">
-        {!meetingsOnly && (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={effectiveTab === "ask"}
-            className={styles.sideTabBtn}
-            onClick={() => onSideTabChange("ask")}
-          >
-            <span className={styles.tinaOrb} aria-hidden="true">
-              <WebIcon name="tinaAsk" size={11} />
-            </span>
-            <span>Ask Tina</span>
-          </button>
-        )}
-
-        <button
-          type="button"
-          role="tab"
-          aria-selected={effectiveTab === "transcript"}
-          className={styles.sideTabBtn}
-          onClick={() => onSideTabChange("transcript")}
-        >
-          <span>Transcript</span>
-          {totalBadgeCount > 0 && <span className={styles.tabBadge}>{totalBadgeCount}</span>}
-        </button>
+      <div className={styles.sideTabs} style={{ padding: "8px 12px", gap: 8, alignItems: "center" }}>
+        <LucianSlidingTabs
+          ariaLabel="Meeting side panel"
+          value={effectiveTab}
+          onChange={(next) => onSideTabChange(next)}
+          tabs={[
+            ...(!meetingsOnly
+              ? [
+                  {
+                    id: "ask" as const,
+                    label: "Ask Tina",
+                    icon: (
+                      <span className={styles.tinaOrb} aria-hidden="true">
+                        <WebIcon name="tinaAsk" size={11} />
+                      </span>
+                    ),
+                  },
+                ]
+              : []),
+            {
+              id: "transcript" as const,
+              label: "Transcript",
+              count: totalBadgeCount,
+            },
+          ]}
+        />
 
         <div className={styles.sideHeaderActions}>
           {!meetingsOnly && effectiveTab === "ask" && (

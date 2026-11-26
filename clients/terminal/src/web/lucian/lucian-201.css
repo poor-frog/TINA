@@ -1,0 +1,293 @@
+/* Lucian UX/UI Prompt #201 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#201 */
+
+.u201-shell {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin-top: 32px;
+}
+
+.u201 {
+  position: relative;
+  width: min(100%, 440px);
+  height: 350px;
+  border-radius: 26px;
+  overflow: hidden;
+  background: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ux-ink) 12%, transparent) 1px, transparent 0) 0 0 / 14px 14px, var(--ux-surface);
+  box-shadow: 0 0 0 1.5px var(--ux-ink), 5px 5px 0 var(--ux-ink);
+  color: var(--ux-ink);
+}
+
+.u201-hd {
+  position: absolute;
+  left: 18px;
+  right: 16px;
+  top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 2;
+}
+
+.u201-hd div {
+  margin-right: auto;
+  min-width: 0;
+}
+
+.u201-hd b {
+  display: block;
+  font-size: 14px;
+  font-weight: 850;
+  letter-spacing: -.02em;
+  color: var(--ux-ink);
+}
+
+.u201-hd small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ux-ink-3);
+}
+
+.u201-hd small::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+.u201-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 12px 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ux-ink);
+  color: var(--ux-surface);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.u201-run svg {
+  width: 10px;
+  height: 10px;
+}
+
+.u201-run:disabled {
+  opacity: .6;
+  cursor: default;
+}
+
+.u201-run:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 2px;
+}
+
+.u201-stage {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 340px;
+  height: 340px;
+  transform: translateX(-50%);
+}
+
+.u201-cv {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 340px;
+  height: 340px;
+  pointer-events: none;
+}
+
+.u201-cv path {
+  fill: none;
+  stroke: var(--ux-line-2);
+  stroke-width: 2;
+  transition: stroke .3s;
+}
+
+.u201-cv path.is-on {
+  stroke: color-mix(in srgb, var(--ux-accent) 75%, transparent);
+}
+
+.u201-cv circle {
+  fill: var(--ux-accent);
+  opacity: 0;
+  filter: drop-shadow(0 0 4px var(--ux-accent));
+}
+
+.u201-nd {
+  position: absolute;
+  width: 152px;
+  padding: 8px 9px;
+  border-radius: 13px;
+  background: var(--ux-surface);
+  box-shadow: 0 0 0 1px var(--ux-line-2), 0 8px 18px -12px var(--ux-shadow-strong);
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  transition: box-shadow .3s, transform .3s;
+}
+
+.u201-nd.is-run {
+  box-shadow: 0 0 0 1.5px var(--ux-accent), 0 10px 24px -10px color-mix(in srgb, var(--ux-accent) 60%, transparent);
+  transform: translateY(-1px);
+}
+
+.u201-nd.is-done {
+  box-shadow: 0 0 0 1px color-mix(in srgb, #10b981 65%, transparent), 0 8px 18px -12px var(--ux-shadow-strong);
+}
+
+.u201-ic {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+}
+
+.u201-ic svg {
+  width: 14px;
+  height: 14px;
+}
+
+.u201-tx {
+  flex: 1;
+  min-width: 0;
+}
+
+.u201-tx b {
+  display: block;
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ux-ink);
+}
+
+.u201-tx span {
+  display: block;
+  margin-top: 1px;
+  font-size: 9.5px;
+  font-weight: 650;
+  color: var(--ux-ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color .3s;
+}
+
+.u201-nd.is-done .u201-tx span {
+  color: var(--ux-ink-2);
+}
+
+.u201-s {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--ux-line-2);
+  position: relative;
+}
+
+.u201-nd.is-run .u201-s {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ux-accent) 25%, transparent);
+  border: 2px solid transparent;
+  border-top-color: var(--ux-accent);
+  box-sizing: border-box;
+  animation: u201-sp .7s linear infinite;
+}
+
+@keyframes u201-sp {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.u201-nd.is-done .u201-s {
+  background: #10b981;
+  box-shadow: none;
+}
+
+.u201-nd.is-done .u201-s::after {
+  content: "";
+  position: absolute;
+  left: 4.5px;
+  top: 2.5px;
+  width: 3px;
+  height: 6px;
+  border: solid #ffffff;
+  border-width: 0 1.6px 1.6px 0;
+  transform: rotate(45deg);
+}
+
+.u201-ms {
+  position: absolute;
+  right: 8px;
+  bottom: -14px;
+  font-size: 9px;
+  font-weight: 800;
+  font-style: normal;
+  color: #059669;
+  opacity: 0;
+  transition: opacity .3s;
+  font-variant-numeric: tabular-nums;
+}
+
+.u201-nd.is-done .u201-ms {
+  opacity: 1;
+}
+
+.u201-ft {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translate(-50%, 8px);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #059669;
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 800;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity .3s, transform .4s cubic-bezier(.3, 1.5, .5, 1);
+  z-index: 2;
+}
+
+.u201-ft.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media (max-width: 400px) {
+  .u201-stage {
+    transform: translateX(-50%) scale(.92);
+    transform-origin: top center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u201-nd.is-run .u201-s {
+    animation: none;
+  }
+  .u201-ft,
+  .u201-nd {
+    transition: none;
+  }
+}

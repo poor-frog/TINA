@@ -3,6 +3,7 @@
  *  and Split-Button `Capture ▾` (Join live now | Plan / Schedule | Connect Calendar). */
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
+import { LucianCommandKButton } from "./lucian/LucianCommandKButton";
 import { LucianThemeToggle } from "./lucian/LucianThemeToggle";
 import { LucianDynamicIsland } from "./lucian/LucianDynamicIsland";
 import { emitWebToast } from "./lucian/webToast";
@@ -86,16 +87,7 @@ export function WebTopBar({
         </div>
 
         <div className="tina-web-search-wrap">
-          <button
-            type="button"
-            className="tina-web-search-trigger"
-            onClick={onOpenSearch}
-            aria-label="Search meetings and tasks"
-          >
-            <WebIcon name="search" size={15} />
-            <span>Search meetings, tasks, or actions</span>
-            <kbd>⌘K</kbd>
-          </button>
+          <LucianCommandKButton onTrigger={onOpenSearch} />
         </div>
 
         <div className="tina-web-topbar-right">

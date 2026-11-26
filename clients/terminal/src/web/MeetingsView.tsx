@@ -5,6 +5,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { WebAvatar } from "./Avatar";
 import { WebIcon } from "./Icons";
+import { LucianSlidingTabs } from "./lucian/LucianSlidingTabs";
+import { LucianSkeletonList } from "./lucian/LucianSkeletonCard";
 import type { CaptureModalMode } from "./TopBar";
 import {
   countActiveFilters,
@@ -86,6 +88,7 @@ function canDeleteRow(m: MeetingMock): boolean {
 
 export function MeetingsView({
   meetings,
+  listLoaded = true,
   userName,
   wsConnected,
   meetingsOnly = false,
@@ -94,6 +97,7 @@ export function MeetingsView({
   onOpenCapture,
 }: {
   meetings: MeetingMock[];
+  listLoaded?: boolean;
   userName: string;
   wsConnected: boolean;
   meetingsOnly?: boolean;
@@ -351,28 +355,20 @@ export function MeetingsView({
 
       <section className="tina-web-meetings-pane">
         <div className="tina-web-toolbar">
-          <div className="tina-web-tabs">
-            {(
-              [
-                { id: "all", label: "All" },
-                { id: "live", label: "Live" },
-                { id: "prep", label: "Upcoming" },
-                { id: "post", label: "Recorded" },
-              ] as const
-            ).map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`tina-web-tab ${phaseFilter === item.id ? "active" : ""}`}
-                onClick={() => {
-                  setPhaseFilter(item.id);
-                  setVisibleCount(PAGE_SIZE);
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+          <LucianSlidingTabs
+            ariaLabel="Meeting status filter"
+            value={phaseFilter}
+            onChange={(next) => {
+              setPhaseFilter(next);
+              setVisibleCount(PAGE_SIZE);
+            }}
+            tabs={[
+              { id: "all", label: "All" },
+              { id: "live", label: "Live" },
+              { id: "prep", label: "Upcoming" },
+              { id: "post", label: "Recorded" },
+            ]}
+          />
 
           <input
             type="search"
@@ -848,7 +844,11 @@ export function MeetingsView({
             </div>
           )}
 
-          {groups.length === 0 && (
+          {groups.length === 0 && !listLoaded && meetings.length === 0 && (
+            <LucianSkeletonList count={5} variant="row" label="Loading meetings…" />
+          )}
+
+          {groups.length === 0 && (listLoaded || meetings.length > 0) && (
             <div style={{ padding: "48px 16px", textAlign: "center", color: "var(--tw-text-4)" }}>
               <p style={{ margin: "0 0 12px", fontSize: 14, color: "var(--tw-text-2)" }}>
                 {meetings.length === 0 ? "No meetings captured yet" : "No meetings match these filters"}

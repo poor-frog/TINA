@@ -310,6 +310,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
                 firstName={user.firstName}
                 userName={user.name}
                 meetings={meetings}
+                listLoaded={listLoaded}
                 meetingsOnly={meetOnly}
                 onOpenMeeting={openMeeting}
                 onAskTina={askTina}
@@ -321,6 +322,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
             {view === "meetings" && (
               <MeetingsView
                 meetings={meetings}
+                listLoaded={listLoaded}
                 userName={user.name}
                 wsConnected={wsConnected}
                 meetingsOnly={meetOnly}

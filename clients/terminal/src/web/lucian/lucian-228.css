@@ -1,0 +1,95 @@
+/* Lucian UX/UI Prompt #228 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#228 */
+
+.u228 {
+  position: relative;
+  width: 100%;
+  border-radius: 26px;
+  overflow: hidden;
+  background: #0d0f0d;
+  box-shadow: 0 0 0 1.5px #0c0d0a, 5px 5px 0 #0c0d0a;
+  color: #edf2ef;
+  padding: 16px;
+  --x: -500px;
+  --y: -500px;
+  --o: 0;
+}
+
+.u228-gd {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.u228-c {
+  position: relative;
+  border-radius: 18px;
+  padding: 1.5px;
+  background:
+    radial-gradient(200px circle at var(--cx, -500px) var(--cy, -500px), rgba(110, 231, 183, calc(var(--o, 0) * 1)), rgba(45, 212, 191, calc(var(--o, 0) * .5)) 42%, transparent 72%),
+    rgba(255, 255, 255, .1);
+}
+
+.u228-in {
+  position: relative;
+  height: 100%;
+  border-radius: 16.5px;
+  background:
+    radial-gradient(260px circle at var(--cx, -500px) var(--cy, -500px), rgba(110, 231, 183, calc(var(--o, 0) * .13)), transparent 62%),
+    #141714;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.u228-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.u228-ic {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: rgba(110, 231, 183, .1);
+  box-shadow: inset 0 0 0 1px rgba(110, 231, 183, .22);
+}
+
+.u228-ic svg {
+  width: 16px;
+  height: 16px;
+}
+
+.u228-num {
+  font-family: var(--lp-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: #6ee7b7;
+}
+
+.u228-in h4 {
+  margin: 4px 0 0;
+  font-size: 16.5px;
+  font-weight: 750;
+  letter-spacing: -.015em;
+  color: #f5f7f5;
+}
+
+.u228-in p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #a4b0a9;
+}
+
+@media (max-width: 720px) {
+  .u228-gd {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
