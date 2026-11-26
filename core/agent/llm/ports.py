@@ -418,6 +418,34 @@ def commit_workspace_paths(
 
 
 
+def _is_system_mount(mount: Path) -> bool:
+    """Return True when ``mount`` is the internal private `_system` continuity repo (not user Knowledge)."""
+    try:
+        resolved = str(mount.resolve())
+    except OSError:
+        resolved = str(mount)
+    raw = os.environ.get("TINA_MOUNTS")
+    if raw:
+        try:
+            entries = json.loads(raw)
+        except (TypeError, ValueError):
+            entries = ()
+        if isinstance(entries, list):
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("role") == "system" or entry.get("slug") == "_system":
+                    mpath = entry.get("path")
+                    if mpath:
+                        try:
+                            if str(Path(mpath).resolve()) == resolved:
+                                return True
+                        except OSError:
+                            if str(mpath) == resolved:
+                                return True
+    return mount.name in ("_system", ".system") or mount.parent.name in ("_system", ".system")
+
+
 def run_harness_turn(
     work: Path | str,
     prompt: str,
@@ -535,5 +563,5 @@ def run_harness_turn(
             sha = _commit_mount(mount, message=msg, author=author)
         except subprocess.CalledProcessError:
             continue  # one mount's commit failing must not abort the rest of the set
-        if sha:
+        if sha and not _is_system_mount(mount):
             yield {"type": "commit", "sha": sha}
