@@ -3925,6 +3925,35 @@ html[data-theme="light"] .tina-web-row-menu-item:hover:not(:disabled) {
 
 /* ---------- Option B: Ask Tina Sessions Search, Response Actions & Tool Approval ---------- */
 
+.tina-web-ask-sessions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tina-web-ask-sessions-head .tina-web-channels-title {
+  margin: 0;
+}
+
+.tina-web-ask-clear-all-btn {
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--tw-text-4);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.tina-web-ask-clear-all-btn:hover {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.24);
+}
+
 .tina-web-ask-session-list {
   flex: 1;
   min-height: 0;
@@ -3934,17 +3963,45 @@ html[data-theme="light"] .tina-web-row-menu-item:hover:not(:disabled) {
   gap: 3px;
 }
 
+.tina-web-session-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.tina-web-session-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tina-web-session-item.active {
+  background: rgba(23, 107, 91, 0.22);
+  border-color: rgba(145, 215, 190, 0.24);
+}
+
+.tina-web-session-item.confirming {
+  background: rgba(239, 68, 68, 0.09);
+  border-color: rgba(239, 68, 68, 0.26);
+}
+
 .tina-web-session-row {
   display: flex;
   align-items: center;
   gap: 9px;
-  width: 100%;
-  padding: 8px 9px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 6px 8px 9px;
   border-radius: 9px;
-  border: 1px solid transparent;
+  border: none;
+  background: transparent;
   color: var(--tw-text-2);
   text-align: left;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  cursor: pointer;
+  transition: color 120ms ease;
 }
 
 .tina-web-session-icon {
@@ -3959,20 +4016,99 @@ html[data-theme="light"] .tina-web-row-menu-item:hover:not(:disabled) {
   color: var(--tw-text-3);
 }
 
-.tina-web-session-row:hover {
-  background: rgba(255, 255, 255, 0.05);
+.tina-web-session-item:hover .tina-web-session-row {
   color: var(--tw-text);
 }
 
 .tina-web-session-row.active {
-  background: rgba(23, 107, 91, 0.22);
-  border-color: rgba(145, 215, 190, 0.24);
   color: var(--tw-mint-bright);
 }
 
 .tina-web-session-row.active .tina-web-session-icon {
   background: rgba(23, 107, 91, 0.42);
   color: var(--tw-mint-bright);
+}
+
+.tina-web-session-delete-btn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-right: 5px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--tw-text-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.tina-web-session-item:hover .tina-web-session-delete-btn,
+.tina-web-session-item:focus-within .tina-web-session-delete-btn,
+.tina-web-session-item.active .tina-web-session-delete-btn {
+  opacity: 0.78;
+}
+
+.tina-web-session-delete-btn:hover,
+.tina-web-session-delete-btn:focus-visible {
+  opacity: 1;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.28);
+}
+
+@media (hover: none) {
+  .tina-web-session-delete-btn {
+    opacity: 0.72;
+  }
+}
+
+.tina-web-session-confirm {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 4px;
+}
+
+.tina-web-session-confirm-del {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.42);
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.tina-web-session-confirm-del:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.3);
+  color: #fff;
+}
+
+.tina-web-session-confirm-cancel {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--tw-line-soft);
+  background: transparent;
+  color: var(--tw-text-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.tina-web-session-confirm-cancel:hover:not(:disabled) {
+  color: var(--tw-text);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .tina-web-session-copy {
@@ -4081,19 +4217,46 @@ html[data-theme="light"] .tina-web .tina-web-session-icon {
   background: rgba(15, 23, 42, 0.05);
 }
 
-html[data-theme="light"] .tina-web .tina-web-session-row:hover {
+html[data-theme="light"] .tina-web .tina-web-session-item:hover {
   background: rgba(15, 23, 42, 0.05);
 }
 
-html[data-theme="light"] .tina-web .tina-web-session-row.active {
+html[data-theme="light"] .tina-web .tina-web-session-item.active {
   background: rgba(23, 107, 91, 0.12);
   border-color: rgba(23, 107, 91, 0.24);
+}
+
+html[data-theme="light"] .tina-web .tina-web-session-row.active {
   color: #0f4c41;
 }
 
 html[data-theme="light"] .tina-web .tina-web-session-row.active .tina-web-session-icon {
   background: rgba(23, 107, 91, 0.18);
   color: #0f4c41;
+}
+
+html[data-theme="light"] .tina-web .tina-web-session-item.confirming {
+  background: rgba(220, 38, 38, 0.07);
+  border-color: rgba(220, 38, 38, 0.26);
+}
+
+html[data-theme="light"] .tina-web .tina-web-ask-clear-all-btn:hover,
+html[data-theme="light"] .tina-web .tina-web-session-delete-btn:hover,
+html[data-theme="light"] .tina-web .tina-web-session-delete-btn:focus-visible {
+  color: #b91c1c;
+  background: rgba(220, 38, 38, 0.1);
+  border-color: rgba(220, 38, 38, 0.24);
+}
+
+html[data-theme="light"] .tina-web .tina-web-session-confirm-del {
+  background: rgba(220, 38, 38, 0.12);
+  border-color: rgba(220, 38, 38, 0.34);
+  color: #b91c1c;
+}
+
+html[data-theme="light"] .tina-web .tina-web-session-confirm-del:hover:not(:disabled) {
+  background: #dc2626;
+  color: #fff;
 }
 
 .tina-web-approval-stack {

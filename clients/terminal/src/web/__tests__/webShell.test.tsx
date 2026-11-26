@@ -379,6 +379,17 @@ describe("WebShell production UI (Option A & Option B)", () => {
       if (url.includes("/api/admin/me")) {
         return new Response(admin ? JSON.stringify({ ok: true }) : "{}", { status: admin ? 200 : 404 });
       }
+      if (url.includes("/api/sessions/") && url.includes("/history")) {
+        return new Response(
+          JSON.stringify({
+            turns: [
+              { role: "user", text: "Earlier checklist question" },
+              { role: "agent", text: "Earlier checklist answer" },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
       if (url.includes("/api/sessions")) {
         return new Response(
           JSON.stringify({
@@ -389,6 +400,9 @@ describe("WebShell production UI (Option A & Option B)", () => {
           }),
           { status: 200 },
         );
+      }
+      if (url.includes("/api/chat/reset") && init?.method === "POST") {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
       if (url.includes("/api/chat/approval") && init?.method === "POST") {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -591,6 +605,53 @@ describe("WebShell production UI (Option A & Option B)", () => {
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith("Drafted follow-up summary for **Product Weekly Sync**.");
     });
+  });
+
+  it("lets users delete individual old conversations and clear all conversations in Ask Tina", async () => {
+    const fetchMock = mockEnvironment({ admin: false });
+    render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+
+    // Open an existing conversation so we also verify deleting the active chat resets the pane
+    fireEvent.click(await screen.findByText("Q4 Rollout Checklist"));
+    expect(await screen.findByText("Earlier checklist answer")).toBeTruthy();
+
+    // Click trash button -> shows inline confirmation -> confirm Delete calls POST /api/chat/reset
+    fireEvent.click(screen.getByRole("button", { name: "Delete conversation Q4 Rollout Checklist" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/chat/reset",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ session: "sess-alpha" }),
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Q4 Rollout Checklist")).toBeNull();
+    });
+    expect(await screen.findByText("What would you like to know?")).toBeTruthy();
+    expect(screen.getByText("Pricing Review")).toBeTruthy();
+
+    // Clear all remaining conversations with inline confirmation
+    fireEvent.click(screen.getByRole("button", { name: "Clear all conversations" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete all" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/chat/reset",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ session: "sess-beta" }),
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Pricing Review")).toBeNull();
+    });
+    expect(await screen.findByText("Conversations appear here after your first question.")).toBeTruthy();
   });
 
   it("enables Live Assist on live meetings, shows Speaker Talk Time, and honors Personal/Team Settings", async () => {

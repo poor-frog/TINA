@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { WebIcon, type WebIconName } from "./Icons";
 import { Markdown } from "../ui-kit/Markdown";
 import { startStreamingDictation, type StreamingDictation } from "../ui-kit/micDictation";
-import { listSessions, sessionHistory, type SessionSummary } from "../surfaces/sessionsApi";
+import { deleteSession, listSessions, sessionHistory, type SessionSummary } from "../surfaces/sessionsApi";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
 import { routineCreationPrompt, stripContextBlocks } from "../surfaces/chat";
 import { presentError } from "../surfaces/apiClient";
@@ -59,10 +59,19 @@ function newSessionId(): string {
   return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function formatSessionStamp(iso?: string | null): string {
-  if (!iso) return "";
-  const ms = Date.parse(iso);
-  if (!Number.isFinite(ms)) return "";
+function formatSessionStamp(stamp?: string | number | null): string {
+  if (stamp == null || stamp === "") return "";
+  const ms =
+    typeof stamp === "number"
+      ? stamp > 1e12
+        ? stamp
+        : stamp * 1000
+      : /^\d+(?:\.\d+)?$/.test(stamp.trim())
+        ? Number(stamp) > 1e12
+          ? Number(stamp)
+          : Number(stamp) * 1000
+        : Date.parse(stamp);
+  if (!Number.isFinite(ms) || ms <= 0) return "";
   const diffMin = Math.floor((Date.now() - ms) / 60_000);
   if (diffMin < 1) return "Just now";
   if (diffMin < 60) return `${diffMin}m ago`;
@@ -124,6 +133,10 @@ export function AskTinaView({
   const [dictating, setDictating] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({});
+  const [confirmDeleteSession, setConfirmDeleteSession] = useState<string | null>(null);
+  const [deletingSessions, setDeletingSessions] = useState<Record<string, boolean>>({});
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [clearingAll, setClearingAll] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const historyRef = useRef<AbortController | null>(null);
@@ -404,6 +417,66 @@ export function AskTinaView({
     setHistoryLoading(false);
   };
 
+  const handleDeleteSession = async (sessionId: string) => {
+    if (deletingSessions[sessionId] || clearingAll) return;
+    setDeletingSessions((cur) => ({ ...cur, [sessionId]: true }));
+    setSessionError(null);
+    try {
+      await deleteSession(sessionId);
+      setSessions((prev) => prev.filter((row) => row.session !== sessionId));
+      setConfirmDeleteSession((cur) => (cur === sessionId ? null : cur));
+      if (activeSession === sessionId) {
+        switchSession(newSessionId());
+      }
+    } catch (err) {
+      setSessionError(presentError(err).headline);
+    } finally {
+      setDeletingSessions((cur) => {
+        const next = { ...cur };
+        delete next[sessionId];
+        return next;
+      });
+    }
+  };
+
+  const handleClearAllSessions = async () => {
+    if (clearingAll || sessions.length === 0) return;
+    const targets = sessions.map((s) => s.session);
+    setClearingAll(true);
+    setSessionError(null);
+    try {
+      const results = await Promise.allSettled(
+        targets.map(async (id) => {
+          await deleteSession(id);
+          return id;
+        }),
+      );
+      const deletedIds = new Set<string>();
+      let firstError: unknown = null;
+      for (const res of results) {
+        if (res.status === "fulfilled") {
+          deletedIds.add(res.value);
+        } else if (firstError === null) {
+          firstError = res.reason;
+        }
+      }
+      if (deletedIds.size > 0) {
+        setSessions((prev) => prev.filter((row) => !deletedIds.has(row.session)));
+        if (deletedIds.has(activeSession)) {
+          switchSession(newSessionId());
+        }
+      }
+      setConfirmClearAll(false);
+      setConfirmDeleteSession(null);
+      if (firstError !== null) {
+        setSessionError(presentError(firstError).headline);
+        loadSessionList();
+      }
+    } finally {
+      setClearingAll(false);
+    }
+  };
+
   const openSession = async (sessionId: string) => {
     switchSession(sessionId);
     const controller = new AbortController();
@@ -534,30 +607,124 @@ export function AskTinaView({
           )}
         </label>
 
-        <div className="tina-web-channels-title">
-          {sessionQuery.trim()
-            ? `Matches (${filteredSessions.length})`
-            : `Recent conversations (${sessions.length})`}
+        <div className="tina-web-ask-sessions-head">
+          <div className="tina-web-channels-title">
+            {sessionQuery.trim()
+              ? `Matches (${filteredSessions.length})`
+              : `Recent conversations (${sessions.length})`}
+          </div>
+          {!sessionQuery.trim() && sessions.length > 0 && (
+            confirmClearAll ? (
+              <div className="tina-web-session-confirm" role="group" aria-label="Confirm clear all conversations">
+                <button
+                  type="button"
+                  className="tina-web-session-confirm-del"
+                  disabled={clearingAll}
+                  onClick={() => void handleClearAllSessions()}
+                >
+                  {clearingAll ? "Clearing…" : "Delete all"}
+                </button>
+                <button
+                  type="button"
+                  className="tina-web-session-confirm-cancel"
+                  aria-label="Cancel clear all"
+                  disabled={clearingAll}
+                  onClick={() => setConfirmClearAll(false)}
+                >
+                  <WebIcon name="close" size={12} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="tina-web-ask-clear-all-btn"
+                aria-label="Clear all conversations"
+                title="Delete all old conversations"
+                disabled={clearingAll}
+                onClick={() => {
+                  setConfirmDeleteSession(null);
+                  setConfirmClearAll(true);
+                }}
+              >
+                Clear all
+              </button>
+            )
+          )}
         </div>
 
-        <div className="tina-web-ask-session-list">
+        <div
+          className="tina-web-ask-session-list"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setConfirmDeleteSession(null);
+              setConfirmClearAll(false);
+            }
+          }}
+        >
           {filteredSessions.map((s) => {
             const stamp = formatSessionStamp(s.last_active || s.created);
+            const label = s.title || s.session;
+            const isDeleting = Boolean(deletingSessions[s.session]);
+            const isConfirming = confirmDeleteSession === s.session;
             return (
-              <button
+              <div
                 key={s.session}
-                type="button"
-                className={`tina-web-session-row ${activeSession === s.session ? "active" : ""}`}
-                onClick={() => void openSession(s.session)}
+                className={`tina-web-session-item ${activeSession === s.session ? "active" : ""} ${isConfirming ? "confirming" : ""}`}
               >
-                <span className="tina-web-session-icon" aria-hidden="true">
-                  <WebIcon name="tinaAsk" size={13} />
-                </span>
-                <span className="tina-web-session-copy">
-                  <strong>{s.title || s.session}</strong>
-                  {stamp && <small>{stamp}</small>}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  className={`tina-web-session-row ${activeSession === s.session ? "active" : ""}`}
+                  onClick={() => {
+                    setConfirmDeleteSession(null);
+                    setConfirmClearAll(false);
+                    void openSession(s.session);
+                  }}
+                >
+                  <span className="tina-web-session-icon" aria-hidden="true">
+                    <WebIcon name="tinaAsk" size={13} />
+                  </span>
+                  <span className="tina-web-session-copy">
+                    <strong>{label}</strong>
+                    {stamp && <small>{stamp}</small>}
+                  </span>
+                </button>
+
+                {isConfirming ? (
+                  <div className="tina-web-session-confirm" role="group" aria-label={`Confirm delete ${label}`}>
+                    <button
+                      type="button"
+                      className="tina-web-session-confirm-del"
+                      disabled={isDeleting}
+                      onClick={() => void handleDeleteSession(s.session)}
+                    >
+                      {isDeleting ? "…" : "Delete"}
+                    </button>
+                    <button
+                      type="button"
+                      className="tina-web-session-confirm-cancel"
+                      aria-label="Cancel delete"
+                      disabled={isDeleting}
+                      onClick={() => setConfirmDeleteSession(null)}
+                    >
+                      <WebIcon name="close" size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="tina-web-session-delete-btn"
+                    aria-label={`Delete conversation ${label}`}
+                    title="Delete conversation"
+                    disabled={isDeleting || clearingAll}
+                    onClick={() => {
+                      setConfirmClearAll(false);
+                      setConfirmDeleteSession(s.session);
+                    }}
+                  >
+                    <WebIcon name="trash" size={13} />
+                  </button>
+                )}
+              </div>
             );
           })}
 
