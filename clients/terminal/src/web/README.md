@@ -41,8 +41,11 @@ TINA Terminal workbench at `/terminal`.
   pill (`#457`), and real `/routine` prompt compilation.
 - **Lucian micro-interaction layer (`lucian/`)**: Ported MIT primitives from Lucian UX/UI Prompt
   bridged onto TINA's dark/light palette (`lucianTokens.css`), including the global stacked toast
-  deck (`#435` `LucianToastStack` + `webToast.ts`) mounted in `WebApp.tsx` and the circular-reveal
-  dark/light mode toggle (`#219` `LucianThemeToggle`) mounted in `TopBar.tsx`.
+  deck (`#435` `LucianToastStack` + `webToast.ts`) in `WebApp.tsx`, circular-reveal dark/light mode
+  toggle (`#219` `LucianThemeToggle`) and live-meeting Dynamic Island (`#459` `LucianDynamicIsland`)
+  in `TopBar.tsx`, selection quote-share tooltip (`#220`), AI voice orb (`#458`), word-by-word read
+  aloud (`#476`), chapter rail (`#195`), audio loop region (`#194`), re-splitting speaker donut
+  (`#097`), unsaved-changes bar (`#250`), and contextual selection formatting (`#140`).
 - **Knowledge Hub (`KnowledgeView.tsx` + `knowledgeFriendly.ts` + `constellationGraph.ts` + `KnowledgeDocEditor.tsx` + `KnowledgeCopilotDrawer.tsx` + `KnowledgeGraphCanvas.tsx` + `knowledgeView.module.css`)**:
   Notion-style, non-tech-friendly Knowledge library mounted directly at `/?nav=knowledge` (with URL
   deep-linking `?nav=knowledge&ws=&doc=&tab=` and Back/Forward reading history), uniting Private

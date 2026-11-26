@@ -10,6 +10,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { WebIcon } from "./Icons";
 import { AgentActivitySteps } from "./AgentActivitySteps";
 import { LucianThinkingText } from "./lucian/LucianThinkingText";
+import { LucianSelectionTooltip } from "./lucian/LucianSelectionTooltip";
+import { LucianVoiceOrb, type VoiceOrbState } from "./lucian/LucianVoiceOrb";
+import { LucianReadAloud } from "./lucian/LucianReadAloud";
 import { emitWebToast } from "./lucian/webToast";
 import { Markdown } from "../ui-kit/Markdown";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
@@ -141,6 +144,7 @@ export function MeetingSidePanel({
   onClearTracker,
   playableSegmentIds,
   activeSegmentId,
+  audioVirtualSec,
   onSegmentClick,
   pendingPrompt,
   onConsumePendingPrompt,
@@ -170,6 +174,7 @@ export function MeetingSidePanel({
   onClearTracker: () => void;
   playableSegmentIds: ReadonlySet<string>;
   activeSegmentId: string | null;
+  audioVirtualSec?: number;
   onSegmentClick?: (segmentId: string) => void;
   pendingPrompt: string | null;
   onConsumePendingPrompt: () => void;
@@ -188,6 +193,7 @@ export function MeetingSidePanel({
   const [tinaOnly, setTinaOnly] = useState(false);
   const [openSourceReplyId, setOpenSourceReplyId] = useState<string | null>(null);
   const [showLatest, setShowLatest] = useState(false);
+  const [highlightedKeys, setHighlightedKeys] = useState<Record<string, boolean>>({});
 
   const sessionRef = useRef(`meeting-${meetingId}-${Date.now().toString(36)}`);
   const abortRef = useRef<AbortController | null>(null);
@@ -207,6 +213,7 @@ export function MeetingSidePanel({
     setShowProcessed(false);
     setTinaOnly(false);
     setOpenSourceReplyId(null);
+    setHighlightedKeys({});
     setAskMode("chat");
   }, [meetingId]);
 
@@ -483,6 +490,18 @@ export function MeetingSidePanel({
   const effectiveTab = meetingsOnly ? "transcript" : sideTab;
   const voiceApiBase = `/api/meetings/${encodeURIComponent(meetingId)}/voice-assistant`;
   const totalBadgeCount = lines.length + voiceReplies.length;
+  const latestVoiceReply = voiceReplies[voiceReplies.length - 1];
+  const voiceOrbState: VoiceOrbState =
+    latestVoiceReply?.state === "started"
+      ? "speak"
+      : latestVoiceReply?.state === "queued"
+        ? "think"
+        : isLive
+          ? "listen"
+          : "idle";
+  const toggleHighlightKey = useCallback((key: string) => {
+    setHighlightedKeys((cur) => ({ ...cur, [key]: !cur[key] }));
+  }, []);
 
   return (
     <aside
@@ -749,6 +768,34 @@ export function MeetingSidePanel({
               />
             </div>
 
+            {(isLive || voiceReplies.length > 0) && (
+              <div className={styles.voiceOrbStrip}>
+                <LucianVoiceOrb
+                  state={voiceOrbState}
+                  size={34}
+                  label={
+                    voiceOrbState === "speak"
+                      ? "TINA đang đọc câu trả lời…"
+                      : voiceOrbState === "think"
+                        ? "Đang chuẩn bị phản hồi thoại…"
+                        : voiceOrbState === "listen"
+                          ? "Đang lắng nghe “Tina ơi”"
+                          : `Voice Agent · ${voiceReplies.length} replies`
+                  }
+                  sublabel={
+                    voiceReplies.length > 0
+                      ? tinaOnly
+                        ? "Showing Voice Agent replies"
+                        : "Tap orb to filter voice replies"
+                      : "Say “Tina ơi” in the meeting"
+                  }
+                  onClick={() => {
+                    if (voiceReplies.length > 0) setTinaOnly((v) => !v);
+                  }}
+                />
+              </div>
+            )}
+
             <div className={styles.transcriptMetaRow}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                 {voiceReplies.length > 0 && (
@@ -844,6 +891,17 @@ export function MeetingSidePanel({
               setShowLatest(!atBottom);
             }}
           >
+            <LucianSelectionTooltip
+              containerRef={transcriptRef}
+              onAskQuote={
+                meetingsOnly
+                  ? undefined
+                  : (quote) => {
+                      void sendPrompt(`Explain and follow up on this quote from the meeting: "${quote}"`);
+                    }
+              }
+              onToggleHighlight={toggleHighlightKey}
+            />
             {timelineItems.length === 0 ? (
               <div className={styles.transcriptEmpty}>
                 {transcriptQuery || speakerFilter || questionsOnly || trackerFilter || tinaOnly
@@ -869,6 +927,7 @@ export function MeetingSidePanel({
                   return (
                     <article
                       key={item.key}
+                      data-quote-key={item.key}
                       aria-label="TINA Agent"
                       className={styles.voiceReplyRow}
                     >
@@ -893,7 +952,12 @@ export function MeetingSidePanel({
                         )}
                       </header>
 
-                      <p className={styles.voiceReplyText}>{displayText}</p>
+                      <LucianReadAloud
+                        text={displayText}
+                        textClassName={styles.voiceReplyText}
+                        autoPlay={reply.state === "started"}
+                        highlighted={Boolean(highlightedKeys[item.key])}
+                      />
 
                       {safeLinks.length > 0 && (
                         <div className={styles.voiceReplyLinks}>
@@ -947,15 +1011,27 @@ export function MeetingSidePanel({
                   item.isDraft && item.primaryText && !/(?:…|\.\.\.)$/.test(item.primaryText.trimEnd())
                     ? `${item.primaryText.trimEnd()}…`
                     : item.primaryText;
+                const isRowHighlighted = Boolean(highlightedKeys[item.key]);
+                const rowStartSec =
+                  typeof meetingStartMs === "number" && Number.isFinite(meetingStartMs) && item.sortMs >= meetingStartMs
+                    ? (item.sortMs - meetingStartMs) / 1000
+                    : item.sortMs / 1000;
+                const activeAudioProgress =
+                  isActive && typeof audioVirtualSec === "number" && Number.isFinite(audioVirtualSec)
+                    ? Math.max(0.05, Math.min(1, (audioVirtualSec - rowStartSec) / Math.max(2, displayPrimary.split(/\s+/).length * 0.42)))
+                    : undefined;
                 return (
                   <div
                     key={item.key}
+                    data-quote-key={item.key}
                     data-segment-id={item.segmentId}
                     data-transcript-segments={JSON.stringify(item.memberIds)}
                     data-draft={item.isDraft ? "true" : "false"}
                     tabIndex={-1}
                     className={`${styles.transcriptRow} ${item.isDraft ? styles.transcriptRowDraft : ""} ${item.playable ? styles.transcriptRowClickable : ""} ${isActive ? styles.transcriptRowActive : ""}`}
                     onClick={() => {
+                      const sel = typeof window.getSelection === "function" ? window.getSelection() : null;
+                      if (sel && !sel.isCollapsed) return;
                       if (item.playable && item.segmentId && onSegmentClick) {
                         onSegmentClick(item.segmentId);
                       }
@@ -988,9 +1064,22 @@ export function MeetingSidePanel({
                         </button>
                       )}
                     </div>
-                    <p className={`${styles.transcriptText} ${item.isDraft ? styles.transcriptTextDraft : ""}`}>
-                      {displayPrimary}
-                    </p>
+                    {activeAudioProgress !== undefined ? (
+                      <LucianReadAloud
+                        text={displayPrimary}
+                        textClassName={`${styles.transcriptText} ${item.isDraft ? styles.transcriptTextDraft : ""}`}
+                        showControls={false}
+                        externalProgress={activeAudioProgress}
+                        isExternallyPlaying={true}
+                        highlighted={isRowHighlighted}
+                      />
+                    ) : (
+                      <p
+                        className={`${styles.transcriptText} ${item.isDraft ? styles.transcriptTextDraft : ""} u220-s ${isRowHighlighted ? "is-hl" : ""}`}
+                      >
+                        {displayPrimary}
+                      </p>
+                    )}
                     {item.secondaryText ? (
                       <p className={styles.transcriptTranslated}>{item.secondaryText}</p>
                     ) : item.isDraft && language !== "vi" ? (

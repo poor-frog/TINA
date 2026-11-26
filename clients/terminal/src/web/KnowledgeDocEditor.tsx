@@ -6,6 +6,8 @@
  *  - Developer view: Unlocks Raw Markdown + YAML editing and custom Git commit message controls. */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { WebIcon } from "./Icons";
+import { LucianUnsavedBar } from "./lucian/LucianUnsavedBar";
+import { LucianSelectionFormatting } from "./lucian/LucianSelectionFormatting";
 import { MdxDoc } from "../ui-kit/MdxDoc";
 import { DocMetaContext, DocNavContext, type DocNavigate } from "../ui-kit/docLinks";
 import {
@@ -61,6 +63,7 @@ export function KnowledgeDocEditor({
   const [acIndex, setAcIndex] = useState<number>(0);
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [linkPickerQuery, setLinkPickerQuery] = useState("");
+  const [selectionRange, setSelectionRange] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   // If Developer view is turned off while in "raw" mode, gracefully return to clean Write mode
@@ -79,6 +82,25 @@ export function KnowledgeDocEditor({
   const isDirty = draft !== initialContent;
   const isRawMode = mode === "raw" && devView;
   const editorValue = isRawMode ? draft : parsed.bodyWithoutLeadingH1;
+  const initialParsed = useMemo(() => parseDocumentClean(initialContent, path), [initialContent, path]);
+  const changeCount = useMemo(() => {
+    if (!isDirty) return 0;
+    let count = 0;
+    if (parsed.displayTitle !== initialParsed.displayTitle) count += 1;
+    if ((parsed.fieldMap.status ?? "") !== (initialParsed.fieldMap.status ?? "")) count += 1;
+    if (parsed.bodyWithoutLeadingH1 !== initialParsed.bodyWithoutLeadingH1) count += 1;
+    return Math.max(1, count);
+  }, [isDirty, parsed, initialParsed]);
+
+  const selectedEditorText =
+    selectionRange.end > selectionRange.start
+      ? editorValue.slice(selectionRange.start, selectionRange.end)
+      : "";
+
+  const syncSelection = (ta: HTMLTextAreaElement) => {
+    setCursorPos(ta.selectionStart);
+    setSelectionRange({ start: ta.selectionStart, end: ta.selectionEnd });
+  };
 
   const showStatusControl =
     !isRawMode &&
@@ -219,6 +241,18 @@ export function KnowledgeDocEditor({
 
   return (
     <div className={styles.editorWrap}>
+      <LucianUnsavedBar
+        dirty={isDirty}
+        changeCount={changeCount}
+        saving={busy}
+        onSave={onSave}
+        onDiscard={() => {
+          onDraftChange(initialContent);
+          setTitleInput(parseDocumentClean(initialContent, path).displayTitle);
+          setSelectionRange({ start: 0, end: 0 });
+        }}
+      />
+
       {/* ── Clean Notion-style Title & Status Header (hidden in Raw dev mode) ── */}
       {!isRawMode && (
         <div className={styles.cleanEditorHeader}>
@@ -411,6 +445,12 @@ export function KnowledgeDocEditor({
       <div className={`${styles.editorGrid} ${mode === "split" ? styles.editorGridSplit : ""}`}>
         {mode !== "preview" && (
           <div style={{ position: "relative" }}>
+            <LucianSelectionFormatting
+              selectedText={selectedEditorText}
+              onWrap={(prefix, suffix, placeholder) => {
+                wrapSelection(prefix, suffix, placeholder);
+              }}
+            />
             <textarea
               ref={taRef}
               className={`${styles.editorTextarea} ${isRawMode ? styles.editorTextareaRaw : styles.editorTextareaClean}`}
@@ -423,11 +463,13 @@ export function KnowledgeDocEditor({
               value={editorValue}
               onChange={(e) => {
                 setEditorText(e.target.value);
-                setCursorPos(e.target.selectionStart);
+                syncSelection(e.currentTarget);
                 setAcIndex(0);
               }}
-              onClick={(e) => setCursorPos(e.currentTarget.selectionStart)}
-              onKeyUp={(e) => setCursorPos(e.currentTarget.selectionStart)}
+              onSelect={(e) => syncSelection(e.currentTarget)}
+              onMouseUp={(e) => syncSelection(e.currentTarget)}
+              onClick={(e) => syncSelection(e.currentTarget)}
+              onKeyUp={(e) => syncSelection(e.currentTarget)}
               onKeyDown={handleKeyDown}
             />
             {suggestions.length > 0 && (

@@ -4,6 +4,8 @@
  *  ±10s jump, scrubber, download, bookmark/reviewed toggles, copy transcript, and Talk time toggle. */
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type SyntheticEvent } from "react";
 import { WebIcon } from "./Icons";
+import { LucianChapterRail, type ChapterRailItem } from "./lucian/LucianChapterRail";
+import { LucianAudioLoopRegion } from "./lucian/LucianAudioLoopRegion";
 import type { MeetingAudioFragment, MeetingAudioPlayerHandle, MeetingAudioPosition } from "../canvas/MeetingAudioPlayer";
 import styles from "./meetingDetail.module.css";
 
@@ -32,6 +34,8 @@ export const MeetingBottomPlayer = forwardRef<
     reviewed: boolean;
     copiedTranscript: boolean;
     smartSearchOpen: boolean;
+    chapters?: ChapterRailItem[];
+    onSelectChapter?: (chapter: ChapterRailItem) => void;
     onToggleStar: () => void;
     onToggleReviewed: () => void;
     onCopyTranscript: () => void;
@@ -49,6 +53,8 @@ export const MeetingBottomPlayer = forwardRef<
     reviewed,
     copiedTranscript,
     smartSearchOpen,
+    chapters = [],
+    onSelectChapter,
     onToggleStar,
     onToggleReviewed,
     onCopyTranscript,
@@ -69,6 +75,11 @@ export const MeetingBottomPlayer = forwardRef<
   const [muted, setMuted] = useState(false);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
   const [error, setError] = useState("");
+  const [openDrawer, setOpenDrawer] = useState<"chapters" | "loop" | null>(null);
+  const [activeChapterIdx, setActiveChapterIdx] = useState(0);
+  const [loopActive, setLoopActive] = useState(false);
+  const [loopStartPct, setLoopStartPct] = useState(20);
+  const [loopEndPct, setLoopEndPct] = useState(65);
 
   useEffect(() => {
     setFragmentIndex(0);
@@ -227,8 +238,24 @@ export const MeetingBottomPlayer = forwardRef<
           onLoadedMetadata={onLoadedMetadata}
           onTimeUpdate={(e) => {
             const sec = e.currentTarget.currentTime;
+            const nextVirtual = offset + sec;
+            if (loopActive && totalDuration > 0) {
+              const loopStartSec = (loopStartPct / 100) * totalDuration;
+              const loopEndSec = (loopEndPct / 100) * totalDuration;
+              if (nextVirtual >= loopEndSec && loopEndSec > loopStartSec) {
+                seekVirtual(loopStartSec);
+                return;
+              }
+            }
             setCurrentTime(sec);
             reportPosition(fragmentIndex, sec);
+            if (chapters.length > 0) {
+              let idx = 0;
+              for (let i = 0; i < chapters.length; i++) {
+                if (nextVirtual >= chapters[i].seconds) idx = i;
+              }
+              setActiveChapterIdx(idx);
+            }
           }}
           onCanPlay={() => {
             setLoading(false);
@@ -256,10 +283,69 @@ export const MeetingBottomPlayer = forwardRef<
         />
       )}
 
+      {openDrawer && (
+        <div className={styles.playerDrawer} role="region" aria-label={openDrawer === "chapters" ? "Meeting chapter rail" : "Audio loop region editor"}>
+          <div className={styles.playerDrawerHead}>
+            <span>{openDrawer === "chapters" ? `Chapters (${chapters.length})` : "Audio loop region"}</span>
+            <button
+              type="button"
+              className={styles.iconBtn}
+              aria-label="Close audio drawer"
+              onClick={() => setOpenDrawer(null)}
+            >
+              <WebIcon name="close" size={14} />
+            </button>
+          </div>
+          {openDrawer === "chapters" ? (
+            <LucianChapterRail
+              chapters={chapters}
+              activeIndex={activeChapterIdx}
+              onSelect={(chapter, idx) => {
+                setActiveChapterIdx(idx);
+                if (onSelectChapter) {
+                  onSelectChapter(chapter);
+                } else if (hasAudio) {
+                  seekVirtual(chapter.seconds);
+                }
+              }}
+            />
+          ) : (
+            <LucianAudioLoopRegion
+              durationSec={totalDuration}
+              currentSec={virtualTime}
+              hasAudio={hasAudio}
+              loopActive={loopActive}
+              startPct={loopStartPct}
+              endPct={loopEndPct}
+              onChangeRange={(s, e) => {
+                setLoopStartPct(s);
+                setLoopEndPct(e);
+              }}
+              onToggleLoop={() => {
+                setLoopActive((prev) => {
+                  const next = !prev;
+                  if (next && hasAudio && totalDuration > 0) {
+                    const startSec = (loopStartPct / 100) * totalDuration;
+                    seekVirtual(startSec);
+                    if (!playing && audioRef.current) playElement(audioRef.current);
+                  }
+                  return next;
+                });
+              }}
+            />
+          )}
+        </div>
+      )}
+
       {/* Full-width top-edge scrubber */}
       <div className={styles.scrubberWrap}>
         <div className={styles.scrubberTrack} aria-hidden="true">
           <span className={styles.scrubberFill} style={{ width: `${progress}%` }} />
+          {totalDuration > 0 &&
+            chapters.map((ch) => {
+              const pct = Math.min(99, Math.max(1, (ch.seconds / totalDuration) * 100));
+              return <span key={ch.id} className={styles.chapterTick} style={{ left: `${pct}%` }} />;
+            })}
         </div>
         <input
           className={styles.scrubberRange}
@@ -369,6 +455,30 @@ export const MeetingBottomPlayer = forwardRef<
       </div>
 
       <div className={styles.playerRight}>
+        {chapters.length > 0 && (
+          <button
+            type="button"
+            className={`${styles.iconBtn} ${openDrawer === "chapters" ? styles.iconBtnActive : ""}`}
+            aria-label="Toggle chapter rail"
+            aria-expanded={openDrawer === "chapters"}
+            title="Chapters"
+            onClick={() => setOpenDrawer((cur) => (cur === "chapters" ? null : "chapters"))}
+          >
+            <WebIcon name="listChecks" size={16} />
+          </button>
+        )}
+
+        <button
+          type="button"
+          className={`${styles.iconBtn} ${openDrawer === "loop" || loopActive ? styles.iconBtnActive : ""}`}
+          aria-label="Audio loop region"
+          aria-expanded={openDrawer === "loop"}
+          title={loopActive ? "Audio loop active" : "Loop audio region"}
+          onClick={() => setOpenDrawer((cur) => (cur === "loop" ? null : "loop"))}
+        >
+          <WebIcon name="refresh" size={15} />
+        </button>
+
         <button
           type="button"
           className={`${styles.iconBtn} ${smartSearchOpen ? styles.iconBtnActive : ""}`}

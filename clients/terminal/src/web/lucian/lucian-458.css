@@ -1,0 +1,180 @@
+/* Lucian UX/UI Prompt #458 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#458 */
+
+.u458 {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  --u458-size: 40px;
+}
+
+.u458-b {
+  position: relative;
+  flex: none;
+  width: var(--u458-size);
+  height: var(--u458-size);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  transition: transform .5s cubic-bezier(.34, 1.6, .5, 1);
+}
+
+.u458 .u458-b:focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 6px;
+}
+
+.u458-b:active {
+  transform: scale(.95);
+}
+
+.u458-b > span {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.u458-gw {
+  inset: -12px;
+  background: radial-gradient(closest-side, rgba(23, 107, 91, .45), rgba(72, 201, 168, .18) 58%, transparent);
+  background: radial-gradient(
+    closest-side,
+    light-dark(rgba(23, 107, 91, .34), rgba(126, 232, 192, .56)),
+    light-dark(rgba(40, 150, 255, .12), rgba(60, 190, 255, .24)) 58%,
+    transparent
+  );
+  filter: blur(6px);
+  will-change: transform, opacity;
+}
+
+.u458-rp {
+  inset: 0;
+  opacity: 0;
+  transition: opacity .6s var(--ux-ease);
+}
+
+.u458-rp i {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px rgba(126, 232, 192, .55);
+  box-shadow: 0 0 0 1.5px light-dark(rgba(23, 107, 91, .45), rgba(145, 215, 190, .55));
+  opacity: 0;
+  animation: u458-rip 2.4s cubic-bezier(.2, .6, .35, 1) infinite;
+}
+
+.u458-rp i:nth-child(2) {
+  animation-delay: .8s;
+}
+
+.u458-rp i:nth-child(3) {
+  animation-delay: 1.6s;
+}
+
+@keyframes u458-rip {
+  0% {
+    transform: scale(1);
+    opacity: .9;
+  }
+  100% {
+    transform: scale(1.62);
+    opacity: 0;
+  }
+}
+
+.u458[data-s="listen"] .u458-rp {
+  opacity: 1;
+}
+
+.u458-o {
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: radial-gradient(circle at 50% 38%, #63d7b3, #176b5b 56%, #0b2d27);
+  box-shadow:
+    inset 0 -6px 12px rgba(6, 28, 24, .52),
+    inset 0 4px 8px rgba(255, 255, 255, .28),
+    0 10px 22px -10px rgba(23, 107, 91, .75);
+  will-change: transform;
+}
+
+.u458-o i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 64%;
+  height: 64%;
+  margin: -32%;
+  border-radius: 50%;
+  filter: blur(7px);
+  opacity: .84;
+  will-change: transform;
+}
+
+.u458-o i:nth-child(1) {
+  background: #22b6ff;
+}
+
+.u458-o i:nth-child(2) {
+  background: #91d7be;
+}
+
+.u458-o i:nth-child(3) {
+  background: #45e3b8;
+  width: 54%;
+  height: 54%;
+  margin: -27%;
+}
+
+.u458-o i:nth-child(4) {
+  background: #134e4a;
+  opacity: .9;
+}
+
+.u458-o b {
+  position: absolute;
+  left: 17%;
+  top: 7%;
+  width: 54%;
+  height: 34%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, .72), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+
+.u458-o::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .2);
+  pointer-events: none;
+}
+
+.u458-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.u458-st {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ux-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.u458-sub {
+  font-size: 11px;
+  color: var(--ux-ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

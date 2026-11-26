@@ -292,6 +292,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
             <WebTopBar
               title={VIEW_TITLES[view]}
               liveMeeting={liveMeetings[0]}
+              liveMeetings={liveMeetings}
               wsConnected={wsConnected}
               hideBar={view === "meeting"}
               onOpenMobileNav={() => setMobileNavOpen((v) => !v)}

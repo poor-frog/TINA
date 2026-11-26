@@ -5,6 +5,7 @@
  *  ChatGPTModelInput, and TranscriptionPicker. */
 import { useCallback, useEffect, useId, useMemo, useState, type CSSProperties } from "react";
 import { WebIcon } from "./Icons";
+import { LucianUnsavedBar } from "./lucian/LucianUnsavedBar";
 import { presentError } from "../surfaces/apiClient";
 import { ChatGPTModelInput } from "../surfaces/chatGPTModelInput";
 import { ModelPicker } from "../surfaces/modelPicker";
@@ -489,7 +490,8 @@ function AgentProviderForm({
     [],
   );
 
-  const dirty = TRACKED_KEYS.some((k) => (values[k] ?? "") !== (initial[k] ?? ""));
+  const dirtyCount = TRACKED_KEYS.filter((k) => (values[k] ?? "") !== (initial[k] ?? "")).length;
+  const dirty = dirtyCount > 0;
   const activeMeta = providerById(mode);
   const apiProviderInfo = apiModelProvider(mode);
   const canSave = !saving && dirty && canSaveModelPrefs(values);
@@ -597,6 +599,15 @@ function AgentProviderForm({
 
   return (
     <div className={styles.flow}>
+      <LucianUnsavedBar
+        dirty={dirty}
+        changeCount={dirtyCount}
+        saving={saving}
+        saveDisabled={!canSave}
+        onSave={() => void handleSave()}
+        onDiscard={handleDiscard}
+      />
+
       {error && (
         <div role="alert" className={styles.alertDanger}>
           {error}

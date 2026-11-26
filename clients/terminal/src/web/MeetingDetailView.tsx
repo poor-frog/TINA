@@ -12,6 +12,8 @@ import { MeetingSmartSearch, type DiscussionSignalSummary } from "./MeetingSmart
 import { MeetingSidePanel, type MeetingVoiceReply } from "./MeetingSidePanel";
 import { ChatGPTPlanNotice, type ChatGPTPlanIssue } from "../surfaces/ChatGPTPlanNotice";
 import { MeetingBottomPlayer, type MeetingBottomPlayerHandle } from "./MeetingBottomPlayer";
+import { LucianSelectionTooltip } from "./lucian/LucianSelectionTooltip";
+import type { ChapterRailItem } from "./lucian/LucianChapterRail";
 import { LiveAssistRunningView } from "../surfaces/LiveAssistRunningView";
 import { MeetingMemory } from "../surfaces/MeetingMemory";
 import { SpeakerRegistry } from "../surfaces/SpeakerRegistry";
@@ -380,6 +382,7 @@ export function MeetingDetailView({
   const discussionOpenRef = useRef<(() => void) | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const toolsRef = useRef<HTMLDivElement>(null);
+  const notesScrollRef = useRef<HTMLDivElement>(null);
 
   // Reset per-meeting UI state when switching meetings
   useEffect(() => {
@@ -1168,6 +1171,23 @@ export function MeetingDetailView({
     return Math.round(speakerStats.totalDurationMs / 1000);
   }, [m, speakerStats.totalDurationMs]);
 
+  const playerChapters = useMemo<ChapterRailItem[]>(() => {
+    return outlineChapters.slice(0, 12).map((ch, idx) => {
+      const parts = ch.time.split(":").map((n) => Number(n));
+      const seconds =
+        parts.length === 2 && parts.every(Number.isFinite)
+          ? parts[0] * 60 + parts[1]
+          : idx * 60;
+      return {
+        id: ch.id,
+        title: ch.title,
+        time: ch.time,
+        seconds,
+        segmentId: ch.segmentId,
+      };
+    });
+  }, [outlineChapters]);
+
   const resolution = meetingResolution(m, byId ? !!fetched : listLoaded);
 
   if (!listed && fetched?.error) {
@@ -1931,7 +1951,18 @@ export function MeetingDetailView({
                   />
                 </div>
               ) : (
-                <div className={styles.docScroll}>
+                <div ref={notesScrollRef} className={styles.docScroll}>
+                  <LucianSelectionTooltip
+                    containerRef={notesScrollRef}
+                    onAskQuote={
+                      meetingsOnly
+                        ? undefined
+                        : (quote) => {
+                            setPendingAskPrompt(`Explain and follow up on this note: "${quote}"`);
+                            setSideTab("ask");
+                          }
+                    }
+                  />
                   <div className={styles.docInner}>
                     {/* Meeting Title & Metadata Header */}
                     <div>
@@ -2331,6 +2362,7 @@ export function MeetingDetailView({
                 onClearTracker={() => setTrackerFilter("")}
                 playableSegmentIds={playableSegmentIds}
                 activeSegmentId={activeSegmentId}
+                audioVirtualSec={playbackActive ? playbackPosition?.virtualTime : undefined}
                 onSegmentClick={canPlayMeetingAudio && audioFragments.length ? seekSegment : undefined}
                 pendingPrompt={pendingAskPrompt}
                 onConsumePendingPrompt={() => setPendingAskPrompt(null)}
@@ -2355,6 +2387,14 @@ export function MeetingDetailView({
             reviewed={prefs.reviewed}
             copiedTranscript={copiedTranscript}
             smartSearchOpen={smartSearchOpen}
+            chapters={playerChapters}
+            onSelectChapter={(ch) => {
+              if (ch.segmentId && canPlayMeetingAudio && audioFragments.length) {
+                seekSegment(ch.segmentId);
+              } else if (ch.seconds >= 0 && audioFragments.length) {
+                playerRef.current?.seekToFragment(0, ch.seconds);
+              }
+            }}
             onToggleStar={() => updatePrefs((cur) => ({ ...cur, starred: !cur.starred }))}
             onToggleReviewed={() => updatePrefs((cur) => ({ ...cur, reviewed: !cur.reviewed }))}
             onCopyTranscript={() => void copyFullTranscript()}

@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
 import { LucianThemeToggle } from "./lucian/LucianThemeToggle";
+import { LucianDynamicIsland } from "./lucian/LucianDynamicIsland";
 import { emitWebToast } from "./lucian/webToast";
 import { parseMeetingInput, meetingUrlFor } from "../surfaces/meetingId";
 import { getJitsiHosts } from "../surfaces/jitsiHosts";
@@ -18,6 +19,8 @@ export type CaptureModalMode = "live" | "schedule";
 
 export function WebTopBar({
   title,
+  liveMeeting,
+  liveMeetings,
   wsConnected,
   hideBar = false,
   onOpenMobileNav,
@@ -31,6 +34,7 @@ export function WebTopBar({
 }: {
   title: string;
   liveMeeting?: MeetingMock;
+  liveMeetings?: MeetingMock[];
   wsConnected: boolean;
   hideBar?: boolean;
   onOpenMobileNav: () => void;
@@ -95,6 +99,10 @@ export function WebTopBar({
         </div>
 
         <div className="tina-web-topbar-right">
+          <LucianDynamicIsland
+            liveMeetings={liveMeetings && liveMeetings.length > 0 ? liveMeetings : liveMeeting ? [liveMeeting] : []}
+            onOpenMeeting={onOpenMeeting}
+          />
           <LucianThemeToggle />
           <div className="tina-web-capture-split" ref={splitRef}>
             <button

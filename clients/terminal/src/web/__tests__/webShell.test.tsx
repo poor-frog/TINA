@@ -1243,4 +1243,58 @@ describe("WebShell production UI (Option A & Option B)", () => {
       expect(screen.queryByText("Copied response to clipboard")).toBeNull();
     });
   });
+
+  it("supports Lucian Package 2: #459 Dynamic Island, #097 re-splitting Speaker Donut, #458 Voice Orb, #476 Read Aloud, #195 Chapter Rail, and #194 Audio Loop Region", async () => {
+    mockEnvironment({ admin: false });
+    render(<WebShell />);
+
+    // #459 Dynamic Island renders on TopBar for the live meeting ("Product Weekly Sync")
+    const island = await screen.findByTestId("lucian-dynamic-island");
+    expect(island).toBeTruthy();
+    const islandTap = screen.getByRole("button", { name: /Live meeting: Product Weekly Sync/i });
+    expect(islandTap.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(islandTap);
+    expect(islandTap.getAttribute("aria-expanded")).toBe("true");
+    expect(island.textContent).toContain("Product Weekly Sync");
+    // Clicking green open button jumps straight into that live meeting workspace
+    fireEvent.click(screen.getByRole("button", { name: "Open live meeting" }));
+    expect(await screen.findByRole("heading", { name: "Product Weekly Sync" })).toBeTruthy();
+
+    // Open Smart Search -> #097 Speaker Donut renders and re-splits when excluding a speaker
+    const talkTimeBtn = screen.getByRole("button", { name: /Talk time/i });
+    if (talkTimeBtn.getAttribute("aria-expanded") !== "true") {
+      fireEvent.click(talkTimeBtn);
+    }
+    const donut = await screen.findByTestId("lucian-speaker-donut");
+    expect(donut).toBeTruthy();
+    const excludeSarup = screen.getByRole("checkbox", { name: /Exclude Sarup in donut chart/i });
+    expect(excludeSarup.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(excludeSarup);
+    expect(excludeSarup.getAttribute("aria-checked")).toBe("false");
+    // Remaining speaker Linh re-splits to 100%
+    expect(donut.textContent).toContain("100%");
+    fireEvent.click(excludeSarup);
+    expect(excludeSarup.getAttribute("aria-checked")).toBe("true");
+
+    // #194 Audio Loop Region drawer toggles open in bottom player and updates loop range
+    fireEvent.click(screen.getByRole("button", { name: "Audio loop region" }));
+    const loopEditor = await screen.findByTestId("lucian-audio-loop");
+    expect(loopEditor).toBeTruthy();
+    const loopStart = screen.getByLabelText("Loop start") as HTMLInputElement;
+    fireEvent.change(loopStart, { target: { value: "30" } });
+    expect(loopStart.value).toBe("30");
+    const loopToggle = loopEditor.querySelector("button.preview") as HTMLButtonElement;
+    fireEvent.click(loopToggle);
+    expect(loopToggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Close audio drawer" }));
+
+    // Transcript tab -> #458 Voice Orb + #476 Read Aloud on Voice Agent reply + #220 Selection Tooltip mounted
+    fireEvent.click(screen.getByRole("tab", { name: /Transcript/i }));
+    expect(await screen.findByTestId("lucian-voice-orb")).toBeTruthy();
+    const readAloudBtn = await screen.findByRole("button", { name: "Read aloud" });
+    fireEvent.click(readAloudBtn);
+    expect(screen.getByRole("button", { name: "Pause read aloud" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Pause read aloud" }));
+    expect(screen.getAllByTestId("lucian-selection-tooltip").length).toBeGreaterThanOrEqual(1);
+  });
 });

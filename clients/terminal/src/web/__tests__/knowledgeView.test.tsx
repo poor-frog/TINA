@@ -317,9 +317,21 @@ describe("KnowledgeView v3 (Notion-Style Non-Tech Knowledge Hub)", () => {
     const nextBody = `${bodyEditor.value}\nSee [[ti`;
     fireEvent.change(bodyEditor, { target: { value: nextBody, selectionStart: nextBody.length } });
     expect(screen.getByText(/● Unsaved/i)).toBeTruthy();
+    // #250 Unsaved changes bar slides open with accurate count
+    const unsavedBar = screen.getByTestId("lucian-unsaved-bar");
+    expect(unsavedBar.className).toContain("is-open");
+    expect(unsavedBar.textContent).toContain("Unsaved changes: 2");
     await waitFor(() => {
       expect(screen.getByRole("listbox", { name: /Page link suggestions/i })).toBeTruthy();
     });
+
+    // #140 Selection formatting bar activates when text is selected and wraps Markdown cleanly
+    bodyEditor.setSelectionRange(0, 5);
+    fireEvent.select(bodyEditor);
+    const fmtBar = screen.getByTestId("lucian-selection-formatting");
+    expect(fmtBar.className).toContain("is-on");
+    fireEvent.click(screen.getByRole("button", { name: "Bold selected text" }));
+    expect(bodyEditor.value).toContain("**");
 
     fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
     await waitFor(() => {

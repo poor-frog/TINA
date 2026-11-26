@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
 import { computeSpeakerStats, formatTalkDuration } from "./SpeakerTalkTime";
+import { LucianSpeakerDonut } from "./lucian/LucianSpeakerDonut";
 import type { MeetingMock, TranscriptLine } from "../surfaces/meetingModel";
 import type { LiveMeetingStateSnapshot } from "../surfaces/liveMeetingStateApi";
 import styles from "./meetingDetail.module.css";
@@ -259,57 +260,11 @@ export function MeetingSmartSearch({
                 </span>
               </p>
             ) : (
-              <>
-                <div className={styles.talkHeader}>
-                  <span>Speakers</span>
-                  <span>WPM</span>
-                  <span>Talktime</span>
-                </div>
-                <div className={styles.talkRows}>
-                  {stats.speakers.map((speaker) => {
-                    const selected = activeSpeaker === speaker.speaker;
-                    return (
-                      <button
-                        key={speaker.speaker}
-                        type="button"
-                        className={`${styles.talkRow} ${selected ? styles.talkRowActive : ""}`}
-                        aria-pressed={selected}
-                        title={
-                          selected
-                            ? `Clear speaker filter (${speaker.speaker})`
-                            : `Filter transcript by ${speaker.speaker}`
-                        }
-                        onClick={() => onSelectSpeaker(selected ? "" : speaker.speaker)}
-                      >
-                        <span className={styles.talkWho}>
-                          <span className={styles.talkAvatar} aria-hidden="true">
-                            {speaker.speaker.slice(0, 1).toUpperCase()}
-                          </span>
-                          <span className={styles.talkName}>{speaker.speaker}</span>
-                        </span>
-                        <span className={styles.talkWpm}>
-                          <span
-                            className={styles.dot}
-                            style={{ background: speaker.color }}
-                            aria-hidden="true"
-                          />
-                          <span>{speaker.wpm || 0}</span>
-                        </span>
-                        <span className={styles.talkPct}>
-                          <span
-                            className={styles.ring}
-                            style={{
-                              background: `conic-gradient(${speaker.color} ${speaker.sharePct}%, var(--tw-line-strong) 0)`,
-                            }}
-                            aria-hidden="true"
-                          />
-                          <span>{speaker.sharePct}%</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
+              <LucianSpeakerDonut
+                speakers={stats.speakers}
+                activeSpeaker={activeSpeaker}
+                onSelectSpeaker={onSelectSpeaker}
+              />
             )}
           </>
         )}

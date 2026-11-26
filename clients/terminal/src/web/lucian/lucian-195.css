@@ -1,0 +1,92 @@
+/* Lucian UX/UI Prompt #195 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#195 */
+
+.u195 {
+  width: 100%;
+  max-width: 100%;
+  font-size: 13px;
+  line-height: 1.4;
+  position: relative;
+  font-variant-numeric: tabular-nums;
+}
+
+.u195 .timeline {
+  display: flex;
+  height: 5px;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+
+.u195 .timeline i {
+  flex: 1;
+  background: var(--ux-surface-3);
+  border-radius: 2px;
+  transition: background .4s var(--ux-ease);
+}
+
+.u195 .timeline i.on {
+  background: var(--ux-accent);
+}
+
+.u195 .chapters {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+
+.u195 .chapters button {
+  flex: 1 0 116px;
+  max-width: 196px;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  padding: 7px 6px 5px;
+  background: transparent;
+  border: 0;
+  border-top: 2px solid var(--ux-line-2);
+  border-radius: 0;
+  color: var(--ux-ink-2);
+  min-height: 36px;
+  transition: border-color .25s var(--ux-ease), color .2s var(--ux-ease), background-color .2s var(--ux-ease);
+  cursor: pointer;
+}
+
+.u195 .chapters button:hover {
+  color: var(--ux-ink);
+  border-top-color: var(--ux-ink-3);
+}
+
+.u195 .chapters button[aria-pressed="true"] {
+  border-top-color: var(--ux-accent);
+  color: var(--ux-ink);
+  font-weight: 600;
+}
+
+.u195 .chapters span {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.u195 .chapters small {
+  display: block;
+  font: 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ux-ink-3);
+  margin-top: 3px;
+}
+
+.u195 :focus-visible {
+  outline: 2px solid var(--ux-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .u195 *,
+  .u195 *::before,
+  .u195 *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
