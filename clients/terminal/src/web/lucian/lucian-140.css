@@ -10,18 +10,21 @@
   background: light-dark(var(--ux-surface), var(--ux-surface-2));
   box-shadow: 0 0 0 1px var(--ux-line-2), 0 12px 26px -14px var(--ux-shadow-strong);
   position: absolute;
-  right: 12px;
-  top: 10px;
-  z-index: 15;
+  right: 8px;
+  bottom: calc(100% + 8px);
+  max-width: calc(100% - 16px);
+  z-index: 25;
   opacity: 0;
   visibility: hidden;
-  transform: translateY(-4px) scale(.96);
+  pointer-events: none;
+  transform: translateY(4px) scale(.96);
   transition: opacity .16s var(--ux-ease), transform .2s var(--ux-ease), visibility 0s linear .16s;
 }
 
 .u140-bar.is-on {
   opacity: 1;
   visibility: visible;
+  pointer-events: auto;
   transform: none;
   transition: opacity .16s var(--ux-ease), transform .24s var(--ux-spring), visibility 0s;
 }

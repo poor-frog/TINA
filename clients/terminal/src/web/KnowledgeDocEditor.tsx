@@ -470,6 +470,11 @@ export function KnowledgeDocEditor({
               onMouseUp={(e) => syncSelection(e.currentTarget)}
               onClick={(e) => syncSelection(e.currentTarget)}
               onKeyUp={(e) => syncSelection(e.currentTarget)}
+              onBlur={(e) => {
+                const next = e.relatedTarget as HTMLElement | null;
+                if (next?.closest?.(".u140-bar")) return;
+                setSelectionRange({ start: 0, end: 0 });
+              }}
               onKeyDown={handleKeyDown}
             />
             {suggestions.length > 0 && (

@@ -325,13 +325,18 @@ describe("KnowledgeView v3 (Notion-Style Non-Tech Knowledge Hub)", () => {
       expect(screen.getByRole("listbox", { name: /Page link suggestions/i })).toBeTruthy();
     });
 
-    // #140 Selection formatting bar activates when text is selected and wraps Markdown cleanly
+    // #140 Selection formatting bar activates when text is selected, survives blur into its buttons, and hides on outside blur
     bodyEditor.setSelectionRange(0, 5);
     fireEvent.select(bodyEditor);
     const fmtBar = screen.getByTestId("lucian-selection-formatting");
     expect(fmtBar.className).toContain("is-on");
-    fireEvent.click(screen.getByRole("button", { name: "Bold selected text" }));
+    const boldBtn = screen.getByRole("button", { name: "Bold selected text" });
+    fireEvent.blur(bodyEditor, { relatedTarget: boldBtn });
+    expect(fmtBar.className).toContain("is-on");
+    fireEvent.click(boldBtn);
     expect(bodyEditor.value).toContain("**");
+    fireEvent.blur(bodyEditor, { relatedTarget: screen.getByLabelText(/^Page title$/i) });
+    expect(fmtBar.className).not.toContain("is-on");
 
     fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
     await waitFor(() => {

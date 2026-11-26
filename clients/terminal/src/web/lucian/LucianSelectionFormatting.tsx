@@ -31,6 +31,7 @@ export function LucianSelectionFormatting({
       data-testid="lucian-selection-formatting"
       aria-hidden={!visible || undefined}
       onPointerDown={(e) => e.preventDefault()}
+      onMouseDown={(e) => e.preventDefault()}
     >
       <button
         type="button"

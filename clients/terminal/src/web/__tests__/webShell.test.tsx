@@ -1185,9 +1185,21 @@ describe("WebShell production UI (Option A & Option B)", () => {
 
     const composer = screen.getByLabelText("Message Ask Tina") as HTMLTextAreaElement;
     // Trigger @ via toolbar button -> popover opens with real meeting & workspace suggestions
-    fireEvent.click(screen.getByRole("button", { name: "Mention meeting or knowledge" }));
+    const mentionBtn = screen.getByRole("button", { name: "Mention meeting or knowledge" });
+    fireEvent.click(mentionBtn);
     const listbox = await screen.findByRole("listbox", { name: "Mention meetings or knowledge" });
     expect(listbox).toBeTruthy();
+    expect(mentionBtn.getAttribute("aria-expanded")).toBe("true");
+    // Blurring textarea toward the @ trigger or popover keeps the mention picker open
+    fireEvent.blur(composer, { relatedTarget: mentionBtn });
+    expect(mentionBtn.getAttribute("aria-expanded")).toBe("true");
+    // Clicking @ again toggles closed without duplicating "@ @", then re-opens cleanly
+    fireEvent.click(mentionBtn);
+    expect(mentionBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(composer.value).toBe("@");
+    fireEvent.click(mentionBtn);
+    expect(mentionBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(composer.value).toBe("@");
     const firstOption = screen.getByRole("option", { name: /Product Weekly Sync/i });
     expect(firstOption).toBeTruthy();
 

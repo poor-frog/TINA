@@ -72,7 +72,8 @@
   transition: background-color .2s var(--ux-ease), color .2s var(--ux-ease), transform .45s var(--ux-spring);
 }
 
-.u451-at:hover {
+.u451-at:hover,
+.u451-at[aria-expanded="true"] {
   background: var(--ux-surface-2);
   background: light-dark(var(--ux-surface-2), var(--ux-surface-3));
   color: var(--ux-ink);

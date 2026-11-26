@@ -79,6 +79,7 @@ export function LucianMentionPopover({
     <div
       className={`ux u451-pop ${open && items.length > 0 ? "is-open" : ""}`}
       data-testid="lucian-mention-popover"
+      onPointerDown={(e) => e.preventDefault()}
       onMouseDown={(e) => e.preventDefault()}
     >
       <div className="u451-lb" id={listboxId} role="listbox" aria-label="Mention meetings or knowledge">
@@ -132,17 +133,22 @@ export function LucianMentionPopover({
 export function LucianMentionTriggerButton({
   onClick,
   disabled = false,
+  expanded = false,
 }: {
   onClick: () => void;
   disabled?: boolean;
+  expanded?: boolean;
 }) {
   return (
     <button
       type="button"
       className="ux u451-at"
       aria-label="Mention meeting or knowledge"
+      aria-haspopup="listbox"
+      aria-expanded={expanded}
       title="Mention a meeting, knowledge page, or space (@)"
       disabled={disabled}
+      onPointerDown={(e) => e.preventDefault()}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
     >

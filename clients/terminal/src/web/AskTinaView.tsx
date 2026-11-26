@@ -429,9 +429,23 @@ export function AskTinaView({
 
   const insertAtMentionTrigger = useCallback(() => {
     const el = composerRef.current;
+    if (mentionOpen && mentionMatch && mentionMatch.query === "") {
+      setMentionDismissedAnchor(mentionMatch.anchor);
+      setMentionMatch(null);
+      el?.focus({ preventScroll: true });
+      return;
+    }
     const focused = el && document.activeElement === el;
     const start = focused ? (el.selectionStart ?? draft.length) : draft.length;
     const end = focused ? (el.selectionEnd ?? draft.length) : draft.length;
+    const existing = start === end ? detectMentionAtCursor(draft, start) : null;
+    if (existing && existing.query === "") {
+      setMentionDismissedAnchor(-1);
+      setMentionActiveIdx(0);
+      setMentionMatch(existing);
+      el?.focus({ preventScroll: true });
+      return;
+    }
     const before = draft.slice(0, start);
     const ins = (before && !/\s$/.test(before) ? " " : "") + "@";
     const nextValue = before + ins + draft.slice(end);
@@ -440,12 +454,13 @@ export function AskTinaView({
     setMentionDismissedAnchor(-1);
     setMentionActiveIdx(0);
     setMentionMatch({ anchor: nextPos - 1, query: "" });
+    el?.focus({ preventScroll: true });
     window.requestAnimationFrame(() => {
       if (!composerRef.current) return;
-      composerRef.current.focus();
+      composerRef.current.focus({ preventScroll: true });
       composerRef.current.setSelectionRange(nextPos, nextPos);
     });
-  }, [draft]);
+  }, [draft, mentionMatch, mentionOpen]);
 
   const removeMentionChip = useCallback((id: string) => {
     setMentionedTargets((prev) => {
@@ -1427,7 +1442,11 @@ export function AskTinaView({
                   syncMentionState(target.value, target.selectionStart ?? target.value.length);
                 }
               }}
-              onBlur={() => setMentionMatch(null)}
+              onBlur={(e) => {
+                const next = e.relatedTarget as HTMLElement | null;
+                if (next?.closest?.(".u451-pop, .u451-at")) return;
+                setMentionMatch(null);
+              }}
               onKeyDown={(e) => {
                 if (mentionOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
                   e.preventDefault();
@@ -1483,7 +1502,11 @@ export function AskTinaView({
             />
             <div className="tina-web-ask-bar">
               <div className="tina-web-ask-bar-left">
-                <LucianMentionTriggerButton onClick={insertAtMentionTrigger} disabled={busy || historyLoading} />
+                <LucianMentionTriggerButton
+                  onClick={insertAtMentionTrigger}
+                  disabled={busy || historyLoading}
+                  expanded={mentionOpen}
+                />
                 <div ref={scopeWrapRef} className="tina-web-ask-scope-popover-wrap">
                   <button
                     type="button"
