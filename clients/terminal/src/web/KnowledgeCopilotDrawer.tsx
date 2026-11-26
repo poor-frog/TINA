@@ -33,7 +33,7 @@ function makeSessionId(slug?: string): string {
   return `kb-${safe}-${Date.now().toString(36)}`;
 }
 
-const KNOWLEDGE_WRITE_TOOLS = new Set(["create_wiki", "update_wiki", "Write", "Edit"]);
+const KNOWLEDGE_WRITE_TOOLS = new Set(["create_wiki", "update_wiki", "delete_wiki", "move_wiki", "Write", "Edit"]);
 
 function toolPhaseLabel(tool: string): string {
   switch (tool) {
@@ -50,6 +50,10 @@ function toolPhaseLabel(tool: string): string {
     case "update_wiki":
     case "Edit":
       return "Updating page in Knowledge…";
+    case "delete_wiki":
+      return "Deleting page in Knowledge…";
+    case "move_wiki":
+      return "Moving page in Knowledge…";
     case "reach_web_search":
     case "WebSearch":
       return "Searching the web…";

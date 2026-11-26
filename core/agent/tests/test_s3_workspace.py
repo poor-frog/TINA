@@ -388,8 +388,10 @@ def test_nova_bedrock_workspace_supports_agent_reach_and_readonly_global(tmp_pat
     gdir = ensure_global_workspace(tmp_path / "_global")
     pdir = tmp_path / "5"
     (pdir / "kg").mkdir(parents=True)
-    (pdir / "docs").mkdir(parents=True)
-    (pdir / "docs" / "private.md").write_text("secret", encoding="utf-8")
+    (pdir / "policy").mkdir(parents=True)
+    (pdir / "policy" / "members.md").write_text("secret", encoding="utf-8")
+    (pdir / "agents").mkdir(parents=True)
+    (pdir / "agents" / "meeting.md").write_text("internal", encoding="utf-8")
 
     monkeypatch.setenv("TINA_AGENT_REACH_URL", "http://agent-reach.tina-staging.local:8080")
     monkeypatch.setenv("TINA_UNIT_TOOLS", json.dumps(["reach.web.search", "reach.github.read"]))
@@ -399,7 +401,7 @@ def test_nova_bedrock_workspace_supports_agent_reach_and_readonly_global(tmp_pat
     ]))
 
     # Direct _wiki_tool checks: seeded _global docs/README/CLAUDE/mail are readable; writes to _global
-    # and non-kg reads on personal mounts are strictly denied.
+    # and non-Knowledge reads (policy/, agents/, CLAUDE.md, dotfiles) on personal mounts are strictly denied.
     mounts_map = {
         "_global": {"slug": "_global", "path": str(gdir), "role": "global", "write": False},
         "personal": {"slug": "personal", "path": str(pdir), "role": "private", "write": True},
@@ -419,10 +421,11 @@ def test_nova_bedrock_workspace_supports_agent_reach_and_readonly_global(tmp_pat
             {"workspace": "_global", "path": "kg/x.md", "text": "nope"},
             "/wiki-create _global:kg/x.md",
         )
-    with pytest.raises(ValueError):
-        bedrock_workspace._wiki_tool(
-            mounts_map, "read_wiki", {"workspace": "personal", "path": "docs/private.md"}, "",
-        )
+    for forbidden in ("policy/members.md", "agents/meeting.md", "CLAUDE.md", ".claude/secret.md"):
+        with pytest.raises(ValueError):
+            bedrock_workspace._wiki_tool(
+                mounts_map, "read_wiki", {"workspace": "personal", "path": forbidden}, "",
+            )
 
     reach_calls = []
     monkeypatch.setattr(
@@ -934,4 +937,218 @@ def test_run_harness_turn_commits_system_mount_silently_without_workspace_update
     commits = [e for e in evs2 if e.get("type") == "commit"]
     assert len(commits) == 1
     assert commits[0]["sha"] == _head(private)
+
+
+def test_bedrock_workspace_delete_move_display_name_frontmatter_and_turn_recovery(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from llm import bedrock_workspace
+
+    gdir = tmp_path / "_global"
+    pdir = tmp_path / "6"
+    sdir = tmp_path / "kim-thiem-c3708e"
+    ro_dir = tmp_path / "readonly-shared"
+    sysdir = tmp_path / ".system" / "6"
+    for d in (gdir / "kg", pdir / "kg", sdir / "kg" / "entities" / "company", sdir / "kg" / "entities" / "person", ro_dir / "kg", sysdir):
+        d.mkdir(parents=True, exist_ok=True)
+    (gdir / "kg" / "guide.md").write_text("# Global Guide\n", encoding="utf-8")
+    (ro_dir / "kg" / "doc.md").write_text("# ReadOnly\n", encoding="utf-8")
+    (sdir / "kg" / "entities" / "company" / "acme-corp.md").write_text(
+        "---\ntype: company\nid: acme-corp\ntitle: Acme Corp\n---\n\n# Acme Corp\n", encoding="utf-8",
+    )
+    (sdir / "kg" / "entities" / "person" / "jane-liu.md").write_text(
+        "---\ntype: person\nid: jane-liu\ntitle: Jane Liu\n---\n\n# Jane Liu\n", encoding="utf-8",
+    )
+    (sdir / "kg" / "entities" / "index.md").write_text("# Entities\n\n- [[Acme Corp]]\n- [[Jane Liu]]\n", encoding="utf-8")
+    (sdir / "kg" / "entities" / "company" / "index.md").write_text("# Companies\n\n- [[Acme Corp]]\n", encoding="utf-8")
+    (sdir / "kg" / "entities" / "person" / "index.md").write_text("# People\n\n- [[Jane Liu]]\n", encoding="utf-8")
+
+    mounts_map = {
+        "_global": {"slug": "_global", "path": str(gdir), "role": "global", "write": False},
+        "6": {"slug": "6", "path": str(pdir), "role": "private", "write": True, "primary": True},
+        "kim-thiem-c3708e": {"slug": "kim-thiem-c3708e", "path": str(sdir), "role": "shared", "write": True},
+        "readonly-shared": {"slug": "readonly-shared", "path": str(ro_dir), "role": "shared", "write": False},
+    }
+
+    # 1. Display-name resolution ("Kim Thiem C3708e" -> "kim-thiem-c3708e")
+    listed = bedrock_workspace._wiki_tool(mounts_map, "list_wiki", {"workspace": "Kim Thiem C3708e"}, "")
+    assert listed["workspace"] == "kim-thiem-c3708e"
+    assert any(item["path"] == "kg/entities/company/acme-corp.md" for item in listed["files"])
+
+    # 2. All Knowledge roots (notes/, wiki/, docs/, sources/, concepts/) + Unicode & spaces filenames
+    created_note = bedrock_workspace._wiki_tool(
+        mounts_map, "create_wiki",
+        {"workspace": "personal", "path": "notes/Ghi chú họp.md", "text": "# Ghi chú họp\n\nNội dung chính.\n"},
+        "tạo ghi chú",
+    )
+    assert created_note["created"] == "notes/Ghi chú họp.md"
+    assert "Nội dung chính." in bedrock_workspace._wiki_tool(
+        mounts_map, "read_wiki", {"workspace": "personal", "path": "notes/Ghi chú họp.md"}, "",
+    )["text"]
+
+    # move_wiki moves cleanly across Knowledge roots and blocks collision
+    moved = bedrock_workspace._wiki_tool(
+        mounts_map, "move_wiki",
+        {"workspace": "personal", "path": "notes/Ghi chú họp.md", "destination": "wiki/Ghi chú họp.md"},
+        "di chuyển ghi chú",
+    )
+    assert moved == {"moved_from": "notes/Ghi chú họp.md", "moved_to": "wiki/Ghi chú họp.md", "workspace": "6"}
+    assert not (pdir / "notes" / "Ghi chú họp.md").exists()
+    assert (pdir / "wiki" / "Ghi chú họp.md").is_file()
+
+    # 3. Early entity frontmatter validation prevents silent post-turn rollback
+    with pytest.raises(ValueError, match="frontmatter"):
+        bedrock_workspace._wiki_tool(
+            mounts_map, "create_wiki",
+            {"workspace": "personal", "path": "kg/entities/person/no-fm.md", "text": "# Missing frontmatter\n"},
+            "tạo hồ sơ",
+        )
+    valid_entity = bedrock_workspace._wiki_tool(
+        mounts_map, "create_wiki",
+        {
+            "workspace": "personal",
+            "path": "kg/entities/person/minh-anh.md",
+            "text": "---\ntype: person\nid: minh-anh\ntitle: Minh Anh\n---\n\n# Minh Anh\n",
+        },
+        "tạo hồ sơ Minh Anh",
+    )
+    assert valid_entity["created"] == "kg/entities/person/minh-anh.md"
+
+    # 4. delete_wiki safety checks: blocks _global, read-only, policy/, symlinks, external_taint without delete intent
+    with pytest.raises(ValueError, match="read-only"):
+        bedrock_workspace._wiki_tool(mounts_map, "delete_wiki", {"workspace": "_global", "path": "kg/guide.md"}, "xóa")
+    with pytest.raises(ValueError, match="read-only"):
+        bedrock_workspace._wiki_tool(mounts_map, "delete_wiki", {"workspace": "readonly-shared", "path": "kg/doc.md"}, "xóa")
+    with pytest.raises(ValueError):
+        bedrock_workspace._wiki_tool(mounts_map, "delete_wiki", {"workspace": "personal", "path": "policy/members.md"}, "xóa")
+    symlink_target = pdir / "kg" / "sym.md"
+    symlink_target.symlink_to(pdir / "wiki" / "Ghi chú họp.md")
+    with pytest.raises(ValueError, match="Not a regular"):
+        bedrock_workspace._wiki_tool(mounts_map, "delete_wiki", {"workspace": "personal", "path": "kg/sym.md"}, "xóa")
+    symlink_target.unlink()
+    with pytest.raises(ValueError, match="external web content"):
+        bedrock_workspace._wiki_tool(
+            mounts_map, "delete_wiki",
+            {"workspace": "personal", "path": "wiki/Ghi chú họp.md"},
+            "tóm tắt trang web này",
+            external_taint=True,
+        )
+    deleted_after_web = bedrock_workspace._wiki_tool(
+        mounts_map, "delete_wiki",
+        {"workspace": "personal", "path": "wiki/Ghi chú họp.md"},
+        "tìm trên web rồi xóa ghi chú cũ giúp tôi",
+        external_taint=True,
+    )
+    assert deleted_after_web["deleted"] == "wiki/Ghi chú họp.md"
+    assert not (pdir / "wiki" / "Ghi chú họp.md").exists()
+
+    # 5. End-to-end turn: delete 2 starter entities + update 3 index files (5 writes > old limit of 2)
+    #    AND recover cleanly when Nova returns <thinking>-only on end_turn!
+    mount_list = [
+        {"slug": "_global", "path": str(gdir), "role": "global", "write": False, "primary": False},
+        {"slug": "6", "path": str(pdir), "role": "private", "write": True, "primary": True},
+        {"slug": "kim-thiem-c3708e", "path": str(sdir), "role": "shared", "write": True, "primary": False},
+        {"slug": "_system", "path": str(sysdir), "role": "system", "write": True, "primary": False},
+    ]
+    monkeypatch.setenv("TINA_MOUNTS", json.dumps(mount_list))
+    monkeypatch.delenv("TINA_AGENT_REACH_URL", raising=False)
+
+    calls_seen: list[dict] = []
+
+    class DeleteAndRecoverClient:
+        def converse(self, **req):
+            calls_seen.append(req)
+            n = len(calls_seen)
+            if n == 1:
+                tool_names = {t["toolSpec"]["name"] for t in req["toolConfig"]["tools"]}
+                assert {"delete_wiki", "move_wiki"}.issubset(tool_names)
+                return {"stopReason": "tool_use", "output": {"message": {"role": "assistant", "content": [
+                    {"toolUse": {"toolUseId": "d1", "name": "delete_wiki", "input": {"workspace": "Kim Thiem C3708e", "path": "kg/entities/company/acme-corp.md"}}},
+                    {"toolUse": {"toolUseId": "d2", "name": "delete_wiki", "input": {"workspace": "Kim Thiem C3708e", "path": "kg/entities/person/jane-liu.md"}}},
+                    {"toolUse": {"toolUseId": "u1", "name": "update_wiki", "input": {"workspace": "kim-thiem-c3708e", "path": "kg/entities/index.md", "mode": "replace", "text": "# Entities\n"}}},
+                    {"toolUse": {"toolUseId": "u2", "name": "update_wiki", "input": {"workspace": "kim-thiem-c3708e", "path": "kg/entities/company/index.md", "mode": "replace", "text": "# Companies\n"}}},
+                    {"toolUse": {"toolUseId": "u3", "name": "update_wiki", "input": {"workspace": "kim-thiem-c3708e", "path": "kg/entities/person/index.md", "mode": "replace", "text": "# People\n"}}},
+                ]}}}
+            if n == 2:
+                # Simulate Nova returning only <thinking> after tool execution
+                return {"stopReason": "end_turn", "output": {"message": {"role": "assistant", "content": [
+                    {"text": "<thinking>All 5 operations succeeded.</thinking>"},
+                ]}}}
+            # Synthesis retry succeeds cleanly!
+            assert req["messages"][-1]["role"] == "user"
+            return {"stopReason": "end_turn", "output": {"message": {"role": "assistant", "content": [
+                {"text": "Tôi đã xóa xong hồ sơ Acme Corp và Jane Liu khỏi workspace Kim Thiem C3708e."},
+            ]}}}
+
+    monkeypatch.setattr(bedrock_workspace, "BedrockConverseCompletion", lambda **_: SimpleNamespace(client=DeleteAndRecoverClient()))
+    harness = bedrock_workspace.BedrockWorkspaceHarness()
+    harness.prepare(pdir, chat_root=sysdir)
+    events = list(harness.run_turn(
+        pdir,
+        "<!--tina:user-input-below-->có, hãy xóa cho tôi",
+        allowed_tools=("Read", "Write", "Edit"),
+        model="amazon.nova-lite-v1:0",
+    ))
+    done = next(e for e in events if e.get("type") == "done")
+    assert done["ok"] is True
+    assert "Acme Corp" in done["reply"]
+    assert not (sdir / "kg" / "entities" / "company" / "acme-corp.md").exists()
+    assert not (sdir / "kg" / "entities" / "person" / "jane-liu.md").exists()
+    assert len(calls_seen) == 3
+
+    # 6. >8 parallel tool calls do NOT abort with empty failure; excess calls get paired error toolResult
+    overflow_calls: list[dict] = []
+
+    class OverflowToolsClient:
+        def converse(self, **req):
+            overflow_calls.append(req)
+            if len(overflow_calls) == 1:
+                return {"stopReason": "tool_use", "output": {"message": {"role": "assistant", "content": [
+                    {"toolUse": {"toolUseId": f"c{i}", "name": "list_wiki", "input": {"workspace": "personal"}}}
+                    for i in range(10)
+                ]}}}
+            # Every toolUseId must have a matching toolResult
+            tool_results = [b["toolResult"] for b in req["messages"][-1]["content"] if "toolResult" in b]
+            assert len(tool_results) == 10
+            assert sum(1 for r in tool_results if r["status"] == "success") == 8
+            assert sum(1 for r in tool_results if r["status"] == "error") == 2
+            return {"stopReason": "end_turn", "output": {"message": {"role": "assistant", "content": [
+                {"text": "Đã liệt kê xong thư viện Knowledge."},
+            ]}}}
+
+    monkeypatch.setattr(bedrock_workspace, "BedrockConverseCompletion", lambda **_: SimpleNamespace(client=OverflowToolsClient()))
+    ov_events = list(harness.run_turn(
+        pdir,
+        "<!--tina:user-input-below-->liệt kê toàn bộ trang",
+        allowed_tools=("Read", "Write", "Edit"),
+        model="amazon.nova-lite-v1:0",
+    ))
+    ov_done = next(e for e in ov_events if e.get("type") == "done")
+    assert ov_done["ok"] is True and "liệt kê" in ov_done["reply"]
+
+    # 7. Still calling tools at step == _MAX_TOOL_STEPS - 1 gracefully closes toolUse and finishes via synthesis retry
+    budget_calls = 0
+
+    class AlwaysToolClient:
+        def converse(self, **req):
+            nonlocal budget_calls
+            budget_calls += 1
+            if budget_calls <= bedrock_workspace._MAX_TOOL_STEPS:
+                return {"stopReason": "tool_use", "output": {"message": {"role": "assistant", "content": [
+                    {"toolUse": {"toolUseId": f"loop-{budget_calls}", "name": "list_wiki", "input": {"workspace": "personal"}}},
+                ]}}}
+            return {"stopReason": "end_turn", "output": {"message": {"role": "assistant", "content": [
+                {"text": "Tôi đã hoàn tất kiểm tra các trang hiện có trong Knowledge."},
+            ]}}}
+
+    monkeypatch.setattr(bedrock_workspace, "BedrockConverseCompletion", lambda **_: SimpleNamespace(client=AlwaysToolClient()))
+    b_events = list(harness.run_turn(
+        pdir,
+        "<!--tina:user-input-below-->kiểm tra knowledge",
+        allowed_tools=("Read", "Write", "Edit"),
+        model="amazon.nova-lite-v1:0",
+    ))
+    b_done = next(e for e in b_events if e.get("type") == "done")
+    assert b_done["ok"] is True and "hoàn tất" in b_done["reply"]
+    assert budget_calls == bedrock_workspace._MAX_TOOL_STEPS + 1
+
 

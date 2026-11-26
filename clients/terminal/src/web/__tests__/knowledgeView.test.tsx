@@ -387,6 +387,23 @@ describe("KnowledgeView v3 (Notion-Style Non-Tech Knowledge Hub)", () => {
       expect(screen.getByText(/Write was denied in this space\./i)).toBeTruthy();
     });
     expect(screen.queryByText(/Updated space · refreshed/i)).toBeNull();
+
+    // delete_wiki / move_wiki also trigger workspace refresh when finished without explicit commit event
+    const countTreeFetches = () =>
+      (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter((call) =>
+        String(call[0]).includes("/api/workspace/tree"),
+      ).length;
+    const treeCallsBeforeDelete = countTreeFetches();
+    mockStreamChatTurn.mockImplementationOnce(async (_req: unknown, cbs: ChatStreamCallbacks) => {
+      cbs.onTool?.("delete_wiki");
+      cbs.onDelta("Đã xóa hồ sơ mẫu.");
+      return { sawVisibleOutput: true, terminal: true, aborted: false };
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Summarize space/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Đã xóa hồ sơ mẫu\./i)).toBeTruthy();
+      expect(countTreeFetches()).toBeGreaterThan(treeCallsBeforeDelete);
+    });
   });
 
   it("renders Constellation Graph with Display popover, All Spaces, Columns toggle, and Back/Forward reading history", async () => {

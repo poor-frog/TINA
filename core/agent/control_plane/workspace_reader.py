@@ -22,7 +22,7 @@ def _tool_op(name: str) -> dict:
         label = "read"
     elif any(k in t for k in ("search", "grep", "find", "glob")):
         label = "search"
-    elif any(k in t for k in ("edit", "write", "append")):
+    elif any(k in t for k in ("edit", "write", "append", "create", "update", "delete", "move")):
         label = "edit"
     elif any(k in t for k in ("git", "commit")):
         label = "git"
