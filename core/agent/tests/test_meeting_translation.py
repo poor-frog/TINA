@@ -226,10 +226,10 @@ def test_live_tail_waits_for_observed_quiet_and_resets_when_new_words_arrive(set
     canonical['status'] = 'active'
     assert not client.post(URL, json={}).json()['groups'][0]['ready']
     assert not calls
-    clock[0] += 4
+    clock[0] += 1
     canonical['segments'].append({'segment_id': 's2', 'text': 'mọi người', 'speaker_id': 'original'})
     client.get(URL)
-    clock[0] += 4
+    clock[0] += 1
     client.post(URL, json={})
     assert not calls
     clock[0] += 1
@@ -494,3 +494,137 @@ def test_phrase_backoff_is_revision_bound_and_resumes_after_process_recreation(s
     canonical['segments'][0]['revision'] = 1
     state = reopened.post(URL,json={}).json()
     assert state['status'] == 'complete' and state['groups'][0]['attempts'] == 1
+
+
+def test_batch_capable_provider_translates_multiple_ready_phrases_in_one_dispatch(setup):
+    _, canonical, calls, _ = setup
+    canonical['segments'] = [
+        {'segment_id': 'p1', 'text': 'Câu thứ nhất đã xong.', 'speaker_id': 'a', 'start_ms': 0, 'end_ms': 1000},
+        {'segment_id': 'p2', 'text': 'Câu thứ hai cũng xong.', 'speaker_id': 'b', 'start_ms': 1100, 'end_ms': 2000},
+        {'segment_id': 'p3', 'text': 'Câu thứ ba tiếp theo.', 'speaker_id': 'c', 'start_ms': 2100, 'end_ms': 3000},
+    ]
+    def batch_complete(request, text):
+        calls.append(text)
+        parts = text.split(api.BATCH_SEPARATOR)
+        return api.BATCH_SEPARATOR.join(f'EN:{part}' for part in parts)
+    batch_complete.supports_batch = True
+    client = use_provider(setup, batch_complete)
+    state = client.post(URL, json={}).json()
+    assert state['status'] == 'complete' and state['completed'] == 3
+    assert len(calls) == 1
+    assert [g['translated_text'] for g in state['groups']] == [
+        'EN:Câu thứ nhất đã xong.',
+        'EN:Câu thứ hai cũng xong.',
+        'EN:Câu thứ ba tiếp theo.',
+    ]
+
+
+def test_translation_worker_translates_phrase_batch_with_fallback(monkeypatch):
+    from types import SimpleNamespace
+    from worker import engine
+    calls, events = [], []
+    class Completion:
+        def complete(self, prompt, **kwargs):
+            calls.append((prompt, kwargs))
+            return SimpleNamespace(text='["Hello.", "Goodbye."]')
+    class Stream:
+        def xadd(self, topic, fields): events.append(json.loads(fields['event']))
+        def expire(self, topic, ttl): pass
+    monkeypatch.setenv('TINA_CHAT_SESSION', 'dictation-translate-request2')
+    monkeypatch.setenv('TINA_MEETING_MODEL', 'meeting-selected-model')
+    monkeypatch.setattr(engine, 'completion_from_env', lambda **kwargs: Completion())
+    joined = f'Xin chào.{engine._TRANSLATION_BATCH_SEPARATOR}Tạm biệt.'
+    raw = engine.DICTATION_TRANSLATE_PREFIX + json.dumps({'request_id': 'request2', 'text': joined, 'target_language': 'en'})
+    monkeypatch.setattr(engine, 'start_prompt', lambda start: raw)
+    engine._run_dictation_translate(Stream(), 'test-output', {})
+    assert len(calls) == 1
+    assert events == [
+        {'type': 'message-delta', 'text': f'Hello.{engine._TRANSLATION_BATCH_SEPARATOR}Goodbye.'},
+        {'type': 'turn-complete'},
+    ]
+
+
+def test_context_capable_provider_receives_speaker_and_recent_translations(setup):
+    _, canonical, _, _ = setup
+    canonical['segments'] = [
+        {'segment_id': 'c1', 'text': 'Anh Nam sẽ phụ trách phần này.', 'speaker_id': 'p1', 'speaker_name': 'Lan', 'start_ms': 0, 'end_ms': 1000},
+        {'segment_id': 'c2', 'text': 'Tôi đồng ý với phương án đó.', 'speaker_id': 'p2', 'speaker_name': 'Nam', 'start_ms': 1100, 'end_ms': 2000},
+    ]
+    recorded = []
+    def context_complete(request, text, *, context=None, speaker=''):
+        recorded.append((text, speaker, context))
+        return 'Nam will lead this part.' if 'Anh Nam' in text else 'I agree with that option.'
+    context_complete.supports_context = True
+    client = use_provider(setup, context_complete)
+    client.post(URL, json={})
+    state = client.post(URL, json={}).json()
+    assert state['status'] == 'complete' and state['completed'] == 2
+    assert recorded[0] == ('Anh Nam sẽ phụ trách phần này.', 'Lan', [])
+    assert recorded[1] == (
+        'Tôi đồng ý với phương án đó.',
+        'Nam',
+        [{'speaker': 'Lan', 'source': 'Anh Nam sẽ phụ trách phần này.', 'translated': 'Nam will lead this part.'}],
+    )
+
+
+def test_direct_translate_fast_path_bypasses_worker_for_http_provider(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from control_plane.api import create_app
+    from control_plane.dispatch import Dispatcher
+    from control_plane.workspace_reader import WorkspaceReader
+    from shared.config import load_settings
+    import llm.openai_compat as openai_compat
+
+    dispatched = []
+    class FakeRuntime:
+        def spawn(self, *args, **kwargs):
+            dispatched.append((args, kwargs))
+            return {'workload_id': 'w1'}
+    class FakeIdentity:
+        def mint(self, *args, **kwargs): return 'tok'
+    class FakeStreamReader:
+        def read(self, unit_id, *, resume=None):
+            yield {'type': 'message-delta', 'text': 'Fallback worker'}
+            yield {'type': 'turn-complete'}
+
+    captured = []
+    class FakeComp:
+        def __init__(self, *, base_url=None, api_key=None, model=None, timeout=120.0, transport=None):
+            captured.append((base_url, api_key, model))
+            self._client = SimpleNamespace(close=lambda: None)
+        def complete(self, prompt, *, system=None, model=None, response_schema=None):
+            return SimpleNamespace(text='Hello everyone.')
+
+    monkeypatch.setattr(openai_compat, 'OpenAICompatCompletion', FakeComp)
+    monkeypatch.setenv('TINA_LLM_BASE_URL', 'https://example.test/v1')
+    monkeypatch.setenv('TINA_LLM_API_KEY', 'sk-test')
+
+    dispatcher = Dispatcher(
+        load_settings(llm_provider='openai-compat', meeting_model='fast-model'),
+        FakeRuntime(), FakeIdentity(),
+    )
+    client = TestClient(create_app(
+        dispatcher, reader=WorkspaceReader(str(tmp_path)),
+        stream_reader=FakeStreamReader(), direct_translate=True,
+    ))
+    resp = client.post('/api/dictation/translate', headers={'X-User-Id': 'u_jane'},
+                       json={'text': 'xin chào mọi người', 'target_language': 'en'})
+    assert resp.status_code == 200
+    assert resp.json() == {'translated_text': 'Hello everyone.'}
+    assert dispatched == []
+    assert captured == [('https://example.test/v1', 'sk-test', 'fast-model')]
+
+    # CLI-backed providers fall back cleanly to the worker container path.
+    cli_dispatcher = Dispatcher(
+        load_settings(llm_provider='claude-cli', meeting_model='claude-sonnet'),
+        FakeRuntime(), FakeIdentity(),
+    )
+    cli_client = TestClient(create_app(
+        cli_dispatcher, reader=WorkspaceReader(str(tmp_path)),
+        stream_reader=FakeStreamReader(), direct_translate=True,
+    ))
+    cli_resp = cli_client.post('/api/dictation/translate', headers={'X-User-Id': 'u_jane'},
+                               json={'text': 'xin chào', 'target_language': 'en'})
+    assert cli_resp.status_code == 200
+    assert cli_resp.json() == {'translated_text': 'Fallback worker'}
+    assert len(dispatched) == 1

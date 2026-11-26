@@ -2,6 +2,7 @@
 """Source-build entrypoint. Compose owns dotenv/interpolation; never source/eval .env."""
 from __future__ import annotations
 
+import hashlib
 import json
 import hmac
 import importlib.util
@@ -9,6 +10,7 @@ import ipaddress
 import os
 import platform
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -16,6 +18,7 @@ import sys
 import tempfile
 import time
 from urllib.parse import urlsplit
+from urllib.request import urlopen
 
 HERE = Path(__file__).resolve().parent.parent
 ROOT = HERE.parent.parent
@@ -39,9 +42,9 @@ def tts_environment(env):
     return {key: loaded[key] for key in ('TTS_API_TOKEN', 'TTS_SERVICE_URL', 'TINA_TTS_MODELS') if key in loaded}
 
 
-def run(args, *, env=None, capture=False, check=True):
+def run(args, *, env=None, capture=False, check=True, input_text=None):
     result = subprocess.run(args, cwd=HERE, env=env, text=True,
-                            capture_output=capture, check=False)
+                            capture_output=capture, check=False, input=input_text)
     if check and result.returncode:
         # Config/env output may contain credentials; never include it in an exception.
         raise StackError(f"Command failed ({result.returncode}): {shlex.join(args)}")
@@ -396,8 +399,56 @@ class Stack:
         self.verify_viegem_cuda()
         for service in ("viegem-models", "meeting-voice-models", "tts-models"):
             if service in self.services:
-                self.compose("run", "--rm", "--no-deps", service)
+                if service == "tts-models":
+                    self.prepare_tts_models()
+                else:
+                    self.compose("run", "--rm", "--no-deps", service)
         self.prepare_wakeword()
+
+    def prepare_tts_models(self):
+        command = ("run", "--rm", "--no-deps", "-T")
+        check = ('from pathlib import Path; from engine import verify_assets; '
+                 'verify_assets(Path("/models"))')
+        result = self.compose(*command, "--entrypoint", "python", "tts-models", "-c", check,
+                              capture=True, check=False)
+        if result.returncode == 0:
+            return
+        descriptor = json.loads((ROOT / "deploy/tts/bundle-release.json").read_text())
+        key_file = _dotenvx_key_file(ROOT / "deploy/tts/.env", self.env)
+        if key_file is None:
+            raise StackError("First-run TTS requires the shared release .env.keys file.")
+        with tempfile.TemporaryDirectory(prefix="tina-tts-release-") as tmp:
+            directory = Path(tmp)
+            envelope = directory / ".env"
+            envelope.write_text('TINA_TTS_BUNDLE_PASSWORD="' + descriptor["password"] + '"\n')
+            env = {k: v for k, v in self.env.items() if not k.startswith("DOTENV_PRIVATE_KEY")}
+            get = run([self.env.get("DOTENVX_BIN") or "dotenvx", "get", "TINA_TTS_BUNDLE_PASSWORD",
+                       "--quiet", "--strict", "--overload", "--no-armor", "--no-native",
+                       "--no-1password", "--no-bitwarden", "-f", str(envelope), "-fk", str(key_file)],
+                      env=env, capture=True, check=False)
+            password = get.stdout.strip()
+            if get.returncode or not re.fullmatch(r"[a-f0-9]{64}", password):
+                raise StackError("The selected .env.keys cannot unlock the TTS release. Use its matching key or restore a verified model volume.")
+            print("Downloading the pinned TTS release bundle from GitHub.", flush=True)
+            archive = directory / "models.enc"
+            digest = hashlib.sha256()
+            total = 0
+            deadline = time.monotonic() + 900
+            try:
+                with urlopen(descriptor["url"], timeout=60) as src, archive.open("wb") as out:
+                    while chunk := src.read(1024**2):
+                        total += len(chunk)
+                        if total > 600 * 1024**2 or time.monotonic() > deadline:
+                            raise StackError("TTS release download exceeded its size or time limit.")
+                        digest.update(chunk)
+                        out.write(chunk)
+            except OSError:
+                raise StackError("Could not download the pinned TTS release from GitHub.") from None
+            if digest.hexdigest() != descriptor["sha256"]:
+                raise StackError("TTS release download failed checksum verification.")
+            run([*self.base, *command, "--volume", str(archive) + ":/bundle.enc:ro",
+                 "tts-models", "python", "install_models.py", "--encrypted-archive", "/bundle.enc"],
+                env=self.env, input_text=password + "\n")
 
     def prepare_wakeword(self):
         if not self.voice_enabled or 'meeting-voice-models' not in self.services:
@@ -653,7 +704,13 @@ with urllib.request.urlopen(req, timeout=20) as response:
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else "plan"
     if action in {"all", "build"}:
-        run(["bash", str(HERE / "mint-dev-env.sh"), os.environ.get("ENV_FILE") or ".env"])
+        env_file = os.environ.get("ENV_FILE") or ".env"
+        seed = ["bash", str(HERE / "mint-dev-env.sh"), env_file]
+        if (env_file == ".env" and not (HERE / ".env").exists()
+                and "TINA_MEETING_VOICE" not in os.environ
+                and _dotenvx_key_file(ROOT / "deploy/tts/.env", os.environ)):
+            seed.append("--voice-release")
+        run(seed)
     stack = Stack(action)
     if action == "plan":
         stack.plan()

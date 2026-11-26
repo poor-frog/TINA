@@ -154,7 +154,10 @@
     .segment-bilingual { margin-bottom: 11px; padding-bottom: 11px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
     .segment-bilingual:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
     .segment-original[hidden] { display: none; }
-    .segment-english { margin-top: 5px; padding: 5px 8px; border-left: 2px solid var(--control-line); border-radius: 0 var(--radius-small) var(--radius-small) 0; background: color-mix(in srgb, var(--subtle-bg) 45%, transparent); color: var(--muted-foreground); font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+    .segment-english { margin-top: 5px; padding: 5px 8px; border-left: 2px solid var(--control-line); border-radius: 0 var(--radius-small) var(--radius-small) 0; background: color-mix(in srgb, var(--subtle-bg) 45%, transparent); color: var(--muted-foreground); font-size: 13px; line-height: 1.55; white-space: pre-wrap; transition: border-color 0.2s ease, color 0.2s ease; }
+    .segment-english[data-ready="true"] { border-left-color: var(--brand); color: var(--foreground); }
+    .segment-english[data-ready="false"] .segment-english-text { font-style: italic; font-size: 12px; }
+    .segment-lang-badge { display: inline-block; margin-right: 6px; color: var(--brand); font-size: 10px; font-weight: 700; letter-spacing: 0.03em; user-select: none; -webkit-user-select: none; }
     @media (max-height: 560px) {
       .meeting-panel { margin-top: 8px; }
       .library summary { min-height: 48px; padding: 7px 10px; }

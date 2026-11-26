@@ -153,7 +153,12 @@ class VieGemEngine:
             raise RuntimeError('VieGem MPS requires an available Apple Metal device')
         if device == 'cuda' and not torch.cuda.is_available():
             raise RuntimeError('VieGem CUDA requires an available NVIDIA device')
-        torch.set_num_threads(2)
+        default_threads = min(6, max(2, (os.cpu_count() or 2) // 2))
+        try:
+            threads = max(1, min(16, int(os.getenv('TINA_VIEGEM_THREADS', str(default_threads)))))
+        except ValueError:
+            threads = default_threads
+        torch.set_num_threads(threads)
         sys.path.insert(0, str(directory / 'viegem'))
         from asr.model import CTCModel, ModelConfig
         from asr.text import Units

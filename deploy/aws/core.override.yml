@@ -1,0 +1,41 @@
+# Merge WITH deploy/compose/docker-compose.yml. Always run `up --no-build`.
+# The original source-defined build: keys are inherited, but ignored with --no-build.
+services:
+  agent-reach:
+    image: ghcr.io/poor-frog/tina-agent-reach:prod
+  admin-api:
+    image: ghcr.io/poor-frog/tina-admin-api:prod
+    # The original compose points to host.docker.internal:18002; use private Speech IP instead.
+    environment:
+      TINA_VIEGEM_TOKEN: ${TRANSCRIPTION_SERVICE_TOKEN:?Set private Speech token in core-env}
+      TINA_VIEGEM_URL: ${TRANSCRIPTION_SERVICE_URL:?Set private Speech IP in core-env}
+  runtime:
+    image: ghcr.io/poor-frog/tina-runtime:prod
+  agent-worker:
+    image: ghcr.io/poor-frog/tina-agent-worker:prod
+  agent-api:
+    image: ghcr.io/poor-frog/tina-agent-api:prod
+  meeting-api:
+    image: ghcr.io/poor-frog/tina-meeting-api:prod
+  storage-init:
+    image: ghcr.io/poor-frog/tina-meeting-api:prod
+  gateway:
+    image: ghcr.io/poor-frog/tina-gateway:prod
+  flows-api:
+    image: ghcr.io/poor-frog/tina-flows:prod
+  flows-worker:
+    image: ghcr.io/poor-frog/tina-flows:prod
+  flows-mailbox:
+    image: ghcr.io/poor-frog/tina-flows:prod
+  mcp:
+    image: ghcr.io/poor-frog/tina-mcp:prod
+  terminal:
+    image: ghcr.io/poor-frog/tina-terminal:prod
+  dashboard:
+    image: ghcr.io/poor-frog/tina-dashboard:prod
+  tts-models:
+    image: ghcr.io/poor-frog/tina-tts:prod
+  tts:
+    image: ghcr.io/poor-frog/tina-tts:prod
+  livekit-agent:
+    image: ghcr.io/poor-frog/tina-livekit-agent:prod

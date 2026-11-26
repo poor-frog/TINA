@@ -21,7 +21,7 @@ if aws ssm get-parameter --region us-east-1 --name /tina/demo/ghcr-token \
   printf '%s' "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
   unset GHCR_PAT
 fi
-COMPOSE="$SOURCE/deploy/aws-demo/speech.compose.yml"
+COMPOSE="$SOURCE/deploy/aws/speech.compose.yml"
 compose=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE")
 "${compose[@]}" config --quiet
 "${compose[@]}" pull viegem viegem-models

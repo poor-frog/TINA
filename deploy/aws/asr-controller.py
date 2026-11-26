@@ -94,7 +94,7 @@ class RemoteWorkers:
 def main():
     controller = Controller(
         Identity(), RemoteWorkers(), "/state/state.json", "tina-aws-remote-viegem",
-        grace=10, revision="aws-demo-v3",
+        grace=10, revision="aws-v3",
     )
     key = hmac.new(SECRET.encode(), b"tina-asr-control:v1", "sha256").hexdigest()
     server = ThreadingHTTPServer(("0.0.0.0", 18007), handler(controller, key))

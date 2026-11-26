@@ -28,7 +28,7 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
   const rows = new Map<string, ReturnType<typeof createTurn>>();
   const spans = new Map<string, HTMLSpanElement>();
   const pinRows = new Map<string, { row: HTMLSpanElement; button: HTMLButtonElement; source: Segment }>();
-  const translations = new Map<string, HTMLSpanElement>();
+  const translations = new Map<string, { box: HTMLSpanElement; badge: HTMLSpanElement; body: HTMLSpanElement }>();
   const originals = new Map<string, HTMLSpanElement>();
   const replyRows = new Map<string, { row: HTMLElement; time: HTMLTimeElement; state: HTMLElement; copy: HTMLElement; note: HTMLElement; sources:HTMLElement }>();
   let following = true;
@@ -158,8 +158,13 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
           } else {
             let original = originals.get(id), english = translations.get(id);
             if (!original || !english) {
-              original = element('span', 'segment-original'); english = element('span', 'segment-english'); english.lang = 'en';
-              originals.set(id, original); translations.set(id, english); span.replaceChildren(original, english);
+              original = element('span', 'segment-original');
+              const box = element('span', 'segment-english'); box.lang = 'en';
+              const badge = element('span', 'segment-lang-badge'); text(badge, 'EN'); badge.setAttribute('aria-hidden', 'true');
+              const body = element('span', 'segment-english-text');
+              box.append(badge, body);
+              english = { box, badge, body };
+              originals.set(id, original); translations.set(id, english); span.replaceChildren(original, box);
             }
             span.classList.add('segment-bilingual');
             const result = segment.translation?.text;
@@ -167,7 +172,8 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
             if (segment.completed !== false && segment.translation?.status === 'failed') pendingTranslation = 'Chưa dịch được đoạn này · bấm Thử lại';
             if (segment.completed !== false && segment.translation?.status === 'retrying') pendingTranslation = 'Đoạn này đang chờ thử lại…';
             text(original, display.text.trim()); original.hidden = language === 'en' && !!result;
-            text(english, `EN  ${result || pendingTranslation}`);
+            english.box.dataset.ready = String(!!result);
+            text(english.body, result || pendingTranslation);
           }
           const sourceId = segment.translation?.sourceIds?.find(sourceId => pinSources?.has(sourceId)) ?? segment.segment_id;
           const source = pinSources?.get(sourceId);

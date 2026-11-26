@@ -1,7 +1,7 @@
 name: tina-speech
 services:
   viegem-models:
-    image: ghcr.io/poor-frog/tina-viegem:demo
+    image: ghcr.io/poor-frog/tina-viegem:prod
     entrypoint:
       - python
       - /app/viegem/install-models.py
@@ -11,7 +11,7 @@ services:
       - viegem-models:/app/models/viegem-fsmn
     restart: 'no'
   viegem:
-    image: ghcr.io/poor-frog/tina-viegem:demo
+    image: ghcr.io/poor-frog/tina-viegem:prod
     environment:
       TINA_VIEGEM_HOST: '0.0.0.0'
       TINA_VIEGEM_DEVICE: cpu

@@ -2,6 +2,9 @@
 *.sh text eol=lf
 # Contract seals hash exact schema bytes; keep Windows checkouts identical to CI.
 *.schema.json text eol=lf
+# Generated architecture views must match the generator's LF line endings.
+docs/views/*.dsl text eol=lf
+docs/views/*.mmd text eol=lf
 
 # .gitattributes — merge strategy per path.
 #

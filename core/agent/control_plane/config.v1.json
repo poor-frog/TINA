@@ -313,6 +313,13 @@
       "description": "the streaming/meeting-copilot model label"
     },
     {
+      "key": "TINA_DIRECT_TRANSLATE",
+      "class": "defaulted",
+      "default": "1",
+      "description": "Run HTTP-backed live meeting translation directly in agent-api without spawning a one-shot worker container (falls back to worker for CLI runners); set 0 to always use workers",
+      "targets": []
+    },
+    {
       "key": "TINA_LLM_PROVIDER",
       "class": "defaulted",
       "default": "(openai-compat)",

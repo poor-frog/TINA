@@ -2,6 +2,15 @@ import { botFetch, type BotConnection } from './bot-transcript';
 import type { TranscriptSegment } from './transcript-rendering';
 
 export type TranscriptLanguage = 'vi' | 'en' | 'bilingual';
+export const LANGUAGE_STORAGE_KEY = 'transcriptLanguage';
+export function parseTranscriptLanguage(value: unknown, fallback: TranscriptLanguage = 'bilingual'): TranscriptLanguage {
+  return value === 'vi' || value === 'en' || value === 'bilingual' ? value : fallback;
+}
+/** Prioritize the most recent finalized live turns in chronological order when the transcript exceeds 128 turns. */
+export function prioritizeSegmentIds(segments: { completed?: boolean; segment_id?: string }[]): string[] {
+  const confirmed = segments.filter(s => s.completed !== false && !!s.segment_id).map(s => s.segment_id!);
+  return confirmed.length > 128 ? confirmed.slice(-128) : confirmed;
+}
 export interface TranslationGroup {
   group_id: string; members: { segment_id: string; source_text: string; revision?: number }[];
   source_text: string; translated_text: string | null; ready: boolean;
@@ -50,12 +59,18 @@ export function translationSegments<T extends TranscriptSegment & { speaker_id?:
 }
 
 /** Same authenticated backend cache as Terminal; provider keys never reach the extension. */
+export const LIVE_POLL_DELAY_MS = 600;
+export const ERROR_POLL_DELAY_MS = 10000;
+export type TranslationHandle = (() => void) & { nudge: () => void };
+
 export function watchTranslation(config: BotConnection, meetingId: number,
   update: (snapshot: TranslationSnapshot) => void, error: () => void, retry = false,
-  priority: () => string[] = () => []): () => void {
+  priority: () => string[] = () => []): TranslationHandle {
   const abort = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let advancing = false;
+  let polling = false;
+  let queuedNudge = false;
   let force = retry;
   const read = async (method = 'GET', retry = false) => {
     const response = await botFetch(config, `/agent/meeting-translations/${meetingId}`, {
@@ -70,17 +85,66 @@ export function watchTranslation(config: BotConnection, meetingId: number,
     if (!abort.signal.aborted) update(snapshot);
     return snapshot;
   };
+  const schedule = (delay: number) => {
+    if (abort.signal.aborted) return;
+    clearTimeout(timer);
+    timer = setTimeout(poll, delay);
+  };
+  const advanceLoop = async (initialForce: boolean, initialCompleted: number) => {
+    if (advancing || abort.signal.aborted) return;
+    advancing = true;
+    let retryNow = initialForce;
+    let lastCompleted = initialCompleted;
+    try {
+      while (!abort.signal.aborted) {
+        const next = await read('POST', retryNow);
+        retryNow = false;
+        const currentCompleted = next.completed ?? 0;
+        if (next.status === 'complete' || next.can_advance === false || next.retry_after > 0 || currentCompleted <= lastCompleted) break;
+        lastCompleted = currentCompleted;
+      }
+    } catch {
+      if (!abort.signal.aborted) error();
+    } finally {
+      advancing = false;
+      if (queuedNudge && !abort.signal.aborted) {
+        queuedNudge = false;
+        schedule(0);
+      }
+    }
+  };
   const poll = async () => {
-    let delay = 3000;
+    if (polling || abort.signal.aborted) {
+      queuedNudge = true;
+      return;
+    }
+    polling = true;
+    let delay = LIVE_POLL_DELAY_MS;
     try {
       const state = await read();
       if (!advancing && state.status !== 'complete' && (state.can_advance !== false || force) && (state.retry_after === 0 || force)) {
-        const retryNow = force; force = false; advancing = true;
-        void read('POST', retryNow).catch(() => { if (!abort.signal.aborted) error(); }).finally(() => { advancing = false; });
+        const retryNow = force; force = false;
+        void advanceLoop(retryNow, state.completed ?? 0);
       }
-    } catch { if (!abort.signal.aborted) error(); delay = 15000; }
-    if (!abort.signal.aborted) timer = setTimeout(poll, delay);
+    } catch {
+      if (!abort.signal.aborted) error();
+      delay = ERROR_POLL_DELAY_MS;
+    } finally {
+      polling = false;
+    }
+    if (queuedNudge && !abort.signal.aborted) {
+      queuedNudge = false;
+      schedule(0);
+    } else {
+      schedule(delay);
+    }
   };
   void poll();
-  return () => { abort.abort(); clearTimeout(timer); };
+  const stop = (() => { abort.abort(); clearTimeout(timer); }) as TranslationHandle;
+  stop.nudge = () => {
+    if (abort.signal.aborted) return;
+    if (polling || advancing) { queuedNudge = true; return; }
+    schedule(0);
+  };
+  return stop;
 }

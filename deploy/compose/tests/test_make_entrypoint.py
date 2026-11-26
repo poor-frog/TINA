@@ -216,7 +216,7 @@ class EntryPointTest(unittest.TestCase):
         self.assertFalse(any('pull' in args and any(name in args for name in ('meeting-voice-models', 'tts-models')) for args in calls))
         up = next(i for i, args in enumerate(calls) if 'up' in args)
         for name in ('meeting-voice-models', 'tts-models'):
-            prepared = next(i for i, args in enumerate(calls) if 'run' in args and args[-1] == name)
+            prepared = next(i for i, args in enumerate(calls) if 'run' in args and name in args)
             self.assertLess(prepared, up)
         self.assertTrue(any('--profile' in args and 'speech' in args for args in calls))
         self.assertTrue(any('pull' in args and args[-1] == 'redis' for args in calls))
@@ -605,6 +605,24 @@ class EntryPointTest(unittest.TestCase):
 
 
 class BootstrapTest(unittest.TestCase):
+    def test_release_key_bootstraps_local_speech_only_on_fresh_config(self):
+        script = ROOT / "deploy/compose/mint-dev-env.sh"
+        with tempfile.TemporaryDirectory() as td:
+            new = Path(td) / "fresh.env"
+            old = Path(td) / "existing.env"
+            subprocess.run(["bash", str(script), str(old)], capture_output=True, check=True)
+            old_bytes = old.read_bytes()
+            for file in (new, old):
+                subprocess.run(["bash", str(script), str(file), "--voice-release"],
+                               capture_output=True, check=True)
+            values = dict(line.split("=", 1) for line in new.read_text().splitlines()
+                          if "=" in line and not line.startswith("#"))
+            self.assertEqual(values["TINA_MEETING_VOICE"], "1")
+            self.assertIn("asr", values["COMPOSE_PROFILES"].split(","))
+            self.assertEqual(values["TRANSCRIPTION_SERVICE_URL"], "http://gipformer:8000")
+            self.assertEqual(len(values["TRANSCRIPTION_SERVICE_TOKEN"]), 64)
+            self.assertTrue(old.read_bytes() == old_bytes)
+
     def test_fresh_secrets_are_private_unique_and_idempotent(self):
         script = ROOT / "deploy/compose/mint-dev-env.sh"
         with tempfile.TemporaryDirectory() as td:

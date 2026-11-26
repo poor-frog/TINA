@@ -3,6 +3,12 @@ import argparse
 import hashlib
 import json
 import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
 from pathlib import Path
 
 
@@ -19,13 +25,52 @@ def verify_file(path, entry):
         raise RuntimeError("TTS asset verification failed: " + entry["path"])
 
 
+def install_encrypted_archive(directory, manifest, archive):
+    files = {}
+    for repo in manifest["repos"]:
+        snapshot = Path("hub") / ("models--" + repo["repo"].replace("/", "--")) / "snapshots" / repo["revision"]
+        files.update((str(snapshot / entry["path"]), entry) for entry in repo["files"])
+    password = sys.stdin.readline(66).rstrip("\n")
+    if not re.fullmatch(r"[a-f0-9]{64}", password):
+        raise RuntimeError("Missing or invalid TTS bundle password")
+    with tempfile.TemporaryDirectory(prefix=".tina-tts-import-", dir=directory) as tmp:
+        stage = Path(tmp)
+        model_tar = stage / "models.tar.gz"
+        result = subprocess.run(["openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-iter", "200000",
+                                 "-md", "sha256", "-pass", "stdin", "-in", str(archive), "-out", str(model_tar)],
+                                input=password + "\n", text=True, capture_output=True, timeout=120)
+        if result.returncode:
+            raise RuntimeError("TTS bundle decryption failed")
+        pending = set(files)
+        total = 0
+        with tarfile.open(model_tar, mode="r|gz") as data:
+            for member in data:
+                total += member.size
+                if not member.isfile() or member.name not in pending or total > 600 * 1024**2:
+                    raise RuntimeError("Unexpected file in TTS model archive")
+                pending.remove(member.name)
+                path = stage / member.name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with data.extractfile(member) as source, path.open("xb") as target:
+                    shutil.copyfileobj(source, target)
+                verify_file(path, files[member.name])
+        if pending:
+            raise RuntimeError("TTS model archive is incomplete")
+        for name in files:
+            target = directory / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            (stage / name).replace(target)
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, default=Path(os.environ.get("HF_HOME", "/models")))
+    parser.add_argument("--encrypted-archive", type=Path)
     args = parser.parse_args()
     from huggingface_hub import snapshot_download
 
     manifest = json.loads(Path(__file__).with_name("model-assets.json").read_text())
+    if args.encrypted_archive:
+        args.directory.mkdir(parents=True, exist_ok=True)
+        install_encrypted_archive(args.directory, manifest, args.encrypted_archive)
     for repo in manifest["repos"]:
         cache = args.directory / "hub"
         repo_cache = cache / ("models--" + repo["repo"].replace("/", "--"))

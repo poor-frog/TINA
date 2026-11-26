@@ -124,6 +124,12 @@ cookies or GitHub tokens are imported. See [Agent Reach](../agent-reach/README.m
 
 ### Meeting voice
 
+On a fresh clone, install the normal prerequisites and place the shared release
+`.env.keys` at the repository root. Plain `make all` seeds the local config with
+meeting voice and CPU Gipformer. It downloads and verifies the encrypted Enhanced
+bundle from GitHub, unlocks it with that same key, and populates the model volume.
+Existing env files are preserved. The verified volume is reused on subsequent runs.
+
 Set `TINA_MEETING_VOICE=1` to enable voice on an instance with trained wake word models and a TTS
 token. To also enable the LiveKit Agents runtime, set `LIVEKIT_AGENT_URL=http://livekit-agent:8080`.
 When the main environment has no TTS token, Stack loads `deploy/tts/.env` with the shared root

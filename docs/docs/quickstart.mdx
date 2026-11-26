@@ -6,14 +6,15 @@ description: "Clone TINA, unlock its private deployment config, and start the co
 ---
 
 This walkthrough starts the configured TINA deployment: its Compose project, Google sign-in,
-speech recognition, and agent services. It preserves the deployment's existing data.
+speech recognition, VieNeu Enhanced speech synthesis, and agent services. It preserves the
+deployment's existing configuration and data.
 
 ## Prerequisites
 
 - macOS with OrbStack or Docker Desktop, or Linux with Docker Engine **≥ v26** and Docker Compose
   supporting `up --wait`. Building the source stack needs about **8 vCPUs / 16 GB RAM**.
 - `git`, `make`, Python **3.10+**, a local Docker context, Dotenvx, and the private `.env.keys` file
-  matching this repository's encrypted `deploy/compose/.env`.
+  matching this repository's encrypted `deploy/compose/.env` and TTS release bundle.
 
 ## 1. Clone the repository
 
@@ -37,15 +38,13 @@ Or use npm: `npm install --global @dotenvx/dotenvx`.
 ## 3. Provide the matching private key
 
 Copy the existing `.env.keys` from your private password manager or secure backup to the repository
-root. It must contain the `DOTENV_PRIVATE_KEY` that matches `deploy/compose/.env`; a new key cannot
-decrypt the existing file. Keep `.env.keys` private. Git ignores it, but do not paste the key into a
-command, commit, issue, or documentation.
+root. Keep the matching `.env.keys` file private and outside Git.
 
 ## 4. Preview and start
 
 Configure `TINA_VIEGEM_TOKEN` in the selected encrypted env for managed VieGem, or set
 `TRANSCRIPTION_SERVICE_URL` for an external OpenAI-compatible ASR service. `make all` downloads
-and verifies the managed model assets when VieGem is configured.
+and verifies the managed ASR assets and unlocks the encrypted TTS bundle when configured.
 
 ```bash
 make plan     # read-only: confirm the project and selected profiles
@@ -53,13 +52,14 @@ make all      # build, start, wait for readiness, and print the API key + URLs
 ```
 
 This starts the existing `tina-production` project and retains its database, recordings, and
-workspaces. The current configured URLs are Terminal `http://127.0.0.1:23000` and API gateway
-`http://127.0.0.1:28056`; the command output is authoritative if the deployment config changes.
-The matching Google OAuth credentials are already in the encrypted config. On a new database, the
-first successful sign-in becomes administrator.
+workspaces. Use the Terminal and API URLs reported at the end (defaults: Terminal
+`http://127.0.0.1:23000`, API gateway `http://127.0.0.1:28056`). The matching Google OAuth
+credentials are already in the encrypted config, and agent questions require a provider
+configured in **Settings → Models**. On a new database, the first successful sign-in becomes
+administrator.
 
 <Note>
-Keep both the private Dotenvx key and the API key printed by `make all` secret. If you do not have
+Keep both the private Dotenvx key and any provisioned API key secret. If you do not have
 the matching Dotenvx key, do not invent a replacement: use the separate [fresh-install guide](/deployment#quick-start-docker-compose).
 </Note>
 
@@ -67,7 +67,7 @@ the matching Dotenvx key, do not invent a replacement: use the separate [fresh-i
 
 <Steps>
   <Step title="Open the terminal">
-    Open the Terminal URL printed by `make all` and sign in with Google.
+    Open the Terminal URL printed by `make all` and follow the local sign-in setup.
   </Step>
   <Step title="Configure speech recognition">
     Under Settings → Models → Transcription, select VieGem + LM or configure an external endpoint.
@@ -84,7 +84,7 @@ the matching Dotenvx key, do not invent a replacement: use the separate [fresh-i
 
 ## 2′. Same thing over the API
 
-Use the API key printed by `make all`, then send a bot and read the transcript:
+Retrieve the API key privately with `make -C deploy/compose provision-token`, then send a bot and read the transcript:
 
 ```bash
 # keep this key private

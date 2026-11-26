@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { watchTranslation, translationSegments, type TranslationGroup, type TranslationSnapshot } from './translation';
+import { watchTranslation, translationSegments, parseTranscriptLanguage, prioritizeSegmentIds, type TranslationGroup, type TranslationSnapshot } from './translation';
 const gateway = 'http://127.0.0.1:18056';
 const connection = { botGatewayUrl: gateway, account: { id: '7', email: 'fixture@example.test',
   key: 'a'.repeat(43), gateway, terminal: 'http://127.0.0.1:23000' } };
@@ -77,4 +77,42 @@ for (const [state, retry, posts] of [
     if (posts) assert.equal(JSON.parse(String(sent[0].body)).retry, retry);
   } finally { stop(); globalThis.fetch = original; }
 }
+
+// Verify continuous drain loop and reactive nudge on new finalized STT segments.
+{
+  let count = 0;
+  globalThis.fetch = async (_input, init = {}) => {
+    if (init.method === 'POST') count++;
+    return Response.json({
+      version: 'meeting-translation.v2', meeting_id: 6,
+      status: count >= 2 ? 'complete' : 'pending',
+      total: 2, completed: count, retry_after: 0, can_advance: count < 2,
+      groups: [
+        { ...phrase, status: count >= 1 ? 'complete' : 'pending', translated_text: count >= 1 ? phrase.translated_text : null },
+        { ...phrase, group_id: 'phrase:b', status: count >= 2 ? 'complete' : 'pending', translated_text: count >= 2 ? 'Second.' : null },
+      ],
+    });
+  };
+  try {
+    let done!: () => void;
+    const finished = new Promise<void>(resolve => { done = resolve; });
+    const stop = watchTranslation(connection, 6,
+      state => { if (state.completed === 2) done(); }, () => assert.fail('Unexpected drain error'));
+    stop.nudge();
+    await finished;
+    stop();
+    assert.equal(count, 2);
+  } finally { globalThis.fetch = original; }
+}
+
+// Verify language preference validation and live-tail priority slicing (>128 turns).
+assert.equal(parseTranscriptLanguage('en'), 'en');
+assert.equal(parseTranscriptLanguage('vi'), 'vi');
+assert.equal(parseTranscriptLanguage('invalid'), 'bilingual');
+const longMeeting = Array.from({ length: 150 }, (_, i) => ({ segment_id: `seg-${i}`, completed: true }));
+longMeeting.push({ segment_id: 'draft-tail', completed: false });
+const prioritized = prioritizeSegmentIds(longMeeting);
+assert.equal(prioritized.length, 128);
+assert.equal(prioritized[0], 'seg-22');
+assert.equal(prioritized[127], 'seg-149');
 console.log('translation isolated retries and revision checks passed');

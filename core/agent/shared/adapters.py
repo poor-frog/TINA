@@ -335,6 +335,15 @@ class RuntimeHttpClient(RuntimePort):
             if exc.code != 404:
                 raise
 
+    def destroy(self, workload_id: str) -> None:
+        req = urllib.request.Request(f"{self._base}/workloads/{workload_id}", method="DELETE")
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout):
+                pass
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+
 
 def _b64u(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
