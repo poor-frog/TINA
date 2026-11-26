@@ -417,6 +417,10 @@ Resources:
             - {Name: VALKEY_HOST, Value: !Ref ValkeyHost}
             - {Name: ADMIN_API_URL, Value: http://127.0.0.1:8001}
             - {Name: MEETING_API_URL, Value: http://127.0.0.1:8080}
+            # Edge per-IP rate limiting is enforced by CloudFront WAF (TinaEdgeRatePerIP) on real
+            # client IPs; the internal VPC gateway receives all Terminal proxy traffic from one
+            # container IP, while Gateway's per-user rate limiter still guards each user key.
+            - {Name: GUARD_ENABLED, Value: 'false'}
           Secrets:
             - {Name: VALKEY_PASSWORD, ValueFrom: !Ref ValkeySecretArn}
             - {Name: INTERNAL_API_SECRET, ValueFrom: !Ref InternalSecret}

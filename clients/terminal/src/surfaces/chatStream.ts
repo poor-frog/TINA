@@ -201,7 +201,15 @@ export async function streamChatTurn(
     if (!r.ok) {
       // 4xx is a real client/terminal error — surface it, don't retry for the whole hard cap. A 5xx
       // (transient gateway/upstream) is resumable → reconnect from the cursor.
-      if (r.status < 500) { terminal = true; cb.onError(`Chat request failed (${r.status})`); return "terminal"; }
+      if (r.status < 500) {
+        terminal = true;
+        const msg =
+          r.status === 429
+            ? "Too many requests — please wait a moment and try again. (429)"
+            : `Chat request failed (${r.status})`;
+        cb.onError(msg);
+        return "terminal";
+      }
       return "closed";
     }
     const reader = r.body?.getReader();

@@ -315,6 +315,22 @@ describe("streamChatTurn — cold start & resume", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);  // 4xx is terminal — no resume loop
   });
 
+  it("explains 429 rate limits clearly instead of a generic status error", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce({ ok: false, status: 429, body: null } as unknown as Response);
+    const { state, cb } = recorder();
+
+    const result = await streamChatTurn(
+      { prompt: "hi", session: "s1", active: undefined },
+      cb,
+      { fetchImpl: fetchImpl as unknown as typeof fetch, signal: new AbortController().signal, ...noWait },
+    );
+
+    expect(state.error).toMatch(/too many requests/i);
+    expect(state.error).toContain("429");
+    expect(result.terminal).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("stops resuming when the caller aborts", async () => {
     const ctrl = new AbortController();
     const fetchImpl = vi.fn().mockImplementation(async () => { ctrl.abort(); return sseResponse([]); });

@@ -565,14 +565,44 @@ export function MeetingDetailView({
     return () => controller.abort();
   }, [resolvedId, phase]);
 
-  // Fetch Voice Agent TTS ("TINA Agent") replies from `/api/meetings/{id}/voice-assistant`
+  // Fetch Voice Agent TTS ("TINA Agent") replies from `/api/meetings/{id}/voice-assistant`.
+  // Strictly single-flight + single-timer: focus/transcript events cancel any pending timer and
+  // coalesce while a request is in flight, and polling pauses while the tab is hidden so live
+  // meetings never fork multiple 3s loops or trip edge/gateway rate limits.
   useEffect(() => {
     if (!resolvedId || !/^[1-9]\d*$/.test(resolvedId)) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight = false;
+    let rerunRequested = false;
     const url = `/api/meetings/${encodeURIComponent(resolvedId)}/voice-assistant`;
 
+    const clearPending = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+
+    const scheduleNext = (delayMs = 3000) => {
+      clearPending();
+      if (!controller.signal.aborted && isLive && !document.hidden) {
+        timer = setTimeout(() => {
+          timer = undefined;
+          void fetchVoice();
+        }, delayMs);
+      }
+    };
+
     const fetchVoice = async () => {
+      if (controller.signal.aborted) return;
+      clearPending();
+      if (inFlight) {
+        rerunRequested = true;
+        return;
+      }
+      inFlight = true;
+      rerunRequested = false;
       try {
         const res = await fetch(url, { cache: "no-store", signal: controller.signal });
         if (!res.ok) return;
@@ -585,21 +615,56 @@ export function MeetingDetailView({
       } catch {
         /* voice assistant unavailable or aborted */
       } finally {
-        if (!controller.signal.aborted && isLive) {
-          timer = setTimeout(() => void fetchVoice(), 3000);
+        inFlight = false;
+        if (!controller.signal.aborted) {
+          if (rerunRequested && !document.hidden) {
+            rerunRequested = false;
+            clearPending();
+            timer = setTimeout(() => {
+              timer = undefined;
+              void fetchVoice();
+            }, 1000);
+          } else {
+            scheduleNext(3000);
+          }
         }
       }
     };
 
-    void fetchVoice();
-    const onFocus = () => void fetchVoice();
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("tina:transcript-corrected", onFocus);
+    if (!document.hidden) {
+      void fetchVoice();
+    }
+
+    const onWake = () => {
+      if (document.hidden) {
+        clearPending();
+        return;
+      }
+      if (!inFlight) void fetchVoice();
+      else rerunRequested = true;
+    };
+
+    const onCorrected = (event: Event) => {
+      if (document.hidden) return;
+      const detail = (event as CustomEvent)?.detail as { meetingId?: string | number; meeting_id?: string | number } | undefined;
+      const target = detail?.meetingId ?? detail?.meeting_id;
+      if (target != null && String(target) !== resolvedId) return;
+      // Live meetings already poll on a single 3s cadence — don't fire per-revision bursts.
+      if (!isLive) {
+        if (!inFlight) void fetchVoice();
+        else rerunRequested = true;
+      }
+    };
+
+    window.addEventListener("focus", onWake);
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("tina:transcript-corrected", onCorrected);
     return () => {
       controller.abort();
-      if (timer) clearTimeout(timer);
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("tina:transcript-corrected", onFocus);
+      clearPending();
+      window.removeEventListener("focus", onWake);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("tina:transcript-corrected", onCorrected);
     };
   }, [resolvedId, isLive]);
 
