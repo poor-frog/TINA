@@ -303,11 +303,11 @@ it('voiceOnly mode shows only voice selection and preview while preserving exist
     if(options?.method==='PUT'){requests.push({url,body});return Response.json(body);}
     if(url==='/api/user/voice')return Response.json({prepare_new_bots:true,speech_voice:'auto',pronunciations:{TINA:'ti na'}});
     if(url==='/api/bots/voice/services')return Response.json(services);
-    if(url==='/api/bots/voice/preview')return new Response(new Blob(['RIFF'],{type:'audio/wav'}),{status:200});
+    if(url==='/api/bots/voice/preview')return new Response(new Uint8Array([1,2,3]),{status:200,headers:{'Content-Type':'audio/wav'}});
     return new Response('',{status:404});
   }));
-  const createUrl=vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:preview-voice');
-  const revokeUrl=vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
+  const createUrl=vi.fn(()=>'blob:preview-voice'),revokeUrl=vi.fn();
+  vi.stubGlobal('URL',class extends URL{static createObjectURL=createUrl;static revokeObjectURL=revokeUrl;});
   const playSpy=vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue(undefined);
   const pauseSpy=vi.spyOn(HTMLMediaElement.prototype,'pause').mockImplementation(()=>{});
   try{
@@ -336,8 +336,6 @@ it('voiceOnly mode shows only voice selection and preview while preserving exist
     }));
     await screen.findByText('All changes saved');
   }finally{
-    createUrl.mockRestore();
-    revokeUrl.mockRestore();
     playSpy.mockRestore();
     pauseSpy.mockRestore();
   }
