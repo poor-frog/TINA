@@ -918,6 +918,29 @@
   color: var(--lp-teal);
 }
 
+/* Twin Interactive Showcase Row (Automation Flow + Interactive Knowledge Graph) */
+.howInteractiveRow {
+  margin-top: 32px;
+  display: grid;
+  grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
+  gap: 28px;
+  align-items: stretch;
+}
+
+.howInteractiveRow :global(.u201-shell) {
+  margin-top: 0;
+  height: 100%;
+}
+
+.howInteractiveRow :global(.u201) {
+  width: 100%;
+  height: 388px;
+}
+
+.howInteractiveRow :global(.u201-stage) {
+  top: 16px;
+}
+
 /* Proof Banner */
 .proofBanner {
   margin-top: 48px;
@@ -1798,6 +1821,7 @@
     max-width: 100%;
   }
   .stepsGrid,
+  .howInteractiveRow,
   .cardGrid3,
   .awarenessGrid,
   .platformPanels,
@@ -1805,6 +1829,16 @@
   .privacyLayout,
   .useCaseGrid2 {
     grid-template-columns: 1fr;
+  }
+  .howInteractiveRow {
+    gap: 22px;
+  }
+  .howInteractiveRow :global(.u201) {
+    max-width: 100%;
+    height: 360px;
+  }
+  .howInteractiveRow :global(.u201-stage) {
+    top: 6px;
   }
   .transcriptFoot {
     grid-template-columns: 1fr;

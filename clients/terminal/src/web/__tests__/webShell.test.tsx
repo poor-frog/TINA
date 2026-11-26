@@ -1375,6 +1375,9 @@ describe("WebShell production UI (Option A & Option B)", () => {
 
     render(<AuthGate><div>App</div></AuthGate>);
     expect(await screen.findByTestId("lucian-automation-flow")).toBeTruthy();
+    const kgCard = screen.getByTestId("landing-knowledge-graph");
+    expect(kgCard).toBeTruthy();
+    expect(kgCard.getAttribute("data-selected-node")).toBe("jane");
     expect(screen.getByTestId("lucian-bento-grid")).toBeTruthy();
     expect(screen.getByTestId("lucian-cursor-glow-grid")).toBeTruthy();
     expect(screen.getByTestId("lucian-glow-cta")).toBeTruthy();
@@ -1382,5 +1385,21 @@ describe("WebShell production UI (Option A & Option B)", () => {
     // Run #201 pipeline flow button works cleanly without throwing
     fireEvent.click(screen.getByRole("button", { name: /Chạy thử/i }));
     expect(screen.getByRole("button", { name: /Đang chạy/i })).toBeTruthy();
+
+    // Interactive Knowledge Graph card supports focus cycling, zoom, drag/pan, and reset
+    fireEvent.click(screen.getByRole("button", { name: /Đổi tiêu điểm/i }));
+    expect(kgCard.getAttribute("data-selected-node")).toBe("acme");
+
+    const zoomBefore = screen.getByTestId("landing-kg-zoom").textContent;
+    fireEvent.click(screen.getByRole("button", { name: "Phóng to đồ thị" }));
+    expect(screen.getByTestId("landing-kg-zoom").textContent).not.toBe(zoomBefore);
+
+    const canvas = screen.getByRole("img", { name: /Đồ thị tri thức tương tác TINA/i });
+    fireEvent.pointerDown(canvas, { clientX: 120, clientY: 120, pointerId: 1 });
+    fireEvent.pointerMove(canvas, { clientX: 170, clientY: 150, pointerId: 1 });
+    fireEvent.pointerUp(canvas, { clientX: 170, clientY: 150, pointerId: 1 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Đặt lại vị trí đồ thị tri thức" }));
+    expect(kgCard.getAttribute("data-selected-node")).toBe("jane");
   });
 });

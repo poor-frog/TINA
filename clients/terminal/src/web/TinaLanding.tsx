@@ -5,6 +5,7 @@
  *  spotlight, interactive cel-animated Hero scene, and private-infrastructure governance. */
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { HeroMeetingScene } from "./HeroMeetingScene";
+import { LandingKnowledgeGraphCard } from "./LandingKnowledgeGraphCard";
 import { LANDING_COPY, type LandingLang } from "./landingCopy";
 import { PrivateInfraIso } from "./PrivateInfraIso";
 import { StepScene } from "./StepScene";
@@ -59,6 +60,7 @@ export function TinaLanding({
   const [wikiSaved, setWikiSaved] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [kgPulseKey, setKgPulseKey] = useState(0);
 
   const copy = LANDING_COPY[lang];
   const hasOAuth = providers.google || providers.microsoft;
@@ -608,7 +610,10 @@ export function TinaLanding({
               </article>
             </div>
 
-            <LucianAutomationFlow lang={lang} />
+            <div className={styles.howInteractiveRow}>
+              <LucianAutomationFlow lang={lang} onRunComplete={() => setKgPulseKey((k) => k + 1)} />
+              <LandingKnowledgeGraphCard lang={lang} pulseKey={kgPulseKey} />
+            </div>
 
             <div className={styles.proofBanner}>
               <strong>

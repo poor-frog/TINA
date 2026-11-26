@@ -1,0 +1,389 @@
+/* LandingKnowledgeGraphCard — Interactive Cosmic Knowledge Graph showcase card
+ * Paired side-by-side with LucianAutomationFlow (#201) in section#how of TinaLanding. */
+
+.tina-kg-card {
+  position: relative;
+  width: 100%;
+  height: 388px;
+  border-radius: 26px;
+  overflow: hidden;
+  background: #050812;
+  box-shadow: 0 0 0 1.5px #0c0d0a, 5px 5px 0 #0c0d0a;
+  color: #f4f8ff;
+  isolation: isolate;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Subtle luminous top-edge rim sheen */
+.tina-kg-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 1px 0 rgba(165, 243, 252, 0.16), inset 0 0 0 1px rgba(148, 197, 255, 0.08);
+  z-index: 4;
+}
+
+.tina-kg-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.tina-kg-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.tina-kg-canvas.is-pointer {
+  cursor: pointer;
+}
+
+.tina-kg-canvas.is-grabbing {
+  cursor: grabbing;
+}
+
+/* Floating translucent header overlay (mirrors .u201-hd structure) */
+.tina-kg-hd {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  padding: 15px 16px 20px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 3;
+  background: linear-gradient(180deg, rgba(5, 8, 18, 0.86) 0%, rgba(5, 8, 18, 0.42) 65%, rgba(5, 8, 18, 0) 100%);
+  pointer-events: none;
+}
+
+.tina-kg-title {
+  margin-right: auto;
+  min-width: 0;
+}
+
+.tina-kg-title b {
+  display: block;
+  font-size: 14px;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+  color: #f8fbff;
+  line-height: 1.25;
+}
+
+.tina-kg-title small {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: rgba(196, 218, 242, 0.72);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tina-kg-title small::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4be8ff;
+  box-shadow: 0 0 8px rgba(75, 232, 255, 0.9);
+}
+
+.tina-kg-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.tina-kg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 11px 0 9px;
+  border: 1px solid rgba(186, 230, 253, 0.2);
+  border-radius: 999px;
+  background: rgba(11, 20, 38, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #e6f2ff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+}
+
+.tina-kg-btn:hover {
+  background: rgba(20, 35, 62, 0.88);
+  border-color: rgba(125, 211, 252, 0.45);
+  transform: translateY(-1px);
+}
+
+.tina-kg-btn:active {
+  transform: translateY(0);
+}
+
+.tina-kg-card .tina-kg-btn:focus-visible {
+  outline: 2px solid #4be8ff;
+  outline-offset: 2px;
+}
+
+.tina-kg-btn svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+.tina-kg-btn-accent {
+  border-color: rgba(75, 232, 255, 0.42);
+  background: rgba(13, 44, 62, 0.78);
+  color: #8ef5ff;
+}
+
+.tina-kg-btn-accent:hover {
+  background: rgba(18, 62, 84, 0.92);
+  border-color: rgba(94, 242, 194, 0.65);
+  color: #d7fff8;
+}
+
+/* Floating top-right drag hint pill (fades gracefully once user interacts) */
+.tina-kg-hint {
+  position: absolute;
+  right: 16px;
+  top: 56px;
+  z-index: 3;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 197, 255, 0.18);
+  background: rgba(7, 13, 27, 0.66);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: rgba(206, 228, 252, 0.78);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.tina-kg-hint svg {
+  width: 11px;
+  height: 11px;
+  color: #5ef2c2;
+  flex: none;
+}
+
+/* Bottom floating glass HUD: Inspector chip (left) + Legend & Zoom controls (right) */
+.tina-kg-hud-bottom {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.tina-kg-inspector {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  max-width: 340px;
+  padding: 7px 11px;
+  border-radius: 14px;
+  border: 1px solid rgba(186, 230, 253, 0.16);
+  background: rgba(6, 12, 24, 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.85);
+}
+
+.tina-kg-orb {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.tina-kg-inspector-body {
+  min-width: 0;
+}
+
+.tina-kg-inspector-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.tina-kg-inspector-top strong {
+  font-size: 11.5px;
+  font-weight: 760;
+  color: #f8fafc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tina-kg-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(75, 232, 255, 0.35);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.tina-kg-links {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(186, 210, 236, 0.68);
+  font-variant-numeric: tabular-nums;
+}
+
+.tina-kg-meta {
+  margin: 2px 0 0;
+  font-size: 10px;
+  line-height: 1.35;
+  color: rgba(196, 218, 242, 0.72);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tina-kg-controls {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.tina-kg-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(186, 230, 253, 0.13);
+  background: rgba(6, 12, 24, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.tina-kg-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9.5px;
+  font-weight: 650;
+  color: rgba(214, 230, 248, 0.78);
+  white-space: nowrap;
+}
+
+.tina-kg-legend-item i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: block;
+}
+
+.tina-kg-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid rgba(186, 230, 253, 0.18);
+  background: rgba(6, 12, 24, 0.8);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.tina-kg-zbtn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #e2f1ff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.tina-kg-zbtn:hover {
+  background: rgba(75, 232, 255, 0.18);
+  color: #ffffff;
+}
+
+.tina-kg-card .tina-kg-zbtn:focus-visible {
+  outline: 2px solid #4be8ff;
+  outline-offset: 1px;
+}
+
+.tina-kg-zval {
+  min-width: 36px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(214, 232, 250, 0.82);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1120px) {
+  .tina-kg-legend {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .tina-kg-card {
+    height: 372px;
+  }
+  .tina-kg-title small {
+    display: none;
+  }
+  .tina-kg-hint {
+    top: 52px;
+  }
+  .tina-kg-inspector {
+    max-width: calc(100% - 102px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tina-kg-btn,
+  .tina-kg-zbtn {
+    transition: none;
+  }
+}

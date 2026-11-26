@@ -4,12 +4,13 @@ End-user production interface mounted at `/` and `/meetings/[meetingId]` alongsi
 TINA Terminal workbench at `/terminal`.
 
 ## Architecture
-- **Pre-Login Landing & OAuth Gate (`TinaLanding.tsx` + `HeroMeetingScene.tsx` + `tinaLanding.module.css` mounted by `src/app/AuthGate.tsx`)**:
+- **Pre-Login Landing & OAuth Gate (`TinaLanding.tsx` + `HeroMeetingScene.tsx` + `LandingKnowledgeGraphCard.tsx` + `tinaLanding.module.css` mounted by `src/app/AuthGate.tsx`)**:
   Editorial neo-brutalist warm-paper pre-login showcase tailored to TINA (Google/Microsoft OAuth,
   first-run admin claim, dev `@example.test` debug login, interactive multi-layer animated Hero
   meeting scene with clickable teammates & rolling TINA bot, bilingual VI+EN live transcript & Voice
-  TTS preview, self-hosted architecture overview, platforms/models matrix, and FAQ), strictly
-  isolated via CSS Modules with self-contained artwork in `public/landing/`.
+  TTS preview, interactive draggable/pannable cosmic Knowledge Graph paired alongside the `#201`
+  meeting automation flow, self-hosted architecture overview, platforms/models matrix, and FAQ),
+  strictly isolated via CSS Modules with self-contained artwork in `public/landing/`.
 - **Scoped CSS (`tina-web.css`)**: All layout, dark/light theme tokens, and Terminal-to-Web CSS
   variable bridges live under `.tina-web` and `.tina-login-shell` so Tailwind and Dockview styles
   in `/terminal` remain completely isolated.

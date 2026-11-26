@@ -52,7 +52,13 @@ function getFlowCopy(lang: "vi" | "en") {
   };
 }
 
-export function LucianAutomationFlow({ lang = "vi" }: { lang?: "vi" | "en" }) {
+export function LucianAutomationFlow({
+  lang = "vi",
+  onRunComplete,
+}: {
+  lang?: "vi" | "en";
+  onRunComplete?: () => void;
+}) {
   const copy = getFlowCopy(lang);
   const rootRef = useRef<HTMLDivElement>(null);
   const pathRefs = useRef<Array<SVGPathElement | null>>([]);
@@ -154,6 +160,7 @@ export function LucianAutomationFlow({ lang = "vi" }: { lang?: "vi" | "en" }) {
             setRunning(false);
             const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
             setFooterText(copy.finished(elapsed));
+            onRunComplete?.();
           };
           flow(1, 600, () => step(2, 480, finishBranch));
           flow(2, 600, () => step(3, 680, finishBranch));
