@@ -74,4 +74,32 @@ function harness(config?: { callbackStampedFrames?: boolean }, spacingMs = 2 * F
   h.mgr.removeAll();
 }
 
+// ── C: overflow preserves an already-transcribed visible draft as confirmed instead of retracting ──
+{
+  const mgr = new SpeakerStreamManager({ maxRetainedDuration: 30, callbackStampedFrames: true });
+  const SID = 'ch-0:6';
+  const confirmed: { text: string; start: number; end: number }[] = [];
+  const pending: string[] = [];
+  let overflows = 0;
+  mgr.onOverflow = () => { overflows++; };
+  mgr.onSegmentReady = () => {};
+  mgr.onSegmentPending = (_id, _n, text) => pending.push(text);
+  mgr.onSegmentConfirmed = (_id, _n, text, start, end) => confirmed.push({ text, start, end });
+  mgr.addSpeaker(SID, 'JKY LEE');
+  const trySubmit = () => (mgr as unknown as { trySubmit(id: string): Promise<void> }).trySubmit(SID);
+  for (let i = 0; i < 80; i++) mgr.feedAudio(SID, frame(0.1), T0 + i * FRAME_MS); // ~20.5s
+  await trySubmit();
+  mgr.handleTranscriptionResult(SID, 'đoạn nói dài đang hiển thị draft', 20.5,
+    [{ text: 'đoạn nói dài đang hiển thị draft', start: 0, end: 20.5 }], 'vi');
+  ok(pending.at(-1) === 'đoạn nói dài đang hiển thị draft', 'draft emitted before overflow');
+  // Simulate slow ASR holding in-flight request while audio crosses 30s capacity
+  await trySubmit();
+  for (let i = 80; i < 122; i++) mgr.feedAudio(SID, frame(0.1), T0 + i * FRAME_MS);
+  ok(overflows > 0, 'overflow fired past 30s');
+  ok(confirmed.length === 1 && confirmed[0].text === 'đoạn nói dài đang hiển thị draft',
+    'overflow promotes visible draft to confirmed instead of retracting it');
+  ok(!pending.includes(''), 'overflow does not emit empty retract for the promoted draft');
+  mgr.removeAll();
+}
+
 console.log(`\n✅ hard-cap-cut: ${checks} checks passed`);

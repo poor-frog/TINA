@@ -13,7 +13,7 @@ import numpy as np
 import soundfile as sf
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from engine import VieGemEngine, verify_model_assets, name_biased_decoder, contextual_biased_decoder
+from engine import VieGemEngine, verify_model_assets, name_biased_decoder, contextual_biased_decoder, split_long_speech_ranges
 from asr_audio import AudioInputError
 from asr_telemetry import AsrMetrics
 from http_worker import create_app
@@ -93,6 +93,34 @@ class EngineTests(unittest.TestCase):
     def test_missing_assets_fail_before_code_import(self):
         with self.assertRaises(FileNotFoundError):
             verify_model_assets(Path('/nonexistent/tina-viegem-model-assets'))
+
+    def test_long_monologue_splits_deterministically_at_quiet_dip(self):
+        sr = 16000
+        # 20s continuous speech with a quiet 200ms dip at 8.0s (inside [6s, 10s])
+        pcm = np.full(20 * sr, 0.25, dtype=np.float32)
+        pcm[int(8.0 * sr):int(8.2 * sr)] = 0.002
+
+        # Short (<11s) interval stays untouched
+        self.assertEqual(split_long_speech_ranges(pcm[:10 * sr], [(0, 10 * sr)], max_segment_sec=10.0), [(0, 10 * sr)])
+
+        # Growing 12s -> 16s -> 20s speech produces the EXACT same first cut (~8.1s),
+        # allowing LocalAgreement-2 to confirm segment 0 incrementally across calls.
+        cuts_12 = split_long_speech_ranges(pcm[:12 * sr], [(0, 12 * sr)], max_segment_sec=10.0)
+        cuts_16 = split_long_speech_ranges(pcm[:16 * sr], [(0, 16 * sr)], max_segment_sec=10.0)
+        cuts_20 = split_long_speech_ranges(pcm, [(0, 20 * sr)], max_segment_sec=10.0)
+        self.assertGreaterEqual(len(cuts_12), 2)
+        self.assertEqual(cuts_12[0], cuts_16[0])
+        self.assertEqual(cuts_16[0], cuts_20[0])
+        self.assertTrue(int(7.9 * sr) <= cuts_12[0][1] <= int(8.3 * sr), cuts_12[0])
+
+    def test_default_silence_ms_is_500(self):
+        vad = Mock()
+        vad.generate.return_value = [{'value': [[0, 1000]]}]
+        engine = VieGemEngine.__new__(VieGemEngine)
+        engine.vad = vad
+        engine.decode = Mock(return_value='xin chào')
+        engine.transcribe(wav(np.full(16000, .1, dtype=np.float32)))
+        self.assertEqual(vad.generate.call_args.kwargs['max_end_silence_time'], 500)
 
 
 class ApiTests(unittest.IsolatedAsyncioTestCase):

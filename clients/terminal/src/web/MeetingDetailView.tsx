@@ -46,7 +46,8 @@ import {
   refreshMeetings,
   type ProcessedNoteDTO,
 } from "../surfaces/liveMeetings";
-import { useMeetingLive } from "../surfaces/meetingLive";
+import { useMeetingLive, type LiveSegment } from "../surfaces/meetingLive";
+import { DURABLE_REFETCH_ATTEMPTS, DURABLE_REFETCH_DELAY_MS, pinSubscriptionUid } from "../canvas/useMeeting";
 import { useMeetingTranslation, type TranscriptLanguage } from "../canvas/MeetingTranslation";
 import type { MeetingAudioFragment, MeetingAudioPosition } from "../canvas/MeetingAudioPlayer";
 import { streamChatTurn } from "../surfaces/chatStream";
@@ -155,6 +156,122 @@ function formatChapterClock(tsMs?: number, firstMs?: number): string {
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
+function formatWallClock(tsMs?: number, rawSeconds?: number | string): string {
+  if (typeof rawSeconds === "string" && rawSeconds.trim()) return rawSeconds;
+  const epoch =
+    typeof tsMs === "number" && Number.isFinite(tsMs) && tsMs > 100_000_000_000
+      ? tsMs
+      : typeof rawSeconds === "number" && Number.isFinite(rawSeconds) && rawSeconds > 1_000_000_000
+        ? rawSeconds * 1000
+        : undefined;
+  if (epoch != null) {
+    const dt = new Date(epoch);
+    if (Number.isFinite(dt.getTime())) {
+      return dt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+    }
+  }
+  if (typeof rawSeconds === "number" && Number.isFinite(rawSeconds)) {
+    return formatChapterClock(rawSeconds * 1000);
+  }
+  return "";
+}
+
+/** Merge durable REST lines with live SSE segments by segment_id without dropping older durable
+ *  history (beyond SSE replay cap), without losing the last 0–12s on stop, and without letting
+ *  a stale 12s poll resurrect a retracted or finalized live draft. Exported for unit tests. */
+export function mergeMeetingTranscriptLines(
+  durableLines: TranscriptLine[],
+  liveSegments: LiveSegment[],
+  opts: {
+    isLive: boolean;
+    liveConnected: boolean;
+    liveEnded: boolean;
+    retractedIds?: readonly string[];
+    fallbackLines?: TranscriptLine[];
+  },
+): TranscriptLine[] {
+  const { isLive, liveConnected, liveEnded, retractedIds, fallbackLines = [] } = opts;
+  if (!isLive && liveSegments.length === 0) {
+    return durableLines.length > 0 ? durableLines : fallbackLines;
+  }
+
+  const retracted = new Set(retractedIds ?? []);
+  const sseActive = isLive && (liveConnected || liveSegments.length > 0);
+  const byId = new Map<string, TranscriptLine>();
+  const orderedIds: string[] = [];
+  const unkeyed: TranscriptLine[] = [];
+
+  for (const line of durableLines) {
+    if (line.id && retracted.has(line.id)) continue;
+    // While live SSE is active, SSE owns the mutable draft tail — skip polled unconfirmed drafts
+    // from the 12s REST snapshot so retracted/superseded drafts cannot briefly reappear.
+    if (sseActive && line.completed === false) continue;
+    if (line.id) {
+      if (!byId.has(line.id)) orderedIds.push(line.id);
+      byId.set(line.id, line);
+    } else {
+      unkeyed.push(line);
+    }
+  }
+
+  for (const seg of liveSegments) {
+    const liveCompleted = seg.completed !== false;
+    // Once a meeting is post-phase and the stream ended, drop unconfirmed live drafts when durable
+    // transcript already exists so a dangling draft never outlives finalized durable rows.
+    if (!isLive && liveEnded && !liveCompleted && durableLines.length > 0) continue;
+    const mapped: TranscriptLine = {
+      id: seg.id,
+      t: formatWallClock(seg.tsMs, seg.t),
+      speaker: seg.speaker?.trim() || (seg.speakerStatus === "unknown" ? "Unknown speaker" : "Speaker"),
+      text: seg.text || "",
+      tsMs: seg.tsMs,
+      speakerId: seg.speakerId,
+      speakerKey: seg.speakerKey,
+      speakerStatus: seg.speakerStatus,
+      speakerRevision: seg.speakerRevision,
+      completed: liveCompleted,
+    };
+
+    if (!mapped.id) {
+      unkeyed.push(mapped);
+      continue;
+    }
+
+    const existing = byId.get(mapped.id);
+    if (!existing) {
+      orderedIds.push(mapped.id);
+      byId.set(mapped.id, mapped);
+      continue;
+    }
+
+    const keepCanonicalText = (existing.revision ?? 0) > 0;
+    const keepCanonicalSpeaker = (existing.speakerRevision ?? 0) > (mapped.speakerRevision ?? 0);
+    const completed = keepCanonicalText || existing.completed !== false ? true : mapped.completed;
+    byId.set(mapped.id, {
+      ...existing,
+      ...mapped,
+      t: mapped.t || existing.t,
+      tsMs: mapped.tsMs ?? existing.tsMs,
+      endTsMs: existing.endTsMs,
+      sessionUid: existing.sessionUid,
+      revision: existing.revision,
+      text: keepCanonicalText ? existing.text : mapped.text,
+      speaker: keepCanonicalSpeaker ? existing.speaker : mapped.speaker,
+      speakerId: keepCanonicalSpeaker ? existing.speakerId : (mapped.speakerId ?? existing.speakerId),
+      speakerKey: mapped.speakerKey ?? existing.speakerKey,
+      speakerStatus: keepCanonicalSpeaker ? existing.speakerStatus : (mapped.speakerStatus ?? existing.speakerStatus),
+      speakerRevision: keepCanonicalSpeaker ? existing.speakerRevision : (mapped.speakerRevision ?? existing.speakerRevision),
+      completed,
+    });
+  }
+
+  const merged = [...orderedIds.map((id) => byId.get(id)!), ...unkeyed].filter(
+    (line) => (line.text ?? "").trim() || (line.revision ?? 0) > 0,
+  );
+  if (merged.length > 0) return merged;
+  return fallbackLines;
+}
+
 export function MeetingDetailView({
   meetingId,
   meetings,
@@ -236,7 +353,13 @@ export function MeetingDetailView({
   const [voiceReplies, setVoiceReplies] = useState<MeetingVoiceReply[]>([]);
   const [chatgptPlanIssue, setChatgptPlanIssue] = useState<ChatGPTPlanIssue | null>(null);
 
-  const liveStream = useMeetingLive(resolvedId, m?.session_uid ?? "");
+  // Pin the live SSE subscription across the live -> post stop transition (matching useMeeting.ts)
+  // so final segments keep rendering while the durable DB catches up after bot exit.
+  const pinRef = useRef({ id: "", uid: "" });
+  pinRef.current = pinSubscriptionUid(pinRef.current, resolvedId, m?.session_uid);
+  const liveStream = useMeetingLive(resolvedId, pinRef.current.uid);
+  const confirmedLiveCountRef = useRef(0);
+  confirmedLiveCountRef.current = liveStream.transcript.filter((s) => s.completed !== false).length;
 
   // ── Audio fragments + playback sync ──
   const [audioFragments, setAudioFragments] = useState<MeetingAudioFragment[]>([]);
@@ -328,13 +451,14 @@ export function MeetingDetailView({
 
   // Fetch real durable transcript + processed notes + recording descriptors
   const loadDurable = useCallback(async () => {
-    if (!resolvedId) return;
+    if (!resolvedId) return null;
     setRefreshingTranscript(true);
     try {
       const durable = await fetchDurableTranscript(resolvedId);
       setDurableLines(durable.lines);
       setDurableNotes(durable.notes);
       setRecordings(durable.recordings ?? []);
+      return durable;
     } finally {
       setRefreshingTranscript(false);
     }
@@ -357,6 +481,38 @@ export function MeetingDetailView({
     }, 12_000);
     return () => window.clearInterval(timer);
   }, [isLive, loadDurable]);
+
+  // Stop catch-up: when a live meeting ends (phase flips to post or SSE emits meeting-end),
+  // immediately refresh durable transcript and retry boundedly until DB catches up to live rows.
+  const sawLiveRef = useRef(false);
+  useEffect(() => {
+    sawLiveRef.current = false;
+  }, [resolvedId]);
+  useEffect(() => {
+    if (isLive) {
+      sawLiveRef.current = true;
+      return;
+    }
+    if (!sawLiveRef.current && !liveStream.ended) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const catchUp = (attempt: number) => {
+      void loadDurable().then((next) => {
+        if (cancelled) return;
+        const durableConfirmed = (next?.lines ?? []).filter((l) => l.completed !== false).length;
+        if (durableConfirmed < confirmedLiveCountRef.current && attempt < DURABLE_REFETCH_ATTEMPTS) {
+          timer = setTimeout(() => {
+            if (!cancelled) catchUp(attempt + 1);
+          }, DURABLE_REFETCH_DELAY_MS);
+        }
+      });
+    };
+    catchUp(0);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [isLive, liveStream.ended, loadDurable]);
 
   // Fetch real Meeting Memory facts & Discussion Review summary when available (best-effort)
   useEffect(() => {
@@ -621,29 +777,24 @@ export function MeetingDetailView({
     }
   };
 
-  // Merge durable transcript lines with live WS segments when live
-  const allLines: TranscriptLine[] = useMemo(() => {
-    if (isLive && liveStream.transcript.length > 0) {
-      return liveStream.transcript.map((s) => ({
-        id: s.id,
-        t: typeof s.t === "string" ? s.t : typeof s.t === "number" ? formatChapterClock(s.t > 1_000_000_000 ? s.t * 1000 : s.t * 1000) : "",
-        speaker: s.speaker || "Speaker",
-        text: s.text || "",
-        tsMs: s.tsMs,
-        speakerId: s.speakerId,
-        speakerKey: s.speakerKey,
-        speakerStatus: s.speakerStatus,
-      }));
-    }
-    if (durableLines.length > 0) return durableLines;
-    return m?.transcript ?? [];
-  }, [durableLines, isLive, liveStream.transcript, m?.transcript]);
+  // Merge durable transcript lines with live SSE segments by segment_id (preserving draft -> final)
+  const allLines: TranscriptLine[] = useMemo(
+    () =>
+      mergeMeetingTranscriptLines(durableLines, liveStream.transcript, {
+        isLive,
+        liveConnected: liveStream.connected,
+        liveEnded: liveStream.ended,
+        retractedIds: liveStream.retractedIds,
+        fallbackLines: m?.transcript ?? [],
+      }),
+    [durableLines, isLive, liveStream.connected, liveStream.ended, liveStream.retractedIds, liveStream.transcript, m?.transcript],
+  );
 
-  // Bilingual translation hook
+  // Bilingual translation hook (only prioritize finalized segments; drafts wait for confirmation)
   const translation = useMeetingTranslation(
     resolvedId,
     language,
-    allLines.filter((seg) => !!seg.id).map((seg) => seg.id!),
+    allLines.filter((seg) => !!seg.id && seg.completed !== false).map((seg) => seg.id!),
   );
 
   // Resolve real multi-fragment audio URLs for completed meetings

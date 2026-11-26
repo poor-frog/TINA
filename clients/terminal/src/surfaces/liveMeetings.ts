@@ -62,6 +62,7 @@ interface SegmentDTO {
   session_uid?: string | null;
   speaker?: string | null;
   text?: string | null;
+  completed?: boolean;
 }
 
 /** A persisted processed note from the durable store (`data.processed.views[].doc.notes[]`,
@@ -381,6 +382,7 @@ export async function fetchDurableTranscript(meetingId: string, strict = false):
         id: s.segment_id, revision: s.revision ?? 0, speakerId: s.speaker_id, speakerKey: s.speaker_key, speakerStatus: s.speaker_status,
         speakerRevision: s.speaker_revision ?? 0, tsMs: epochMs(s.start), endTsMs: epochMs(s.end),
         sessionUid: s.session_uid ?? undefined,
+        completed: s.completed !== false,
       }));
     const status = body.data?.processed?.views?.find(v => v.id === COPILOT_NOTES_VIEW_ID)?.status;
     const recordings = Array.isArray(body.recordings) ? body.recordings.filter((recording) => Number.isFinite(recording.id)) : [];

@@ -101,6 +101,7 @@ type TimelineItem =
       time: string;
       primaryText: string;
       secondaryText: string;
+      isDraft: boolean;
       playable: boolean;
     }
   | {
@@ -383,6 +384,7 @@ export function MeetingSidePanel({
               time: n.t != null ? formatEpochShort(n.t) : "",
               primaryText: text,
               secondaryText: "",
+              isDraft: false,
               playable: false,
             });
           });
@@ -394,7 +396,8 @@ export function MeetingSidePanel({
           if (questionsOnly && !seg.text.includes("?")) return;
           if (tracker && !combined.includes(tracker)) return;
           if (needle && !combined.includes(needle)) return;
-          const translated = seg.translation?.text || "";
+          const isDraft = seg.completed === false;
+          const translated = isDraft ? "" : (seg.translation?.text || "");
           const primaryText = language === "en" && translated ? translated : seg.text;
           const secondaryText = language === "bilingual" && translated ? translated : "";
           const memberIds = seg.translation?.memberIds ?? (seg.id ? [seg.id] : []);
@@ -410,7 +413,8 @@ export function MeetingSidePanel({
             time: seg.t || "",
             primaryText,
             secondaryText,
-            playable: !!playableId && playableSegmentIds.has(playableId),
+            isDraft,
+            playable: !isDraft && !!playableId && playableSegmentIds.has(playableId),
           });
         });
       }
@@ -456,11 +460,17 @@ export function MeetingSidePanel({
     voiceReplies,
   ]);
 
+  const lastTimelineItem = timelineItems[timelineItems.length - 1];
+  const lastTimelineTail =
+    lastTimelineItem?.kind === "segment"
+      ? `${lastTimelineItem.key}:${lastTimelineItem.primaryText.length}:${lastTimelineItem.isDraft ? "d" : "f"}`
+      : lastTimelineItem?.key ?? "";
+
   useEffect(() => {
     if (!isLive || sideTab !== "transcript" || !followingRef.current) return;
     const el = transcriptRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [timelineItems.length, isLive, sideTab]);
+  }, [timelineItems.length, lastTimelineTail, isLive, sideTab]);
 
   const effectiveTab = meetingsOnly ? "transcript" : sideTab;
   const voiceApiBase = `/api/meetings/${encodeURIComponent(meetingId)}/voice-assistant`;
@@ -845,13 +855,18 @@ export function MeetingSidePanel({
                 const isActive =
                   !!activeSegmentId &&
                   (item.segmentId === activeSegmentId || item.memberIds.includes(activeSegmentId));
+                const displayPrimary =
+                  item.isDraft && item.primaryText && !/(?:…|\.\.\.)$/.test(item.primaryText.trimEnd())
+                    ? `${item.primaryText.trimEnd()}…`
+                    : item.primaryText;
                 return (
                   <div
                     key={item.key}
                     data-segment-id={item.segmentId}
                     data-transcript-segments={JSON.stringify(item.memberIds)}
+                    data-draft={item.isDraft ? "true" : "false"}
                     tabIndex={-1}
-                    className={`${styles.transcriptRow} ${item.playable ? styles.transcriptRowClickable : ""} ${isActive ? styles.transcriptRowActive : ""}`}
+                    className={`${styles.transcriptRow} ${item.isDraft ? styles.transcriptRowDraft : ""} ${item.playable ? styles.transcriptRowClickable : ""} ${isActive ? styles.transcriptRowActive : ""}`}
                     onClick={() => {
                       if (item.playable && item.segmentId && onSegmentClick) {
                         onSegmentClick(item.segmentId);
@@ -859,7 +874,15 @@ export function MeetingSidePanel({
                     }}
                   >
                     <div className={styles.transcriptRowHead}>
-                      <span className={styles.transcriptSpeaker}>{item.speaker}</span>
+                      <span className={styles.transcriptSpeakerGroup}>
+                        <span className={styles.transcriptSpeaker}>{item.speaker}</span>
+                        {item.isDraft && (
+                          <span className={styles.transcriptDraftBadge} role="status" aria-label="Live draft">
+                            <span className={styles.transcriptDraftDot} aria-hidden="true" />
+                            <span>Draft</span>
+                          </span>
+                        )}
+                      </span>
                       {item.time && (
                         <button
                           type="button"
@@ -877,8 +900,14 @@ export function MeetingSidePanel({
                         </button>
                       )}
                     </div>
-                    <p className={styles.transcriptText}>{item.primaryText}</p>
-                    {item.secondaryText && <p className={styles.transcriptTranslated}>{item.secondaryText}</p>}
+                    <p className={`${styles.transcriptText} ${item.isDraft ? styles.transcriptTextDraft : ""}`}>
+                      {displayPrimary}
+                    </p>
+                    {item.secondaryText ? (
+                      <p className={styles.transcriptTranslated}>{item.secondaryText}</p>
+                    ) : item.isDraft && language !== "vi" ? (
+                      <p className={styles.transcriptDraftHint}>Chờ đoạn nói hoàn tất…</p>
+                    ) : null}
                   </div>
                 );
               })

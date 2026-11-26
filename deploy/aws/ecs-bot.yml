@@ -69,6 +69,8 @@ Resources:
           Image: !Ref BotImage
           Essential: true
           StopTimeout: 30
+          Environment:
+            - {Name: BOT_SPEAKER_MAX_BUFFER_SEC, Value: '20'}
           EntryPoint: !If [Probe, [/bin/sh, -ec], !Ref 'AWS::NoValue']
           Command: !If
             - Probe

@@ -87,6 +87,49 @@ def contextual_biased_decoder(lm, custom_words=None, name_weight=0.0, custom_wei
     return biased
 
 
+def split_long_speech_ranges(pcm, intervals, max_segment_sec=None):
+    """Deterministically split continuous >max_segment_sec VAD intervals at quietest energy dips.
+
+    The search window [start + 0.6*max, start + max] depends ONLY on `start` (never on `end`),
+    so as live audio grows across consecutive ASR calls, the first split point stays identical
+    and LocalAgreement-2 can incrementally confirm `draft -> final` without waiting for a long
+    silence or hitting the 30-second live buffer ceiling.
+    """
+    if max_segment_sec is None:
+        max_segment_sec = float(os.getenv('TINA_VIEGEM_MAX_SEGMENT_SEC', '10'))
+    if not math.isfinite(max_segment_sec) or max_segment_sec <= 0:
+        return intervals
+    max_samples = int(max_segment_sec * RATE)
+    min_samples = max(RATE, int(max_samples * 0.6))
+    min_tail = RATE  # require at least 1.0s left after the cut so we never emit tiny stubs
+    frame_len = int(0.16 * RATE)  # 160ms energy window
+    stride = int(0.04 * RATE)     # 40ms step
+    out = []
+    for start, end in intervals:
+        cur = start
+        while end - cur >= max_samples + min_tail:
+            win_lo = cur + min_samples
+            win_hi = min(cur + max_samples, end - min_tail)
+            if win_hi - win_lo < frame_len:
+                cut = win_hi
+            else:
+                best_pos = win_hi - frame_len
+                best_energy = float('inf')
+                for pos in range(win_lo, win_hi - frame_len + 1, stride):
+                    frame = pcm[pos:pos + frame_len]
+                    energy = float(np.dot(frame, frame))
+                    if energy < best_energy:
+                        best_energy = energy
+                        best_pos = pos
+                cut = best_pos + frame_len // 2
+            if cut <= cur or cut >= end:
+                break
+            out.append((cur, cut))
+            cur = cut
+        out.append((cur, end))
+    return out
+
+
 def verify_model_assets(directory):
     manifest = json.loads((HERE / 'model-assets.json').read_text())
     for group, spec in manifest.items():
@@ -166,14 +209,15 @@ class VieGemEngine:
     def decode(self, pcm):
         return self.decode_probabilities(self.probabilities(pcm))
 
-    def transcribe(self, content, silence_ms=1200):
+    def transcribe(self, content, silence_ms=500):
         pcm, duration = read_audio(content)
         if not np.any(pcm):
             return {'text': '', 'duration': duration, 'segments': []}
         ranges = self.vad.generate(input=np.pad(pcm, (0, max(0, 3200 - len(pcm)))), cache={},
                                    is_final=True, fs=RATE, max_end_silence_time=silence_ms, disable_pbar=True)
         segments = []
-        for start, end in speech_ranges(ranges, len(pcm)):
+        intervals = split_long_speech_ranges(pcm, speech_ranges(ranges, len(pcm)))
+        for start, end in intervals:
             text = self.decode(pcm[start:end]).strip()
             if len(text) > 10000:
                 raise RuntimeError('ASR output exceeds limit')

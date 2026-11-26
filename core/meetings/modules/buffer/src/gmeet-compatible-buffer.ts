@@ -90,6 +90,8 @@ interface SpeakerBuffer {
   submittedEndSample?: number;
   lastTranscriptEndSample?: number;
   capCutSample?: number;
+  lastSubmitAtMs?: number;
+  recentRttSec: number;
 }
 
 export type GmeetCompatibleSubmissionTrigger =
@@ -236,6 +238,7 @@ export class GmeetCompatibleBuffer {
       lastConfirmedText: '',
       pendingDraftText: '',
       pendingDraftStartMs: now,
+      recentRttSec: 0,
     });
 
     if (this.scheduleSubmissions) {
@@ -263,7 +266,8 @@ export class GmeetCompatibleBuffer {
       const lost=Math.max(0,buffer.totalSamples-buffer.confirmedSamples)+Math.max(0,audioData.length-capacity);
       this.onOverflow?.(lost);
       const pending=buffer.inFlight;
-      this.clearStaleDraft(buffer);
+      // Preserve any already-transcribed visible draft as confirmed before resetting the window.
+      this.finalizePendingDraft(buffer);
       this.fullReset(buffer);
       buffer.inFlight=pending; // the old request must finish before a new generation can submit
       if(audioData.length>capacity) {
@@ -338,6 +342,11 @@ export class GmeetCompatibleBuffer {
     if (!buffer) return false;
 
     buffer.inFlight = false;
+    if (buffer.lastSubmitAtMs !== undefined) {
+      const rttSec = Math.max(0, (this.now() - buffer.lastSubmitAtMs) / 1000);
+      buffer.lastSubmitAtMs = undefined;
+      buffer.recentRttSec = Math.max(rttSec, buffer.recentRttSec * 0.5);
+    }
 
     // Discard stale responses: if the buffer was reset (generation bumped)
     // while a Whisper request was in flight, this response is for audio that
@@ -689,7 +698,8 @@ export class GmeetCompatibleBuffer {
     // dedup-vs-lastConfirmedText guard on purpose — the pending row carries this exact text
     // as completed:false and MUST be replaced by a completed:true row of the same id.
     const covered = Math.min(buffer.lastTranscriptEndSample ?? buffer.submittedEndSample ?? buffer.totalSamples, buffer.totalSamples);
-    const endMs = covered > 0 ? (buffer.windowStartMs + covered / this.sampleRate * 1000) : startMs;
+    const rawEndMs = covered > 0 ? (buffer.windowStartMs + covered / this.sampleRate * 1000) : startMs;
+    const endMs = rawEndMs > startMs ? Math.min(rawEndMs, startMs + this.maxBufferDuration * 1000) : rawEndMs;
     if (Number.isFinite(endMs) && endMs > startMs && endMs - startMs <= this.maxBufferDuration * 1000 && text !== buffer.lastConfirmedText && this.onSegmentConfirmed && !this.isHallucination(text)) {
       this.onSegmentConfirmed(buffer.speakerId, buffer.speakerName, text, startMs, endMs, `${buffer.speakerId}:${buffer.sequenceNumber}`, buffer.lastLanguage);
       buffer.sequenceNumber++;
@@ -750,7 +760,8 @@ export class GmeetCompatibleBuffer {
       // Reserve a cadence plus the next capture frame for both scheduled and replay callers.
       const limit = Math.min(this.maxBufferDuration, this.maxRetainedDuration);
       const frameSec = (buffer.chunks.at(-1)?.length ?? 0) / this.sampleRate;
-      const rolloverAt = Math.max(this.minAudioDuration, limit - Math.min(this.submitInterval + frameSec, limit / 2));
+      const latencyReserve = Math.min(buffer.recentRttSec, limit / 2);
+      const rolloverAt = Math.max(this.minAudioDuration, limit - Math.min(this.submitInterval + frameSec + latencyReserve, limit / 2));
       if (this.unconfirmedSamples(buffer) / this.sampleRate >= rolloverAt) buffer.capCutSample = this.quietCutSample(buffer, 4);
     }
     let end = buffer.capCutSample ?? buffer.totalSamples;
@@ -790,6 +801,7 @@ export class GmeetCompatibleBuffer {
 
     buffer.submittedEndSample = end;
     buffer.inFlight = true;
+    buffer.lastSubmitAtMs = this.now();
     this.submitGeneration.set(buffer.speakerId, buffer.generation);
 
     try {
@@ -1038,6 +1050,8 @@ export class GmeetCompatibleBuffer {
     buffer.carryForwardSamples = 0;
     buffer.submittedEndSample = undefined;
     buffer.capCutSample = undefined;
+    buffer.lastSubmitAtMs = undefined;
+    buffer.recentRttSec = 0;
     buffer.generation++;
   }
 }

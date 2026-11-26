@@ -18,6 +18,7 @@ export interface LiveModelError { stage?: string; model?: string; message: strin
 export interface LiveStreamIssue { kind: "stream" | "model" | "parse"; message: string; status?: number; at: number; model?: string; stage?: string }
 export interface LiveState {
   transcript: LiveSegment[];
+  retractedIds?: string[];
   notes: LiveNote[];
   cards: LiveCard[];
   errors: LiveModelError[];
@@ -32,7 +33,7 @@ export interface LiveState {
 
 interface Entry { state: LiveState; subs: Set<() => void>; es?: EventSource; refs: number; retry?: number; watchdog?: number; startEpochMs?: number; lastEventId?: string }
 const stores = new Map<string, Entry>();
-const EMPTY: LiveState = { transcript: [], notes: [], cards: [], errors: [], issues: [], note: "", ended: false, connected: false, reconnects: 0 };
+const EMPTY: LiveState = { transcript: [], retractedIds: [], notes: [], cards: [], errors: [], issues: [], note: "", ended: false, connected: false, reconnects: 0 };
 const RECONNECT_MS = 2500;
 // Active staleness watchdog. An EventSource can go SILENTLY half-open — the socket stays "open" but
 // no bytes flow, so `onerror` never fires and the existing reconnect path never triggers. We poll
@@ -63,7 +64,15 @@ function connect(e: Entry, meetingId: string, sessionUid: string): void {
   // recompute (mutating the arrays in place leaves their identity stable and the memo would go stale).
   const emit = () => {
     const s = e.state;
-    e.state = { ...s, transcript: [...s.transcript], notes: [...s.notes], cards: [...s.cards], errors: [...s.errors], issues: [...s.issues] };
+    e.state = {
+      ...s,
+      transcript: [...s.transcript],
+      retractedIds: [...(s.retractedIds ?? [])],
+      notes: [...s.notes],
+      cards: [...s.cards],
+      errors: [...s.errors],
+      issues: [...s.issues],
+    };
     e.subs.forEach((f) => f());
   };
   const addIssue = (issue: Omit<LiveStreamIssue, "at">) => {
@@ -136,6 +145,9 @@ function connect(e: Entry, meetingId: string, sessionUid: string): void {
       // agent-api seam; fall back to the connect-time anchor only when the event lacks it (old/seed data).
       const tsMs = (typeof ev.tsMs === "number" && Number.isFinite(ev.tsMs)) ? ev.tsMs : absMs(ev.t);
       const seg: LiveSegment = { speaker: ev.speaker ?? "?", text: ev.text ?? "", t: ev.t, tsMs, id: ev.id, speakerId: ev.speakerId, speakerKey: ev.speakerKey, speakerStatus: ev.speakerStatus, speakerRevision: ev.speakerRevision, completed: ev.completed !== false };
+      if (ev.id && s.retractedIds?.length) {
+        s.retractedIds = s.retractedIds.filter((id) => id !== ev.id);
+      }
       const i = ev.id ? s.transcript.findIndex((x) => x.id === ev.id) : -1;
       if (i >= 0) s.transcript[i] = seg; else s.transcript.push(seg);
       s.lastTranscriptAt = s.lastEventAt;
@@ -169,8 +181,20 @@ function connect(e: Entry, meetingId: string, sessionUid: string): void {
       // tail). Our egress is append-only + we upsert by id, so a retract is the ONLY way a draft leaves
       // the view — drop the named ids so a stale "unattached"/duplicated line disappears in place.
       const drop = new Set(ev.segment_ids);
+      const existingRetracted = new Set(s.retractedIds ?? []);
+      let retractAdded = false;
+      for (const id of drop) {
+        if (!existingRetracted.has(id)) {
+          existingRetracted.add(id);
+          retractAdded = true;
+        }
+      }
+      if (retractAdded) {
+        s.retractedIds = [...existingRetracted].slice(-512);
+      }
       const kept = s.transcript.filter((x) => !x.id || !drop.has(x.id));
-      if (kept.length !== s.transcript.length) s.transcript = kept; else return; // nothing here → don't churn
+      if (kept.length !== s.transcript.length) s.transcript = kept;
+      else if (!retractAdded) return; // nothing here → don't churn
     }
     else if (ev.type === "message-delta" && ev.text) s.note = ev.text;
     else if (ev.type === "stream-error") addIssue({ kind: "stream", message: ev.message || "Meeting stream error", status: ev.status });

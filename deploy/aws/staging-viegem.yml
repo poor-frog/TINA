@@ -79,6 +79,8 @@ Resources:
             - {Name: TINA_VIEGEM_HOST, Value: 0.0.0.0}
             - {Name: TINA_VIEGEM_PORT, Value: '8000'}
             - {Name: TINA_VIEGEM_MODEL_DIR, Value: /app/models/viegem-fsmn}
+            - {Name: TINA_VIEGEM_SILENCE_MS, Value: '500'}
+            - {Name: TINA_VIEGEM_MAX_SEGMENT_SEC, Value: '10'}
             - {Name: HF_HUB_OFFLINE, Value: '1'}
             - {Name: TRANSFORMERS_OFFLINE, Value: '1'}
             - {Name: TOKENIZERS_PARALLELISM, Value: 'false'}
