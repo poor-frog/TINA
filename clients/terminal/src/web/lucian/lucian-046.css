@@ -71,7 +71,9 @@
   outline: none;
 }
 
-.u046-in:focus-visible {
+.u046-in:focus-visible,
+.ux .u046-in:focus-visible,
+.tina-web .u046-in:focus-visible {
   outline: none;
 }
 

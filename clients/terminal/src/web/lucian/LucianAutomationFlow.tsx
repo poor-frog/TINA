@@ -29,10 +29,10 @@ function getFlowCopy(lang: "vi" | "en") {
       runAgain: "Chạy lại",
       finished: (sec: string) => `Hoàn tất quy trình · ${sec} s`,
       nodes: [
-        { title: "Vào Google Meet", idleSub: "TINA Bot · Extension", doneSub: "Đã ghi âm & phiên âm" },
-        { title: "Hỏi đáp & Tóm tắt AI", idleSub: "Song ngữ · “Tina ơi”", doneSub: "Trích dẫn nguồn · 98%" },
-        { title: "Cập nhật Wiki", idleSub: "My Space · Team", doneSub: "Đã liên kết [[Entity]]" },
-        { title: "Tạo Action Items", idleSub: "kg/entities/task/", doneSub: "Đã nháp 3 đầu việc" },
+        { title: "Vào cuộc họp", idleSub: "Bot · Extension", doneSub: "Đã ghi & phiên âm" },
+        { title: "AI & “Tina ơi”", idleSub: "Song ngữ VI + EN", doneSub: "Trích dẫn · 98%" },
+        { title: "Cập nhật Wiki", idleSub: "My Space · Team", doneSub: "Đã gắn [[Entity]]" },
+        { title: "Tạo Action Items", idleSub: "kg/entities/task/", doneSub: "Đã nháp 3 việc" },
       ],
     };
   }
@@ -44,10 +44,10 @@ function getFlowCopy(lang: "vi" | "en") {
     runAgain: "Run again",
     finished: (sec: string) => `Run finished · ${sec} s`,
     nodes: [
-      { title: "Join Google Meet", idleSub: "TINA Bot · Extension", doneSub: "Captured & transcribed" },
-      { title: "Bilingual AI + Voice", idleSub: "VI + EN · “Hey Tina”", doneSub: "Cited brief · 98%" },
-      { title: "Update Knowledge", idleSub: "My Space · Team", doneSub: "Linked [[Entities]]" },
-      { title: "Draft Action Items", idleSub: "kg/entities/task/", doneSub: "3 tasks drafted" },
+      { title: "Join Meet", idleSub: "Bot · Extension", doneSub: "Captured live" },
+      { title: "Bilingual AI", idleSub: "VI + EN · Voice", doneSub: "Cited brief · 98%" },
+      { title: "Update Wiki", idleSub: "My Space · Team", doneSub: "Entities linked" },
+      { title: "Draft Tasks", idleSub: "kg/entities/task/", doneSub: "3 tasks drafted" },
     ],
   };
 }

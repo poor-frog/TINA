@@ -83,7 +83,7 @@
   font-size: 11px;
 }
 
-.u211-h {
+.u211 .u211-h {
   margin: 18px 0 0;
   font-size: clamp(28px, 4.4vw, 48px);
   line-height: 1.08;

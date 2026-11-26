@@ -59,13 +59,16 @@ html[data-theme="light"] .tina-login-shell,
   --ux-spring: cubic-bezier(.34, 1.45, .64, 1);
 }
 
-/* Pre-login Landing warm editorial paper & obsidian card bridges */
-.tina-landing-ux {
+/* Pre-login Landing warm editorial paper & obsidian card bridges
+   Selector specificity beats :root[data-theme="dark"] .ux and .root h1..h4 inside TinaLanding. */
+.tina-landing-ux,
+.tina-landing-ux .ux,
+:root[data-theme] .tina-landing-ux .ux {
   color-scheme: light;
   --ux-page: #f3f0e8;
   --ux-surface: #ffffff;
-  --ux-surface-2: #ebe7dc;
-  --ux-surface-3: #e0dacb;
+  --ux-surface-2: #f1ede2;
+  --ux-surface-3: #e4dfd1;
   --ux-ink: #0c0d0a;
   --ux-ink-2: #2f312b;
   --ux-ink-3: #5a584f;
@@ -87,7 +90,9 @@ html[data-theme="light"] .tina-login-shell,
   --ux-spring: cubic-bezier(.34, 1.45, .64, 1);
 }
 
-.tina-landing-ux-dark {
+.tina-landing-ux-dark,
+.tina-landing-ux-dark .ux,
+:root[data-theme] .tina-landing-ux-dark .ux {
   color-scheme: dark;
   --ux-page: #0c0d0a;
   --ux-surface: #121412;
@@ -112,6 +117,11 @@ html[data-theme="light"] .tina-login-shell,
   --ux-grad: linear-gradient(120deg, #6ee7b7, #2dd4bf 55%, #b5e8d1);
   --ux-ease: cubic-bezier(.2, .8, .2, 1);
   --ux-spring: cubic-bezier(.34, 1.45, .64, 1);
+}
+
+.tina-landing-ux .ux :is(h1, h2, h3, h4),
+.tina-landing-ux-dark .ux :is(h1, h2, h3, h4) {
+  color: var(--ux-ink);
 }
 
 .ux,
