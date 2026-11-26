@@ -157,7 +157,36 @@ def build_stop_router(repo: MeetingRepo, publisher: CommandPublisher, runtime=No
         # sibling — spawned after the first stop — must still take it down.
         pending = [row for row in rows if not (row.get("data") or {}).get("stop_requested")]
         if not pending:
-            raise HTTPException(status_code=404, detail="No active meeting for this bot")
+            stuck_booting = (
+                [
+                    row for row in rows
+                    if row.get("status") in _BOOTING_STATUSES and row.get("bot_container_id")
+                ]
+                if runtime is not None
+                else []
+            )
+            if not stuck_booting:
+                raise HTTPException(status_code=404, detail="No active meeting for this bot")
+            cleaned: list[dict] = []
+            for row in stuck_booting:
+                fresh = await _reread(repo, row)
+                boot_stage = fresh.get("status")
+                if boot_stage not in _BOOTING_STATUSES:
+                    continue
+                if await _teardown_and_terminalize_booting(
+                    repo, publisher, runtime, user_id, fresh, native_meeting_id=native_meeting_id,
+                    allow_missing_container=False,
+                ):
+                    cleaned.append(fresh)
+            if not cleaned:
+                raise HTTPException(status_code=404, detail="No active meeting for this bot")
+            return {
+                "status": "stopping",
+                "meeting_id": cleaned[0]["id"],
+                "native_meeting_id": native_meeting_id,
+                "also_stopped": [row["id"] for row in cleaned[1:]],
+                "cancelled": [],
+            }
         meeting = pending[0]
         meeting_id = meeting["id"]
 
@@ -222,12 +251,11 @@ def build_stop_router(repo: MeetingRepo, publisher: CommandPublisher, runtime=No
         if runtime is not None:
             for row in live:
                 fresh = await _reread(repo, row)
-                container = fresh.get("bot_container_id")
-                if container and fresh.get("status") in _BOOTING_STATUSES:
-                    try:
-                        await runtime.delete_workload(container)
-                    except Exception as e:  # noqa: BLE001 — best-effort; reconcile backstops
-                        _log_stop_teardown_failed(row["id"], container, e)
+                if fresh.get("status") in _BOOTING_STATUSES:
+                    await _teardown_and_terminalize_booting(
+                        repo, publisher, runtime, user_id, fresh, native_meeting_id=native_meeting_id,
+                        allow_missing_container=False,
+                    )
 
         if siblings:
             _log_stop_evicted(meeting_id, [row["id"] for row in siblings], native_meeting_id)
@@ -308,6 +336,64 @@ async def _cancel_planned(repo, row: dict) -> None:
         )
     except Exception:  # noqa: BLE001 — logging never fails a stop
         pass
+
+
+async def _teardown_and_terminalize_booting(
+    repo,
+    publisher: CommandPublisher,
+    runtime,
+    user_id: int,
+    row: dict,
+    *,
+    native_meeting_id: str,
+    allow_missing_container: bool,
+) -> bool:
+    """Tear down a pre-active booting bot workload and terminalize the meeting immediately.
+
+    A booting bot (`requested`/`joining`/`awaiting_admission`) never reached `active` and has no
+    recording to finalize. Leaving its row stuck in `joining` after teardown (or after a runtime
+    restart made the dead workload `WorkloadUnknown`) traps the UI in a zombie `Joining` pill until
+    the long reconcile grace expires. Terminalizing as `failed` with `failure_stage=boot_stage` and
+    `completion_reason='stopped'` preserves the #807 stage attribution while clearing the UI right away.
+    """
+    boot_stage = row.get("status")
+    container = row.get("bot_container_id")
+    if not container:
+        if not allow_missing_container:
+            return False
+        reason = "stopped by the user before the bot joined"
+    else:
+        reason = "stopped by the user while booting"
+        try:
+            await runtime.delete_workload(container)
+        except WorkloadUnknown as e:
+            _log_stop_teardown_failed(row["id"], container, e)
+            reason = "stopped by the user; booting workload no longer tracked by runtime"
+        except Exception as e:  # noqa: BLE001 — transient teardown failure; reconcile backstops
+            _log_stop_teardown_failed(row["id"], container, e)
+            return False
+
+    await repo.fail_meeting(
+        meeting_id=row["id"],
+        reason=reason,
+        failure_stage=boot_stage,
+        completion_reason=_CANCELLED_REASON,
+        data={"stop_requested": True},
+    )
+    try:
+        await publisher.publish(
+            f"u:{user_id}:meetings",
+            json.dumps({
+                "type": "meeting.status",
+                "meeting_id": row["id"],
+                "native": native_meeting_id,
+                "status": "failed",
+                "completion_reason": _CANCELLED_REASON,
+            }),
+        )
+    except Exception:  # noqa: BLE001 — terminal state is already durable in Postgres
+        pass
+    return True
 
 
 async def _mark_stop_requested(repo, row: dict) -> None:

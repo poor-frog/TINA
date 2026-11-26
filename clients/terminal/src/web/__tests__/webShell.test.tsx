@@ -512,7 +512,8 @@ describe("WebShell production UI (Option A & Option B)", () => {
 
     // Navigate to Meetings Notebook -> verify date grouping & multi-dimensional Filter popover
     fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
-    expect((await screen.findAllByText("Live now")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByRole("button", { name: "Live now" })).toBeNull();
+    expect(await screen.findByText("Live now")).toBeTruthy();
     expect(screen.getByText("Yesterday")).toBeTruthy();
     expect(screen.queryByText("Live sync")).toBeNull();
     expect(screen.queryByRole("button", { name: "Capture menu" })).toBeNull();
@@ -652,6 +653,52 @@ describe("WebShell production UI (Option A & Option B)", () => {
       expect(screen.queryByText("Pricing Review")).toBeNull();
     });
     expect(await screen.findByText("Conversations appear here after your first question.")).toBeTruthy();
+  });
+
+  it("opens Knowledge Hub directly when clicking a kg/*.md path inside an Ask Tina reply", async () => {
+    mockEnvironment({ admin: false });
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/sessions/sess-alpha/history")) {
+        return new Response(
+          JSON.stringify({
+            turns: [
+              { role: "user", text: "tạo trang hướng dẫn knowledge" },
+              { role: "agent", text: "Bạn có thể xem trang mới tại `kg/knowledge_guide.md` nhé." },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/api/workspace/tree")) {
+        return new Response(JSON.stringify({ files: ["kg/knowledge_guide.md"] }), { status: 200 });
+      }
+      if (url.includes("/api/workspace/document") && url.includes("knowledge_guide.md")) {
+        return new Response(
+          JSON.stringify({
+            path: "kg/knowledge_guide.md",
+            content: "# Hướng dẫn sử dụng Knowledge\n\nNội dung chi tiết.\n",
+            sha256: "abc",
+            writable: true,
+          }),
+          { status: 200 },
+        );
+      }
+      return origFetch(input, init);
+    }) as typeof fetch;
+
+    render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+    fireEvent.click(await screen.findByText("Q4 Rollout Checklist"));
+
+    const docChip = await screen.findByText("kg/knowledge_guide.md");
+    fireEvent.click(docChip);
+
+    await waitFor(() => {
+      expect(window.location.search).toContain("nav=knowledge");
+      expect(window.location.search).toContain("doc=kg%2Fknowledge_guide.md");
+    });
   });
 
   it("enables Live Assist on live meetings, shows Speaker Talk Time, and honors Personal/Team Settings", async () => {

@@ -24,7 +24,8 @@ import { LayoutServiceId, createLayoutService } from "../workbench/layout";
 import { PaletteServiceId, createPaletteService } from "../workbench/palette";
 import { useLiveMeetings, useLiveMeetingsConnection, useLiveMeetingsLoaded } from "../surfaces/liveMeetings";
 import { meetingPhase } from "../surfaces/meetingModel";
-import { ASK_CHAT_EVENT, type AskChatDetail } from "../canvas/actions";
+import { ASK_CHAT_EVENT, OPEN_ENTITY_EVENT, type AskChatDetail } from "../canvas/actions";
+import { invalidateDocLinkCaches, resolveDocRef } from "../ui-kit/docLinks";
 import { useWebIdentity } from "./useWebIdentity";
 import { WebSidebar, type WebNavView } from "./Sidebar";
 import { WebTopBar, type CaptureModalMode } from "./TopBar";
@@ -223,19 +224,41 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
       const detail = (e as CustomEvent<AskChatDetail>).detail;
       if (detail?.prompt) askTina(detail.prompt);
     };
+    const onOpenEntity = (e: Event) => {
+      if (meetOnly) return;
+      const detail = (e as CustomEvent<{ path?: string; wikilink?: string; slug?: string; docPath?: string }>).detail;
+      if (!detail?.path && !detail?.wikilink) return;
+      invalidateDocLinkCaches();
+      void resolveDocRef(
+        { path: detail.path, wikilink: detail.wikilink },
+        { path: detail.docPath, slug: detail.slug },
+      )
+        .then((resolved) => {
+          if (resolved?.path) {
+            openKnowledgeDoc(resolved.path, resolved.slug);
+          } else if (detail.path) {
+            openKnowledgeDoc(detail.path.replace(/^\/+/, ""), detail.slug);
+          }
+        })
+        .catch(() => {
+          if (detail.path) openKnowledgeDoc(detail.path.replace(/^\/+/, ""), detail.slug);
+        });
+    };
     const onWindowClick = () => setUserMenuOpen(false);
 
     window.addEventListener("popstate", onPopState);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener(ASK_CHAT_EVENT, onAskChat);
+    window.addEventListener(OPEN_ENTITY_EVENT, onOpenEntity);
     window.addEventListener("click", onWindowClick);
     return () => {
       window.removeEventListener("popstate", onPopState);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener(ASK_CHAT_EVENT, onAskChat);
+      window.removeEventListener(OPEN_ENTITY_EVENT, onOpenEntity);
       window.removeEventListener("click", onWindowClick);
     };
-  }, [askTina]);
+  }, [askTina, meetOnly, openKnowledgeDoc]);
 
   const terminalHref = view === "meeting" && activeMeetingId
     ? terminalMeetingPath(activeMeetingId)

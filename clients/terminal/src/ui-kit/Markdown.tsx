@@ -13,7 +13,7 @@ import { Card, CardGroup, InternalLink, Wikilink, isInternalHref, useOpenEntity 
 // spelling the agent uses (relative `kg/entities/x.md` or the verbatim absolute mount path
 // `<root>/<subject>/kg/...`) plus any doc inside an attached-workspace mount
 // (`<root>/.attached/<subject>/<slug>/...md`) — resolveDocRef translates all of them.
-const ENTITY_PATH = /^(?:(?:[\w./-]*\/)?kg\/[\w./-]+\.md|\/[\w./-]*\.attached\/[\w./-]+\.md)$/;
+const ENTITY_PATH = /^(?:(?:[\w./-]*\/)?(?:kg|docs|mail)\/[\w./-]+\.md|\/[\w./-]*\.attached\/[\w./-]+\.md)$/;
 // Clickable `kg/entities/...` inline code — a component so it can read the doc's
 // workspace context (DocMeta/DocNav) via useOpenEntity, same as every other link.
 function EntityCode({ code }: { code: string }) {

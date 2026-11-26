@@ -16,7 +16,6 @@ export type CaptureModalMode = "live" | "schedule";
 
 export function WebTopBar({
   title,
-  liveMeeting,
   wsConnected,
   hideBar = false,
   onOpenMobileNav,
@@ -94,18 +93,6 @@ export function WebTopBar({
         </div>
 
         <div className="tina-web-topbar-right">
-          {liveMeeting && (
-            <button
-              type="button"
-              className="tina-web-live-pill"
-              onClick={() => onOpenMeeting(liveMeeting.id)}
-              title="Open active live meeting"
-            >
-              <span className="tina-web-live-dot" aria-hidden="true" />
-              <span>Live now</span>
-            </button>
-          )}
-
           <div className="tina-web-capture-split" ref={splitRef}>
             <button
               type="button"

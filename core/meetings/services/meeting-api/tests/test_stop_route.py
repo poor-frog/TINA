@@ -279,3 +279,60 @@ def test_stop_marks_a_row_that_has_no_session_yet():
     assert r.status_code == 200, r.text
     rows = {row["id"]: row for row in asyncio.run(repo.find_active_rows(7, "google_meet", "nosess"))}
     assert (rows[sessionless["id"]]["data"] or {}).get("stop_requested") is True
+
+
+def test_stop_terminalizes_booting_bot_immediately_on_teardown_and_untracked_workload():
+    """Stopping a `joining` bot whose container is torn down (or 404/WorkloadUnknown after runtime
+    restart) must immediately terminalize it as `failed` with `failure_stage='joining'` and
+    `completion_reason='stopped'` so the UI never stays trapped in a zombie Joining state."""
+    from meeting_api.bot_spawn.fakes import FakeRuntimeClient
+    from meeting_api.bot_spawn.ports import WorkloadUnknown
+
+    # Case 1: confirmed workload teardown
+    repo, pub = InMemoryMeetingRepo(), InMemoryCommandPublisher()
+    runtime = FakeRuntimeClient()
+    app = create_app(meeting_repo=repo, command_publisher=pub, runtime=runtime)
+    joining = _seed(repo, user_id=7, platform="google_meet", native="join-live", status="joining")
+    asyncio.run(repo.set_bot_container(meeting_id=joining["id"], bot_container_id="wl-joining"))
+
+    r = TestClient(app).delete("/bots/google_meet/join-live", headers={"x-user-id": "7"})
+    assert r.status_code == 200, r.text
+    assert "wl-joining" in runtime.deleted
+    row = asyncio.run(repo.get_meeting(joining["id"]))
+    assert row["status"] == "failed"
+    assert row["data"]["failure_stage"] == "joining"
+    assert row["data"]["completion_reason"] == "stopped"
+    assert row["data"]["stop_requested"] is True
+    assert any(ch == "u:7:meetings" and json.loads(msg)["status"] == "failed" for ch, msg in pub.published)
+
+    # Case 2: runtime returns WorkloadUnknown (404) after a runtime restart
+    class _UntrackedRuntime(FakeRuntimeClient):
+        async def delete_workload(self, workload_id: str) -> None:
+            raise WorkloadUnknown(workload_id)
+
+    repo2, pub2 = InMemoryMeetingRepo(), InMemoryCommandPublisher()
+    app2 = create_app(meeting_repo=repo2, command_publisher=pub2, runtime=_UntrackedRuntime())
+    zombie = _seed(repo2, user_id=7, platform="google_meet", native="join-404", status="joining")
+    asyncio.run(repo2.set_bot_container(meeting_id=zombie["id"], bot_container_id="wl-lost"))
+
+    r2 = TestClient(app2).delete("/bots/google_meet/join-404", headers={"x-user-id": "7"})
+    assert r2.status_code == 200, r2.text
+    row2 = asyncio.run(repo2.get_meeting(zombie["id"]))
+    assert row2["status"] == "failed"
+    assert row2["data"]["failure_stage"] == "joining"
+    assert row2["data"]["completion_reason"] == "stopped"
+
+    # Case 3: pre-existing stuck `joining` row that already had `stop_requested=True` from an earlier click
+    repo3, pub3 = InMemoryMeetingRepo(), InMemoryCommandPublisher()
+    app3 = create_app(meeting_repo=repo3, command_publisher=pub3, runtime=_UntrackedRuntime())
+    stuck = _seed(repo3, user_id=7, platform="google_meet", native="join-stuck", status="joining")
+    asyncio.run(repo3.merge_meeting_data(stuck["id"], {"stop_requested": True}))
+    asyncio.run(repo3.set_bot_container(meeting_id=stuck["id"], bot_container_id="wl-old"))
+
+    r3 = TestClient(app3).delete("/bots/google_meet/join-stuck", headers={"x-user-id": "7"})
+    assert r3.status_code == 200, r3.text
+    row3 = asyncio.run(repo3.get_meeting(stuck["id"]))
+    assert row3["status"] == "failed"
+    assert row3["data"]["completion_reason"] == "stopped"
+    # Must NOT re-publish a bot leave command when cleaning up an already stop_requested zombie
+    assert not any(ch.startswith("bot_commands:") for ch, _ in pub3.published)
