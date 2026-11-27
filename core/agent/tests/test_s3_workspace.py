@@ -561,6 +561,27 @@ def test_nova_bedrock_workspace_supports_agent_reach_and_readonly_global(tmp_pat
     )
     assert (pdir / "kg" / "append-nl.md").read_text(encoding="utf-8") == "# Log\n\nLine 1.\n\nLine 2.\n"
 
+    # 4b. Root README.md is readable/writable on user & shared workspaces (team briefs), still read-only on _global.
+    (pdir / "README.md").write_text("# Team Brief\n", encoding="utf-8")
+    readme_read = bedrock_workspace._wiki_tool(numeric_mounts, "read_wiki", {"workspace": "5", "path": "README.md"}, "")
+    assert "# Team Brief" in readme_read["text"]
+    readme_upd = bedrock_workspace._wiki_tool(
+        numeric_mounts,
+        "update_wiki",
+        {"workspace": "5", "path": "README.md", "mode": "replace", "text": "# Team Brief\n\nUpdated goals.\n"},
+        "Update the team brief at README.md",
+        external_taint=True,
+    )
+    assert readme_upd["updated"] == "README.md"
+    assert "Updated goals." in (pdir / "README.md").read_text(encoding="utf-8")
+    with pytest.raises(ValueError, match="allowed|read-only"):
+        bedrock_workspace._wiki_tool(
+            numeric_mounts,
+            "update_wiki",
+            {"workspace": "_global", "path": "README.md", "mode": "replace", "text": "nope"},
+            "update readme",
+        )
+
     # 5. stopReason == "max_tokens" preserves generated text instead of failing the turn.
     class MaxTokensClient:
         def converse(self, **req):

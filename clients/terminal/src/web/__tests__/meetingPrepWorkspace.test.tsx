@@ -124,7 +124,7 @@ describe("MeetingPrepWorkspace & Brief status badges", () => {
     );
     mockReadWorkspaceFile.mockImplementation(async (path: string) =>
       briefWritten && path === "kg/entities/meeting/brief-abc-defg-hij.md"
-        ? "# Q4 Architecture Review Brief\n\n## Attendees\n- **Jane Liu** — VP Engineering at Acme"
+        ? "---\ntype: meeting\nid: brief-abc-defg-hij\ntitle: Q4 Architecture Review\nmeeting_id: 501\n---\n# Q4 Architecture Review Brief\n\n## Attendees\n- **Jane Liu** — VP Engineering at Acme"
         : "",
     );
 
@@ -176,9 +176,27 @@ describe("MeetingPrepWorkspace & Brief status badges", () => {
     });
     expect(sentReq.prompt).toContain("kg/entities/meeting/brief-abc-defg-hij.md");
 
-    // Live brief renders immediately on commit
+    // Live brief renders immediately on commit with YAML frontmatter hidden
     expect(await screen.findByText("Your brief for this meeting")).toBeTruthy();
     expect(screen.getByText(/VP Engineering at Acme/i)).toBeTruthy();
+    expect(screen.queryByText(/type: meeting/i)).toBeNull();
+    expect(screen.queryByText(/meeting_id: 501/i)).toBeNull();
+
+    // Replying naturally in Vietnamese inside Brief Assistant wraps explicit update intent while keeping bubble clean
+    const composer = screen.getByLabelText("Reply to Brief Assistant");
+    fireEvent.change(composer, {
+      target: { value: "các người tham gia gồm Kiến Quốc, Nam và Đình Quang. Mục tiêu là lên plan demo." },
+    });
+    fireEvent.submit(composer.closest("form")!);
+
+    await waitFor(() => {
+      expect(mockStreamChatTurn).toHaveBeenCalledTimes(2);
+    });
+    const [replyReq] = mockStreamChatTurn.mock.calls[1] as [{ prompt: string }];
+    expect(replyReq.prompt).toContain('Update the meeting brief at "kg/entities/meeting/brief-abc-defg-hij.md"');
+    expect(replyReq.prompt).toContain("<!--tina:brief-reply-->");
+    expect(replyReq.prompt).toContain("Kiến Quốc, Nam và Đình Quang");
+    expect(screen.getByText("các người tham gia gồm Kiến Quốc, Nam và Đình Quang. Mục tiêu là lên plan demo.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Open in Knowledge/i }));
     expect(onOpenKnowledgeDoc).toHaveBeenCalledWith("kg/entities/meeting/brief-abc-defg-hij.md", "my-space");

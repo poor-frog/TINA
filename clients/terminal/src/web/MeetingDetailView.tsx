@@ -887,9 +887,9 @@ export function MeetingDetailView({
     [durableLines, isLive, liveStream.connected, liveStream.ended, liveStream.retractedIds, liveStream.transcript, m?.transcript],
   );
 
-  // Bilingual translation hook (only prioritize finalized segments; drafts wait for confirmation)
+  // Bilingual translation hook (only prioritize finalized segments; skip planned/prep meetings)
   const translation = useMeetingTranslation(
-    resolvedId,
+    phase === "prep" ? "" : resolvedId,
     language,
     allLines.filter((seg) => !!seg.id && seg.completed !== false).map((seg) => seg.id!),
   );

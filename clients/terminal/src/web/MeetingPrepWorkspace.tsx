@@ -43,8 +43,9 @@ import type { ToolApprovalDecision, ToolApprovalState } from "../workbench/toolA
 import styles from "./meetingPrepWorkspace.module.css";
 
 const BRIEF_POLL_MS = 12_000;
-const S3_SYNC_SETTLE_MS = 1_800;
+const S3_SYNC_SETTLE_DELAYS_MS = [1_800, 4_200] as const;
 const SEED_README_MARK = "This is your **Personal workspace**";
+const BRIEF_REPLY_SENTINEL = "<!--tina:brief-reply-->";
 
 interface OwnBriefNote {
   path: string;
@@ -79,8 +80,22 @@ function platformSlugFor(platform: string): string {
   return platform === "Google Meet" ? "google_meet" : platform.toLowerCase().replace(/\s+/g, "_");
 }
 
+function stripYamlFrontmatter(raw: string): string {
+  const normalized = raw.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---\n")) return raw;
+  const end = normalized.indexOf("\n---", 4);
+  if (end === -1) return raw;
+  const after = normalized.slice(end + 4).replace(/^\n+/, "");
+  return after || raw;
+}
+
 function summarizeKickoffPrompt(raw: string): string {
   const cleaned = stripContextBlocks(raw).trim();
+  const replyIdx = cleaned.indexOf(BRIEF_REPLY_SENTINEL);
+  if (replyIdx !== -1) {
+    const tail = cleaned.slice(replyIdx + BRIEF_REPLY_SENTINEL.length).trim();
+    if (tail) return tail;
+  }
   if (/^Interview me to build the brief for /i.test(cleaned)) {
     return "Start private brief interview";
   }
@@ -154,7 +169,7 @@ export function MeetingPrepWorkspace({
 
   const mountedRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
-  const settleTimerRef = useRef<number | null>(null);
+  const settleTimersRef = useRef<number[]>([]);
   const savedTimerRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -168,7 +183,8 @@ export function MeetingPrepWorkspace({
       mountedRef.current = false;
       abortRef.current?.abort();
       abortRef.current = null;
-      if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
+      for (const timer of settleTimersRef.current) window.clearTimeout(timer);
+      settleTimersRef.current = [];
       if (savedTimerRef.current !== null) window.clearTimeout(savedTimerRef.current);
     };
   }, []);
@@ -206,11 +222,12 @@ export function MeetingPrepWorkspace({
 
   const scheduleBriefRefresh = useCallback((immediate = true) => {
     if (immediate) setBriefRefreshTick((t) => t + 1);
-    if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
-    settleTimerRef.current = window.setTimeout(() => {
-      settleTimerRef.current = null;
-      if (mountedRef.current) setBriefRefreshTick((t) => t + 1);
-    }, S3_SYNC_SETTLE_MS);
+    for (const timer of settleTimersRef.current) window.clearTimeout(timer);
+    settleTimersRef.current = S3_SYNC_SETTLE_DELAYS_MS.map((delayMs) =>
+      window.setTimeout(() => {
+        if (mountedRef.current) setBriefRefreshTick((t) => t + 1);
+      }, delayMs),
+    );
   }, []);
 
   // Poll shared workspace README.md when bound
@@ -650,7 +667,7 @@ export function MeetingPrepWorkspace({
       }
       const path = ownBrief?.path || briefNotePath({ meetingId: meeting.id, nativeId: nid });
       const noteId = path.split("/").pop()!.replace(/\.md$/, "");
-      const prompt = `Interview me to build the brief for ${JSON.stringify(name)} — ask what you can't know from my records (who's in the room, what I want out of it, what the notetaker should listen for), research attendees in my knowledge and public sources. Write the brief at EXACTLY ${JSON.stringify(`${mount.path}/${path}`)} in my PRIVATE workspace ${JSON.stringify(mount.slug)}. Do not write this private brief into any shared workspace. For a NEW file use frontmatter type: meeting, id: ${JSON.stringify(noteId)}, title: ${JSON.stringify(name)}, and meeting_id: ${meeting.id}. Read the existing file first and preserve user edits and frontmatter; continue it rather than replacing it. Write the note EARLY and keep updating it as we talk — this exact file renders live on the meeting page.`;
+      const prompt = `Interview me to build the brief for ${JSON.stringify(name)} — ask what you can't know from my records (who's in the room, what I want out of it, what the notetaker should listen for). Write the brief at relative path ${JSON.stringify(path)} (full mount path ${JSON.stringify(`${mount.path}/${path}`)}) in my PRIVATE workspace ${JSON.stringify(mount.slug)}. Do not write this private brief into any shared workspace. For a NEW file use frontmatter type: meeting, id: ${JSON.stringify(noteId)}, title: ${JSON.stringify(name)}, and meeting_id: ${meeting.id}. Read the existing file first and preserve user edits and frontmatter; continue it rather than replacing it. Write the note EARLY and fold every detail I provide immediately into the file — do not leave empty placeholder sections or block on web search.`;
       if (mountedRef.current) setBriefChatStarted(true);
       await sendBriefPrompt(prompt, {
         displayText: ownBrief ? `Update brief for “${name}”` : `Start brief interview for “${name}”`,
@@ -800,10 +817,43 @@ export function MeetingPrepWorkspace({
     }
   };
 
+  const submitBriefReply = useCallback(
+    (rawInput: string) => {
+      const userText = rawInput.trim();
+      if (!userText || chatBusy) return;
+      const name = title.trim() || headline;
+      if (meeting.workspace_id) {
+        const wirePrompt = [
+          `Update the team brief at "README.md" in the shared workspace ${JSON.stringify(meeting.workspace_id)} immediately with ALL details I just provided below.`,
+          `Read the existing README.md first, preserve team edits, and write/update the complete structured brief (Objective, Attendees, Agenda, Key Points, Action Items & Deadlines) right now — do NOT leave empty placeholder headings and do NOT block or wait on web search.`,
+          `Reply in the exact language of my message below summarizing what you updated.`,
+          "",
+          BRIEF_REPLY_SENTINEL,
+          userText,
+        ].join("\n");
+        void sendBriefPrompt(wirePrompt, { displayText: userText });
+        return;
+      }
+      const targetPath = ownBrief?.path || briefNotePath({ meetingId: meeting.id, nativeId: meeting.native_id });
+      const targetSlug = ownBrief?.slug || "personal";
+      const noteId = targetPath.split("/").pop()!.replace(/\.md$/, "");
+      const wirePrompt = [
+        `Update the meeting brief at ${JSON.stringify(targetPath)} in my private workspace ${JSON.stringify(targetSlug)} immediately with ALL details I just provided below.`,
+        `Read the existing file first (or create it with YAML frontmatter type: meeting, id: ${JSON.stringify(noteId)}, title: ${JSON.stringify(name)}, meeting_id: ${meeting.id} if missing), keep valid frontmatter, and write/update the complete structured brief (Objective, Attendees, Agenda, Key Points to Listen For, Deadlines & Specific Tasks) right now — do NOT leave empty placeholder headings and do NOT block or wait on web search.`,
+        `Reply in the exact language of my message below summarizing what you updated.`,
+        "",
+        BRIEF_REPLY_SENTINEL,
+        userText,
+      ].join("\n");
+      setBriefChatStarted(true);
+      void sendBriefPrompt(wirePrompt, { displayText: userText });
+    },
+    [chatBusy, headline, meeting.id, meeting.native_id, meeting.workspace_id, ownBrief, sendBriefPrompt, title],
+  );
+
   const handleChatSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!draft.trim() || chatBusy) return;
-    void sendBriefPrompt(draft);
+    submitBriefReply(draft);
   };
 
   const copyMessage = async (id: string, text: string) => {
@@ -1249,7 +1299,7 @@ export function MeetingPrepWorkspace({
                         </div>
                       </div>
                       <div className={styles.briefDocBody}>
-                        <Markdown>{sharedBriefText}</Markdown>
+                        <Markdown>{stripYamlFrontmatter(sharedBriefText)}</Markdown>
                       </div>
                     </>
                   ) : (
@@ -1332,7 +1382,7 @@ export function MeetingPrepWorkspace({
                       </div>
                     </div>
                     <div className={styles.briefDocBody}>
-                      <Markdown>{ownBrief.text}</Markdown>
+                      <Markdown>{stripYamlFrontmatter(ownBrief.text)}</Markdown>
                     </div>
                   </>
                 ) : briefChatStarted || chatBusy ? (
@@ -1684,7 +1734,7 @@ export function MeetingPrepWorkspace({
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    void sendBriefPrompt(draft);
+                    submitBriefReply(draft);
                   }
                 }}
               />

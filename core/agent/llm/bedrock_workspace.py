@@ -156,6 +156,8 @@ def _is_allowed_wiki_path(relative: str | None, *, is_global: bool, writing: boo
         return False
     if is_global and not writing:
         return relative in ("README.md", "CLAUDE.md") or (len(parts) >= 2 and parts[0] in _GLOBAL_ROOTS)
+    if not is_global and relative == "README.md":
+        return True
     return len(parts) >= 2 and parts[0] in _KNOWLEDGE_ROOTS
 
 
@@ -227,7 +229,7 @@ def _iter_workspace_files(mount: dict, *, limit: int) -> list[tuple[str, Path]]:
     roots = (
         [root / "README.md", root / "CLAUDE.md", root / "kg", root / "docs", root / "mail"]
         if is_global
-        else [root / name for name in _KNOWLEDGE_ROOTS]
+        else [root / "README.md", *(root / name for name in _KNOWLEDGE_ROOTS)]
     )
     found: list[tuple[str, Path]] = []
 
@@ -657,7 +659,7 @@ class BedrockWorkspaceHarness:
                 + (f"Mounted workspaces: {mount_summary}.\n" if mount_summary else "")
                 + "Tools & formatting:\n"
                 "- Always pass an exact workspace slug above (or 'personal' for your private space) and a relative "
-                "path under kg/, wiki/, notes/, sources/, concepts/, or docs/ (e.g. 'kg/notes.md', 'notes/plan.md').\n"
+                "path under kg/, wiki/, notes/, sources/, concepts/, docs/, or README.md (e.g. 'kg/entities/meeting/brief-1.md', 'README.md').\n"
                 "- Use list_wiki and search_wiki to discover pages, read_wiki to read them, create_wiki to add new "
                 "pages, update_wiki (mode='append' or 'replace' after reading) to edit existing pages, move_wiki to "
                 "move or rename pages, and delete_wiki to delete pages when the user asks. Never try to delete a file "
