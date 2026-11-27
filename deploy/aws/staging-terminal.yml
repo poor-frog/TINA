@@ -29,6 +29,9 @@ Parameters:
   HideModelSettings: {Type: String, Default: 'false', AllowedValues: ['true', 'false']}
   GatewayExtensionOrigins: {Type: String, Default: ''}
   ExtensionStoreUrl: {Type: String, Default: ''}
+  SesSecretArn: {Type: String, Default: ''}
+  SesFrom: {Type: String, Default: ''}
+  SesRegion: {Type: String, Default: 'us-east-1', AllowedPattern: '^[a-z]{2}(-[a-z]+)+-[0-9]+$'}
 
 Conditions:
   GoogleEnabled: !Not [!Equals [!Ref GoogleSecretArn, '']]
@@ -41,6 +44,9 @@ Conditions:
   WithHideModelSettings: !Equals [!Ref HideModelSettings, 'true']
   WithExtensionOrigins: !Not [!Equals [!Ref GatewayExtensionOrigins, '']]
   WithExtensionStoreUrl: !Not [!Equals [!Ref ExtensionStoreUrl, '']]
+  WithSes: !And
+    - !Not [!Equals [!Ref SesSecretArn, '']]
+    - !Not [!Equals [!Ref SesFrom, '']]
 
 Resources:
   NextAuthSecret:
@@ -115,6 +121,7 @@ Resources:
                   - !Ref NextAuthSecret
                   - !If [GoogleEnabled, !Ref GoogleSecretArn, !Ref 'AWS::NoValue']
                   - !If [WithTranscription, !Ref TranscriptionTokenArn, !Ref 'AWS::NoValue']
+                  - !If [WithSes, !Ref SesSecretArn, !Ref 'AWS::NoValue']
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Metadata:
@@ -151,6 +158,8 @@ Resources:
             - !If [WithAdminEmails, {Name: TINA_ADMIN_EMAILS, Value: !Ref AdminEmails}, !Ref 'AWS::NoValue']
             - !If [WithExtensionOrigins, {Name: TINA_GATEWAY_EXTENSION_ORIGINS, Value: !Ref GatewayExtensionOrigins}, !Ref 'AWS::NoValue']
             - !If [WithExtensionStoreUrl, {Name: MEETTINA_EXTENSION_STORE_URL, Value: !Ref ExtensionStoreUrl}, !Ref 'AWS::NoValue']
+            - !If [WithSes, {Name: TINA_SES_FROM, Value: !Ref SesFrom}, !Ref 'AWS::NoValue']
+            - !If [WithSes, {Name: TINA_SES_REGION, Value: !Ref SesRegion}, !Ref 'AWS::NoValue']
             - {Name: NEXTAUTH_URL, Value: !Ref StageUrl}
             - {Name: TERMINAL_URL, Value: !Ref StageUrl}
           Secrets:
@@ -169,6 +178,14 @@ Resources:
               - GoogleEnabled
               - {Name: GOOGLE_CLIENT_SECRET, ValueFrom: !Sub '${GoogleSecretArn}:client_secret::'}
               - !Ref AWS::NoValue
+            - !If
+              - WithSes
+              - {Name: TINA_SES_SMTP_USER, ValueFrom: !Sub '${SesSecretArn}:username::'}
+              - !Ref 'AWS::NoValue'
+            - !If
+              - WithSes
+              - {Name: TINA_SES_SMTP_PASSWORD, ValueFrom: !Sub '${SesSecretArn}:password::'}
+              - !Ref 'AWS::NoValue'
           LogConfiguration:
             LogDriver: awslogs
             Options: {awslogs-group: !Ref TerminalLogs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}

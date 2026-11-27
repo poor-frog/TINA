@@ -14,6 +14,7 @@ import GoogleProvider from "next-auth/providers/google";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import { cookies } from "next/headers";
 import { AUTH_COOKIE, USER_INFO_COOKIE, findOrCreateUserToken, linkGoogleCalendarAccount, validateAuthToken } from "../adminApi";
+import { sendLoginEmail } from "../../mail/templates";
 import { googleAvatarUrl } from "../googleAvatar";
 import { GOOGLE_CALENDAR_LINK_COOKIE, listGoogleCalendars, verifyGoogleCalendarLinkIntent } from "../googleCalendarLink";
 import { GOOGLE_CALENDAR_PROVIDER, GOOGLE_CALENDAR_AUTHORIZATION_PARAMS, GOOGLE_CALENDAR_SCOPES } from "../../../../lib/googleCalendar";
@@ -140,6 +141,13 @@ export const authOptions: AuthOptions = {
       const displayName = user.name || result.user.name || result.user.email.split("@")[0];
       const image = provider === "google" ? googleAvatarUrl(user.image) : null;
       cookieStore.set(USER_INFO_COOKIE, JSON.stringify({ email: result.user.email, name: displayName, image }), opts);
+      // Best-effort login / welcome notification via Amazon SES — never blocks sign-in.
+      void sendLoginEmail({
+        email: result.user.email,
+        name: displayName,
+        provider,
+        isNewUser: result.justCreated,
+      }).catch(() => undefined);
       return true;
     },
     async jwt({ token, account, profile }) {

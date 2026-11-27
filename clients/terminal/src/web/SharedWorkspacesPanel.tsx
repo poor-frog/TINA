@@ -16,6 +16,7 @@ import {
   readAttachedWorkspaces,
   removeWorkspaceMember,
   revokeWorkspaceInvite,
+  sendWorkspaceInviteLinkByEmail,
   setSharedActive,
   setWorkspaceMemberRole,
   shareEnableWorkspace,
@@ -49,6 +50,8 @@ export function SharedWorkspacesPanel() {
   const [inviteMode, setInviteMode] = useState<"open" | "restricted">("open");
   const [inviteEmails, setInviteEmails] = useState("");
   const [mintedLink, setMintedLink] = useState<string | null>(null);
+  const [mintedToken, setMintedToken] = useState<string | null>(null);
+  const [sendLinkEmails, setSendLinkEmails] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
 
   const loadAll = useCallback(async () => {
@@ -95,6 +98,8 @@ export function SharedWorkspacesPanel() {
 
   useEffect(() => {
     setMintedLink(null);
+    setMintedToken(null);
+    setSendLinkEmails("");
     setCopiedLink(false);
     if (!selectedWs) {
       setMembers([]);
@@ -148,9 +153,9 @@ export function SharedWorkspacesPanel() {
   const handleMintInvite = (e: FormEvent) => {
     e.preventDefault();
     if (!selectedWs) return;
-    const allowedEmails = inviteMode === "restricted"
-      ? inviteEmails.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean)
-      : undefined;
+    const parsedEmails = inviteEmails.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+    const allowedEmails = inviteMode === "restricted" ? parsedEmails : undefined;
+    const notifyEmails = inviteMode === "open" && parsedEmails.length > 0 ? parsedEmails : undefined;
     if (inviteMode === "restricted" && (!allowedEmails || allowedEmails.length === 0)) {
       setError("Enter at least one email address for a restricted invite.");
       return;
@@ -163,13 +168,47 @@ export function SharedWorkspacesPanel() {
         expires_in_sec: 7 * 86400,
         max_uses: inviteMode === "restricted" ? allowedEmails!.length : 25,
         allowed_emails: allowedEmails,
+        notify_emails: notifyEmails,
       });
       const origin = typeof window !== "undefined" ? window.location.origin : "";
       setMintedLink(`${origin}/?invite=${encodeURIComponent(minted.token)}`);
+      setMintedToken(minted.token);
       setCopiedLink(false);
       setInviteEmails("");
       await loadWorkspaceDetails(selectedWs);
-    }, "Invite link created (expires in 7 days).");
+      const delivery = minted.email_delivery;
+      if (delivery && delivery.sent.length > 0) {
+        const failedPart = delivery.failed.length > 0 ? ` (${delivery.failed.length} failed)` : "";
+        setNotice(`Invite link created and emailed to ${delivery.sent.length} recipient(s)${failedPart}.`);
+      } else if (delivery && delivery.failed.length > 0) {
+        setNotice(`Invite link created, but email delivery failed for ${delivery.failed.join(", ")}. You can copy the link below.`);
+      } else {
+        setNotice("Invite link created (expires in 7 days).");
+      }
+    });
+  };
+
+  const handleSendMintedLinkByEmail = (e: FormEvent) => {
+    e.preventDefault();
+    if (!mintedToken) return;
+    const emails = sendLinkEmails.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+    if (emails.length === 0) {
+      setError("Enter at least one email address to send this invite link.");
+      return;
+    }
+    void runAction(async () => {
+      const res = await sendWorkspaceInviteLinkByEmail(mintedToken, emails);
+      setSendLinkEmails("");
+      const delivery = res.email_delivery;
+      if (delivery.sent.length > 0) {
+        const failedPart = delivery.failed.length > 0 ? ` (${delivery.failed.length} failed)` : "";
+        setNotice(`Invite email sent to ${delivery.sent.join(", ")}${failedPart}.`);
+      } else if (delivery.skipped) {
+        setNotice("Email delivery is not configured on this environment. Copy the link above to share.");
+      } else {
+        setError(`Could not deliver invite email to ${delivery.failed.join(", ")}.`);
+      }
+    });
   };
 
   const handleCopyLink = async () => {
@@ -419,36 +458,56 @@ export function SharedWorkspacesPanel() {
                     </select>
                     <button type="submit" className="tina-web-btn-primary" disabled={busy}>
                       <WebIcon name="link" size={14} />
-                      <span>Generate invite link</span>
+                      <span>{inviteEmails.trim() ? "Generate & email invite" : "Generate invite link"}</span>
                     </button>
                   </div>
-                  {inviteMode === "restricted" && (
-                    <input
-                      type="text"
-                      aria-label="Allowed invite emails"
-                      placeholder="alice@company.com, bob@company.com"
-                      value={inviteEmails}
-                      onChange={(e) => setInviteEmails(e.target.value)}
-                      disabled={busy}
-                      className="tina-web-input"
-                    />
-                  )}
+                  <input
+                    type="text"
+                    aria-label={inviteMode === "restricted" ? "Allowed invite emails" : "Optional invite emails"}
+                    placeholder={
+                      inviteMode === "restricted"
+                        ? "alice@company.com, bob@company.com (invite emails will be sent automatically)"
+                        : "Optional: alice@company.com, bob@company.com to email this share link"
+                    }
+                    value={inviteEmails}
+                    onChange={(e) => setInviteEmails(e.target.value)}
+                    disabled={busy}
+                    className="tina-web-input"
+                  />
                 </form>
 
                 {mintedLink && (
-                  <div className="tina-web-minted-box">
-                    <input
-                      type="text"
-                      readOnly
-                      aria-label="Generated invite link"
-                      value={mintedLink}
-                      className="tina-web-input"
-                    />
-                    <button type="button" className="tina-web-btn-ghost" onClick={() => void handleCopyLink()}>
-                      <WebIcon name={copiedLink ? "check" : "copy"} size={14} />
-                      <span>{copiedLink ? "Copied" : "Copy"}</span>
-                    </button>
-                  </div>
+                  <>
+                    <div className="tina-web-minted-box">
+                      <input
+                        type="text"
+                        readOnly
+                        aria-label="Generated invite link"
+                        value={mintedLink}
+                        className="tina-web-input"
+                      />
+                      <button type="button" className="tina-web-btn-ghost" onClick={() => void handleCopyLink()}>
+                        <WebIcon name={copiedLink ? "check" : "copy"} size={14} />
+                        <span>{copiedLink ? "Copied" : "Copy"}</span>
+                      </button>
+                    </div>
+                    {mintedToken && (
+                      <form onSubmit={handleSendMintedLinkByEmail} className="tina-web-minted-box" style={{ marginTop: 8 }}>
+                        <input
+                          type="text"
+                          aria-label="Send generated invite link by email"
+                          placeholder="Email this invite link to teammate@company.com…"
+                          value={sendLinkEmails}
+                          onChange={(e) => setSendLinkEmails(e.target.value)}
+                          disabled={busy}
+                          className="tina-web-input"
+                        />
+                        <button type="submit" className="tina-web-btn-ghost" disabled={busy || !sendLinkEmails.trim()}>
+                          <span>Send email</span>
+                        </button>
+                      </form>
+                    )}
+                  </>
                 )}
 
                 {invites.length > 0 && (

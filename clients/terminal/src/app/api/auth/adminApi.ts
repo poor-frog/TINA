@@ -326,7 +326,7 @@ async function pruneLoginTokens(userId: string | number): Promise<void> {
 export async function findOrCreateUserToken(
   email: string,
   googleSubject?: string,
-): Promise<{ ok: true; user: AdminUser; token: string } | { ok: false; status: number; error: string }> {
+): Promise<{ ok: true; user: AdminUser; token: string; justCreated: boolean } | { ok: false; status: number; error: string }> {
   const googleLogin = (userId?: string | number) => internalRequest<AdminUser>("/internal/google-login", {
     method: "POST", body: JSON.stringify({ subject: googleSubject, ...(userId !== undefined && { user_id: Number(userId) }) }),
   });
@@ -380,5 +380,5 @@ export async function findOrCreateUserToken(
   if (justCreated) {
     await provisionUserWorkspace(minted.data.token);
   }
-  return { ok: true, user, token: minted.data.token };
+  return { ok: true, user, token: minted.data.token, justCreated };
 }

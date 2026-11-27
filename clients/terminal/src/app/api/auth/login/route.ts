@@ -7,6 +7,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { AUTH_COOKIE, USER_INFO_COOKIE, findOrCreateUserToken } from "../adminApi";
+import { sendLoginEmail } from "../../mail/templates";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -54,12 +55,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: result.error }, { status: result.status || 500, headers: NO_STORE });
   }
 
-  const { user, token } = result;
+  const { user, token, justCreated } = result;
   const secure = isSecureRequest();
   const cookieStore = await cookies();
   const opts = { httpOnly: true, secure, sameSite: "lax" as const, maxAge: 60 * 60 * 24 * 30, path: "/" };
   cookieStore.set(AUTH_COOKIE, token, opts);
-  cookieStore.set(USER_INFO_COOKIE, JSON.stringify({ email: user.email, name: user.name || user.email.split("@")[0] }), opts);
+  const displayName = user.name || user.email.split("@")[0];
+  cookieStore.set(USER_INFO_COOKIE, JSON.stringify({ email: user.email, name: displayName }), opts);
+
+  // Best-effort login / welcome notification (skips reserved .test domains on live SES).
+  void sendLoginEmail({
+    email: user.email,
+    name: displayName,
+    provider: "direct",
+    isNewUser: justCreated,
+  }).catch(() => undefined);
 
   return NextResponse.json(
     { success: true, user: { id: user.id, email: user.email, name: user.name ?? user.email } },

@@ -69,7 +69,17 @@ export async function readActiveSet(): Promise<ActiveSet> {
 
 // ── sharing (Lane M/Lane A): create a shared workspace, mint/redeem invites ──────────────────────
 export interface Membership { workspace_id: string; role: string; added_at?: string }
-export interface MintedInvite { id: string; token: string; role: string; workspace_id: string; expires_at: string; max_uses: number; mode: string }
+export interface InviteEmailDelivery { attempted: number; sent: string[]; failed: string[]; skipped: boolean }
+export interface MintedInvite {
+  id: string;
+  token: string;
+  role: string;
+  workspace_id: string;
+  expires_at: string;
+  max_uses: number;
+  mode: string;
+  email_delivery?: InviteEmailDelivery;
+}
 
 /** CREATE a new shared workspace and make the caller its OWNER (the bootstrap that makes a workspace
  *  shareable). Returns the fresh workspace_id — invites can then be minted against it. */
@@ -96,14 +106,35 @@ export async function setGitToken(token: string | null): Promise<SavedGitToken> 
 }
 
 /** MINT a scoped invite for a shared workspace (owner/contributor). The token is returned ONCE. */
-export async function mintInvite(opts: { workspace_id: string; role?: string; mode?: string; expires_in_sec?: number; max_uses?: number; allowed_emails?: string[] }): Promise<MintedInvite> {
+export async function mintInvite(opts: {
+  workspace_id: string;
+  role?: string;
+  mode?: string;
+  expires_in_sec?: number;
+  max_uses?: number;
+  allowed_emails?: string[];
+  notify_emails?: string[];
+}): Promise<MintedInvite> {
   return getJson(`/api/workspace/invites`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       workspace_id: opts.workspace_id, role: opts.role ?? "contributor", mode: opts.mode ?? "open",
       expires_in_sec: opts.expires_in_sec ?? 604800, max_uses: opts.max_uses ?? 1,
       allowed_emails: opts.allowed_emails ?? null,
+      ...(opts.notify_emails && opts.notify_emails.length > 0 ? { notify_emails: opts.notify_emails } : {}),
     }),
+  });
+}
+
+/** Send an already-minted workspace invite link to teammates by email (server verifies token). */
+export async function sendWorkspaceInviteLinkByEmail(
+  token: string,
+  emails: string[],
+): Promise<{ ok: boolean; email_delivery: InviteEmailDelivery }> {
+  return getJson(`/api/workspace/invites/send-email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, emails }),
   });
 }
 
