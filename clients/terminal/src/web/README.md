@@ -42,11 +42,16 @@ TINA Terminal workbench at `/terminal`.
   source-cited Wiki `MeetingKnowledge`, bilingual VI/EN translation, chronologically interleaved
   `TINA Agent` Voice TTS replies from `/api/meetings/{id}/voice-assistant` with expandable
   `VoiceReplySources` citations, search & audio-synced rows), and docked bottom studio audio scrubber.
-- **Ask Tina (`AskTinaView.tsx`)**: Full-page SSE assistant with real MCP Tool Approval cards
-  (`/api/chat/approval`), Copy & Share response actions, searchable `/api/sessions` history,
-  meeting pre-grounding, `@`-mention picker (`#451`), shimmering thinking state (`#453`), connected
-  agent task-step timeline (`#454`), morphing tool approval card (`#455`), morphing voice dictation
-  pill (`#457`), and real `/routine` prompt compilation.
+- **Ask Tina (`AskTinaView.tsx` + `chatComposerUtils.ts`)**: Full-page SSE assistant with real MCP
+  Tool Approval cards (`/api/chat/approval`), Copy, Share & Save-to-Knowledge actions, searchable
+  `/api/sessions` history, real backend-grounded `@`-mention picker (`#451` supporting meetings,
+  pages, non-`.md` files, spaces, tasks, people, `@Today` schedule, Vietnamese diacritic-insensitive
+  search & `kind:` prefixes), full keyboard `/` slash command popover (`/research`, `/routine`,
+  `/recap`, `/prep`, `/tasks`, `/draft`, `/schedule`, `/save`, `/new`), file & image attachment
+  uploads (button, paste, drag-and-drop via `POST /api/workspace/upload`), shimmering thinking state
+  (`#453`), connected agent task-step timeline (`#454`), morphing tool approval card (`#455`), and
+  morphing voice dictation pill (`#457`). Shared `@` mentions and `/` commands also power the inline
+  `KnowledgeCopilotDrawer` and `MeetingSidePanel` composers.
 - **Lucian micro-interaction layer (`lucian/`)**: Ported MIT primitives from Lucian UX/UI Prompt
   bridged onto TINA's dark/light/landing palettes (`lucianTokens.css`), including the global stacked
   toast deck (`#435`), circular-reveal dark/light toggle (`#219`), live-meeting Dynamic Island

@@ -2546,6 +2546,12 @@
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.36), 0 0 0 3px rgba(23, 107, 91, 0.16);
 }
 
+.tina-web-ask-form.is-drag-over {
+  border-color: rgba(145, 215, 190, 0.72);
+  border-style: dashed;
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.38), 0 0 0 3px rgba(145, 215, 190, 0.22);
+}
+
 .tina-web-ask-form textarea {
   width: 100%;
   min-height: 40px;

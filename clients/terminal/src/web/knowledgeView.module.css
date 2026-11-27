@@ -2668,6 +2668,7 @@
 }
 
 .copilotComposer {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -2747,8 +2748,34 @@
 .copilotComposerActions {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
   flex: none;
+}
+
+.copilotTriggerGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.copilotSchedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(145, 215, 190, 0.35);
+  background: rgba(23, 107, 91, 0.16);
+  color: var(--tw-mint-bright);
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.copilotSchedBadge:hover {
+  background: rgba(23, 107, 91, 0.28);
 }
 
 .copilotKeyHint {

@@ -2,7 +2,7 @@
 /** AskTinaView — Full-page Production AI Assistant backed by TINA's resumable SSE `/api/chat`,
  *  MCP Tool Approval cards (`/api/chat/approval`), real `/routine` prompt compilation, Copy/Share
  *  message actions, parsed context pills, and searchable `/api/sessions` history. */
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
 import { AgentActivitySteps, describeAgentTool } from "./AgentActivitySteps";
 import { LucianThinkingText } from "./lucian/LucianThinkingText";
@@ -13,20 +13,42 @@ import {
   LucianMentionChips,
   LucianMentionPopover,
   LucianMentionTriggerButton,
+  compileMentionContext,
   detectMentionAtCursor,
+  filterMentionTargets,
   findMentionBeforeCursor,
   type MentionMatch,
   type MentionTarget,
 } from "./lucian/LucianMentionPicker";
+import {
+  LucianSlashPopover,
+  LucianSlashTriggerButton,
+  compileSlashPrompt,
+  detectSlashAtStart,
+  filterSlashCommands,
+  type SlashCommandDef,
+  type SlashMatch,
+} from "./lucian/LucianSlashPicker";
+import {
+  COMPOSER_ATTACHMENT_ACCEPT,
+  MAX_COMPOSER_FILES,
+  MAX_COMPOSER_FILE_BYTES,
+  buildMentionCatalog,
+  formatAttachmentsPrompt,
+  saveReplyToKnowledge,
+  uploadComposerFiles,
+  type PendingAttachment,
+  type UploadedWorkspaceFile,
+} from "./chatComposerUtils";
 import { emitWebToast } from "./lucian/webToast";
 import { Markdown } from "../ui-kit/Markdown";
 import { startStreamingDictation, type StreamingDictation } from "../ui-kit/micDictation";
 import { deleteSession, listSessions, sessionHistory, type SessionSummary } from "../surfaces/sessionsApi";
 import { listWorkspaceTree, readActiveSet } from "../surfaces/workspaceApi";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
-import { routineCreationPrompt, stripContextBlocks } from "../surfaces/chat";
+import { stripContextBlocks } from "../surfaces/chat";
 import { ApiError, presentError } from "../surfaces/apiClient";
-import type { MeetingFocus } from "../surfaces/chatContext";
+import type { FocusPayload, MeetingFocus } from "../surfaces/chatContext";
 import { meetingPhase, type MeetingMock } from "../surfaces/meetingModel";
 import type { ToolApprovalDecision, ToolApprovalState } from "../workbench/toolApproval";
 
@@ -134,15 +156,6 @@ function agentPhaseLabel(phase: ChatPhase | null, hasText: boolean, lastOp?: str
   return "Thinking…";
 }
 
-function friendlyMentionPageLabel(path: string): string {
-  const base = path.split("/").pop() || path;
-  return base
-    .replace(/\.md$/i, "")
-    .replace(/[-_]+/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .trim();
-}
-
 export function AskTinaView({
   meetings,
   initialPrompt,
@@ -153,6 +166,7 @@ export function AskTinaView({
   onConsumeInitialPrompt: () => void;
 }) {
   const mentionListboxId = useId();
+  const slashListboxId = useId();
   const starterId = useId();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionQuery, setSessionQuery] = useState("");
@@ -160,7 +174,11 @@ export function AskTinaView({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [selectedMeetingId, setSelectedMeetingId] = useState<string>("");
+  const [includeSchedule, setIncludeSchedule] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [phase, setPhase] = useState<ChatPhase | null>(null);
   const [dictating, setDictating] = useState(false);
@@ -181,6 +199,9 @@ export function AskTinaView({
   const [mentionActiveIdx, setMentionActiveIdx] = useState(0);
   const [mentionDismissedAnchor, setMentionDismissedAnchor] = useState(-1);
   const [mentionedTargets, setMentionedTargets] = useState<MentionTarget[]>([]);
+  const [slashMatch, setSlashMatch] = useState<SlashMatch | null>(null);
+  const [slashActiveIdx, setSlashActiveIdx] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const historyRef = useRef<AbortController | null>(null);
@@ -190,6 +211,9 @@ export function AskTinaView({
   const isNearBottomRef = useRef(true);
   const scopeWrapRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentsRef = useRef<PendingAttachment[]>(attachments);
+  attachmentsRef.current = attachments;
   const messagesRef = useRef<ChatMessage[]>(messages);
   messagesRef.current = messages;
 
@@ -231,6 +255,9 @@ export function AskTinaView({
       historyRef.current?.abort();
       historyRef.current = null;
       dictRef.current?.cancel();
+      for (const att of attachmentsRef.current) {
+        if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+      }
     };
   }, [loadSessionList]);
 
@@ -318,95 +345,55 @@ export function AskTinaView({
 
   const suggestedMeeting = selectedMeeting ?? latestRecording;
 
-  const allMentionTargets = useMemo<MentionTarget[]>(() => {
-    const out: MentionTarget[] = [];
-    const seen = new Set<string>();
-
-    for (const m of meetings.slice(0, 12)) {
-      const label = (m.title_custom || m.title || "").trim();
-      if (!label) continue;
-      const key = `meeting:${m.id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({
-        id: key,
-        kind: "meeting",
-        label,
-        role: "Meeting",
-        gradientA: "#7CCBFF",
-        gradientB: "#3B6CF0",
-        meetingId: m.id,
-      });
-    }
-
-    for (const space of activeSpaces.slice(0, 8)) {
-      const label = (space.name || space.slug || "").trim();
-      if (!label) continue;
-      const key = `space:${space.slug}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({
-        id: key,
-        kind: "space",
-        label,
-        role: "Space",
-        gradientA: "#D2C2FF",
-        gradientB: "#7458F0",
-        spaceSlug: space.slug,
-      });
-    }
-
-    for (const file of workspaceDocs.filter((p) => /\.md$/i.test(p)).slice(0, 16)) {
-      const label = friendlyMentionPageLabel(file);
-      if (!label) continue;
-      const key = `page:${file}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({
-        id: key,
-        kind: "page",
-        label,
-        role: "Page",
-        gradientA: "#8EE3BE",
-        gradientB: "#139A72",
-        docPath: file,
-      });
-    }
-
-    return out;
-  }, [meetings, activeSpaces, workspaceDocs]);
+  const allMentionTargets = useMemo<MentionTarget[]>(
+    () =>
+      buildMentionCatalog({
+        meetings,
+        spaces: activeSpaces,
+        workspaceDocs,
+      }),
+    [meetings, activeSpaces, workspaceDocs],
+  );
 
   const filteredMentions = useMemo(() => {
     if (!mentionMatch) return [];
-    const q = mentionMatch.query.trim().toLowerCase();
-    const list = q
-      ? allMentionTargets.filter(
-          (item) =>
-            item.label.toLowerCase().includes(q) ||
-            item.role.toLowerCase().includes(q) ||
-            (item.docPath && item.docPath.toLowerCase().includes(q)),
-        )
-      : allMentionTargets;
-    return list.slice(0, 8);
+    return filterMentionTargets(allMentionTargets, mentionMatch.query, 10);
   }, [allMentionTargets, mentionMatch]);
 
-  const mentionOpen = Boolean(mentionMatch && filteredMentions.length > 0);
+  const filteredSlashCommands = useMemo(() => {
+    if (!slashMatch) return [];
+    return filterSlashCommands(slashMatch.query);
+  }, [slashMatch]);
 
-  const syncMentionState = useCallback(
+  const mentionOpen = Boolean(mentionMatch && filteredMentions.length > 0);
+  const slashOpen = Boolean(!mentionOpen && slashMatch && filteredSlashCommands.length > 0);
+
+  const syncComposerPickers = useCallback(
     (nextValue: string, cursorPos: number) => {
-      const match = detectMentionAtCursor(nextValue, cursorPos);
-      if (!match) {
+      const sMatch = detectSlashAtStart(nextValue, cursorPos);
+      if (!sMatch) {
+        setSlashDismissed(false);
+        setSlashMatch(null);
+      } else if (!slashDismissed) {
+        setSlashMatch((prev) => {
+          if (!prev || prev.query !== sMatch.query) setSlashActiveIdx(0);
+          return sMatch;
+        });
+      }
+
+      const mMatch = detectMentionAtCursor(nextValue, cursorPos);
+      if (!mMatch) {
         setMentionDismissedAnchor(-1);
         setMentionMatch(null);
         return;
       }
-      if (match.anchor === mentionDismissedAnchor) return;
+      if (mMatch.anchor === mentionDismissedAnchor) return;
       setMentionMatch((prev) => {
-        if (!prev || prev.anchor !== match.anchor) setMentionActiveIdx(0);
-        return match;
+        if (!prev || prev.anchor !== mMatch.anchor) setMentionActiveIdx(0);
+        return mMatch;
       });
     },
-    [mentionDismissedAnchor],
+    [mentionDismissedAnchor, slashDismissed],
   );
 
   const pickMention = useCallback(
@@ -424,6 +411,8 @@ export function AskTinaView({
       setMentionedTargets((prev) => (prev.some((x) => x.id === target.id) ? prev : [...prev, target]));
       if (target.kind === "meeting" && target.meetingId) {
         setSelectedMeetingId(target.meetingId);
+      } else if (target.kind === "schedule") {
+        setIncludeSchedule(true);
       }
       window.requestAnimationFrame(() => {
         if (!composerRef.current) return;
@@ -436,6 +425,7 @@ export function AskTinaView({
 
   const insertAtMentionTrigger = useCallback(() => {
     const el = composerRef.current;
+    setSlashMatch(null);
     if (mentionOpen && mentionMatch && mentionMatch.query === "") {
       setMentionDismissedAnchor(mentionMatch.anchor);
       setMentionMatch(null);
@@ -469,11 +459,35 @@ export function AskTinaView({
     });
   }, [draft, mentionMatch, mentionOpen]);
 
+  const insertSlashTrigger = useCallback(() => {
+    const el = composerRef.current;
+    setMentionMatch(null);
+    if (slashOpen && slashMatch && slashMatch.query === "") {
+      setSlashDismissed(true);
+      setSlashMatch(null);
+      el?.focus({ preventScroll: true });
+      return;
+    }
+    const nextValue = draft.trimStart().startsWith("/") ? draft : `/${draft}`;
+    setDraft(nextValue);
+    setSlashDismissed(false);
+    setSlashActiveIdx(0);
+    setSlashMatch({ anchor: 0, query: "" });
+    el?.focus({ preventScroll: true });
+    window.requestAnimationFrame(() => {
+      if (!composerRef.current) return;
+      composerRef.current.focus({ preventScroll: true });
+      composerRef.current.setSelectionRange(1, 1);
+    });
+  }, [draft, slashMatch, slashOpen]);
+
   const removeMentionChip = useCallback((id: string) => {
     setMentionedTargets((prev) => {
       const target = prev.find((x) => x.id === id);
       if (target?.kind === "meeting" && target.meetingId && target.meetingId === selectedMeetingId) {
         setSelectedMeetingId("");
+      } else if (target?.kind === "schedule") {
+        setIncludeSchedule(false);
       }
       if (target) {
         setDraft((cur) => cur.replace(new RegExp(`@${target.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s?`, "g"), "").trimStart());
@@ -481,6 +495,59 @@ export function AskTinaView({
       return prev.filter((x) => x.id !== id);
     });
   }, [selectedMeetingId]);
+
+  const addPendingFiles = useCallback((incoming: File[]) => {
+    if (incoming.length === 0) return;
+    setSessionError(null);
+    const next: PendingAttachment[] = [];
+    for (const file of incoming) {
+      if (file.size > MAX_COMPOSER_FILE_BYTES) {
+        emitWebToast({ message: `File “${file.name}” vượt quá giới hạn 25 MB.`, tone: "error" });
+        continue;
+      }
+      const isImage = file.type.startsWith("image/");
+      const previewUrl = isImage && typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
+        ? URL.createObjectURL(file)
+        : undefined;
+      next.push({
+        id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        file,
+        isImage,
+        previewUrl,
+      });
+    }
+    if (next.length === 0) return;
+    setAttachments((prev) => {
+      const remaining = Math.max(0, MAX_COMPOSER_FILES - prev.length);
+      if (remaining === 0) {
+        for (const a of next) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+        emitWebToast({ message: `Tối đa ${MAX_COMPOSER_FILES} tệp đính kèm mỗi lượt gửi.`, tone: "info" });
+        return prev;
+      }
+      const kept = next.slice(0, remaining);
+      for (const extra of next.slice(remaining)) {
+        if (extra.previewUrl) URL.revokeObjectURL(extra.previewUrl);
+      }
+      return [...prev, ...kept];
+    });
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const found = prev.find((a) => a.id === id);
+      if (found?.previewUrl) URL.revokeObjectURL(found.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+  }, []);
+
+  const clearAttachments = useCallback(() => {
+    setAttachments((prev) => {
+      for (const a of prev) {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      }
+      return [];
+    });
+  }, []);
 
   const activeConversationTitle = useMemo(() => {
     const match = sessions.find((s) => s.session === activeSession);
@@ -491,17 +558,109 @@ export function AskTinaView({
     return question ? parseUserContext(question.text).body.slice(0, 60) : "New conversation";
   }, [sessions, activeSession, messages]);
 
+  const setTransientFeedback = useCallback((msgId: string, label: string) => {
+    setActionFeedback((cur) => ({ ...cur, [msgId]: label }));
+    window.setTimeout(() => {
+      setActionFeedback((cur) => {
+        if (cur[msgId] !== label) return cur;
+        const next = { ...cur };
+        delete next[msgId];
+        return next;
+      });
+    }, 2200);
+  }, []);
+
+  const saveMessageToKnowledge = useCallback(
+    async (replyText: string, msgId?: string) => {
+      try {
+        const titleHint =
+          activeConversationTitle !== "New conversation" && activeConversationTitle !== "Ask Tina"
+            ? activeConversationTitle
+            : undefined;
+        const { path } = await saveReplyToKnowledge({ replyText, titleHint });
+        if (msgId) setTransientFeedback(msgId, "Saved");
+        emitWebToast({ message: `Đã lưu vào Knowledge: ${path}`, tone: "success" });
+        void listWorkspaceTree()
+          .then((files) => {
+            if (Array.isArray(files)) setWorkspaceDocs(files);
+          })
+          .catch(() => undefined);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Could not save reply to Knowledge.";
+        if (msgId) setTransientFeedback(msgId, "Save failed");
+        emitWebToast({ message: msg, tone: "error" });
+      }
+    },
+    [activeConversationTitle, setTransientFeedback],
+  );
+
   const sendMessage = useCallback(
-    async (rawPrompt: string, meetingOverrideId?: string, focusOverride?: MeetingFocus) => {
-      const displayPrompt = rawPrompt.trim();
-      if (!displayPrompt || abortRef.current || historyRef.current) return;
+    async (
+      rawPrompt: string,
+      meetingOverrideId?: string,
+      focusOverride?: MeetingFocus,
+      opts?: { mentions?: MentionTarget[]; uploadedFiles?: UploadedWorkspaceFile[] },
+    ) => {
+      const trimmed = rawPrompt.trim();
+      const uploadedFiles = opts?.uploadedFiles ?? [];
+      if ((!trimmed && uploadedFiles.length === 0) || abortRef.current || historyRef.current) return;
+
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      const mentionCtx = compileMentionContext(opts?.mentions ?? []);
+      const effectiveMeetingId =
+        (meetingOverrideId ?? focusOverride?.meeting_id ?? selectedMeetingId) ||
+        mentionCtx.primaryMeetingId ||
+        "";
+      const meeting = meetings.find((m) => m.id === effectiveMeetingId);
+
+      const compiled = compileSlashPrompt(trimmed, {
+        tz,
+        meetingTitle: meeting ? meeting.title_custom || meeting.title : focusOverride?.title,
+      });
+      if (compiled.kind === "instant") {
+        if (compiled.commandId === "new") {
+          setActiveSession(newSessionId());
+          setMessages([]);
+          setSessionError(null);
+          setBusy(false);
+          setPhase(null);
+          setHistoryLoading(false);
+          emitWebToast({ message: "Đã mở cuộc trò chuyện mới", tone: "info" });
+        } else if (compiled.commandId === "schedule") {
+          setIncludeSchedule((cur) => {
+            const next = !cur;
+            emitWebToast({
+              message: next ? "Đã bật ngữ cảnh lịch họp hôm nay" : "Đã tắt ngữ cảnh lịch họp hôm nay",
+              tone: "info",
+            });
+            return next;
+          });
+        } else if (compiled.commandId === "save") {
+          const lastAgent = [...messagesRef.current].reverse().find((m) => m.role === "agent" && m.text.trim());
+          if (!lastAgent) {
+            emitWebToast({ message: "Chưa có câu trả lời nào của Tina để lưu.", tone: "info" });
+          } else {
+            void saveMessageToKnowledge(lastAgent.text, lastAgent.id);
+          }
+        }
+        return;
+      }
+      if (compiled.kind === "error") {
+        setSessionError(compiled.message);
+        emitWebToast({ message: compiled.message, tone: "error" });
+        return;
+      }
 
       isNearBottomRef.current = true;
       setShowScrollDown(false);
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-      const wirePrompt = /^\/routine(?:\s|$)/i.test(displayPrompt)
-        ? routineCreationPrompt(displayPrompt, tz)
-        : displayPrompt;
+      setSessionError(null);
+
+      const attachBlock = formatAttachmentsPrompt(uploadedFiles);
+      const wireParts = [compiled.wirePrompt, mentionCtx.contextBlock, attachBlock].filter(Boolean);
+      const wirePrompt = wireParts.join("\n\n");
+      const displayPrompt =
+        compiled.displayPrompt ||
+        `Attached files: ${uploadedFiles.map((f) => f.name).join(", ")}`;
 
       const userId = `u-${Date.now()}`;
       const agentId = `a-${Date.now() + 1}`;
@@ -516,9 +675,7 @@ export function AskTinaView({
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const effectiveMeetingId = meetingOverrideId ?? focusOverride?.meeting_id ?? selectedMeetingId;
-      const meeting = meetings.find((m) => m.id === effectiveMeetingId);
-      const activeContext: MeetingFocus | undefined = meeting
+      const meetingContext: MeetingFocus | undefined = meeting
         ? {
             kind: "meeting",
             meeting_id: meeting.id,
@@ -531,23 +688,29 @@ export function AskTinaView({
             ...(focusOverride ?? {}),
           }
         : focusOverride;
+      const effectiveFocus: FocusPayload | null = meetingContext ?? mentionCtx.fallbackFocus ?? null;
+      const effectiveIncludeSchedule = includeSchedule || mentionCtx.includeSchedule;
       const isPrep =
         (meeting ? meetingPhase(meeting) === "prep" : false) ||
-        activeContext?.status === "idle" ||
-        activeContext?.status === "scheduled";
+        meetingContext?.status === "idle" ||
+        meetingContext?.status === "scheduled";
 
       try {
         await streamChatTurn(
           {
             prompt: wirePrompt,
             session: activeSession,
-            active: activeContext,
+            active: effectiveFocus ?? undefined,
+            research: compiled.research || undefined,
             context: {
               tz,
-              surface: activeContext
+              surface: meetingContext
                 ? { list: "meetings", tab: { kind: isPrep ? "meetingPrep" : "meeting" } }
-                : { list: "ask" },
-              focus: activeContext ?? null,
+                : effectiveFocus?.kind === "file"
+                  ? { list: "files", tab: { kind: "doc" } }
+                  : { list: "ask" },
+              focus: effectiveFocus,
+              ...(effectiveIncludeSchedule ? { include: { schedule: true } } : {}),
             },
           },
           {
@@ -660,7 +823,7 @@ export function AskTinaView({
         }
       }
     },
-    [activeSession, loadSessionList, meetings, selectedMeetingId],
+    [activeSession, includeSchedule, loadSessionList, meetings, saveMessageToKnowledge, selectedMeetingId],
   );
 
   const respondToApproval = async (approvalId: string, decision: ToolApprovalDecision) => {
@@ -872,18 +1035,6 @@ export function AskTinaView({
     }
   };
 
-  const setTransientFeedback = (msgId: string, label: string) => {
-    setActionFeedback((cur) => ({ ...cur, [msgId]: label }));
-    window.setTimeout(() => {
-      setActionFeedback((cur) => {
-        if (cur[msgId] !== label) return cur;
-        const next = { ...cur };
-        delete next[msgId];
-        return next;
-      });
-    }, 2200);
-  };
-
   const copyMessage = async (msgId: string, text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -933,20 +1084,94 @@ export function AskTinaView({
     composerRef.current?.focus();
   }, []);
 
-  const onSubmit = (e: FormEvent) => {
+  const pickSlashCommand = useCallback(
+    (cmd: SlashCommandDef) => {
+      setSlashMatch(null);
+      setSlashDismissed(false);
+      if (cmd.instant) {
+        setDraft("");
+        void sendMessage(cmd.command);
+        return;
+      }
+      const nextValue = cmd.insertTemplate;
+      setDraft(nextValue);
+      window.requestAnimationFrame(() => {
+        if (!composerRef.current) return;
+        composerRef.current.focus();
+        composerRef.current.setSelectionRange(nextValue.length, nextValue.length);
+      });
+    },
+    [sendMessage],
+  );
+
+  const onComposerPaste = useCallback(
+    (e: ClipboardEvent<HTMLTextAreaElement>) => {
+      const files = Array.from(e.clipboardData?.items ?? [])
+        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .map((item) => item.getAsFile())
+        .filter((f): f is File => Boolean(f));
+      if (files.length === 0) return;
+      e.preventDefault();
+      addPendingFiles(files);
+    },
+    [addPendingFiles],
+  );
+
+  const onComposerDrop = useCallback(
+    (e: DragEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      setDragOver(false);
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (files.length > 0) addPendingFiles(files);
+    },
+    [addPendingFiles],
+  );
+
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!draft.trim() || busy || historyLoading) return;
+    const hasText = Boolean(draft.trim());
+    const hasFiles = attachments.length > 0;
+    if ((!hasText && !hasFiles) || busy || uploading || historyLoading) return;
+
     const text = draft;
+    const mentionsSnapshot = mentionedTargets;
+    const pendingFiles = attachments.map((a) => a.file);
+
+    let uploadedFiles: UploadedWorkspaceFile[] = [];
+    if (pendingFiles.length > 0) {
+      setUploading(true);
+      setSessionError(null);
+      try {
+        uploadedFiles = await uploadComposerFiles(pendingFiles);
+        void listWorkspaceTree()
+          .then((files) => {
+            if (Array.isArray(files)) setWorkspaceDocs(files);
+          })
+          .catch(() => undefined);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "File upload failed.";
+        setSessionError(msg);
+        emitWebToast({ message: msg, tone: "error" });
+        setUploading(false);
+        return;
+      }
+      setUploading(false);
+      clearAttachments();
+    }
+
     setDraft("");
     setMentionMatch(null);
+    setSlashMatch(null);
+    setSlashDismissed(false);
     setMentionedTargets([]);
-    void sendMessage(text);
+    void sendMessage(text, undefined, undefined, { mentions: mentionsSnapshot, uploadedFiles });
   };
 
   const emptyConversation = !historyLoading && messages.length === 0;
   const draftStarter = (text: string) => {
     setDraft(text);
     setMentionMatch(null);
+    setSlashMatch(null);
     setMentionedTargets([]);
     composerRef.current?.focus();
   };
@@ -960,7 +1185,6 @@ export function AskTinaView({
   );
 
   const lastMessageId = messages[messages.length - 1]?.id;
-  const showSlashHint = draft.startsWith("/") && !/^\/routine\s+\S/i.test(draft);
 
   const renderSessionRow = (s: SessionSummary) => {
     const stamp = formatSessionStamp(s.last_active || s.created);
@@ -1410,6 +1634,16 @@ export function AskTinaView({
                           <button
                             type="button"
                             className="tina-web-msg-action-btn"
+                            aria-label="Save response to Knowledge"
+                            title="Save response to Knowledge (/save)"
+                            onClick={() => void saveMessageToKnowledge(msg.text, msg.id)}
+                          >
+                            <WebIcon name={actionFeedback[msg.id] === "Saved" ? "check" : "bookOpen"} size={13} />
+                            <span>{actionFeedback[msg.id] === "Saved" ? "Saved" : "Save"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="tina-web-msg-action-btn"
                             aria-label="Share response"
                             title="Share response"
                             onClick={() => void shareMessage(msg.id, msg.text)}
@@ -1417,7 +1651,7 @@ export function AskTinaView({
                             <WebIcon name="share" size={13} />
                             <span>Share</span>
                           </button>
-                          {actionFeedback[msg.id] && actionFeedback[msg.id] !== "Copied" && (
+                          {actionFeedback[msg.id] && actionFeedback[msg.id] !== "Copied" && actionFeedback[msg.id] !== "Saved" && (
                             <span role="status" className="tina-web-msg-feedback">
                               {actionFeedback[msg.id]}
                             </span>
@@ -1446,24 +1680,31 @@ export function AskTinaView({
         )}
 
         <div className="tina-web-ask-footer">
-          {showSlashHint && (
-            <div className="tina-web-ask-slash-hint">
-              <button
-                type="button"
-                className="tina-web-ask-slash-btn"
-                onClick={() => {
-                  setDraft("/routine Every weekday at 9:00 AM, ");
-                  composerRef.current?.focus();
-                }}
-              >
-                <WebIcon name="skills" size={13} />
-                <code>/routine</code>
-                <span>Schedule a recurring Tina agent</span>
-              </button>
-            </div>
-          )}
-
-          <form className="tina-web-ask-form" onSubmit={onSubmit}>
+          <form
+            className={`tina-web-ask-form ${dragOver ? "is-drag-over" : ""}`}
+            onSubmit={(e) => void onSubmit(e)}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (!dragOver) setDragOver(true);
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+            }}
+            onDrop={onComposerDrop}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={COMPOSER_ATTACHMENT_ACCEPT}
+              aria-label="Attach files to chat"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                if (files.length > 0) addPendingFiles(files);
+                e.target.value = "";
+              }}
+            />
             <LucianMentionPopover
               open={mentionOpen}
               listboxId={mentionListboxId}
@@ -1473,35 +1714,73 @@ export function AskTinaView({
               onHoverIndex={setMentionActiveIdx}
               onPick={pickMention}
             />
+            <LucianSlashPopover
+              open={slashOpen}
+              listboxId={slashListboxId}
+              items={filteredSlashCommands}
+              activeIndex={slashActiveIdx}
+              onHoverIndex={setSlashActiveIdx}
+              onPick={pickSlashCommand}
+            />
             <LucianMentionChips mentions={mentionedTargets} onRemove={removeMentionChip} />
+            {attachments.length > 0 && (
+              <div className="ux u451-att-strip" aria-label="Pending attachments">
+                {attachments.map((att) => (
+                  <span key={att.id} className="u451-att" title={att.file.name}>
+                    {att.isImage && att.previewUrl ? (
+                      <img src={att.previewUrl} alt="" />
+                    ) : (
+                      <WebIcon name="fileText" size={13} />
+                    )}
+                    <span className="u451-att-name">{att.file.name}</span>
+                    <button
+                      type="button"
+                      className="u451-m-rm"
+                      aria-label={`Remove attachment ${att.file.name}`}
+                      onClick={() => removeAttachment(att.id)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <textarea
               ref={composerRef}
               rows={1}
               value={draft}
               role="combobox"
               aria-autocomplete="list"
-              aria-expanded={mentionOpen}
-              aria-controls={mentionListboxId}
-              aria-activedescendant={mentionOpen ? `${mentionListboxId}-opt-${Math.min(mentionActiveIdx, Math.max(0, filteredMentions.length - 1))}` : undefined}
+              aria-expanded={mentionOpen || slashOpen}
+              aria-controls={slashOpen ? slashListboxId : mentionListboxId}
+              aria-activedescendant={
+                mentionOpen
+                  ? `${mentionListboxId}-opt-${Math.min(mentionActiveIdx, Math.max(0, filteredMentions.length - 1))}`
+                  : slashOpen
+                    ? `${slashListboxId}-opt-${Math.min(slashActiveIdx, Math.max(0, filteredSlashCommands.length - 1))}`
+                    : undefined
+              }
+              onPaste={onComposerPaste}
               onChange={(e) => {
                 const next = e.target.value;
                 setDraft(next);
-                syncMentionState(next, e.target.selectionStart ?? next.length);
+                syncComposerPickers(next, e.target.selectionStart ?? next.length);
               }}
               onClick={(e) => {
                 const target = e.currentTarget;
-                syncMentionState(target.value, target.selectionStart ?? target.value.length);
+                syncComposerPickers(target.value, target.selectionStart ?? target.value.length);
               }}
               onKeyUp={(e) => {
                 if (/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) {
                   const target = e.currentTarget;
-                  syncMentionState(target.value, target.selectionStart ?? target.value.length);
+                  syncComposerPickers(target.value, target.selectionStart ?? target.value.length);
                 }
               }}
               onBlur={(e) => {
                 const next = e.relatedTarget as HTMLElement | null;
                 if (next?.closest?.(".u451-pop, .u451-at")) return;
                 setMentionMatch(null);
+                setSlashMatch(null);
               }}
               onKeyDown={(e) => {
                 if (mentionOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
@@ -1520,6 +1799,24 @@ export function AskTinaView({
                   e.stopPropagation();
                   if (mentionMatch) setMentionDismissedAnchor(mentionMatch.anchor);
                   setMentionMatch(null);
+                  return;
+                }
+                if (slashOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+                  e.preventDefault();
+                  setSlashActiveIdx((cur) => (cur + (e.key === "ArrowDown" ? 1 : -1) + filteredSlashCommands.length) % filteredSlashCommands.length);
+                  return;
+                }
+                if (slashOpen && (e.key === "Enter" || e.key === "Tab")) {
+                  e.preventDefault();
+                  const chosen = filteredSlashCommands[Math.min(slashActiveIdx, filteredSlashCommands.length - 1)];
+                  if (chosen) pickSlashCommand(chosen);
+                  return;
+                }
+                if (slashOpen && e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setSlashDismissed(true);
+                  setSlashMatch(null);
                   return;
                 }
                 if (e.key === "Backspace") {
@@ -1542,7 +1839,7 @@ export function AskTinaView({
                       window.requestAnimationFrame(() => {
                         if (!composerRef.current) return;
                         composerRef.current.setSelectionRange(nextPos, nextPos);
-                        syncMentionState(nextValue, nextPos);
+                        syncComposerPickers(nextValue, nextPos);
                       });
                       return;
                     }
@@ -1550,19 +1847,52 @@ export function AskTinaView({
                 }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  onSubmit(e);
+                  void onSubmit(e);
                 }
               }}
-              placeholder={selectedMeeting ? "Ask about this meeting…" : "Ask a question or type @ to add context…"}
+              placeholder={
+                selectedMeeting
+                  ? "Ask about this meeting, type @ for context or / for commands…"
+                  : "Ask Tina anything — type @ for context, / for commands, or drop/paste files…"
+              }
               aria-label="Message Ask Tina"
             />
             <div className="tina-web-ask-bar">
               <div className="tina-web-ask-bar-left">
                 <LucianMentionTriggerButton
                   onClick={insertAtMentionTrigger}
-                  disabled={busy || historyLoading}
+                  disabled={busy || uploading || historyLoading}
                   expanded={mentionOpen}
                 />
+                <LucianSlashTriggerButton
+                  onClick={insertSlashTrigger}
+                  disabled={busy || uploading || historyLoading}
+                  expanded={slashOpen}
+                />
+                <button
+                  type="button"
+                  className="ux u451-at"
+                  aria-label="Attach files or images"
+                  title="Attach files or paste images (PDF, Markdown, Office, images)"
+                  disabled={busy || uploading || historyLoading}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <WebIcon name="upload" size={15} />
+                </button>
+                {includeSchedule && (
+                  <span className="ux u451-m" title="Today's and upcoming schedule is included in this chat">
+                    <WebIcon name="calendar" size={11} />
+                    <span>Schedule: today</span>
+                    <button
+                      type="button"
+                      className="u451-m-rm"
+                      aria-label="Disable today's schedule context"
+                      onClick={() => setIncludeSchedule(false)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                )}
                 <div ref={scopeWrapRef} className="tina-web-ask-scope-popover-wrap">
                   <button
                     type="button"
@@ -1662,9 +1992,9 @@ export function AskTinaView({
                   <button
                     type="submit"
                     className="tina-web-ask-send-btn"
-                    aria-label="Send"
-                    title="Send message (Enter)"
-                    disabled={!draft.trim() || historyLoading}
+                    aria-label={uploading ? "Uploading files" : "Send"}
+                    title={uploading ? "Uploading attachments…" : "Send message (Enter)"}
+                    disabled={(!draft.trim() && attachments.length === 0) || uploading || historyLoading}
                   >
                     <WebIcon name="sendUp" size={15} strokeWidth={2.2} />
                   </button>
