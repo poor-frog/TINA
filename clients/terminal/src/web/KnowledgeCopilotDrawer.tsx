@@ -412,9 +412,6 @@ export function KnowledgeCopilotDrawer({
       <div className={styles.copilotFeed}>
         {messages.length === 0 ? (
           <div className={styles.copilotEmpty}>
-            <div className={styles.copilotHeroBadge} aria-hidden="true">
-              <WebIcon name="sparkleSmall" size={22} />
-            </div>
             <h3 className={styles.copilotHeroTitle}>
               {docPath ? `Ask about ${targetLabel}` : `How can I help with ${workspaceName}?`}
             </h3>

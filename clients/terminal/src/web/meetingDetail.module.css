@@ -330,6 +330,10 @@
   border-bottom: var(--mt-hairline) solid var(--mt-line-soft);
 }
 
+.smartSearchToggle {
+  flex: none;
+}
+
 .smartHeadTitle {
   display: flex;
   flex-direction: column;
@@ -2297,6 +2301,35 @@
   .playerCenter {
     position: static;
     transform: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .smartSearchToggle {
+    width: 32px;
+    padding: 0;
+  }
+
+  .smartSearchToggle span {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .topBar {
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+  }
+
+  .topBarLeft {
+    flex-basis: 100%;
+  }
+
+  .topBarRight {
+    max-width: 100%;
+    gap: var(--space-1);
+    margin-inline-start: auto;
   }
 }
 

@@ -765,7 +765,12 @@ describe("WebShell production UI (Option A & Option B)", () => {
 
   it("renders the 3-column Fireflies-style Meeting Workspace (Smart Search, Notes/Skills/Action Items, Ask Tina/Transcript, Bottom Player)", async () => {
     const fetchMock = mockEnvironment({ admin: false });
-    render(<WebShell initialMeetingId="102" />);
+    vi.stubGlobal("innerWidth", 1440);
+    try {
+      render(<WebShell initialMeetingId="102" />);
+    } finally {
+      vi.unstubAllGlobals();
+    }
 
     // Center Notes document renders title, code badge, summary card, and action item creator
     expect(await screen.findByRole("heading", { name: "Design Review" })).toBeTruthy();
@@ -788,12 +793,26 @@ describe("WebShell production UI (Option A & Option B)", () => {
     fireEvent.click(screen.getByRole("button", { name: "What were the main topics?" }));
     expect(await screen.findByText(/Drafted follow-up summary/)).toBeTruthy();
 
-    // Toggle Smart Search via bottom player Talk time button -> click speaker filters Transcript
-    const talkTimeBtn = screen.getByRole("button", { name: /Talk time/i });
-    if (talkTimeBtn.getAttribute("aria-expanded") !== "true") {
-      fireEvent.click(talkTimeBtn);
-    }
-    expect(await screen.findByText("Smart Search")).toBeTruthy();
+    const smartSearchToggle = screen.getByRole("button", { name: "Show Smart Search" });
+    const talkTimeBtn = screen.getByRole("button", { name: "Talk time" });
+    const sidebarName = "Smart Search and Talk time & metrics";
+    expect(smartSearchToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("complementary", { name: sidebarName })).toBeNull();
+
+    fireEvent.click(smartSearchToggle);
+    const sidebar = screen.getByRole("complementary", { name: sidebarName });
+    expect(smartSearchToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(smartSearchToggle.getAttribute("aria-controls")).toBe(sidebar.id);
+    expect(talkTimeBtn.getAttribute("aria-expanded")).toBe("true");
+    const refreshButton = screen.getByRole("button", { name: "Refresh speaker metrics" });
+    expect(refreshButton.textContent).toBe("Refresh");
+    expect(refreshButton.querySelector("svg")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide Smart Search" }));
+    expect(screen.queryByRole("complementary", { name: sidebarName })).toBeNull();
+    expect(talkTimeBtn.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(talkTimeBtn);
+    expect(screen.getByRole("heading", { name: "Smart Search" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Linh/i }));
     expect(screen.getByRole("tab", { name: /Transcript/i }).getAttribute("aria-selected")).toBe("true");
 

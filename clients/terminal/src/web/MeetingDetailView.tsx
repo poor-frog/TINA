@@ -3,7 +3,7 @@
  *  architecture, 100% wired to TINA's real APIs: durable + live transcripts, Live Assist state,
  *  Meeting Memory facts, Discussion Review signals, bilingual translation, multi-fragment audio
  *  playback, grounded Ask Tina SSE streaming, Share session, inline Rename, BotControls, and tools. */
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
 import { WebAvatar } from "./Avatar";
 import { Markdown } from "../ui-kit/Markdown";
@@ -316,11 +316,16 @@ export function MeetingDetailView({
   // ── Layout & tab state ──
   const [docTab, setDocTab] = useState<"notes" | "skills" | "tasks" | "live-assist">("notes");
   const [sideTab, setSideTab] = useState<"ask" | "transcript">(isLive ? "transcript" : "ask");
-  const [smartSearchOpen, setSmartSearchOpen] = useState(() =>
-    typeof window !== "undefined" ? window.innerWidth >= 1180 : false,
-  );
+  const [smartSearchOpen, setSmartSearchOpen] = useState(false);
   const [fullscreenDoc, setFullscreenDoc] = useState(false);
   const [fullscreenSide, setFullscreenSide] = useState(false);
+  const smartSearchId = useId();
+  const smartSearchVisible = smartSearchOpen && !fullscreenDoc && !fullscreenSide;
+  const toggleSmartSearch = () => {
+    setFullscreenDoc(false);
+    setFullscreenSide(false);
+    setSmartSearchOpen(!smartSearchVisible);
+  };
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
 
@@ -1677,6 +1682,21 @@ export function MeetingDetailView({
               </div>
             )}
           </div>
+
+          {phase !== "prep" && (
+            <button
+              type="button"
+              className={`${styles.ghostBtn} ${styles.smartSearchToggle} ${smartSearchVisible ? styles.ghostBtnActive : ""}`}
+              aria-label={smartSearchVisible ? "Hide Smart Search" : "Show Smart Search"}
+              aria-expanded={smartSearchVisible}
+              aria-controls={smartSearchVisible ? smartSearchId : undefined}
+              title={smartSearchVisible ? "Hide Smart Search" : "Show Smart Search"}
+              onClick={toggleSmartSearch}
+            >
+              <WebIcon name="sidebar" size={16} />
+              <span>Smart Search</span>
+            </button>
+          )}
         </div>
 
         <div className={styles.topBarRight}>
@@ -1759,8 +1779,9 @@ export function MeetingDetailView({
         <>
           <div className={styles.body}>
             {/* Zone 1: Left Smart Search + Speaker Talk Time */}
-            {smartSearchOpen && !fullscreenDoc && !fullscreenSide && (
+            {smartSearchVisible && (
               <MeetingSmartSearch
+                id={smartSearchId}
                 meeting={m}
                 lines={allLines}
                 liveAssistState={liveAssistState}
@@ -2386,7 +2407,7 @@ export function MeetingDetailView({
             starred={prefs.starred}
             reviewed={prefs.reviewed}
             copiedTranscript={copiedTranscript}
-            smartSearchOpen={smartSearchOpen}
+            smartSearchOpen={smartSearchVisible}
             chapters={playerChapters}
             onSelectChapter={(ch) => {
               if (ch.segmentId && canPlayMeetingAudio && audioFragments.length) {
@@ -2398,11 +2419,7 @@ export function MeetingDetailView({
             onToggleStar={() => updatePrefs((cur) => ({ ...cur, starred: !cur.starred }))}
             onToggleReviewed={() => updatePrefs((cur) => ({ ...cur, reviewed: !cur.reviewed }))}
             onCopyTranscript={() => void copyFullTranscript()}
-            onToggleSmartSearch={() => {
-              setFullscreenDoc(false);
-              setFullscreenSide(false);
-              setSmartSearchOpen((v) => !v);
-            }}
+            onToggleSmartSearch={toggleSmartSearch}
             onPositionChange={(pos) => {
               setPlaybackPosition(pos);
               setPlaybackActive(true);

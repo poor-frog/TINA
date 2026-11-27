@@ -38,6 +38,7 @@ export interface DiscussionSignalSummary {
 }
 
 export function MeetingSmartSearch({
+  id,
   meeting,
   lines,
   liveAssistState,
@@ -56,6 +57,7 @@ export function MeetingSmartSearch({
   onSelectSpeaker,
   onSelectTracker,
 }: {
+  id: string;
   meeting?: MeetingMock;
   lines: TranscriptLine[];
   liveAssistState: LiveMeetingStateSnapshot | null;
@@ -129,7 +131,7 @@ export function MeetingSmartSearch({
   };
 
   return (
-    <aside className={styles.smartRail} aria-label="Smart Search and Talk time & metrics">
+    <aside id={id} className={styles.smartRail} aria-label="Smart Search and Talk time & metrics">
       <header className={styles.smartHead}>
         <div className={styles.smartHeadTitle}>
           <h2>Smart Search</h2>
@@ -137,13 +139,13 @@ export function MeetingSmartSearch({
         </div>
         <button
           type="button"
-          className={styles.iconBtn}
+          className={styles.ghostBtn}
           disabled={refreshing}
           onClick={onRefresh}
           title="Refresh transcript metrics"
           aria-label="Refresh speaker metrics"
         >
-          <WebIcon name="refresh" size={14} />
+          {refreshing ? "Refreshing…" : "Refresh"}
         </button>
       </header>
 
