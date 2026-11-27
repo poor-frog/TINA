@@ -1,0 +1,227 @@
+name: TINA - Build and Push Amazon ECR (ARM64)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - clients/terminal/**
+      - core/agent/**
+      - core/runtime/**
+      - core/flows/**
+      - core/gateway/**
+      - core/meetings/**
+      - core/identity/**
+      - behavior/**
+      - packages/**
+      - .github/workflows/aws-ecr-publish.yml
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Component to build and push to Amazon ECR (auto = changed components on push, or pick one / all)
+        type: choice
+        default: all
+        options:
+          - all
+          - terminal
+          - agent-api
+          - agent-worker
+          - runtime
+          - flows
+          - gateway
+          - meeting-api
+          - admin-api
+
+permissions: {}
+
+concurrency:
+  group: aws-ecr-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.repository == 'poor-frog/TINA' && vars.AWS_ECR_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      has_components: ${{ steps.select.outputs.has_components }}
+      short_sha: ${{ steps.select.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Select changed components
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_COMPONENT: ${{ inputs.component }}
+          SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+
+          CATALOG = {
+              "terminal": {
+                  "name": "terminal",
+                  "repo": "tina-staging/terminal",
+                  "context": ".",
+                  "dockerfile": "clients/terminal/Dockerfile",
+                  "build_args": "NEXT_PUBLIC_TERMINAL_MODE=workspace-pilot\nNEXT_PUBLIC_HIDE_MODEL_SETTINGS=1",
+                  "paths": ("clients/terminal/", "packages/"),
+                  "smoke_cmd": "node -e \"require('node:assert').ok(require('node:fs').existsSync('.next/BUILD_ID'))\"",
+              },
+              "agent-api": {
+                  "name": "agent-api",
+                  "repo": "tina-staging/agent-api",
+                  "context": ".",
+                  "dockerfile": "core/agent/services/agent-api/Dockerfile",
+                  "build_args": "",
+                  "paths": ("core/agent/", "packages/", "behavior/"),
+                  "smoke_cmd": "python -B -c 'import boto3, control_plane.api, control_plane.workspace_store, control_plane.workspace_reader'",
+              },
+              "agent-worker": {
+                  "name": "agent-worker",
+                  "repo": "tina-staging/agent-worker",
+                  "context": ".",
+                  "dockerfile": "core/agent/worker/Dockerfile",
+                  "build_args": "",
+                  "paths": ("core/agent/", "packages/", "behavior/"),
+                  "smoke_cmd": "python -B -c 'import boto3, worker.workspace_sync, worker.workspace_stream; from llm.registry import HARNESS_RUNNERS; assert \"bedrock-workspace\" in HARNESS_RUNNERS'",
+              },
+              "runtime": {
+                  "name": "runtime",
+                  "repo": "tina-foundation/runtime",
+                  "context": "core/runtime",
+                  "dockerfile": "core/runtime/Dockerfile",
+                  "build_args": "",
+                  "paths": ("core/runtime/",),
+                  "smoke_cmd": "python -B -c 'import boto3, runtime_kernel.ecs_backend, runtime_kernel.s3_workspace, runtime_kernel.egress_proxy'",
+              },
+              "flows": {
+                  "name": "flows",
+                  "repo": "tina-staging/flows",
+                  "context": ".",
+                  "dockerfile": "core/flows/Dockerfile",
+                  "build_args": "",
+                  "paths": ("core/flows/", "behavior/"),
+                  "smoke_cmd": "python -B -c 'import flows_config, flows_steps.notify, flows_steps.emailx'",
+              },
+              "gateway": {
+                  "name": "gateway",
+                  "repo": "tina-staging/gateway",
+                  "context": ".",
+                  "dockerfile": "core/gateway/services/gateway/Dockerfile",
+                  "build_args": "",
+                  "paths": ("core/gateway/", "packages/"),
+                  "smoke_cmd": "",
+              },
+              "meeting-api": {
+                  "name": "meeting-api",
+                  "repo": "tina-staging/meeting-api",
+                  "context": ".",
+                  "dockerfile": "core/meetings/services/meeting-api/Dockerfile",
+                  "build_args": "",
+                  "paths": ("core/meetings/", "packages/"),
+                  "smoke_cmd": "",
+              },
+              "admin-api": {
+                  "name": "admin-api",
+                  "repo": "tina-staging/admin-api",
+                  "context": "core/identity/services/admin-api",
+                  "dockerfile": "core/identity/services/admin-api/Dockerfile",
+                  "build_args": "",
+                  "paths": ("core/identity/",),
+                  "smoke_cmd": "",
+              },
+          }
+
+          event_name = os.environ["EVENT_NAME"]
+          chosen = os.environ.get("INPUT_COMPONENT", "")
+          if event_name == "workflow_dispatch":
+              selected = list(CATALOG.values()) if chosen == "all" else [CATALOG[chosen]]
+          else:
+              res = subprocess.run(["git", "diff", "--name-only", "HEAD~1", "HEAD"], capture_output=True, text=True)
+              changed = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+              selected = [
+                  spec for spec in CATALOG.values()
+                  if any(path.startswith(prefix) for path in changed for prefix in spec["paths"])
+              ]
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"short_sha={os.environ['SHA'][:8]}\n")
+              fh.write(f"has_components={'true' if selected else 'false'}\n")
+              fh.write(f"matrix={json.dumps({'include': selected})}\n")
+          PY
+
+  publish:
+    needs: plan
+    if: needs.plan.outputs.has_components == 'true'
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Prepare clean Docker build source
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tina-source"
+          git archive --format=tar HEAD |
+            tar --extract --directory="$RUNNER_TEMP/tina-source" --exclude='.env' --exclude='.env.*' --exclude='.env.keys'
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, smoke-check, and push ARM64 image
+        id: build
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPO: ${{ matrix.repo }}
+          TAG: main-${{ needs.plan.outputs.short_sha }}
+          CONTEXT_DIR: ${{ runner.temp }}/tina-source/${{ matrix.context }}
+          DOCKERFILE: ${{ runner.temp }}/tina-source/${{ matrix.dockerfile }}
+          BUILD_ARGS: ${{ matrix.build_args }}
+          SMOKE_CMD: ${{ matrix.smoke_cmd }}
+          REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE="${ECR_REGISTRY}/${REPO}:${TAG}"
+          args=()
+          while IFS= read -r line; do
+            [[ -n "$line" ]] && args+=(--build-arg "$line")
+          done <<< "$BUILD_ARGS"
+
+          docker build --platform linux/arm64 \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${REVISION}" \
+            -f "$DOCKERFILE" "${args[@]}" -t "$IMAGE" "$CONTEXT_DIR"
+
+          test "$(docker image inspect --format '{{.Architecture}}' "$IMAGE")" = arm64
+          if [[ -n "$SMOKE_CMD" ]]; then
+            docker run --rm --network none --entrypoint sh "$IMAGE" -c "$SMOKE_CMD"
+          fi
+
+          docker push "$IMAGE"
+          DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE")"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Published \`${REPO}\`"
+            echo "- Tag: \`${IMAGE}\`"
+            echo "- Digest: \`${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

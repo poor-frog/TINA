@@ -203,7 +203,7 @@
     {
       "key": "TINA_NOTIFY_CHANNEL",
       "class": "defaulted",
-      "description": "Outbound notifications: smtp for the mailbox, or resend for authenticated Resend SMTPS.",
+      "description": "Outbound notifications: smtp for the mailbox, resend for authenticated Resend SMTPS, or ses for authenticated Amazon SES SMTPS.",
       "default": "smtp",
       "targets": [
         "compose"
@@ -365,6 +365,44 @@
       "targets": [
         "compose"
       ]
+    },
+    {
+      "key": "TINA_SES_SMTP_USER",
+      "class": "capability",
+      "description": "Amazon SES SMTP username paired with TINA_SES_SMTP_PASSWORD; required when the ses channel is selected.",
+      "capability": "ses_notifications",
+      "targets": [
+        "compose"
+      ],
+      "secret": true
+    },
+    {
+      "key": "TINA_SES_SMTP_PASSWORD",
+      "class": "capability",
+      "description": "Amazon SES SMTP password derived for TINA_SES_REGION; required when the ses channel is selected.",
+      "capability": "ses_notifications",
+      "targets": [
+        "compose"
+      ],
+      "secret": true
+    },
+    {
+      "key": "TINA_SES_FROM",
+      "class": "capability",
+      "description": "Bare sender email on a verified Amazon SES domain, e.g. tina@meettina.site.",
+      "capability": "ses_notifications",
+      "targets": [
+        "compose"
+      ]
+    },
+    {
+      "key": "TINA_SES_REGION",
+      "class": "defaulted",
+      "description": "AWS region for the Amazon SES SMTPS endpoint email-smtp.<region>.amazonaws.com.",
+      "default": "us-east-1",
+      "targets": [
+        "compose"
+      ]
     }
   ],
   "capabilities": {
@@ -430,6 +468,11 @@
       "description": "Resend outbound notifications selected by TINA_NOTIFY_CHANNEL=resend.",
       "mode": "all",
       "when_unconfigured": "Resend sends refuse before connecting, naming the missing key. The default smtp channel remains unchanged."
+    },
+    "ses_notifications": {
+      "description": "Amazon SES outbound notifications selected by TINA_NOTIFY_CHANNEL=ses.",
+      "mode": "all",
+      "when_unconfigured": "SES sends refuse before connecting, naming the missing key. The default smtp channel remains unchanged."
     }
   },
   "surface_only": [

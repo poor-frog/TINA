@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Private TINA Flows API and worker, using an isolated database on staging RDS.
+Description: Private TINA Flows API, queue worker, and optional IMAP mailbox, using an isolated database on staging RDS.
 Metadata:
   AWSToolsMetrics: {AWSAgentToolkit: 'true'}
 Parameters:
@@ -15,17 +15,28 @@ Parameters:
   CoreInternalSecretArn: {Type: String}
   FlowsImage: {Type: String, AllowedPattern: '[a-zA-Z0-9./:_-]+@sha256:[a-f0-9]{64}'}
   FlowsRepositoryArn: {Type: String}
+  MailboxSecretArn: {Type: String, Default: ''}
+  MailSenderDomains: {Type: String, Default: '', AllowedPattern: '(|[A-Za-z0-9.-]+(,[A-Za-z0-9.-]+)*)'}
+  TerminalUrl: {Type: String, Default: ''}
   AgentApiUrl: {Type: String, Default: ''}
   AgentApiClientSecurityGroupId: {Type: String, Default: ''}
   ResendSecretArn: {Type: String, Default: ''}
   ResendFrom: {Type: String, Default: ''}
+  SesSecretArn: {Type: String, Default: ''}
+  SesFrom: {Type: String, Default: ''}
+  SesRegion: {Type: String, Default: 'us-east-1', AllowedPattern: '^[a-z]{2}(-[a-z]+)+-[0-9]+$'}
 
 Conditions:
+  WithMailbox: !Not [!Equals [!Ref MailboxSecretArn, '']]
+  WithTerminalUrl: !Not [!Equals [!Ref TerminalUrl, '']]
   WithAgentApi: !Not [!Equals [!Ref AgentApiUrl, '']]
   WithAgentApiSg: !Not [!Equals [!Ref AgentApiClientSecurityGroupId, '']]
   WithResend: !And
     - !Not [!Equals [!Ref ResendSecretArn, '']]
     - !Not [!Equals [!Ref ResendFrom, '']]
+  WithSes: !And
+    - !Not [!Equals [!Ref SesSecretArn, '']]
+    - !Not [!Equals [!Ref SesFrom, '']]
 
 Resources:
   DatabasePassword:
@@ -88,7 +99,9 @@ Resources:
                   - !Ref FlowsApiKey
                   - !Ref CoreAdminTokenArn
                   - !Ref CoreInternalSecretArn
+                  - !If [WithMailbox, !Ref MailboxSecretArn, !Ref 'AWS::NoValue']
                   - !If [WithResend, !Ref ResendSecretArn, !Ref 'AWS::NoValue']
+                  - !If [WithSes, !Ref SesSecretArn, !Ref 'AWS::NoValue']
   Task:
     Type: AWS::ECS::TaskDefinition
     Metadata:
@@ -155,14 +168,21 @@ Resources:
             - {Name: TINA_FLOWS_API_PORT, Value: '8200'}
             - {Name: TINA_FLOWS_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}
             - {Name: TINA_FLOWS_GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
+            - !If [WithTerminalUrl, {Name: TINA_UI_URL, Value: !Ref TerminalUrl}, !Ref 'AWS::NoValue']
             - !If [WithAgentApi, {Name: TINA_FLOWS_AGENT_API_URL, Value: !Ref AgentApiUrl}, !Ref 'AWS::NoValue']
+            - !If [WithSes, {Name: TINA_NOTIFY_CHANNEL, Value: ses}, !If [WithResend, {Name: TINA_NOTIFY_CHANNEL, Value: resend}, !Ref 'AWS::NoValue']]
             - !If [WithResend, {Name: TINA_RESEND_FROM, Value: !Ref ResendFrom}, !Ref 'AWS::NoValue']
+            - !If [WithSes, {Name: TINA_SES_FROM, Value: !Ref SesFrom}, !Ref 'AWS::NoValue']
+            - !If [WithSes, {Name: TINA_SES_REGION, Value: !Ref SesRegion}, !Ref 'AWS::NoValue']
           Secrets:
             - {Name: FLOWS_DB_PASSWORD, ValueFrom: !Ref DatabasePassword}
             - {Name: TINA_FLOWS_API_KEY, ValueFrom: !Ref FlowsApiKey}
             - {Name: TINA_FLOWS_ADMIN_KEY, ValueFrom: !Ref CoreAdminTokenArn}
-            - {Name: TINA_INTERNAL_API_SECRET, ValueFrom: !Ref CoreInternalSecretArn}
+            - {Name: INTERNAL_API_SECRET, ValueFrom: !Ref CoreInternalSecretArn}
+            - !If [WithMailbox, {Name: TINA_MAIL_ADDR, ValueFrom: !Sub '${MailboxSecretArn}:address::'}, !Ref 'AWS::NoValue']
             - !If [WithResend, {Name: TINA_RESEND_API_KEY, ValueFrom: !Ref ResendSecretArn}, !Ref 'AWS::NoValue']
+            - !If [WithSes, {Name: TINA_SES_SMTP_USER, ValueFrom: !Sub '${SesSecretArn}:username::'}, !Ref 'AWS::NoValue']
+            - !If [WithSes, {Name: TINA_SES_SMTP_PASSWORD, ValueFrom: !Sub '${SesSecretArn}:password::'}, !Ref 'AWS::NoValue']
           Command:
             - python
             - -c
@@ -190,14 +210,23 @@ Resources:
             - {Name: FLOWS_DB_HOST, Value: !Ref PostgresHost}
             - {Name: TINA_FLOWS_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}
             - {Name: TINA_FLOWS_GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
+            - !If [WithTerminalUrl, {Name: TINA_UI_URL, Value: !Ref TerminalUrl}, !Ref 'AWS::NoValue']
+            - !If [WithMailbox, {Name: TINA_FLOWS_MAIL_DOMAINS, Value: !Ref MailSenderDomains}, !Ref 'AWS::NoValue']
             - !If [WithAgentApi, {Name: TINA_FLOWS_AGENT_API_URL, Value: !Ref AgentApiUrl}, !Ref 'AWS::NoValue']
+            - !If [WithSes, {Name: TINA_NOTIFY_CHANNEL, Value: ses}, !If [WithResend, {Name: TINA_NOTIFY_CHANNEL, Value: resend}, !Ref 'AWS::NoValue']]
             - !If [WithResend, {Name: TINA_RESEND_FROM, Value: !Ref ResendFrom}, !Ref 'AWS::NoValue']
+            - !If [WithSes, {Name: TINA_SES_FROM, Value: !Ref SesFrom}, !Ref 'AWS::NoValue']
+            - !If [WithSes, {Name: TINA_SES_REGION, Value: !Ref SesRegion}, !Ref 'AWS::NoValue']
           Secrets:
             - {Name: FLOWS_DB_PASSWORD, ValueFrom: !Ref DatabasePassword}
             - {Name: TINA_FLOWS_API_KEY, ValueFrom: !Ref FlowsApiKey}
             - {Name: TINA_FLOWS_ADMIN_KEY, ValueFrom: !Ref CoreAdminTokenArn}
-            - {Name: TINA_INTERNAL_API_SECRET, ValueFrom: !Ref CoreInternalSecretArn}
+            - {Name: INTERNAL_API_SECRET, ValueFrom: !Ref CoreInternalSecretArn}
+            - !If [WithMailbox, {Name: TINA_MAIL_ADDR, ValueFrom: !Sub '${MailboxSecretArn}:address::'}, !Ref 'AWS::NoValue']
+            - !If [WithMailbox, {Name: TINA_MAIL_APP_PASSWORD, ValueFrom: !Sub '${MailboxSecretArn}:app_password::'}, !Ref 'AWS::NoValue']
             - !If [WithResend, {Name: TINA_RESEND_API_KEY, ValueFrom: !Ref ResendSecretArn}, !Ref 'AWS::NoValue']
+            - !If [WithSes, {Name: TINA_SES_SMTP_USER, ValueFrom: !Sub '${SesSecretArn}:username::'}, !Ref 'AWS::NoValue']
+            - !If [WithSes, {Name: TINA_SES_SMTP_PASSWORD, ValueFrom: !Sub '${SesSecretArn}:password::'}, !Ref 'AWS::NoValue']
           Command:
             - python
             - -c
@@ -232,9 +261,77 @@ Resources:
         - RegistryArn: !GetAtt Discovery.Arn
       DeploymentConfiguration:
         DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+  MailboxTask:
+    Type: AWS::ECS::TaskDefinition
+    Condition: WithMailbox
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Add IMAP ingestion after an integration mailbox is available.
+        must: Consume as a singleton and use the Flows database for cursor and message deduplication.
+    Properties:
+      Family: !Sub '${AWS::StackName}-mailbox'
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: '256'
+      Memory: '512'
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: mailbox
+          Image: !Ref FlowsImage
+          Essential: true
+          Environment:
+            - {Name: FLOWS_DB_HOST, Value: !Ref PostgresHost}
+            - {Name: TINA_FLOWS_ADMIN_API_URL, Value: 'http://core.tina-staging.local:8001'}
+            - {Name: TINA_FLOWS_GATEWAY_URL, Value: 'http://core.tina-staging.local:8000'}
+            - !If [WithTerminalUrl, {Name: TINA_UI_URL, Value: !Ref TerminalUrl}, !Ref 'AWS::NoValue']
+            - {Name: TINA_MAIL_INBOX, Value: imap}
+            - {Name: TINA_FLOWS_MAIL_DOMAINS, Value: !Ref MailSenderDomains}
+          Secrets:
+            - {Name: FLOWS_DB_PASSWORD, ValueFrom: !Ref DatabasePassword}
+            - {Name: TINA_FLOWS_API_KEY, ValueFrom: !Ref FlowsApiKey}
+            - {Name: TINA_FLOWS_ADMIN_KEY, ValueFrom: !Ref CoreAdminTokenArn}
+            - {Name: INTERNAL_API_SECRET, ValueFrom: !Ref CoreInternalSecretArn}
+            - {Name: TINA_MAIL_ADDR, ValueFrom: !Sub '${MailboxSecretArn}:address::'}
+            - {Name: TINA_MAIL_APP_PASSWORD, ValueFrom: !Sub '${MailboxSecretArn}:app_password::'}
+          Command:
+            - python
+            - -c
+            - |
+              import os
+              from urllib.parse import quote
+              password = quote(os.environ.pop("FLOWS_DB_PASSWORD"), safe="")
+              host = os.environ["FLOWS_DB_HOST"]
+              os.environ["TINA_FLOWS_DB_URL"] = f"postgresql+psycopg://tina_flows:{password}@{host}/tina_flows?sslmode=require"
+              os.execvp("python", ["python", "-m", "flows_integrations.mailbox"])
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref Logs, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: ecs}
+  MailboxService:
+    Type: AWS::ECS::Service
+    Condition: WithMailbox
+    DependsOn: Service
+    Properties:
+      Cluster: !Ref ClusterName
+      TaskDefinition: !Ref MailboxTask
+      DesiredCount: 1
+      LaunchType: FARGATE
+      PlatformVersion: '1.4.0'
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 100
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref AppSubnetIds
+          SecurityGroups: [!Ref AppSecurityGroupId, !Ref CoreClientSecurityGroupId]
 Outputs:
   FlowsUrl: {Value: 'http://flows.tina-staging.local:8200'}
   ServiceName: {Value: !GetAtt Service.Name}
   TaskDefinitionArn: {Value: !Ref Task}
   LogGroup: {Value: !Ref Logs}
   ApiKeyArn: {Value: !Ref FlowsApiKey}
+  MailboxServiceName:
+    Condition: WithMailbox
+    Value: !GetAtt MailboxService.Name

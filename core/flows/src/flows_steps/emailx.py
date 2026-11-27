@@ -4,6 +4,7 @@ never by sender (the wrong-mail-answered-onboarding lesson)."""
 from __future__ import annotations
 
 import email.utils
+import re
 import smtplib
 import ssl
 import time
@@ -13,6 +14,8 @@ from email.mime.text import MIMEText
 
 import flows_config
 from .email_design import LOGO_CID, LOGO_PATH
+
+_AWS_REGION_RE = re.compile(r"^[a-z]{2}(?:-[a-z]+)+-\d+$")
 
 
 def creds(*, login: bool = True) -> tuple[str, str]:
@@ -113,6 +116,29 @@ def send_resend(to: str, subject: str, body: str, *, in_reply_to=None, html_body
             s.send_message(m)
     except smtplib.SMTPException as exc:
         raise RuntimeError(f"Resend SMTP failed ({type(exc).__name__})") from None
+    return m["Message-ID"]
+
+
+def send_ses(to: str, subject: str, body: str, *, in_reply_to=None, html_body=None) -> str:
+    user = flows_config.require("TINA_SES_SMTP_USER")
+    password = flows_config.require("TINA_SES_SMTP_PASSWORD")
+    addr = flows_config.require("TINA_SES_FROM")
+    region = flows_config.get("TINA_SES_REGION")
+    if email.utils.parseaddr(addr)[1] != addr or addr.count("@") != 1 or "\r" in addr or "\n" in addr:
+        raise flows_config.ConfigError("TINA_SES_FROM must be a bare sender email address")
+    if not _AWS_REGION_RE.fullmatch(region):
+        raise flows_config.ConfigError("TINA_SES_REGION must be a valid AWS region name")
+    m = _message(addr, to, subject, body, in_reply_to=in_reply_to, html_body=html_body)
+    reply_to = flows_config.get("TINA_MAIL_ADDR")
+    if reply_to:
+        m["Reply-To"] = reply_to
+    try:
+        with smtplib.SMTP_SSL(f"email-smtp.{region}.amazonaws.com", 465, timeout=20,
+                              context=ssl.create_default_context()) as s:
+            s.login(user, password)
+            s.send_message(m)
+    except smtplib.SMTPException as exc:
+        raise RuntimeError(f"Amazon SES SMTP failed ({type(exc).__name__})") from None
     return m["Message-ID"]
 
 

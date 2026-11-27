@@ -165,9 +165,13 @@ DECLARED: dict[str, tuple[str, object, str]] = {
     "TINA_MAIL_SMTP_PORT": ("defaulted", "25", "the port for a set TINA_MAIL_SMTP_HOST."),
     "TINA_MAILPIT_URL": ("defaulted", "http://127.0.0.1:8025", "mailpit's HTTP base, when the inbox is mailpit."),
     "TINA_MAILPIT_LOOKBACK_S": ("defaulted", "300", "re-scan window behind the mailpit watermark."),
-    "TINA_NOTIFY_CHANNEL": ("defaulted", "smtp", "outbound notifications: `smtp` for the mailbox, or `resend` for Resend SMTPS."),
+    "TINA_NOTIFY_CHANNEL": ("defaulted", "smtp", "outbound notifications: `smtp` for the mailbox, `resend` for Resend SMTPS, or `ses` for Amazon SES SMTPS."),
     "TINA_RESEND_API_KEY": ("capability", None, "Resend API key used as the SMTPS password when the resend channel is selected."),
     "TINA_RESEND_FROM": ("capability", None, "bare sender email on a verified Resend domain; onboarding@resend.dev is restricted to account-owner tests."),
+    "TINA_SES_SMTP_USER": ("capability", None, "Amazon SES SMTP username paired with TINA_SES_SMTP_PASSWORD when the ses channel is selected."),
+    "TINA_SES_SMTP_PASSWORD": ("capability", None, "Amazon SES SMTP password derived for TINA_SES_REGION when the ses channel is selected."),
+    "TINA_SES_FROM": ("capability", None, "bare sender email on a verified Amazon SES domain, e.g. tina@meettina.site."),
+    "TINA_SES_REGION": ("defaulted", "us-east-1", "AWS region for the Amazon SES SMTPS endpoint email-smtp.<region>.amazonaws.com."),
 
     # ── WHO THE MAILBOX WILL ACT FOR (R-B12) ────────────────────────────────
     "TINA_FLOWS_MAIL_DOMAINS": (
@@ -233,6 +237,8 @@ SECRETS = frozenset({
     "TINA_FLOWS_ADMIN_KEY", "TINA_FLOWS_API_KEY", "TINA_FLOWS_TIMELINE_KEY",
     "TINA_MAIL_APP_PASSWORD",
     "TINA_RESEND_API_KEY",
+    "TINA_SES_SMTP_USER",
+    "TINA_SES_SMTP_PASSWORD",
 })
 
 #: The mail capability's keys, in one place so a half-declared control is visible as one.

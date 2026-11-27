@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: GitHub Actions OIDC provider and least-privilege IAM role for publishing TINA ARM64 images to Amazon ECR.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Description: GitHub organization or user owning the repository (e.g. poor-frog).
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository name (e.g. TINA).
+  AllowedBranch:
+    Type: String
+    Default: main
+    Description: Git branch allowed to assume this ECR publish role.
+  CreateOidcProvider:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Set false if the AWS account already has an OIDC provider for token.actions.githubusercontent.com.
+  ExistingOidcProviderArn:
+    Type: String
+    Default: ''
+    Description: Existing GitHub OIDC provider ARN when CreateOidcProvider=false.
+  RepositoryPrefix:
+    Type: String
+    Default: tina-staging
+    Description: Primary ECR repository prefix allowed for image pushes.
+  SecondaryRepositoryPrefix:
+    Type: String
+    Default: tina-foundation
+    Description: Secondary ECR repository prefix allowed for foundation image pushes (bot, runtime, meeting-api).
+
+Conditions:
+  ShouldCreateOidcProvider: !Equals [!Ref CreateOidcProvider, 'true']
+  HasSecondaryPrefix: !Not [!Equals [!Ref SecondaryRepositoryPrefix, '']]
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  EcrPublisherRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-ecr-publisher'
+      Description: !Sub 'Allows GitHub Actions on ${GitHubOrg}/${GitHubRepo} (${AllowedBranch}) to push images to TINA ECR repositories'
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - ShouldCreateOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref ExistingOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${AllowedBranch}'
+      Policies:
+        - PolicyName: EcrPushScopedRepositories
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: EcrAuthToken
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: EcrPushPullScopedRepos
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${RepositoryPrefix}/*'
+                  - !If
+                    - HasSecondaryPrefix
+                    - !Sub 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${SecondaryRepositoryPrefix}/*'
+                    - !Ref 'AWS::NoValue'
+
+Outputs:
+  OidcProviderArn:
+    Value: !If
+      - ShouldCreateOidcProvider
+      - !Ref GitHubOidcProvider
+      - !Ref ExistingOidcProviderArn
+  PublisherRoleArn:
+    Value: !GetAtt EcrPublisherRole.Arn

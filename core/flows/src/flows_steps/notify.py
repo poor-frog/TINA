@@ -78,6 +78,17 @@ class ResendNotifier:
         return mx.send_resend(to, subject, compose(body, link), in_reply_to=in_reply_to, html_body=html_body)
 
 
+class SesNotifier:
+    """Amazon SES SMTPS endpoint keeps HTML, inline logo and RFC Message-ID threading intact."""
+
+    name = "ses"
+
+    def send(self, to: str, subject: str, body: str, *, link: Optional[str] = None,
+             in_reply_to: Optional[str] = None, html_body: Optional[str] = None) -> str:
+        from . import emailx as mx
+        return mx.send_ses(to, subject, compose(body, link), in_reply_to=in_reply_to, html_body=html_body)
+
+
 _CHANNEL: Optional[NotifyPort] = None
 
 
@@ -93,8 +104,10 @@ def channel() -> NotifyPort:
             _CHANNEL = SmtpNotifier()
         elif want == "resend":
             _CHANNEL = ResendNotifier()
+        elif want == "ses":
+            _CHANNEL = SesNotifier()
         else:
-            raise ValueError(f"unknown notify channel {want!r} — choose 'smtp' or 'resend'")
+            raise ValueError(f"unknown notify channel {want!r} — choose 'smtp', 'resend', or 'ses'")
     return _CHANNEL
 
 

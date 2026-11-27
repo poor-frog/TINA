@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Amazon SES domain identity, Route53 DKIM/SPF/DMARC DNS records, and least-privilege SMTP sender for TINA.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: Verified sender domain (e.g. meettina.site).
+  HostedZoneId:
+    Type: String
+    Description: Route53 Public Hosted Zone ID for DomainName.
+  MailFromSubdomain:
+    Type: String
+    Default: mail
+    AllowedPattern: '^[a-z0-9-]+$'
+    Description: Subdomain used for custom SES MAIL FROM (e.g. mail -> mail.meettina.site).
+  DmarcReportEmail:
+    Type: String
+    Default: ''
+    Description: Optional email address for DMARC aggregate reports (rua=mailto:...).
+  SmtpSecretName:
+    Type: String
+    Default: tina-staging/ses-smtp
+    Description: Secrets Manager name that stores the derived SES SMTP credentials JSON.
+
+Conditions:
+  HasDmarcReportEmail: !Not [!Equals [!Ref DmarcReportEmail, '']]
+
+Resources:
+  DomainIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties:
+      EmailIdentity: !Ref DomainName
+      DkimAttributes:
+        SigningEnabled: true
+      DkimSigningAttributes:
+        NextSigningKeyLength: RSA_2048_BIT
+      MailFromAttributes:
+        MailFromDomain: !Sub '${MailFromSubdomain}.${DomainName}'
+        BehaviorOnMxFailure: USE_DEFAULT_VALUE
+      FeedbackAttributes:
+        EmailForwardingEnabled: true
+
+  SesDnsRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Comment: Amazon SES DKIM, custom MAIL FROM, SPF, and DMARC records for TINA
+      RecordSets:
+        - Name: !GetAtt DomainIdentity.DkimDNSTokenName1
+          Type: CNAME
+          TTL: '300'
+          ResourceRecords:
+            - !GetAtt DomainIdentity.DkimDNSTokenValue1
+        - Name: !GetAtt DomainIdentity.DkimDNSTokenName2
+          Type: CNAME
+          TTL: '300'
+          ResourceRecords:
+            - !GetAtt DomainIdentity.DkimDNSTokenValue2
+        - Name: !GetAtt DomainIdentity.DkimDNSTokenName3
+          Type: CNAME
+          TTL: '300'
+          ResourceRecords:
+            - !GetAtt DomainIdentity.DkimDNSTokenValue3
+        - Name: !Sub '${MailFromSubdomain}.${DomainName}'
+          Type: MX
+          TTL: '300'
+          ResourceRecords:
+            - !Sub '10 feedback-smtp.${AWS::Region}.amazonses.com'
+        - Name: !Sub '${MailFromSubdomain}.${DomainName}'
+          Type: TXT
+          TTL: '300'
+          ResourceRecords:
+            - '"v=spf1 include:amazonses.com ~all"'
+        - Name: !Ref DomainName
+          Type: TXT
+          TTL: '300'
+          ResourceRecords:
+            - '"v=spf1 include:amazonses.com ~all"'
+        - Name: !Sub '_dmarc.${DomainName}'
+          Type: TXT
+          TTL: '300'
+          ResourceRecords:
+            - !If
+              - HasDmarcReportEmail
+              - !Sub '"v=DMARC1; p=none; rua=mailto:${DmarcReportEmail}"'
+              - '"v=DMARC1; p=none"'
+
+  SmtpSenderUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub '${AWS::StackName}-smtp'
+      Policies:
+        - PolicyName: SesSendDomainOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowSesSendFromVerifiedDomain
+                Effect: Allow
+                Action:
+                  - ses:SendRawEmail
+                  - ses:SendEmail
+                Resource: !Sub 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*'
+                Condition:
+                  StringLike:
+                    ses:FromAddress: !Sub '*@${DomainName}'
+
+  SmtpCredentialsSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Ref SmtpSecretName
+      Description: !Sub 'Amazon SES SMTP credentials for ${DomainName} (${AWS::Region})'
+
+Outputs:
+  DomainName:
+    Value: !Ref DomainName
+  MailFromDomain:
+    Value: !Sub '${MailFromSubdomain}.${DomainName}'
+  SmtpEndpoint:
+    Value: !Sub 'email-smtp.${AWS::Region}.amazonaws.com'
+  SmtpUserName:
+    Value: !Ref SmtpSenderUser
+  SmtpSecretArn:
+    Value: !Ref SmtpCredentialsSecret

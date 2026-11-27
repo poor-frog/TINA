@@ -307,6 +307,14 @@ callbacks, MCP public origins, and Chrome Extension CORS stay fixed across rebui
    - Add Authorized JavaScript origin `https://<host>` and Authorized redirect URIs `https://<host>/api/auth/callback/google` and `https://<host>/api/auth/callback/google-calendar`.
    - Verify `GET https://<host>/edge-health` returns `TINA_EDGE_READY`, `GET https://<host>/api/auth/me` returns `401` unauthenticated, and OAuth sign-in returns `200`.
 
+## Amazon SES outbound email for Flows
+
+[`staging-ses.yml`](staging-ses.yml) provisions an Amazon SES domain identity (Easy DKIM + custom `mail.<domain>` MAIL FROM), creates the matching Route53 DKIM/MX/SPF/DMARC records, and creates a least-privilege IAM SMTP sender user plus Secrets Manager container (`tina-staging/ses-smtp`). Populate the secret with the IAM access key ID (`username`) and its region-derived SESv4 SMTP password (`password`), then pass `SesSecretArn`, `SesFrom=tina@<domain>`, and `SesRegion=us-east-1` into [`staging-flows.yml`](staging-flows.yml). While the account is in SES Sandbox mode, request production access in the SES console before mailing external meeting attendees.
+
+## GitHub Actions to Amazon ECR (OIDC)
+
+[`staging-github-ecr.yml`](staging-github-ecr.yml) creates the GitHub Actions OIDC provider and a least-privilege IAM role (`tina-staging-github-ecr-ecr-publisher`) scoped to `poor-frog/TINA` on `main` with push access limited to `tina-staging/*` and `tina-foundation/*`. Store `PublisherRoleArn` in the repository variable `AWS_ECR_ROLE_ARN` to enable [`.github/workflows/aws-ecr-publish.yml`](../../.github/workflows/aws-ecr-publish.yml) for native ARM64 builds.
+
 ## Staging power management (sleep / wake cost control)
 
 Use [`staging-power.sh`](staging-power.sh) to scale staging Fargate services down when

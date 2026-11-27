@@ -95,6 +95,24 @@ is set, Resend notifications include it as Reply-To so replies can reach that in
 Helm deployment, set `flows.mail.notifyChannel`, `flows.mail.resendApiKey` and
 `flows.mail.resendFrom` through private values. To switch back, select `TINA_NOTIFY_CHANNEL=smtp`.
 
+### Amazon SES delivery
+
+To send outbound notifications through Amazon SES SMTPS on a verified domain (e.g. `meettina.site`):
+
+```dotenv
+TINA_NOTIFY_CHANNEL=ses
+TINA_SES_SMTP_USER=YOUR_SES_SMTP_USERNAME
+TINA_SES_SMTP_PASSWORD=YOUR_SES_SMTP_PASSWORD
+TINA_SES_FROM=tina@meettina.site
+TINA_SES_REGION=us-east-1
+```
+
+The `ses` notification adapter reuses the same MIME builder and sends via
+`email-smtp.<region>.amazonaws.com:465` with certificate-verified TLS. HTML, plain text, the inline
+logo, RFC Message-ID threading, and optional `Reply-To` (`TINA_MAIL_ADDR`) are preserved with no
+extra Python SDK dependency. On AWS staging, [`deploy/aws/staging-ses.yml`](../../deploy/aws/staging-ses.yml)
+provisions the SES domain identity, Route53 DKIM/SPF/DMARC records, and least-privilege SMTP secret.
+
 ## Engine
 
 Durable product workflows as TWO Postgres tables and ONE leased worker loop. A fact enters as a
