@@ -890,6 +890,16 @@
   color: var(--tw-text);
 }
 
+.tina-web-usermenu-trailing {
+  margin-left: auto;
+  color: var(--tw-text-4);
+  flex-shrink: 0;
+}
+
+.tina-web-usermenu-item:hover .tina-web-usermenu-trailing {
+  color: var(--tw-text-2);
+}
+
 .tina-web-usermenu-item.danger {
   color: #ff9a9a;
 }
@@ -2818,6 +2828,195 @@
 .tina-web-field select:focus {
   border-color: var(--tw-mint);
   outline: none;
+}
+
+/* ---------- MeetTINA Extension Install Modal ---------- */
+
+.tina-web-ext-modal {
+  width: min(520px, 100%);
+}
+
+.tina-web-ext-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tina-web-ext-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(23, 107, 91, 0.22);
+  border: 1px solid rgba(145, 215, 190, 0.26);
+  color: var(--tw-mint);
+  flex-shrink: 0;
+}
+
+.tina-web-ext-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border-radius: 10px;
+  background: rgba(23, 107, 91, 0.16);
+  border: 1px solid rgba(145, 215, 190, 0.22);
+  color: var(--tw-mint);
+}
+
+.tina-web-ext-banner svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.tina-web-ext-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tina-web-ext-banner-text strong {
+  color: var(--tw-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tina-web-ext-banner-text span {
+  color: var(--tw-text-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tina-web-ext-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tina-web-ext-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--tw-line-soft);
+  background: var(--tw-card);
+}
+
+.tina-web-ext-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--tw-raised);
+  border: 1px solid var(--tw-line-strong);
+  color: var(--tw-mint);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.tina-web-ext-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.tina-web-ext-step-body strong {
+  color: var(--tw-text);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.tina-web-ext-step-body p {
+  margin: 0;
+  color: var(--tw-text-3);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.tina-web-ext-step-body p strong {
+  color: var(--tw-text-2);
+  font-size: inherit;
+  font-weight: 600;
+}
+
+.tina-web-ext-step-body code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--tw-raised);
+  color: var(--tw-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.tina-web-ext-copybar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 5px 6px 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--tw-line);
+  background: var(--tw-bg);
+}
+
+.tina-web-ext-copybar code {
+  padding: 0;
+  background: transparent;
+  color: var(--tw-mint);
+  font-size: 12.5px;
+  user-select: all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tina-web-ext-copy-btn {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.tina-web-ext-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+html[data-theme="light"] .tina-web .tina-web-usermenu-item:hover {
+  background: rgba(17, 24, 21, 0.06);
+}
+
+html[data-theme="light"] .tina-web .tina-web-ext-badge {
+  background: var(--tw-surface-teal);
+  border-color: rgba(23, 107, 91, 0.22);
+  color: var(--tw-teal);
+}
+
+html[data-theme="light"] .tina-web .tina-web-ext-banner {
+  background: var(--tw-surface-teal);
+  border-color: rgba(23, 107, 91, 0.2);
+  color: var(--tw-teal);
+}
+
+html[data-theme="light"] .tina-web .tina-web-modal {
+  border-color: var(--tw-line);
+  box-shadow: 0 24px 64px rgba(17, 24, 21, 0.18);
 }
 
 /* ---------- Tasks & Settings & Routines wrappers ---------- */

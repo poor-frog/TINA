@@ -74,7 +74,8 @@ export type WebIconName =
   | "folder"
   | "upload"
   | "gitBranch"
-  | "network";
+  | "network"
+  | "puzzle";
 
 const PATHS: Record<WebIconName, ReactNode> = {
   home: (
@@ -457,6 +458,9 @@ const PATHS: Record<WebIconName, ReactNode> = {
       <line x1="13.2" y1="7.2" x2="17.8" y2="15.8" />
       <line x1="7.5" y1="18" x2="16.5" y2="18" />
     </>
+  ),
+  puzzle: (
+    <path d="M14 5a2 2 0 1 0-4 0H6a2 2 0 0 0-2 2v3.5a2 2 0 1 1 0 4V18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3.5a2 2 0 1 0 0-4V7a2 2 0 0 0-2-2h-2Z" />
   ),
 };
 

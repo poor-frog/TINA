@@ -2,6 +2,8 @@
 !clients/
 !clients/terminal/
 !clients/terminal/**
+!clients/extension/
+!clients/extension/**
 !branding/
 !branding/tokens.css
 !packages/
@@ -10,3 +12,6 @@
 !packages/transcript-rendering/src/format.ts
 clients/terminal/.next/
 clients/terminal/node_modules/
+clients/extension/node_modules/
+clients/extension/dist/
+clients/extension/release/

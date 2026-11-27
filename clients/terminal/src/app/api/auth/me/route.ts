@@ -8,6 +8,7 @@ import { AUTH_COOKIE, USER_INFO_COOKIE } from "../adminApi";
 import { googleAvatarUrl } from "../googleAvatar";
 import { authOptions } from "../[...nextauth]/authOptions";
 import { canUseWorkspacePilot } from "../workspacePilot";
+import { extensionStoreUrl } from "../../extension/config";
 import { hideModelSettings, workspacePilotMode } from "../../../mode";
 
 export const dynamic = "force-dynamic";
@@ -44,12 +45,15 @@ export async function GET() {
     }
   }
 
+  const storeUrl = extensionStoreUrl();
+
   return NextResponse.json(
     { authenticated: true, user: { email: email ?? null, name: name ?? null, image },
       ...(workspacePilotMode() ? { workspacePilot: await canUseWorkspacePilot() } : {}),
       ...(process.env.NEXT_PUBLIC_HIDE_MODEL_SETTINGS !== undefined
         ? { hideModelSettings: hideModelSettings() }
-        : {}) },
+        : {}),
+      ...(storeUrl ? { extensionStoreUrl: storeUrl } : {}) },
     { headers: NO_STORE },
   );
 }

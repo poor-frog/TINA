@@ -17,6 +17,15 @@
 ARG RUNTIME_DEPS=prod
 
 # node:22 — tinykeys@4 requires node >=22; 20 only warns but we pin 22 to match engines.
+FROM node:22-slim AS ext-build
+WORKDIR /app/clients/extension
+COPY clients/extension/package.json clients/extension/package-lock.json ./
+RUN npm ci
+COPY clients/extension/. .
+COPY packages/transcript-rendering/src/format.ts /app/packages/transcript-rendering/src/format.ts
+COPY branding/tokens.css /app/branding/tokens.css
+RUN npm run pack:unpacked
+
 FROM node:22-slim AS build
 WORKDIR /app/clients/terminal
 COPY clients/terminal/package.json clients/terminal/package-lock.json ./
@@ -81,6 +90,7 @@ COPY --from=deps /app/clients/terminal/node_modules ./node_modules
 # The built app + the custom server + runtime config it reads.
 COPY --from=build /app/clients/terminal/.next ./.next
 COPY clients/terminal/public ./public
+COPY --from=ext-build /app/clients/extension/release/meettina-extension.zip ./public/downloads/meettina-extension.zip
 COPY clients/terminal/server.mjs clients/terminal/next.config.ts clients/terminal/tsconfig.json ./
 # next-env.d.ts is gitignored (Next.js generates it during `next build`); take it from the build stage
 # rather than the build context, where it is absent on a clean clone.

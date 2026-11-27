@@ -32,6 +32,7 @@ import { useWebIdentity } from "./useWebIdentity";
 import { WebSidebar, type WebNavView } from "./Sidebar";
 import { WebTopBar, type CaptureModalMode } from "./TopBar";
 import { WebGlobalSearch } from "./GlobalSearch";
+import { ExtensionDownloadModal, triggerExtensionDownload } from "./ExtensionDownloadModal";
 import { WebAvatar } from "./Avatar";
 import { WebIcon } from "./Icons";
 import { HomeView } from "./HomeView";
@@ -102,7 +103,15 @@ function readInitialRoute(initialMeetingId?: string): { view: WebNavView; meetin
 }
 
 export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
-  const { user, isAdmin, workspacePilot, canOpenTerminal, hideModelSettings, signOut } = useWebIdentity();
+  const {
+    user,
+    isAdmin,
+    workspacePilot,
+    canOpenTerminal,
+    hideModelSettings,
+    extensionStoreUrl,
+    signOut,
+  } = useWebIdentity();
   const meetOnly = meetingsOnly() || (workspacePilotMode() && !workspacePilot);
   const meetings = useLiveMeetings();
   const listLoaded = useLiveMeetingsLoaded();
@@ -114,6 +123,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => AUTO_COLLAPSE_SIDEBAR_VIEWS.has(initial.view));
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [extensionModalOpen, setExtensionModalOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
   const [captureMode, setCaptureMode] = useState<CaptureModalMode>("live");
@@ -441,6 +451,35 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
               <WebIcon name="settings" size={15} />
               <span>Settings</span>
             </button>
+            {extensionStoreUrl ? (
+              <a
+                href={extensionStoreUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                role="menuitem"
+                className="tina-web-usermenu-item"
+                onClick={() => setUserMenuOpen(false)}
+              >
+                <WebIcon name="puzzle" size={15} />
+                <span>MeetTINA Extension</span>
+                <WebIcon name="externalLink" size={13} className="tina-web-usermenu-trailing" />
+              </a>
+            ) : (
+              <button
+                type="button"
+                role="menuitem"
+                className="tina-web-usermenu-item"
+                onClick={() => {
+                  setUserMenuOpen(false);
+                  triggerExtensionDownload();
+                  setExtensionModalOpen(true);
+                }}
+              >
+                <WebIcon name="puzzle" size={15} />
+                <span>MeetTINA Extension</span>
+                <WebIcon name="download" size={13} className="tina-web-usermenu-trailing" />
+              </button>
+            )}
             {canOpenTerminal && (
               <a
                 href={terminalHref}
@@ -475,6 +514,11 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
           onOpenKnowledgeDoc={openKnowledgeDoc}
           onNavigate={navigate}
           onOpenCapture={() => openCapture("live")}
+        />
+
+        <ExtensionDownloadModal
+          open={extensionModalOpen}
+          onClose={() => setExtensionModalOpen(false)}
         />
 
         <LucianToastStack />

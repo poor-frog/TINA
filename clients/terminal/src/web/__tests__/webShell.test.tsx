@@ -387,12 +387,14 @@ describe("WebShell production UI (Option A & Option B)", () => {
     admin,
     workspacePilot,
     hideModelSettings,
+    extensionStoreUrl,
     chatGptStatus,
     liveAssistState = { configured: false, enabled: false, can_configure: true, readonly: false, revision: 0, items: [] },
   }: {
     admin: boolean;
     workspacePilot?: boolean;
     hideModelSettings?: boolean;
+    extensionStoreUrl?: string;
     chatGptStatus?: { status: number; body: Record<string, unknown> };
     liveAssistState?: Record<string, unknown>;
   }) {
@@ -404,6 +406,7 @@ describe("WebShell production UI (Option A & Option B)", () => {
           user: { name: "Sarup Banskota", email: "sarup@tina.local" },
           ...(typeof workspacePilot === "boolean" ? { workspacePilot } : {}),
           ...(typeof hideModelSettings === "boolean" ? { hideModelSettings } : {}),
+          ...(extensionStoreUrl ? { extensionStoreUrl } : {}),
         }), { status: 200 });
       }
       if (url.includes("/api/admin/me")) {
@@ -1543,5 +1546,38 @@ describe("WebShell production UI (Option A & Option B)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Đặt lại vị trí đồ thị tri thức" }));
     expect(kgCard.getAttribute("data-selected-node")).toBe("jane");
+  });
+
+  it("shows MeetTINA Extension under Settings in Account menu: downloads zip + opens modal by default, or links to Chrome Web Store when configured", async () => {
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    mockEnvironment({ admin: true });
+    render(<WebShell />);
+
+    await screen.findByText("Sarup");
+    fireEvent.click(screen.getByRole("button", { name: "Workspace account" }));
+
+    const menu = screen.getByRole("menu", { name: "Account menu" });
+    const items = Array.from(menu.querySelectorAll('[role="menuitem"]')).map((el) => el.textContent?.trim());
+    expect(items).toEqual(["Settings", "MeetTINA Extension", "Open TINA Terminal", "Log out"]);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "MeetTINA Extension" }));
+    expect(clickSpy).toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Install MeetTINA Extension" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog", { name: "Install MeetTINA Extension" })).toBeNull();
+    clickSpy.mockRestore();
+
+    cleanup();
+    const storeUrl = "https://chromewebstore.google.com/detail/meettina/fcogeajjhhcadbnamadikkefdfmaaiil";
+    mockEnvironment({ admin: false, extensionStoreUrl: storeUrl });
+    render(<WebShell />);
+
+    await screen.findByText("Sarup");
+    fireEvent.click(screen.getByRole("button", { name: "Workspace account" }));
+    const storeLink = await screen.findByRole("menuitem", { name: "MeetTINA Extension" });
+    expect(storeLink.tagName).toBe("A");
+    expect(storeLink.getAttribute("href")).toBe(storeUrl);
+    expect(storeLink.getAttribute("target")).toBe("_blank");
   });
 });
