@@ -289,6 +289,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
     router = APIRouter()
     task_flows = TaskFlowStore(redis, playback)
     handoffs = VoiceHandoffs(redis, playback)
+    ready_inflight: dict[str, asyncio.Task[tuple[bool, str | None]]] = {}
 
     async def meeting(mid, user=None, session: str | None = None, authorization=None):
         row = await repo.get_meeting(mid)
@@ -314,7 +315,8 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         headers = {'X-User-Id': str(row['user_id']), 'X-Internal-Secret': secret}
         if request_id is not None: headers['X-Tina-Voice-Request-Id'] = str(request_id)
         try:
-            async with client_factory(timeout=150 if suffix == 'answer' else 95, follow_redirects=False) as client:
+            timeout = 4 if suffix == 'ready' else (150 if suffix == 'answer' else 95)
+            async with client_factory(timeout=timeout, follow_redirects=False) as client:
                 response = await client.request('POST' if body is not None else 'GET',
                     f'{base}/api/internal/meeting-voice/{row["id"]}/{suffix}', json=body,
                     headers=headers)
@@ -603,35 +605,51 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                     verdict = json.loads(cached)
                     ready, reason = verdict['ready'], verdict.get('reason')
             else:
-                if policy.engine == 'livekit' and not bridge: reason = 'livekit_unavailable'
-                try:
-                    available = await agent(row, 'ready')
-                    if any(path not in available['documents'] for path in policy.documents):
-                        raise HTTPException(409, 'Shared source was removed')
-                except HTTPException:
-                    reason = 'sources_unavailable'
-                if reason is None:
-                    url = os.environ.get('TTS_SERVICE_URL', '').rstrip('/')
+                async def _probe_ready() -> tuple[bool, str | None]:
+                    probe_ready = False
+                    probe_reason = 'livekit_unavailable' if policy.engine == 'livekit' and not bridge else None
                     try:
-                        if url:
+                        available = await agent(row, 'ready')
+                        if any(path not in available['documents'] for path in policy.documents):
+                            raise HTTPException(409, 'Shared source was removed')
+                    except HTTPException:
+                        probe_reason = 'sources_unavailable'
+                    if probe_reason is None:
+                        url = os.environ.get('TTS_SERVICE_URL', '').rstrip('/')
+                        try:
+                            if url:
+                                async with client_factory(timeout=4, follow_redirects=False) as client:
+                                    response = await client.get(url + '/ready', headers={'X-API-Key': os.environ.get('TTS_API_TOKEN', '')})
+                                    probe_ready = response.status_code == 200
+                        except httpx.HTTPError:
+                            pass
+                        if not probe_ready: probe_reason = 'tts_unavailable'
+                    if probe_reason is None and policy.engine == 'livekit':
+                        base = os.environ.get('LIVEKIT_AGENT_URL', '').rstrip('/')
+                        try:
                             async with client_factory(timeout=4, follow_redirects=False) as client:
-                                response = await client.get(url + '/ready', headers={'X-API-Key': os.environ.get('TTS_API_TOKEN', '')})
-                                ready = response.status_code == 200
-                    except httpx.HTTPError:
-                        pass
-                    if not ready: reason = 'tts_unavailable'
-                if reason is None and policy.engine == 'livekit':
-                    base = os.environ.get('LIVEKIT_AGENT_URL', '').rstrip('/')
-                    try:
-                        async with client_factory(timeout=4, follow_redirects=False) as client:
-                            response = await client.get(base + '/ready') if base else None
-                            ready = bool(response is not None and response.status_code == 200
-                                         and response.json().get('engine') == 'livekit-agents')
-                    except (httpx.HTTPError, ValueError):
-                        ready = False
-                    if not ready: reason = 'livekit_unavailable'
-                # Readiness is advisory; answers always recheck live policy/source fingerprints.
-                await redis.set(ready_key, json.dumps({'ready': ready, 'reason': reason}), ex=10)
+                                response = await client.get(base + '/ready') if base else None
+                                probe_ready = bool(response is not None and response.status_code == 200
+                                                   and response.json().get('engine') == 'livekit-agents')
+                        except (httpx.HTTPError, ValueError):
+                            probe_ready = False
+                        if not probe_ready: probe_reason = 'livekit_unavailable'
+                    # Readiness is advisory; answers always recheck live policy/source fingerprints.
+                    await redis.set(ready_key, json.dumps({'ready': probe_ready, 'reason': probe_reason}), ex=15)
+                    return probe_ready, probe_reason
+
+                flight_key = f'{ready_key}:{policy.source_profile_id or ""}'
+                task = ready_inflight.get(flight_key)
+                if task is None or task.done():
+                    task = asyncio.create_task(_probe_ready())
+                    ready_inflight[flight_key] = task
+                    def _cleanup_ready(done_task: asyncio.Task, key: str = flight_key) -> None:
+                        if ready_inflight.get(key) is done_task:
+                            ready_inflight.pop(key, None)
+                        if not done_task.cancelled():
+                            done_task.exception()
+                    task.add_done_callback(_cleanup_ready)
+                ready, reason = await asyncio.shield(task)
         if ready and speech_profile:
             try:
                 async with client_factory(timeout=4,follow_redirects=False) as client:

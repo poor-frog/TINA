@@ -11,6 +11,8 @@ on:
       - core/gateway/**
       - core/meetings/**
       - core/identity/**
+      - deploy/livekit/**
+      - deploy/aws/bot-patch.Dockerfile
       - behavior/**
       - packages/**
       - .github/workflows/aws-ecr-publish.yml
@@ -30,6 +32,8 @@ on:
           - gateway
           - meeting-api
           - admin-api
+          - bot
+          - livekit-agent
 
 permissions: {}
 
@@ -136,6 +140,24 @@ jobs:
                   "paths": ("core/identity/",),
                   "smoke_cmd": "",
               },
+              "bot": {
+                  "name": "bot",
+                  "repo": "tina-foundation/bot",
+                  "context": ".",
+                  "dockerfile": "deploy/aws/bot-patch.Dockerfile",
+                  "build_args": "BOT_BASE=${ECR_REGISTRY}/tina-foundation/bot@sha256:27f527453c8ec2aa10bcb08ad1804f499da6a00f5f6346d9b0726828e8f6a700\nTINA_IMAGE_VERSION=${TAG}",
+                  "paths": ("core/meetings/services/bot/", "deploy/aws/bot-patch.Dockerfile"),
+                  "smoke_cmd": "node -e \"import('/app/core/meetings/services/bot/dist/meeting-voice.js').then(m=>{if(typeof m.MeetingVoice!=='function')process.exit(1)})\"",
+              },
+              "livekit-agent": {
+                  "name": "livekit-agent",
+                  "repo": "tina-staging/livekit-agent",
+                  "context": ".",
+                  "dockerfile": "deploy/livekit/Dockerfile",
+                  "build_args": "TINA_BOT_IMAGE=${ECR_REGISTRY}/tina-foundation/bot@sha256:27f527453c8ec2aa10bcb08ad1804f499da6a00f5f6346d9b0726828e8f6a700",
+                  "paths": ("deploy/livekit/", "core/agent/shared/voice_trace.py", "core/agent/shared/voice_tools.py"),
+                  "smoke_cmd": "python -B -c 'import server, adapters, rag, task_flow; from tina_ns import NativeNs; p=NativeNs(); p.close()'",
+              },
           }
 
           event_name = os.environ["EVENT_NAME"]
@@ -204,6 +226,8 @@ jobs:
           IMAGE="${ECR_REGISTRY}/${REPO}:${TAG}"
           args=()
           while IFS= read -r line; do
+            line="${line//\$\{ECR_REGISTRY\}/$ECR_REGISTRY}"
+            line="${line//\$\{TAG\}/$TAG}"
             [[ -n "$line" ]] && args+=(--build-arg "$line")
           done <<< "$BUILD_ARGS"
 

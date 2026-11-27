@@ -89,10 +89,15 @@ class Stop(BaseModel):
     request_id: UUID
 
 
+class _ClientDisconnected(Exception):
+    """Raised when the HTTP caller closes the connection before completion."""
+
+
 async def connect_room(name):
     room = rtc.Room()
     token = api.AccessToken().with_identity('tina-agent').with_ttl(timedelta(minutes=2)).with_grants(
-        api.VideoGrants(room_join=True, room=name, can_publish=False, can_subscribe=False, can_publish_data=False)).to_jwt()
+        api.VideoGrants(room_join=True, room=name, can_publish=False, can_subscribe=False,
+                        can_publish_data=False, can_update_own_metadata=True)).to_jwt()
     try:
         await asyncio.wait_for(room.connect(os.environ['LIVEKIT_URL'], token,
             options=rtc.RoomOptions(auto_subscribe=False)), 12)
@@ -313,6 +318,10 @@ def create_app(client=None, room_connector=connect_room):
     app.state.rows = rows
     app.state.get_runtime = get_runtime
 
+    @app.exception_handler(_ClientDisconnected)
+    async def _handle_client_disconnected(_request: Request, _exc: _ClientDisconnected):
+        return JSONResponse({'detail': 'Client disconnected'}, status_code=499)
+
     @app.get('/health')
     async def health():
         try:
@@ -372,7 +381,7 @@ def create_app(client=None, room_connector=connect_room):
             while not task.done():
                 await asyncio.sleep(.05)
                 if await request.is_disconnected():
-                    handle.interrupt(); raise asyncio.CancelledError()
+                    handle.interrupt(); raise _ClientDisconnected()
             await task
             if handle.exception() is not None: raise HTTPException(503,'Agent pipeline failed')
         finally:
@@ -384,7 +393,7 @@ def create_app(client=None, room_connector=connect_room):
             while not task.done():
                 await asyncio.sleep(.05)
                 if await request.is_disconnected():
-                    raise asyncio.CancelledError()
+                    raise _ClientDisconnected()
             return await task
         finally:
             if not task.done(): task.cancel()
@@ -428,6 +437,7 @@ def create_app(client=None, room_connector=connect_room):
             row.model.request={'body':body.model_dump(mode='json'),'speaker':x_voice_speaker_key}
             row.session.output.audio=None
             context = llm.ChatContext.empty()
+            disconnected = False
             try:
                 row.context_task=asyncio.create_task(row.model.agent(row.model.request, 'context'))
                 try: snapshot = await wait_flow(row.context_task,request)
@@ -465,6 +475,9 @@ def create_app(client=None, room_connector=connect_room):
                 if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
                 if not row.model.result: raise HTTPException(503,'TINA answer failed')
                 return row.model.result | {'voice_runtime':'livekit'}
+            except _ClientDisconnected:
+                disconnected = True
+                return JSONResponse({'detail': 'Client disconnected'}, status_code=499)
             except asyncio.CancelledError:
                 if (mid,session,rid) in stopped or row.closing is not None: raise HTTPException(409,'Voice turn stopped') from None
                 raise
@@ -472,7 +485,7 @@ def create_app(client=None, room_connector=connect_room):
                 raise HTTPException(503,'TINA agent operation failed') from None
             finally:
                 if row.model.result is None:
-                    if (mid,session,rid) not in stopped: row.failed=True
+                    if not disconnected and (mid,session,rid) not in stopped: row.failed=True
                     await cancel_turn(mid,session,rid,authorization)
                     row.current_id=None
                 row.model.request=None; row.model.result=None; row.touched=time.monotonic()

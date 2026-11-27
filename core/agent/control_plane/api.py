@@ -1231,7 +1231,7 @@ def create_app(
                 "/api/workspace", "/api/sessions", "/api/routines",
                 "/api/chat", "/api/models", "/invocations",
                 "/api/internal/meeting-voice",
-                "/api/meeting-translations", "/api/discussion-reviews",
+                "/api/discussion-reviews",
             )
             if not path.startswith(sync_prefixes) or path.startswith("/api/workspace/git-token"):
                 return await call_next(request)
@@ -1249,7 +1249,6 @@ def create_app(
             is_write = method in ("POST", "PUT", "PATCH", "DELETE") and (
                 path.startswith("/api/workspace")
                 or path.startswith("/api/routines")
-                or path.startswith("/api/meeting-translations")
                 or path.startswith("/api/discussion-reviews")
                 or is_voice_write
             )
@@ -1385,6 +1384,14 @@ def create_app(
                         logger.exception("S3 write-through push failed for %s", p)
 
             if is_write:
+                async_lock = getattr(s3_store, "async_distributed_lock", None)
+                if async_lock is not None:
+                    async with async_lock(f"subject:{subject}"):
+                        before = await run_in_threadpool(_pre_sync, True)
+                        response = await call_next(request)
+                        if response.status_code < 400:
+                            await run_in_threadpool(_post_push, before)
+                        return response
                 with s3_store.distributed_lock(f"subject:{subject}"):
                     before = await run_in_threadpool(_pre_sync, True)
                     response = await call_next(request)

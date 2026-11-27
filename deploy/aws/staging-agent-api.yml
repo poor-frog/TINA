@@ -414,7 +414,7 @@ Resources:
       Family: !Ref AWS::StackName
       NetworkMode: awsvpc
       RequiresCompatibilities: [FARGATE]
-      Cpu: '512'
+      Cpu: '1024'
       Memory: '2048'
       RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
       ExecutionRoleArn: !GetAtt ExecutionRole.Arn

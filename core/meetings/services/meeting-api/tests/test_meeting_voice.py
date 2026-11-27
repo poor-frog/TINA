@@ -1208,3 +1208,38 @@ async def test_web_failure_category_and_verification_survive_playback_storage(se
         saved=repo.row['data']['voice_replies'][body['request_id']]
         assert saved['reason']==reason and saved['verification']==checks
         assert saved['answer_kind']=='web' and saved['state']=='completed'
+
+
+async def test_config_readiness_coalesces_concurrent_probes_and_bounds_agent_ready_timeout(setup):
+    _, repo, redis, *_ = setup
+    timeouts = []
+    ready_calls = 0
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def upstream(request):
+        nonlocal ready_calls
+        if request.url.host == 'agent.test' and request.url.path.endswith('/ready'):
+            ready_calls += 1
+            entered.set()
+            await release.wait()
+            return httpx.Response(200, json={'documents': ['wiki/shared.md']})
+        return httpx.Response(200, json={'ready': True})
+
+    def factory(**kwargs):
+        timeouts.append(kwargs.get('timeout'))
+        return httpx.AsyncClient(transport=httpx.MockTransport(upstream), **kwargs)
+
+    app = FastAPI()
+    app.include_router(build_voice_router(repo, redis, redis, client_factory=factory))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        t1 = asyncio.create_task(client.get('/bots/voice/1/current/config', headers=headers()))
+        await asyncio.wait_for(entered.wait(), 2)
+        t2 = asyncio.create_task(client.get('/bots/voice/1/current/config', headers=headers()))
+        await asyncio.sleep(0.05)
+        release.set()
+        r1, r2 = await asyncio.wait_for(asyncio.gather(t1, t2), 2)
+        assert r1.status_code == 200 and r2.status_code == 200
+        assert r1.json()['ready'] is True and r2.json()['ready'] is True
+        assert ready_calls == 1
+        assert all(t == 4 for t in timeouts)
+        assert 0 < await redis.ttl('meeting:voice:1:current:ready:1') <= 15

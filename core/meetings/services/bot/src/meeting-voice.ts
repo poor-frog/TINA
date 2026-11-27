@@ -112,6 +112,31 @@ export async function voiceAsrReady(inv: Invocation, fetchImpl = globalThis.fetc
   } catch { return false; }
 }
 
+class VoiceApiError extends Error {
+  constructor(message: string, readonly code: string) {
+    super(message);
+    this.name = 'VoiceApiError';
+  }
+}
+
+const SAFE_NETWORK_CODES = new Set([
+  'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EPIPE', 'EAI_AGAIN',
+  'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET',
+]);
+
+function safeErrorCode(err: unknown): string {
+  if (err instanceof VoiceApiError) return err.code;
+  if (err instanceof Error) {
+    if (err.name === 'TimeoutError') return 'timeout';
+    if (err.name === 'AbortError') return 'aborted';
+    const cause = (err as { cause?: { code?: unknown } }).cause;
+    if (typeof cause?.code === 'string' && SAFE_NETWORK_CODES.has(cause.code)) return cause.code;
+    const direct = (err as { code?: unknown }).code;
+    if (typeof direct === 'string' && SAFE_NETWORK_CODES.has(direct)) return direct;
+  }
+  return 'error';
+}
+
 export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetch): VoiceApi {
   let speechProfile:string|undefined;
   let agent: {baseUrl:string;token:string;revision:number} | undefined, currentId: string | undefined;
@@ -121,9 +146,9 @@ export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetc
       ...(speakerKey ? { 'X-Voice-Speaker-Key': speakerKey } : {}) },
       body: body ? JSON.stringify(body) : undefined, signal: signal
         ? AbortSignal.any([signal, AbortSignal.timeout(170_000)]) : AbortSignal.timeout(3000) });
-    if (!response.ok) throw new Error('Voice service unavailable');
+    if (!response.ok) throw new VoiceApiError('Voice service unavailable', `http_${response.status}`);
     const text = await response.text();
-    if (text.length > 200_000) throw new Error('Voice response exceeds bound');
+    if (text.length > 200_000) throw new VoiceApiError('Voice response exceeds bound', 'response_too_large');
     return JSON.parse(text);
   }
   const cancelTurn = async (requestId:string) => {
@@ -199,6 +224,7 @@ export class MeetingVoice {
   private closed = true;
   private pollTimer?: ReturnType<typeof setTimeout>;
   private probeRecovery = false;
+  private activePollFailures = 0;
   private abort = new AbortController();
   private pendingState?: { state: VoiceState; id?: string; diagnostic?: VoiceDiagnostic };
   private diagnostic?: VoiceDiagnostic;
@@ -462,6 +488,7 @@ export class MeetingVoice {
   }
   private async cancel(dispose = false, reason: VoiceDiagnosticCode = 'stopped') {
     this.probeRecovery = false;
+    this.activePollFailures = 0;
     const requestId=this.requestId,playedText=this.playedText,started=this.playbackStarted;
     this.finishTiming(reason);
     const generation = ++this.generation;
@@ -513,6 +540,7 @@ export class MeetingVoice {
       probing = true;
       const asrReady = config.enabled && config.ready ? await this.asrReady() : false;
       probing = false;
+      this.activePollFailures = 0;
       const ready = config.enabled && config.ready && asrReady;
       if (this.closed) return;
       if (!ready) {
@@ -556,9 +584,19 @@ export class MeetingVoice {
         }
       }
       this.publishState(this.state, this.requestId);
-    } catch {
+    } catch (err) {
+      this.log(`poll_failed:${probing ? 'probe' : 'setup'}:${safeErrorCode(err)}`);
+      if (probing && this.processing && !this.externalSpeaking && ['THINKING', 'SPEAKING'].includes(this.state)) {
+        if (++this.activePollFailures < 3) return;
+      }
+      this.activePollFailures = 0;
       const recoverable = probing && (this.state !== 'ERROR' || this.probeRecovery || this.kwsRetryAt !== undefined) && !this.externalSpeaking;
       this.ns.setEnabled(false);
+      if (!this.closed && this.state === 'ERROR' && !this.worker && !this.requestId && !this.externalSpeaking) {
+        this.probeRecovery = recoverable;
+        this.diagnose('services_unavailable');
+        return;
+      }
       if (!this.closed && await this.cancel(true)) {
         this.probeRecovery = recoverable && this.state === 'OFF';
         this.setState('ERROR'); this.diagnose('services_unavailable');
@@ -895,9 +933,9 @@ export class MeetingVoice {
         this.continuationHypotheses = [];
       }
       if (answer.clarification || answer.evidence_available !== false) this.diagnose('completed');
-    } catch {
+    } catch (err) {
       if (live()) {
-        this.log('turn_failed');this.diagnose('answer_failed');this.idleDiagnostic='answer_failed';
+        this.log(`turn_failed:${safeErrorCode(err)}`);this.diagnose('answer_failed');this.idleDiagnostic='answer_failed';
         clearTimeout(ackTimer);noticeAbort.abort();await ack.catch(()=>{});
         if (!answerReceived && live()) {
           let attemptedAudio=false;

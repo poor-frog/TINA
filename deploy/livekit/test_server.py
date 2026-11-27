@@ -819,3 +819,61 @@ async def test_cancel_during_sdk_start_cleans_the_partial_room(service,monkeypat
     pending.cancel()
     with suppress(asyncio.CancelledError):await asyncio.wait_for(pending,2)
     assert not app.state.rows and len(deleted)==1
+
+
+async def test_connect_room_grants_can_update_own_metadata(monkeypatch):
+    captured = {}
+
+    class FakeRoom:
+        async def connect(self, url, token, options=None):
+            captured['url'] = url
+            captured['token'] = token
+
+        async def disconnect(self):
+            pass
+
+    monkeypatch.setenv('LIVEKIT_URL', 'ws://livekit.test:7880')
+    monkeypatch.setenv('LIVEKIT_API_KEY', 'test-api-key')
+    monkeypatch.setenv('LIVEKIT_API_SECRET', 'test-api-secret-at-least-32-chars-long')
+    monkeypatch.setattr(server.rtc, 'Room', FakeRoom)
+    await server.connect_room('room-meta-check')
+    verified = server.api.TokenVerifier('test-api-key', 'test-api-secret-at-least-32-chars-long').verify(captured['token'])
+    assert verified.video.room_join is True
+    assert verified.video.room == 'room-meta-check'
+    assert verified.video.can_update_own_metadata is True
+    assert verified.video.can_publish is False
+    assert verified.video.can_subscribe is False
+
+
+async def test_real_disconnect_does_not_poison_runtime_failed_flag(service):
+    client, calls, state, app = service
+    gate = asyncio.Event()
+    app.state.context_gate[0] = gate
+    sock = socket.socket()
+    sock.bind(('127.0.0.1', 0))
+    sock.listen()
+    port = sock.getsockname()[1]
+    srv = uvicorn.Server(uvicorn.Config(app, lifespan='off', access_log=False, log_level='critical', timeout_graceful_shutdown=1))
+    serving = asyncio.create_task(srv.serve(sockets=[sock]))
+    try:
+        while not srv.started:
+            await asyncio.sleep(.01)
+        async with httpx.AsyncClient(base_url=f'http://127.0.0.1:{port}') as http:
+            pending = asyncio.create_task(http.post(URL + '/answer', headers=HEADERS, json=question()))
+            await asyncio.wait_for(app.state.entered.wait(), 3)
+            pending.cancel()
+            with suppress(asyncio.CancelledError):
+                await pending
+            row = next(iter(app.state.rows.values()))
+            async with asyncio.timeout(2):
+                while row.lock.locked():
+                    await asyncio.sleep(.02)
+            assert row.failed is False
+            gate.set()
+            replacement = await http.post(URL + '/answer', headers=HEADERS, json=question())
+            assert replacement.status_code == 200
+            assert app.state.rows[(1, SESSION)] is row
+    finally:
+        gate.set()
+        srv.should_exit = True
+        await serving

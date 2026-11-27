@@ -1173,3 +1173,120 @@ def test_bedrock_workspace_delete_move_display_name_frontmatter_and_turn_recover
     assert budget_calls == bedrock_workspace._MAX_TOOL_STEPS + 1
 
 
+def test_async_distributed_lock_does_not_block_event_loop_and_translations_skip_s3(tmp_path, monkeypatch):
+    import asyncio
+    from contextlib import asynccontextmanager
+    from fastapi.testclient import TestClient
+    from control_plane.api import create_app
+    from control_plane.workspace_reader import WorkspaceReader
+    from control_plane.workspace_store import S3WorkspaceStore
+
+    # 1. async_distributed_lock yields the event loop while waiting on a contended Redis lock.
+    class FakeLockRedis:
+        def __init__(self):
+            self.keys = {}
+
+        def set(self, key, value, nx=False, px=None):
+            if nx and key in self.keys:
+                return False
+            self.keys[key] = value
+            return True
+
+        def eval(self, _script, _numkeys, key, token):
+            if self.keys.get(key) == token:
+                del self.keys[key]
+                return 1
+            return 0
+
+    store = S3WorkspaceStore(s3=object(), bucket="ws-bucket", root=tmp_path, redis_url="redis://fake")
+    store._redis_client = FakeLockRedis()
+
+    async def _run_contention():
+        entered_first = asyncio.Event()
+        release_first = asyncio.Event()
+        ticks_while_waiting = 0
+        order = []
+
+        async def holder():
+            async with store.async_distributed_lock("subject:7", timeout=5.0):
+                order.append("holder_acquired")
+                entered_first.set()
+                await release_first.wait()
+                order.append("holder_releasing")
+
+        async def waiter():
+            await entered_first.wait()
+            async with store.async_distributed_lock("subject:7", timeout=5.0):
+                order.append("waiter_acquired")
+
+        async def ticker():
+            nonlocal ticks_while_waiting
+            await entered_first.wait()
+            for _ in range(5):
+                await asyncio.sleep(0.02)
+                ticks_while_waiting += 1
+            release_first.set()
+
+        await asyncio.wait_for(asyncio.gather(holder(), waiter(), ticker()), timeout=5.0)
+        assert ticks_while_waiting == 5, "event loop stalled while waiting on Redis lock"
+        assert order == ["holder_acquired", "holder_releasing", "waiter_acquired"]
+
+    asyncio.run(_run_contention())
+
+    # 2. /api/meeting-translations bypasses S3 middleware completely, while workspace writes use async_distributed_lock.
+    monkeypatch.setenv("TINA_WORKSPACE_STORAGE", "s3")
+    monkeypatch.setenv("TINA_S3_WORKSPACE_BUCKET", "ws-bucket")
+    events = []
+
+    class AsyncStubStore:
+        def __init__(self, root):
+            self.root = root
+
+        def compact_bloated_system_snapshots(self):
+            return {"compacted": 0}
+
+        @asynccontextmanager
+        async def async_distributed_lock(self, key, **_kw):
+            events.append(("async_lock", key))
+            yield
+
+        def distributed_lock(self, key, **_kw):
+            from contextlib import nullcontext
+            return nullcontext()
+
+        def sync_subject_workspaces(self, subject, *, memberships=(), include_system=False, force=False):
+            events.append(("sync", subject, force))
+
+        def push_attach_state(self, subject):
+            events.append(("push_attach", subject))
+
+        def push_if_changed(self, path, *, actor=None, protect_policy=False):
+            events.append(("push", path.name, actor))
+
+    stub = AsyncStubStore(tmp_path)
+    (tmp_path / "7").mkdir(exist_ok=True)
+    monkeypatch.setattr("control_plane.workspace_store.S3WorkspaceStore.from_env", classmethod(lambda cls, *args, **kw: stub))
+    app = create_app(None, reader=WorkspaceReader(tmp_path))
+    events.clear()
+
+    @app.post("/api/meeting-translations/probe/noop")
+    def _tr_probe():
+        return {"ok": True}
+
+    @app.post("/api/workspace/async-lock-probe")
+    def _ws_probe():
+        return {"ok": True}
+
+    client = TestClient(app)
+    r_tr = client.post("/api/meeting-translations/probe/noop", headers={"X-User-Id": "7"})
+    assert r_tr.status_code == 200
+    assert events == [], f"meeting-translations should skip S3 sync/lock, got {events}"
+
+    r_ws = client.post("/api/workspace/async-lock-probe", headers={"X-User-Id": "7"})
+    assert r_ws.status_code == 200
+    assert ("async_lock", "subject:7") in events
+    assert ("sync", "7", True) in events
+    assert ("push", "7", "7") in events
+
+
+

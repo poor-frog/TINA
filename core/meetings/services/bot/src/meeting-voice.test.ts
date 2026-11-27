@@ -1562,3 +1562,83 @@ test('question waiting notices receive six seconds and short name acknowledgment
   try { await g.voice.start(); await g.capture('TINA ơi'); assert.deepEqual(deadlines, [6000, 3000]); }
   finally { await g.voice.stop(); }
 });
+
+test('transient poll failures during THINKING tolerate up to two misses without aborting the active turn', async () => {
+  const answer = deferred<{text: string}>();
+  const f = fixture(() => answer.promise);
+  let configFail = false;
+  const origConfig = f.api.config;
+  f.api.config = async signal => {
+    if (configFail) {
+      const err = new Error('PRIVATE DETAIL MUST NOT LEAK');
+      err.name = 'TimeoutError';
+      throw err;
+    }
+    return origConfig(signal);
+  };
+  const poll = async () => {
+    clearTimeout((f.voice as any).pollTimer);
+    await (f.voice as any).poll();
+    clearTimeout((f.voice as any).pollTimer);
+  };
+  try {
+    await f.voice.start();
+    clearTimeout((f.voice as any).pollTimer);
+    await f.capture();
+    assert.equal(f.states.at(-1), 'THINKING');
+    // Two consecutive transient config timeouts do NOT tear down the active turn.
+    configFail = true;
+    await poll();
+    await poll();
+    assert.equal(f.states.at(-1), 'THINKING');
+    assert(f.logs.some(line => line === 'poll_failed:probe:timeout'));
+    assert(!f.logs.join(' ').includes('PRIVATE DETAIL'));
+    // Recovery resets failure count and the in-flight answer completes normally.
+    configFail = false;
+    await poll();
+    answer.resolve({text: 'Lan phụ trách demo.'});
+    await tick(40);
+    assert.deepEqual(f.spoken, ['Lan phụ trách demo.']);
+    assert.equal(f.states.at(-1), 'QUIET');
+  } finally {
+    answer.resolve({text: 'Lan phụ trách demo.'});
+    await f.voice.stop();
+  }
+});
+
+test('repeated poll failures while already in ERROR do not flap OFF to ERROR and still recover', async () => {
+  let fail = false, starts = 0;
+  const states: string[] = [];
+  const voice = new MeetingVoice({
+    config: async () => {
+      if (fail) throw Error('synthetic outage');
+      return {enabled: true, ready: true, revision: 1};
+    },
+    answer: async () => ({text: 'unused'}),
+    state: async state => { states.push(state); },
+  }, {speak: async () => 'completed', stop: async () => {}}, async () => {},
+  () => { starts++; return {send: () => true, close() {}}; }, () => {});
+  const poll = async () => {
+    clearTimeout((voice as any).pollTimer);
+    await (voice as any).poll();
+    clearTimeout((voice as any).pollTimer);
+  };
+  try {
+    await voice.start();
+    clearTimeout((voice as any).pollTimer);
+    fail = true;
+    await poll(); // transitions into ERROR
+    const countAfterFirstFailure = states.length;
+    assert.equal(states.at(-1), 'ERROR');
+    await poll(); // already ERROR without worker -> must NOT flap OFF -> ERROR
+    await poll();
+    assert.equal(states.slice(countAfterFirstFailure).includes('OFF'), false);
+    assert.equal(states.at(-1), 'ERROR');
+    fail = false;
+    await poll(); // still recovers via probeRecovery
+    assert.equal(starts, 2);
+    assert.equal(states.at(-1), 'OFF');
+  } finally {
+    await voice.stop();
+  }
+});

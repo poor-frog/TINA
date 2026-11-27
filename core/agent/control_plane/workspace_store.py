@@ -8,6 +8,7 @@ O(1) invite resolution.
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -16,7 +17,7 @@ from pathlib import Path
 import shutil
 import threading
 import time
-from typing import Any, Iterator, Optional
+from typing import Any, AsyncIterator, Iterator, Optional
 import uuid
 
 from shared.s3_workspace import (
@@ -89,15 +90,34 @@ class S3WorkspaceStore:
     def _redis(self):
         if not self._redis_url:
             return None
-        if self._redis_client is None:
-            try:
-                import redis
-                self._redis_client = redis.from_url(
-                    self._redis_url, decode_responses=True, socket_connect_timeout=1, socket_timeout=2,
-                )
-            except Exception:  # noqa: BLE001
-                return None
-        return self._redis_client
+        with self._lock:
+            if self._redis_client is None:
+                try:
+                    import redis
+                    self._redis_client = redis.from_url(
+                        self._redis_url, decode_responses=True, socket_connect_timeout=1, socket_timeout=2,
+                    )
+                except Exception:  # noqa: BLE001
+                    return None
+            return self._redis_client
+
+    @staticmethod
+    def _try_acquire_lock(client: Any, lock_key: str, token: str) -> Optional[bool]:
+        try:
+            return bool(client.set(lock_key, token, nx=True, px=30000))
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _release_lock(client: Any, lock_key: str, token: str) -> None:
+        try:
+            script = (
+                "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                "return redis.call('del', KEYS[1]) else return 0 end"
+            )
+            client.eval(script, 1, lock_key, token)
+        except Exception:  # noqa: BLE001
+            pass
 
     @contextlib.contextmanager
     def distributed_lock(self, key: str, *, timeout: float = 25.0) -> Iterator[None]:
@@ -111,25 +131,43 @@ class S3WorkspaceStore:
         deadline = time.monotonic() + timeout
         acquired = False
         while time.monotonic() < deadline:
-            try:
-                if client.set(lock_key, token, nx=True, px=30000):
-                    acquired = True
-                    break
-            except Exception:  # noqa: BLE001
+            status = self._try_acquire_lock(client, lock_key, token)
+            if status is True:
+                acquired = True
+                break
+            if status is None:
                 break
             time.sleep(0.05)
         try:
             yield
         finally:
             if acquired:
-                try:
-                    script = (
-                        "if redis.call('get', KEYS[1]) == ARGV[1] then "
-                        "return redis.call('del', KEYS[1]) else return 0 end"
-                    )
-                    client.eval(script, 1, lock_key, token)
-                except Exception:  # noqa: BLE001
-                    pass
+                self._release_lock(client, lock_key, token)
+
+    @contextlib.asynccontextmanager
+    async def async_distributed_lock(self, key: str, *, timeout: float = 25.0) -> AsyncIterator[None]:
+        """Non-blocking cross-replica Valkey mutex for async middleware without stalling the event loop."""
+        client = await asyncio.to_thread(self._redis)
+        if client is None:
+            yield
+            return
+        lock_key = f"tina:ws-lock:{key}"
+        token = uuid.uuid4().hex
+        deadline = time.monotonic() + timeout
+        acquired = False
+        while time.monotonic() < deadline:
+            status = await asyncio.to_thread(self._try_acquire_lock, client, lock_key, token)
+            if status is True:
+                acquired = True
+                break
+            if status is None:
+                break
+            await asyncio.sleep(0.05)
+        try:
+            yield
+        finally:
+            if acquired:
+                await asyncio.to_thread(self._release_lock, client, lock_key, token)
 
     # ── attach state.json sync ────────────────────────────────────────────────
 
