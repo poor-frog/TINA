@@ -6,7 +6,6 @@ workspace mounts and maps the resulting assistant text into the existing UnitEve
 from __future__ import annotations
 
 from collections import deque
-import functools
 import glob
 import json
 import logging
@@ -14,7 +13,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -26,16 +24,18 @@ from llm.model_capabilities import groq_chat_model_error, normalized_effort
 from llm.ports import harness_subprocess_env
 from llm.citations import render_citations, web_sources
 from llm.workspace_mcp import (
-    READ_TOOLS as _WORKSPACE_MCP_READ_TOOLS,
-    WRITE_TOOLS as _WORKSPACE_MCP_WRITE_TOOLS,
+    SERVER_NAME as _WORKSPACE_MCP_SERVER,
+    build_server_spec as _build_workspace_mcp_spec,
     load_mounts as _load_workspace_mounts,
+    select_workspace_tools as _select_workspace_mcp_tools,
+    shell_sandbox_available as _ws_shell_sandbox_available,
+    workspace_mcp_instructions as _workspace_mcp_instructions,
 )
 
 
 log = logging.getLogger("tina.codex")
 _CLIENT = {"name": "tina", "title": "TINA", "version": "0.12.0"}
 _REAL_POPEN = subprocess.Popen
-_WORKSPACE_MCP_SERVER = "tina-workspace"
 _SANDBOX_ERROR_PATTERNS = (
     "bwrap:",
     "creating new namespace failed",
@@ -45,74 +45,9 @@ _SANDBOX_ERROR_PATTERNS = (
 )
 
 
-@functools.lru_cache(maxsize=1)
-def _probe_linux_userns() -> bool:
-    """Check once in a short-lived child whether Linux unprivileged user+mount namespaces work."""
-    probe = (
-        "import ctypes, sys; "
-        "libc = ctypes.CDLL(None, use_errno=True); "
-        "sys.exit(0 if libc.unshare(0x10000000 | 0x00020000) == 0 else 1)"
-    )
-    try:
-        result = subprocess.run(
-            [sys.executable, "-c", probe],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=3,
-            check=False,
-        )
-        return result.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
 def _shell_sandbox_available() -> bool:
     """Return False when the container runtime blocks Linux user namespaces (e.g. AWS ECS Fargate)."""
-    if (
-        os.environ.get("TINA_WORKSPACE_SYNC_SIDECAR") == "1"
-        or os.environ.get("ECS_CONTAINER_METADATA_URI_V4")
-        or os.environ.get("ECS_CONTAINER_METADATA_URI")
-    ):
-        return False
-    if sys.platform != "linux":
-        return True
-    if subprocess.Popen is not _REAL_POPEN:
-        return True
-    return _probe_linux_userns()
-
-
-def _workspace_mcp_instructions(
-    mounts: dict[str, dict],
-    tools: list[str],
-    *,
-    read_only: bool,
-) -> str:
-    mount_summary = ", ".join(
-        f"'{slug}' ({m.get('role')}, {'writable' if m.get('write') else 'read-only'})"
-        for slug, m in mounts.items()
-    )
-    tool_list = ", ".join(tools)
-    mode_note = (
-        "This turn is read-only; do not attempt to modify files."
-        if read_only
-        else (
-            "For writes, use create_wiki, update_wiki (mode='append' or 'replace' after read_wiki), "
-            "move_wiki, or delete_wiki on writable workspaces only. Files under "
-            "kg/entities/<type>/<slug>.md (except index.md/log.md) must start with YAML frontmatter "
-            "containing type, id, and title."
-        )
-    )
-    return (
-        "## Workspace access (MCP)\n"
-        "Shell execution is disabled in this container runtime. Do NOT call shell or apply_patch tools. "
-        f"Use the connected `{_WORKSPACE_MCP_SERVER}` MCP tools ({tool_list}) to inspect and work with "
-        "workspace Markdown files.\n"
-        f"Authorized workspaces: {mount_summary}.\n"
-        "Pass an exact workspace slug above (or 'personal' for your private space, or '*' with search_wiki) "
-        "and a relative Markdown path under kg/, wiki/, notes/, sources/, concepts/, docs/, or README.md "
-        "(CLAUDE.md and mail/*.md are also readable in '_global').\n"
-        + mode_note
-    )
+    return _ws_shell_sandbox_available(mocked_runner=subprocess.Popen is not _REAL_POPEN)
 
 
 class CodexHarness:
@@ -656,11 +591,7 @@ class CodexHarness:
         effective_mcp_tools = dict(mcp_tools) if mcp_tools else {}
         if shell_disabled:
             ws_mounts = _load_workspace_mounts(mounts, read_only=read_only)
-            ws_tools: list[str] = []
-            if {"Read", "Glob", "Grep", "Bash"}.intersection(allowed):
-                ws_tools.extend(_WORKSPACE_MCP_READ_TOOLS)
-            if not read_only and {"Write", "Edit"}.intersection(allowed):
-                ws_tools.extend(_WORKSPACE_MCP_WRITE_TOOLS)
+            ws_tools = _select_workspace_mcp_tools(allowed, read_only=read_only)
             if ws_mounts and ws_tools and self._codex_home is not None:
                 mounts_file = self._codex_home / f"tina-mounts-{uuid4().hex}.json"
                 mounts_file.write_text(
@@ -683,18 +614,9 @@ class CodexHarness:
                     effective_mcp_servers = loaded_servers
                 else:
                     effective_mcp_servers = dict(effective_mcp_servers)
-                ws_args = [
-                    "-B",
-                    str(Path(__file__).resolve().with_name("workspace_mcp.py")),
-                    "--mounts-file", str(mounts_file),
-                    "--tools", *ws_tools,
-                ]
-                if read_only:
-                    ws_args.append("--readonly")
-                effective_mcp_servers[_WORKSPACE_MCP_SERVER] = {
-                    "command": sys.executable,
-                    "args": ws_args,
-                }
+                effective_mcp_servers[_WORKSPACE_MCP_SERVER] = _build_workspace_mcp_spec(
+                    mounts_file, ws_tools, read_only=read_only,
+                )
                 effective_mcp_tools[_WORKSPACE_MCP_SERVER] = ws_tools
                 effective_allowed.add(f"mcp__{_WORKSPACE_MCP_SERVER}")
                 ws_guidance = _workspace_mcp_instructions(ws_mounts, ws_tools, read_only=read_only)

@@ -16,9 +16,17 @@ export interface ToolDescriptor {
   kind: "read" | "write" | "web" | "tool";
 }
 
+export function normalizeAgentToolName(rawTool: string): string {
+  const trimmed = rawTool.trim();
+  const mcpMatch = /^mcp__(?:tina[-_](?:workspace|reach))__(.+)$/i.exec(trimmed);
+  return mcpMatch ? mcpMatch[1] : trimmed;
+}
+
 export function describeAgentTool(rawTool: string): ToolDescriptor {
-  switch (rawTool) {
+  const normalized = normalizeAgentToolName(rawTool);
+  switch (normalized) {
     case "list_wiki":
+    case "Glob":
       return {
         icon: "folder",
         active: "Browsing Knowledge library…",
@@ -27,6 +35,7 @@ export function describeAgentTool(rawTool: string): ToolDescriptor {
         kind: "read",
       };
     case "search_wiki":
+    case "Grep":
       return {
         icon: "search",
         active: "Searching Knowledge…",

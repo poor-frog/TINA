@@ -367,32 +367,6 @@ def commit_workspace_paths(
     message: str,
     author: Optional[tuple[str, str]] = None,
 ) -> Optional[str]:
-    """Commit only the listed workspace-relative paths, leaving other staged or dirty files untouched."""
-    work = Path(work)
-    safe_paths: list[str] = []
-    for raw in paths:
-        path = Path(raw)
-        if path.is_absolute() or ".." in path.parts or ".git" in path.parts:
-            raise ValueError("invalid workspace commit path")
-        safe_paths.append(path.as_posix())
-    if not safe_paths or not (work / ".git").exists():
-        return None
-    if not _git(work, "status", "--porcelain", "--", *safe_paths):
-        return None
-    env = _commit_env(author)
-    _git(work, "add", "--", *safe_paths, env=env)
-    summary = message.splitlines()[0][:72] if message else "agent turn"
-    _git(work, "commit", "--only", "-m", summary, "--", *safe_paths, env=env)
-    return _git(work, "rev-parse", "HEAD", env=env)
-
-
-def commit_workspace_paths(
-    work: Path | str,
-    paths: Iterable[str],
-    *,
-    message: str,
-    author: Optional[tuple[str, str]] = None,
-) -> Optional[str]:
     """Validate and commit only the listed workspace-relative paths, leaving other changes untouched."""
     work = Path(work)
     safe_paths: list[str] = []

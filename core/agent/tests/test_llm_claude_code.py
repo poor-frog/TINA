@@ -556,3 +556,86 @@ def test_prepare_repoints_stale_symlink_and_is_idempotent(tmp_path: Path, monkey
     assert os.readlink(link) == target
     link = _prepare_with_home(monkeypatch, home, ws)  # second turn, already correct → no-op
     assert os.readlink(link) == target
+
+
+def test_claude_prepare_survives_readonly_workspace(tmp_path: Path, monkeypatch):
+    readonly_ws = tmp_path / "readonly-shared"
+    readonly_ws.mkdir()
+    chat_root = tmp_path / "_system"
+    chat_root.mkdir()
+    monkeypatch.setenv("HOME", str(chat_root))
+    readonly_ws.chmod(0o555)
+    try:
+        ClaudeCodeHarness().prepare(readonly_ws, chat_root=chat_root)
+    finally:
+        readonly_ws.chmod(0o755)
+    assert (chat_root / ".claude" / "projects").is_dir()
+
+
+@pytest.mark.parametrize("read_only_turn", [False, True])
+def test_claude_fargate_strips_bash_and_attaches_workspace_mcp(
+    tmp_path: Path, monkeypatch, read_only_turn: bool,
+):
+    private = tmp_path / "2"
+    global_dir = tmp_path / "_global"
+    system_dir = tmp_path / "_system"
+    for d in (private, global_dir, system_dir):
+        d.mkdir()
+    monkeypatch.setenv("TINA_WORKSPACE_SYNC_SIDECAR", "1")
+    monkeypatch.setenv("TINA_MOUNTS", json.dumps([
+        {"slug": "2", "path": str(private), "role": "private", "write": True, "primary": True},
+        {"slug": "_global", "path": str(global_dir), "role": "global", "write": False},
+        {"slug": "_system", "path": str(system_dir), "role": "system", "write": True},
+    ]))
+    captured: dict = {}
+
+    def execute(argv, _cwd):
+        captured["argv"] = argv
+        cfg_path = Path(argv[argv.index("--mcp-config") + 1])
+        captured["cfg_path"] = cfg_path
+        captured["mcp"] = json.loads(cfg_path.read_text())
+        yield json.dumps({"type": "result", "subtype": "success", "result": "ok", "session_id": "s1"})
+
+    tools = ["Read", "Bash", "mcp__tina-reach"] if read_only_turn else ["Read", "Write", "Edit", "Bash", "mcp__tina-reach"]
+    events = list(ClaudeCodeHarness(exec_fn=execute).run_turn(
+        private, "Summarize Jane Liu",
+        allowed_tools=tools,
+        mcp_servers={"tina-reach": {"command": "python", "args": ["-m", "llm.reach_mcp"]}},
+        mcp_tools={"tina-reach": ["reach_web_search"]},
+    ))
+    assert events[-1]["ok"] is True
+    allowed_arg = captured["argv"][captured["argv"].index("--allowedTools") + 1].split(",")
+    assert "Bash" not in allowed_arg
+    assert "Write" not in allowed_arg
+    assert "mcp__tina-workspace" in allowed_arg
+    assert "mcp__tina-reach" in allowed_arg
+    assert set(captured["mcp"]["mcpServers"]) == {"tina-workspace", "tina-reach"}
+    ws_args = captured["mcp"]["mcpServers"]["tina-workspace"]["args"]
+    if read_only_turn:
+        assert "--readonly" in ws_args
+        assert "create_wiki" not in ws_args
+    else:
+        assert "--readonly" not in ws_args
+        assert "create_wiki" in ws_args
+    assert "tina-workspace" in captured["argv"][captured["argv"].index("-p") + 1]
+    assert not captured["cfg_path"].exists()
+
+
+def test_claude_attaches_non_reach_ungated_inline_mcp_servers(tmp_path: Path):
+    captured: dict = {}
+
+    def execute(argv, _cwd):
+        cfg_path = Path(argv[argv.index("--mcp-config") + 1])
+        captured["mcp"] = json.loads(cfg_path.read_text())
+        yield json.dumps({"type": "result", "subtype": "success", "result": "ok", "session_id": "s1"})
+
+    events = list(ClaudeCodeHarness(exec_fn=execute).run_turn(
+        tmp_path, "check docs",
+        allowed_tools=["Read", "mcp__custom-docs"],
+        mcp_servers={"custom-docs": {"command": "docs-mcp", "args": ["--readonly"]}},
+        mcp_tools={"custom-docs": ["search"]},
+    ))
+    assert events[-1]["ok"] is True
+    assert captured["mcp"] == {
+        "mcpServers": {"custom-docs": {"command": "docs-mcp", "args": ["--readonly"]}},
+    }

@@ -350,3 +350,98 @@ def test_prepare_isolates_cli_state_per_tina_chat_session(monkeypatch, tmp_path:
     assert first._home is not None and second._home is not None
     assert first._home != second._home
     assert first._home.parent == second._home.parent
+
+
+def test_antigravity_excludes_system_mount_locks_global_and_respects_untrusted_trigger(
+    monkeypatch, tmp_path: Path,
+):
+    shared_ro = tmp_path / "shared-ro"
+    global_dir = tmp_path / "_global"
+    system_dir = tmp_path / "_system"
+    for d in (shared_ro, global_dir, system_dir):
+        d.mkdir()
+    monkeypatch.setenv("TINA_ANTIGRAVITY_AUTH_MODE", "gemini-api")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("TINA_MOUNTS", json.dumps([
+        {"slug": "team", "path": str(shared_ro), "role": "shared", "write": False},
+        {"slug": "_global", "path": str(global_dir), "role": "global", "write": True},
+        {"slug": "_system", "path": str(system_dir), "role": "system", "write": True},
+    ]))
+    monkeypatch.setattr("llm.antigravity.shutil.which", lambda _name: "/usr/local/bin/agy")
+
+    captured: dict = {}
+
+    def execute(argv, _cwd):
+        captured["argv"] = argv
+        captured["settings"] = json.loads(Path(argv[argv.index("--settings") + 1]).read_text())
+        return [_event({"event": "result", "result": {"status": "SUCCESS", "response": "ok"}})]
+
+    harness = AntigravityHarness(exec_fn=execute)
+    harness.prepare(shared_ro, chat_root=system_dir)
+    events = list(harness.run_turn(shared_ro, "inspect", allowed_tools=["Read", "Write", "Edit", "Bash"]))
+    assert events[-1]["ok"] is True
+    assert captured["argv"][captured["argv"].index("--mode") + 1] == "plan"
+    assert str(system_dir) not in captured["argv"]
+    allow = captured["settings"]["permissions"]["allow"]
+    assert not any(str(system_dir) in rule for rule in allow)
+    assert not any(rule.startswith("write_file(") for rule in allow)
+    assert "write_file(*)" in captured["settings"]["permissions"]["deny"]
+
+    # Untrusted event trigger forces read-only even on a writable private mount.
+    priv = tmp_path / "priv"
+    priv.mkdir()
+    monkeypatch.setenv("TINA_UNIT_TRIGGER", "event")
+    monkeypatch.setenv("TINA_MOUNTS", json.dumps([
+        {"slug": "2", "path": str(priv), "role": "private", "write": True},
+    ]))
+    harness.prepare(priv, chat_root=system_dir)
+    list(harness.run_turn(priv, "event turn", allowed_tools=["Read", "Write", "Edit"]))
+    assert captured["argv"][captured["argv"].index("--mode") + 1] == "plan"
+    assert "write_file(*)" in captured["settings"]["permissions"]["deny"]
+
+
+def test_antigravity_fargate_disables_sandbox_and_attaches_workspace_mcp(
+    monkeypatch, tmp_path: Path,
+):
+    private = tmp_path / "2"
+    global_dir = tmp_path / "_global"
+    system_dir = tmp_path / "_system"
+    for d in (private, global_dir, system_dir):
+        d.mkdir()
+    monkeypatch.setenv("TINA_ANTIGRAVITY_AUTH_MODE", "gemini-api")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("TINA_WORKSPACE_SYNC_SIDECAR", "1")
+    monkeypatch.setenv("TINA_MOUNTS", json.dumps([
+        {"slug": "2", "path": str(private), "role": "private", "write": True, "primary": True},
+        {"slug": "_global", "path": str(global_dir), "role": "global", "write": False},
+        {"slug": "_system", "path": str(system_dir), "role": "system", "write": True},
+    ]))
+    monkeypatch.setattr("llm.antigravity.shutil.which", lambda _name: "/usr/local/bin/agy")
+
+    captured: dict = {}
+
+    def execute(argv, _cwd):
+        captured["argv"] = argv
+        captured["settings"] = json.loads(Path(argv[argv.index("--settings") + 1]).read_text())
+        assert harness._home is not None
+        mcp_path = harness._home / ".gemini" / "config" / "mcp_config.json"
+        captured["mcp"] = json.loads(mcp_path.read_text())
+        mounts_files = list(harness._home.glob("tina-mounts-*.json"))
+        assert len(mounts_files) == 1
+        captured["mounts_file"] = mounts_files[0]
+        return [_event({"event": "result", "result": {"status": "SUCCESS", "response": "ok"}})]
+
+    harness = AntigravityHarness(exec_fn=execute)
+    harness.prepare(private, chat_root=system_dir)
+    events = list(harness.run_turn(private, "Summarize Jane Liu", allowed_tools=["Read", "Write", "Edit", "Bash"]))
+    assert events[-1]["ok"] is True
+    assert "--sandbox" not in captured["argv"]
+    assert captured["argv"][captured["argv"].index("--mode") + 1] == "plan"
+    assert captured["settings"]["enableTerminalSandbox"] is False
+    assert "command(*)" in captured["settings"]["permissions"]["deny"]
+    assert "write_file(*)" in captured["settings"]["permissions"]["deny"]
+    assert "mcp(tina-workspace/search_wiki)" in captured["settings"]["permissions"]["allow"]
+    assert "mcp(tina-workspace/create_wiki)" in captured["settings"]["permissions"]["allow"]
+    assert "tina-workspace" in captured["mcp"]["mcpServers"]
+    assert "tina-workspace" in captured["argv"][captured["argv"].index("-p") + 1]
+    assert not captured["mounts_file"].exists()

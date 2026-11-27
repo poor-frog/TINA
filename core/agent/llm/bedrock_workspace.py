@@ -158,6 +158,8 @@ def _is_allowed_wiki_path(relative: str | None, *, is_global: bool, writing: boo
         return relative in ("README.md", "CLAUDE.md") or (len(parts) >= 2 and parts[0] in _GLOBAL_ROOTS)
     if not is_global and relative == "README.md":
         return True
+    if not is_global and not writing and relative == "onboarding.md":
+        return True
     return len(parts) >= 2 and parts[0] in _KNOWLEDGE_ROOTS
 
 
@@ -229,7 +231,7 @@ def _iter_workspace_files(mount: dict, *, limit: int) -> list[tuple[str, Path]]:
     roots = (
         [root / "README.md", root / "CLAUDE.md", root / "kg", root / "docs", root / "mail"]
         if is_global
-        else [root / "README.md", *(root / name for name in _KNOWLEDGE_ROOTS)]
+        else [root / "README.md", root / "onboarding.md", *(root / name for name in _KNOWLEDGE_ROOTS)]
     )
     found: list[tuple[str, Path]] = []
 

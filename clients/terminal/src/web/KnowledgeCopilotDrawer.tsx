@@ -5,7 +5,7 @@
  *  seeded prompts from uploaded files or Connections Map, and auto-refreshes on workspace commits. */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { WebIcon, type WebIconName } from "./Icons";
-import { AgentActivitySteps } from "./AgentActivitySteps";
+import { AgentActivitySteps, normalizeAgentToolName } from "./AgentActivitySteps";
 import { LucianThinkingText } from "./lucian/LucianThinkingText";
 import { emitWebToast } from "./lucian/webToast";
 import { friendlyPageTitle } from "./knowledgeFriendly";
@@ -39,10 +39,12 @@ function makeSessionId(slug?: string): string {
 const KNOWLEDGE_WRITE_TOOLS = new Set(["create_wiki", "update_wiki", "delete_wiki", "move_wiki", "Write", "Edit"]);
 
 function toolPhaseLabel(tool: string): string {
-  switch (tool) {
+  switch (normalizeAgentToolName(tool)) {
     case "list_wiki":
+    case "Glob":
       return "Browsing your library…";
     case "search_wiki":
+    case "Grep":
       return "Searching your library…";
     case "read_wiki":
     case "Read":
@@ -211,7 +213,7 @@ export function KnowledgeCopilotDrawer({
             },
             onTool: (tool) => {
               if (!controller.signal.aborted) setActiveTool(tool);
-              if (KNOWLEDGE_WRITE_TOOLS.has(tool)) mutatedInTurn = true;
+              if (KNOWLEDGE_WRITE_TOOLS.has(normalizeAgentToolName(tool))) mutatedInTurn = true;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === agentId ? { ...m, ops: [...(m.ops ?? []), tool] } : m,

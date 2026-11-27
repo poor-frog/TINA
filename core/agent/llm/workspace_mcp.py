@@ -7,10 +7,13 @@ through this server's allowlisted, symlink-safe, mount-scoped Markdown operation
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
+from typing import Iterable
 from urllib.parse import quote, unquote
 
 # Harnesses scrub PYTHONPATH; this installed bridge must also launch from a workspace cwd.
@@ -30,9 +33,105 @@ _MAX_RPC_LINE_BYTES = 131072
 _MAX_WRITES_PER_SESSION = 16
 _MAX_RESOURCES = 100
 _RESOURCE_PREFIX = "tina-workspace://"
+SERVER_NAME = "tina-workspace"
 
 READ_TOOLS: tuple[str, ...] = ("list_wiki", "search_wiki", "read_wiki")
 WRITE_TOOLS: tuple[str, ...] = ("create_wiki", "update_wiki", "move_wiki", "delete_wiki")
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_linux_userns() -> bool:
+    """Check once in a short-lived child whether Linux unprivileged user+mount namespaces work."""
+    probe = (
+        "import ctypes, sys; "
+        "libc = ctypes.CDLL(None, use_errno=True); "
+        "sys.exit(0 if libc.unshare(0x10000000 | 0x00020000) == 0 else 1)"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            check=False,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def shell_sandbox_available(*, mocked_runner: bool = False) -> bool:
+    """Return False when the container runtime blocks Linux user namespaces (e.g. AWS ECS Fargate)."""
+    if (
+        os.environ.get("TINA_WORKSPACE_SYNC_SIDECAR") == "1"
+        or os.environ.get("ECS_CONTAINER_METADATA_URI_V4")
+        or os.environ.get("ECS_CONTAINER_METADATA_URI")
+    ):
+        return False
+    if sys.platform != "linux":
+        return True
+    if mocked_runner:
+        return True
+    return _probe_linux_userns()
+
+
+def select_workspace_tools(allowed: Iterable[str], *, read_only: bool) -> list[str]:
+    """Select allowed workspace MCP tools matching TINA's turn policy."""
+    granted = set(allowed)
+    selected: list[str] = []
+    if {"Read", "Glob", "Grep", "Bash"}.intersection(granted):
+        selected.extend(READ_TOOLS)
+    if not read_only and {"Write", "Edit"}.intersection(granted):
+        selected.extend(WRITE_TOOLS)
+    return selected
+
+
+def build_server_spec(mounts_file: Path, tools: list[str], *, read_only: bool) -> dict:
+    """Return the stdio MCP server descriptor launching workspace_mcp.py for one turn."""
+    args = [
+        "-B",
+        str(Path(__file__).resolve()),
+        "--mounts-file", str(mounts_file),
+        "--tools", *tools,
+    ]
+    if read_only:
+        args.append("--readonly")
+    return {"command": sys.executable, "args": args}
+
+
+def workspace_mcp_instructions(
+    mounts: dict[str, dict],
+    tools: list[str],
+    *,
+    read_only: bool,
+) -> str:
+    """Concise guidance telling a CLI harness to use tina-workspace MCP instead of shell tools."""
+    mount_summary = ", ".join(
+        f"'{slug}' ({m.get('role')}, {'writable' if m.get('write') else 'read-only'})"
+        for slug, m in mounts.items()
+    )
+    tool_list = ", ".join(tools)
+    mode_note = (
+        "This turn is read-only; do not attempt to modify files."
+        if read_only
+        else (
+            "For writes, use create_wiki, update_wiki (mode='append' or 'replace' after read_wiki), "
+            "move_wiki, or delete_wiki on writable workspaces only. Files under "
+            "kg/entities/<type>/<slug>.md (except index.md/log.md) must start with YAML frontmatter "
+            "containing type, id, and title."
+        )
+    )
+    return (
+        "## Workspace access (MCP)\n"
+        "Shell execution is disabled in this container runtime. Do NOT call shell or apply_patch tools. "
+        f"Use the connected `{SERVER_NAME}` MCP tools ({tool_list}) to inspect and work with "
+        "workspace Markdown files.\n"
+        f"Authorized workspaces: {mount_summary}.\n"
+        "Pass an exact workspace slug above (or 'personal' for your private space, or '*' with search_wiki) "
+        "and a relative Markdown path under kg/, wiki/, notes/, sources/, concepts/, docs/, README.md, "
+        "or onboarding.md (read-only; CLAUDE.md and mail/*.md are also readable in '_global').\n"
+        + mode_note
+    )
 
 TOOLS: dict[str, dict] = {
     "list_wiki": {

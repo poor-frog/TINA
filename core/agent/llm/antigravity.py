@@ -13,10 +13,21 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Optional
+from uuid import uuid4
 
 from llm.errors import looks_like_auth_failure
 from llm.model_capabilities import agy_builtin_model, normalized_effort
 from llm.ports import HarnessExec, harness_env_overrides, harness_subprocess_env
+from llm.workspace_mcp import (
+    SERVER_NAME as _WORKSPACE_MCP_SERVER,
+    build_server_spec as _build_workspace_mcp_spec,
+    load_mounts as _load_workspace_mounts,
+    select_workspace_tools as _select_workspace_mcp_tools,
+    shell_sandbox_available as _ws_shell_sandbox_available,
+    workspace_mcp_instructions as _workspace_mcp_instructions,
+)
+
+_REAL_POPEN = subprocess.Popen
 
 
 _TOOL_NAMES = {
@@ -182,20 +193,31 @@ def _mounts(work: Path) -> list[dict]:
     for mount in mounts:
         if not isinstance(mount, dict) or not isinstance(mount.get("path"), str):
             continue
+        role = str(mount.get("role") or "").strip()
+        slug = str(mount.get("slug") or "").strip()
+        if role == "system" or slug == "_system":
+            continue
         path = Path(mount["path"])
         if path.is_absolute():
-            clean.append({"path": str(path), "write": mount.get("write") is True})
+            writable = mount.get("write") is True and role != "global" and slug != "_global"
+            clean.append({"path": str(path), "write": writable})
     if not any(Path(item["path"]) == work for item in clean):
         clean.insert(0, {"path": str(work.resolve()), "write": False})
     return clean
 
 
 def _permission_settings(mounts: list[dict], allowed_tools: set[str],
-                         mcp_rules: list[str]) -> dict:
+                         mcp_rules: list[str], *,
+                         shell_disabled: bool = False,
+                         read_only: bool = False) -> dict:
     readable = list(dict.fromkeys(item["path"] for item in mounts)) if 'Read' in allowed_tools else []
     writable = (
-        list(dict.fromkeys(item["path"] for item in mounts if item["write"]))
-        if {"Write", "Edit"}.intersection(allowed_tools) else []
+        []
+        if (read_only or shell_disabled)
+        else (
+            list(dict.fromkeys(item["path"] for item in mounts if item["write"]))
+            if {"Write", "Edit"}.intersection(allowed_tools) else []
+        )
     )
     permissions = {
         "allow": [*(f"read_file({path})" for path in readable),
@@ -204,7 +226,7 @@ def _permission_settings(mounts: list[dict], allowed_tools: set[str],
     }
     if not writable:
         permissions["deny"].append("write_file(*)")
-    if "Bash" not in allowed_tools:
+    if shell_disabled or "Bash" not in allowed_tools:
         permissions["deny"].append("command(*)")
     if not allowed_tools:
         permissions["deny"].append("read_file(*)")
@@ -213,7 +235,7 @@ def _permission_settings(mounts: list[dict], allowed_tools: set[str],
     return {
         "agentMode": "accept-edits" if writable else "plan",
         "toolPermission": "proceed-in-sandbox",
-        "enableTerminalSandbox": True,
+        "enableTerminalSandbox": not shell_disabled,
         "allowNonWorkspaceAccess": False,
         "permissions": permissions,
     }
@@ -229,12 +251,13 @@ def build_argv(
     settings_path: Optional[str] = None,
     extra_dirs: Iterable[str] = (),
     read_only: bool = False,
+    sandbox: bool = True,
 ) -> list[str]:
     """Build a headless, sandboxed Antigravity CLI invocation."""
-    argv = [
-        executable, "-p", prompt, "--output-format", "stream-json",
-        "--sandbox", "--mode", "plan" if read_only else "accept-edits",
-    ]
+    argv = [executable, "-p", prompt, "--output-format", "stream-json"]
+    if sandbox:
+        argv.append("--sandbox")
+    argv.extend(["--mode", "plan" if read_only else "accept-edits"])
     if settings_path:
         argv.extend(["--settings", settings_path])
     for path in extra_dirs:
@@ -307,12 +330,16 @@ class AntigravityHarness:
             return
 
     def _write_settings(self, mounts: list[dict], allowed_tools: set[str],
-                        mcp_rules: list[str], *, model: Optional[str] = None) -> Path:
+                        mcp_rules: list[str], *, model: Optional[str] = None,
+                        shell_disabled: bool = False, read_only: bool = False) -> Path:
         if self._home is None:
             raise RuntimeError("Antigravity harness was not prepared")
         settings_dir = self._home / ".gemini" / "antigravity-cli"
         settings_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        settings = _permission_settings(mounts, allowed_tools, mcp_rules)
+        settings = _permission_settings(
+            mounts, allowed_tools, mcp_rules,
+            shell_disabled=shell_disabled, read_only=read_only,
+        )
         auth_mode = (os.environ.get("TINA_ANTIGRAVITY_AUTH_MODE") or "").strip()
         if auth_mode == "gemini-api" or (not auth_mode and os.environ.get("GEMINI_API_KEY")):
             settings["modelProvider"] = "gemini"
@@ -428,30 +455,77 @@ class AntigravityHarness:
         if preflight:
             yield {"type": "done", "ok": False, "reply": preflight}
             return
+        mounts_file: Optional[Path] = None
+        mcp_path: Optional[Path] = None
+        settings_path: Optional[Path] = None
         try:
             mounts = _mounts(work)
             allowed = set(allowed_tools)
             gated = set(gated_mcp_servers)
-            mcp_path, mcp_rules = self._write_mcp_config(
-                mcp_servers, allowed, gated, None, mcp_tools,
-            )
-            settings_path = self._write_settings(mounts, allowed, mcp_rules, model=model)
-            dirs = [item["path"] for item in mounts if Path(item["path"]) != work]
-            writable = bool({"Write", "Edit"}.intersection(allowed)) and any(
+            trusted_trigger = os.environ.get("TINA_UNIT_TRIGGER", "message") in {"message", "scheduled"}
+            writable = trusted_trigger and bool({"Write", "Edit"}.intersection(allowed)) and any(
                 item["write"] for item in mounts
             )
+            read_only = not writable
+            mocked_runner = self._exec is not _exec_subprocess or subprocess.Popen is not _REAL_POPEN
+            shell_disabled = bool(allowed) and not _ws_shell_sandbox_available(mocked_runner=mocked_runner)
+            effective_prompt = prompt
+            effective_mcp_servers = dict(mcp_servers) if mcp_servers else {}
+            effective_mcp_tools = dict(mcp_tools) if mcp_tools else {}
+            if shell_disabled and self._home is not None:
+                try:
+                    raw_mounts = json.loads(os.environ.get("TINA_MOUNTS", "[]"))
+                except (TypeError, ValueError):
+                    raw_mounts = []
+                ws_mounts = _load_workspace_mounts(raw_mounts, read_only=read_only)
+                ws_tools = _select_workspace_mcp_tools(allowed, read_only=read_only)
+                if ws_mounts and ws_tools:
+                    mounts_file = self._home / f"tina-mounts-{uuid4().hex}.json"
+                    mounts_file.write_text(
+                        json.dumps(list(ws_mounts.values()), ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                    try:
+                        mounts_file.chmod(0o600)
+                    except OSError:
+                        pass
+                    effective_mcp_servers[_WORKSPACE_MCP_SERVER] = _build_workspace_mcp_spec(
+                        mounts_file, ws_tools, read_only=read_only,
+                    )
+                    effective_mcp_tools[_WORKSPACE_MCP_SERVER] = ws_tools
+                    allowed.add(f"mcp__{_WORKSPACE_MCP_SERVER}")
+                    effective_prompt = (
+                        _workspace_mcp_instructions(ws_mounts, ws_tools, read_only=read_only)
+                        + "\n\n"
+                        + prompt
+                    )
+            mcp_path, mcp_rules = self._write_mcp_config(
+                effective_mcp_servers or None, allowed, gated, None, effective_mcp_tools or None,
+            )
+            settings_path = self._write_settings(
+                mounts, allowed, mcp_rules, model=model,
+                shell_disabled=shell_disabled, read_only=read_only,
+            )
+            dirs = [item["path"] for item in mounts if Path(item["path"]) != work]
             argv = build_argv(
-                prompt,
+                effective_prompt,
                 executable=self._executable,
                 session=session,
                 model=model,
                 effort=os.environ.get("TINA_AGENT_EFFORT"),
                 settings_path=str(settings_path),
                 extra_dirs=dirs,
-                read_only=not writable,
+                read_only=read_only or shell_disabled,
+                sandbox=not shell_disabled,
             )
             home = str(self._home) if self._home else ""
         except (OSError, ValueError, RuntimeError) as exc:
+            if mounts_file is not None:
+                mounts_file.unlink(missing_ok=True)
+            if mcp_path is not None:
+                mcp_path.unlink(missing_ok=True)
+            if settings_path is not None:
+                settings_path.unlink(missing_ok=True)
             yield {"type": "done", "ok": False,
                    "reply": f"Could not prepare Antigravity runner: {exc}"}
             return
@@ -475,9 +549,15 @@ class AntigravityHarness:
                     mcp_path.unlink()
                 except OSError:
                     pass
+            if mounts_file is not None:
+                try:
+                    mounts_file.unlink()
+                except OSError:
+                    pass
             # Settings are generated from TINA's turn grants. Remove them so a concurrent or later
             # turn cannot inherit a broader permission set.
-            try:
-                settings_path.unlink()
-            except OSError:
-                pass
+            if settings_path is not None:
+                try:
+                    settings_path.unlink()
+                except OSError:
+                    pass

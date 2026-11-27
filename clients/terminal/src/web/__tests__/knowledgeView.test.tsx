@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { KnowledgeView } from "../KnowledgeView";
 import {
+  categorizePath,
   friendlyPageTitle,
   parseDocumentClean,
   slugifyTitle,
@@ -9,6 +10,7 @@ import {
   updateCleanDocumentBody,
   updateCleanDocumentTitle,
 } from "../knowledgeFriendly";
+import { describeAgentTool, normalizeAgentToolName } from "../AgentActivitySteps";
 import {
   buildConstellationGraph,
   computeFitCamera,
@@ -181,6 +183,31 @@ describe("knowledgeFriendly helpers", () => {
     expect(stripUploadHash("0123456789abcdef-Q4-Report.pdf")).toBe("Q4-Report.pdf");
     expect(friendlyPageTitle("uploads/0123456789abcdef-Q4-Report.pdf")).toBe("Q4-Report.pdf");
     expect(friendlyPageTitle("kg/entities/person/alice-nguyen.md")).toBe("Alice Nguyen");
+  });
+
+  it("hides entity index/log files and agents/views seed scaffolding as system while keeping user pages visible", () => {
+    expect(categorizePath("kg/entities/person/index.md")).toBe("system");
+    expect(categorizePath("kg/entities/meeting/index.md")).toBe("system");
+    expect(categorizePath("kg/entities/project/log.md")).toBe("system");
+    expect(categorizePath("kg/entities/task/index.md")).toBe("system");
+    expect(categorizePath("agents/meeting.md")).toBe("system");
+    expect(categorizePath("agents/README.md")).toBe("system");
+    expect(categorizePath("views/README.md")).toBe("system");
+
+    expect(categorizePath("kg/entities/person/jane-liu.md")).toBe("people");
+    expect(categorizePath("kg/entities/meeting/2026-06-12-acme-intro.md")).toBe("meetings");
+    expect(categorizePath("onboarding.md")).toBe("pages");
+    expect(categorizePath("README.md")).toBe("pages");
+  });
+
+  it("normalizes prefixed tina-workspace and tina-reach MCP tool names to human-friendly activity labels", () => {
+    expect(normalizeAgentToolName("mcp__tina-workspace__search_wiki")).toBe("search_wiki");
+    expect(normalizeAgentToolName("mcp__tina_workspace__create_wiki")).toBe("create_wiki");
+    expect(normalizeAgentToolName("mcp__tina-reach__reach_web_search")).toBe("reach_web_search");
+    expect(describeAgentTool("mcp__tina-workspace__search_wiki").done).toBe("Searched Knowledge");
+    expect(describeAgentTool("mcp__tina-workspace__read_wiki").done).toBe("Read page");
+    expect(describeAgentTool("mcp__tina-workspace__update_wiki").kind).toBe("write");
+    expect(describeAgentTool("mcp__tina-reach__reach_web_read").done).toBe("Read web page");
   });
 
   it("edits title and body cleanly while preserving multi-line YAML frontmatter", () => {
@@ -393,9 +420,10 @@ describe("KnowledgeView v3 (Notion-Style Non-Tech Knowledge Hub)", () => {
     expect(typeof chatReq?.context?.surface).toBe("object");
     expect(chatReq?.context?.surface).not.toBeNull();
 
-    // Regression guard: denied/uncommitted write tool-call must NOT fabricate a green "Updated space" badge
+    // Regression guard: denied/uncommitted write tool-call must NOT fabricate a green "Updated space" badge,
+    // and prefixed mcp__tina-workspace__ tools render human-friendly labels rather than raw MCP strings.
     mockStreamChatTurn.mockImplementationOnce(async (_req: unknown, cbs: ChatStreamCallbacks) => {
-      cbs.onTool?.("create_wiki");
+      cbs.onTool?.("mcp__tina-workspace__create_wiki");
       cbs.onDelta("Write was denied in this space.");
       return { sawVisibleOutput: true, terminal: true, aborted: false };
     });

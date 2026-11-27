@@ -22,6 +22,7 @@ def _seed_mounts(tmp_path: Path) -> tuple[Path, Path, Path, list[dict]]:
     (private / "policy").mkdir(parents=True)
     (private / ".git").mkdir(parents=True)
     (private / "README.md").write_text("# My Space\nPrivate notes.\n", encoding="utf-8")
+    (private / "onboarding.md").write_text("# Onboarding\nWelcome to TINA.\n", encoding="utf-8")
     (private / "kg" / "entities" / "person" / "jane-liu.md").write_text(
         "---\ntype: person\nid: person-jane-liu\ntitle: Jane Liu\n---\n\n"
         "# Jane Liu\nVP of Engineering at [[Acme Corp]]. Met during [[Acme intro call]].\n",
@@ -155,6 +156,27 @@ def test_workspace_mcp_enforces_readonly_security_and_frontmatter(tmp_path: Path
     assert "_system" not in mounts
     assert mounts["2"]["write"] is True
     assert mounts["_global"]["write"] is False
+
+    # onboarding.md is readable (matches Pages & Notes UI) but remains non-writable.
+    onboarding_read = workspace_mcp.handle(
+        {"method": "tools/call", "params": {
+            "name": "read_wiki", "arguments": {"workspace": "2", "path": "onboarding.md"},
+        }},
+        mounts,
+        (*workspace_mcp.READ_TOOLS, *workspace_mcp.WRITE_TOOLS),
+    )
+    assert onboarding_read["isError"] is False
+    assert "Welcome to TINA." in onboarding_read["content"][0]["text"]
+    onboarding_write = workspace_mcp.handle(
+        {"method": "tools/call", "params": {
+            "name": "update_wiki", "arguments": {
+                "workspace": "2", "path": "onboarding.md", "mode": "append", "text": "denied",
+            },
+        }},
+        mounts,
+        (*workspace_mcp.READ_TOOLS, *workspace_mcp.WRITE_TOOLS),
+    )
+    assert onboarding_write["isError"] is True
 
     # Symlink escape, policy/, and _global write are all denied.
     for call in (

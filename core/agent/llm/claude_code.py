@@ -24,6 +24,17 @@ from typing import Callable, Iterable, Iterator, Optional
 from llm.errors import looks_like_auth_failure, preflight_provider_guard
 from llm.model_capabilities import normalized_effort
 from llm.ports import HarnessExec, harness_subprocess_env
+from llm.workspace_mcp import (
+    SERVER_NAME as _WORKSPACE_MCP_SERVER,
+    build_server_spec as _build_workspace_mcp_spec,
+    load_mounts as _load_workspace_mounts,
+    select_workspace_tools as _select_workspace_mcp_tools,
+    shell_sandbox_available as _ws_shell_sandbox_available,
+    workspace_mcp_instructions as _workspace_mcp_instructions,
+)
+
+_REAL_POPEN = subprocess.Popen
+_DIRECT_WORKSPACE_TOOLS = frozenset({"Bash", "Read", "Write", "Edit", "Glob", "Grep"})
 
 
 def _short(content: object, n: int = 80) -> str:
@@ -215,15 +226,15 @@ def _link_chat_into_workspace(work: Path) -> None:
     ws_projects = work / ".claude" / "projects"
     home_claude = Path(os.environ.get("HOME", "/root")) / ".claude"
     link = home_claude / "projects"
-    if link == ws_projects:
-        # The S3 worker uses the private continuity root as HOME.
-        if link.is_symlink() and os.readlink(link) == str(link):
-            link.unlink()
-        ws_projects.mkdir(parents=True, exist_ok=True)
-        return
-    ws_projects.mkdir(parents=True, exist_ok=True)
-    home_claude.mkdir(parents=True, exist_ok=True)
     try:
+        if link == ws_projects:
+            # The S3 worker uses the private continuity root as HOME.
+            if link.is_symlink() and os.readlink(link) == str(link):
+                link.unlink()
+            ws_projects.mkdir(parents=True, exist_ok=True)
+            return
+        ws_projects.mkdir(parents=True, exist_ok=True)
+        home_claude.mkdir(parents=True, exist_ok=True)
         if link.is_symlink():
             if os.readlink(link) == str(ws_projects):
                 return
@@ -247,11 +258,13 @@ def _link_skills_into_workspace(work: Path) -> None:
     ``skills/`` dir via a symlink. The real files stay durable + committed; the CLI finds them through
     the link. Idempotent: create ``skills/`` if absent, then (re)point a stale/wrong symlink — but never
     clobber a real ``.claude/skills`` directory."""
-    skills = work / "skills"
-    skills.mkdir(parents=True, exist_ok=True)
-    link = work / ".claude" / "skills"
-    link.parent.mkdir(parents=True, exist_ok=True)
     try:
+        skills = work / "skills"
+        if not skills.is_dir():
+            skills.mkdir(parents=True, exist_ok=True)
+        link = work / ".claude" / "skills"
+        if not link.parent.is_dir():
+            link.parent.mkdir(parents=True, exist_ok=True)
         if link.is_symlink():
             if os.readlink(link) == str(skills):
                 return
@@ -260,7 +273,7 @@ def _link_skills_into_workspace(work: Path) -> None:
             return  # a real dir already there — don't clobber
         link.symlink_to(skills, target_is_directory=True)
     except OSError:
-        pass  # best-effort; the turn still works, just without workspace skills
+        pass  # best-effort; read-only spaces still work cleanly without workspace skills
 
 
 class ClaudeCodeHarness:
@@ -270,6 +283,36 @@ class ClaudeCodeHarness:
 
     def __init__(self, exec_fn: Optional[HarnessExec] = None) -> None:
         self._exec: HarnessExec = exec_fn or _exec_subprocess
+
+    @staticmethod
+    def _collect_inline_mcp_servers(
+        mcp_servers: Optional[dict],
+        allowed_set: set[str],
+        gated_set: set[str],
+        mcp_tools: Optional[dict[str, list[str]]],
+    ) -> dict[str, dict]:
+        selected: dict[str, dict] = {}
+        for name, spec in sorted((mcp_servers or {}).items()):
+            if (
+                not isinstance(name, str)
+                or name in gated_set
+                or f"mcp__{name}" not in allowed_set
+                or not isinstance(spec, dict)
+                or not (mcp_tools or {}).get(name)
+            ):
+                continue
+            if spec.get("env") or spec.get("env_vars") or spec.get("bearer_token_env_var") or spec.get("env_http_headers"):
+                continue
+            command = spec.get("command")
+            url = spec.get("url")
+            if isinstance(command, str) and command:
+                entry: dict = {"command": command, "args": [str(a) for a in (spec.get("args") or [])]}
+                if spec.get("cwd"):
+                    entry["cwd"] = str(spec["cwd"])
+                selected[name] = entry
+            elif isinstance(url, str) and url.startswith(("http://", "https://")):
+                selected[name] = {"url": url}
+        return selected
 
     def run_turn(self, work: Path, prompt: str, *, allowed_tools: Iterable[str] = (),
                  session: Optional[str] = None, model: Optional[str] = None,
@@ -282,19 +325,89 @@ class ClaudeCodeHarness:
             "deepseek" if os.environ.get("ANTHROPIC_BASE_URL", "").rstrip("/") == "https://api.deepseek.com/anthropic"
             else "custom" if os.environ.get("ANTHROPIC_BASE_URL") else "subscription")
         effort = normalized_effort(mode, model or os.environ.get("TINA_AGENT_MODEL", ""), os.environ.get("TINA_AGENT_EFFORT"))
-        reach = (mcp_servers or {}).get('tina-reach')
-        if (mcp_config is None and isinstance(reach, dict) and 'mcp__tina-reach' in allowed_tools
-                and 'tina-reach' not in gated_mcp_servers and (mcp_tools or {}).get('tina-reach')):
-            # Public retrieval has no secret environment and its bridge advertises only granted tools.
-            with tempfile.TemporaryDirectory(prefix='tina-reach-mcp-') as directory:
-                config = Path(directory) / 'mcp.json'
-                config.write_text(json.dumps({'mcpServers': {'tina-reach': {
-                    'command': reach['command'], 'args': reach['args']}}}))
-                argv = build_argv(prompt, allowed_tools=allowed_tools, session=session, model=model,
+        allowed_list = list(allowed_tools)
+        allowed_set = set(allowed_list)
+        gated_set = set(gated_mcp_servers)
+        mocked_runner = self._exec is not _exec_subprocess or subprocess.Popen is not _REAL_POPEN
+        shell_disabled = bool(allowed_list) and not _ws_shell_sandbox_available(mocked_runner=mocked_runner)
+        inline_servers = self._collect_inline_mcp_servers(mcp_servers, allowed_set, gated_set, mcp_tools)
+
+        if shell_disabled:
+            trusted_trigger = os.environ.get("TINA_UNIT_TRIGGER", "message") in {"message", "scheduled"}
+            try:
+                raw_mounts = json.loads(os.environ.get("TINA_MOUNTS", "[]"))
+            except (TypeError, ValueError):
+                raw_mounts = []
+            writable_mounts = any(
+                isinstance(m, dict) and m.get("write") is True
+                and m.get("role") not in ("global", "system") and m.get("slug") not in ("_global", "_system")
+                for m in (raw_mounts if isinstance(raw_mounts, list) else [])
+            )
+            read_only = (
+                not trusted_trigger
+                or not {"Write", "Edit"}.intersection(allowed_set)
+                or not writable_mounts
+            )
+            ws_mounts = _load_workspace_mounts(raw_mounts, read_only=read_only)
+            ws_tools = _select_workspace_mcp_tools(allowed_set, read_only=read_only)
+            effective_prompt = prompt
+            effective_allowed = [tool for tool in allowed_list if tool != "Bash"]
+            merged_servers: dict[str, dict] = {}
+            if mcp_config and Path(mcp_config).is_file():
+                try:
+                    raw_cfg = json.loads(Path(mcp_config).read_text(encoding="utf-8"))
+                    if isinstance(raw_cfg, dict) and isinstance(raw_cfg.get("mcpServers"), dict):
+                        merged_servers.update(raw_cfg["mcpServers"])
+                except (OSError, json.JSONDecodeError):
+                    pass
+            merged_servers.update(inline_servers)
+            with tempfile.TemporaryDirectory(prefix="tina-mcp-") as directory:
+                if ws_mounts and ws_tools:
+                    mounts_file = Path(directory) / "mounts.json"
+                    mounts_file.write_text(
+                        json.dumps(list(ws_mounts.values()), ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                    try:
+                        mounts_file.chmod(0o600)
+                    except OSError:
+                        pass
+                    merged_servers[_WORKSPACE_MCP_SERVER] = _build_workspace_mcp_spec(
+                        mounts_file, ws_tools, read_only=read_only,
+                    )
+                    effective_allowed = [
+                        tool for tool in effective_allowed if tool not in _DIRECT_WORKSPACE_TOOLS
+                    ]
+                    ws_grant = f"mcp__{_WORKSPACE_MCP_SERVER}"
+                    if ws_grant not in effective_allowed:
+                        effective_allowed.append(ws_grant)
+                    effective_prompt = (
+                        _workspace_mcp_instructions(ws_mounts, ws_tools, read_only=read_only)
+                        + "\n\n"
+                        + prompt
+                    )
+                temp_mcp_config: Optional[str] = mcp_config
+                if merged_servers:
+                    config = Path(directory) / "mcp.json"
+                    config.write_text(json.dumps({"mcpServers": merged_servers}), encoding="utf-8")
+                    temp_mcp_config = str(config)
+                argv = build_argv(
+                    effective_prompt, allowed_tools=effective_allowed, session=session, model=model,
+                    effort=effort or None, mcp_config=temp_mcp_config, output_schema=output_schema,
+                )
+                yield from parse_stream_json(self._exec(argv, str(work)), structured_output=output_schema is not None)
+            return
+
+        if mcp_config is None and inline_servers:
+            # Non-secret granted MCP servers (such as tina-reach) attach for the duration of the turn.
+            with tempfile.TemporaryDirectory(prefix="tina-reach-mcp-") as directory:
+                config = Path(directory) / "mcp.json"
+                config.write_text(json.dumps({"mcpServers": inline_servers}), encoding="utf-8")
+                argv = build_argv(prompt, allowed_tools=allowed_list, session=session, model=model,
                                   effort=effort or None, mcp_config=str(config), output_schema=output_schema)
                 yield from parse_stream_json(self._exec(argv, str(work)), structured_output=output_schema is not None)
             return
-        argv = build_argv(prompt, allowed_tools=allowed_tools, session=session, model=model,
+        argv = build_argv(prompt, allowed_tools=allowed_list, session=session, model=model,
                           effort=effort or None,
                           mcp_config=mcp_config, output_schema=output_schema)
         yield from parse_stream_json(self._exec(argv, str(work)), structured_output=output_schema is not None)

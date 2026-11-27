@@ -153,19 +153,22 @@ export function humanizeSlug(raw: string): string {
 export function categorizePath(path: string): LibraryCategory {
   const clean = path.replace(/^\/+/, "");
   if (clean.startsWith("uploads/")) return "files";
-  if (clean.startsWith("kg/entities/meeting/") || clean.startsWith("wiki/meetings/")) return "meetings";
-  if (clean.startsWith("kg/entities/person/")) return "people";
-  if (clean.startsWith("kg/entities/project/")) return "projects";
-  if (clean.startsWith("kg/entities/task/")) return "tasks";
   if (clean.startsWith("kg/entities/")) {
     const base = clean.split("/").pop()?.toLowerCase() ?? "";
     if (base === "index.md" || base === "log.md") return "system";
+    if (clean.startsWith("kg/entities/meeting/")) return "meetings";
+    if (clean.startsWith("kg/entities/person/")) return "people";
+    if (clean.startsWith("kg/entities/project/")) return "projects";
+    if (clean.startsWith("kg/entities/task/")) return "tasks";
     return "topics";
   }
+  if (clean.startsWith("wiki/meetings/")) return "meetings";
   if (
     clean === "CLAUDE.md" ||
     clean === "kg/index.md" ||
     clean === "kg/log.md" ||
+    clean.startsWith("agents/") ||
+    clean.startsWith("views/") ||
     clean.startsWith("routines/") ||
     clean.startsWith("policy/") ||
     clean.startsWith("skills/") ||
