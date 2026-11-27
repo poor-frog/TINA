@@ -1380,6 +1380,34 @@ export async function startCaptureBridge(
     if (w.TinaBrowserUtils?.createGmeetCapture && !w.__tinaGmeetCapture) {
       w.__tinaGmeetSpeakers = w.__tinaGmeetSpeakers
         ?? w.TinaBrowserUtils.createGmeetSpeakers?.({ selfName: botName, log: (m: string) => w.logBot?.('[PerSpeaker] ' + m) });
+      const attrStats = { glow: 0, linger: 0, sole: 0, unresolved: 0 };
+      let lastUnresolvedDiagMs = 0;
+      const reportGmeetDiag = (kind: string, channel?: number) => {
+        try {
+          const st = w.__tinaGmeetSpeakers?.getState?.();
+          const tilesSummary = (st?.tiles ?? []).slice(0, 12).map((t: any) => ({
+            id: String(t.id ?? '').slice(0, 16),
+            name: t.name ?? null,
+            self: !!t.self,
+            speaking: !!t.speaking,
+            presenting: !!t.presenting,
+            effects: !!t.effects,
+          }));
+          const payload = {
+            type: kind,
+            ...(channel !== undefined ? { channel } : {}),
+            tiles: tilesSummary,
+            speakingNow: st?.speakingNow ?? [],
+            knownClassHits: st?.selectorStats?.knownClassHits ?? {},
+            stats: { ...attrStats },
+          };
+          w.logBot?.(`[PerSpeaker] gmeet-speakers ${kind} ${JSON.stringify(payload)}`);
+          w.__tinaObservation?.('gmeet-speakers', payload, Date.now());
+        } catch { /* diagnostics must never break capture */ }
+      };
+      if (!w.__tinaGmeetHealthTimer) {
+        w.__tinaGmeetHealthTimer = (globalThis as any).setInterval(() => reportGmeetDiag('health'), 30_000);
+      }
       w.__tinaGmeetCapture = w.TinaBrowserUtils.createGmeetCapture({
         includeSilence:true,
         bufferSize: captureBufferSize,
@@ -1387,15 +1415,39 @@ export async function startCaptureBridge(
         onAudio:(index:number,pcm:Float32Array,timeline?:{captureMs:number;startSample:number})=>{
           let energy=0;for(const value of pcm)energy+=value*value;
           const audible=Math.sqrt(energy/pcm.length)>=.0001;
-          if(audible)w.__tinaGmeetSpeakers?.reportTrackAudio?.(index);
-          // Bind the glow name at capture time (the v1 producer's inversion): exactly-one-lit ⇒ name.
-          const lit:string[]=audible?(w.__tinaGmeetSpeakers?.litNames?.() ?? []):[];
-          const glow = lit.length === 1 ? lit[0] : undefined;
-          if (glow) {
-            const participantId = w.__tinaGmeetSpeakers?.participantForName?.(glow) ?? null;
-            w.__tinaNamedAudioData(index, glow, Array.from(pcm),timeline?.captureMs ?? Date.now(),participantId,timeline?.startSample);
+          const captureMs = timeline?.captureMs ?? Date.now();
+          let glow: string | undefined;
+          let participantId: string | null = null;
+          if (audible) {
+            const resolved = w.__tinaGmeetSpeakers?.resolvedSpeaker?.(captureMs);
+            if (resolved?.name) {
+              glow = resolved.name;
+              participantId = resolved.participantId ?? null;
+              if (resolved.via === 'glow') attrStats.glow++;
+              else if (resolved.via === 'linger') attrStats.linger++;
+              else attrStats.sole++;
+            } else if (!w.__tinaGmeetSpeakers?.resolvedSpeaker) {
+              // Backward compatibility if an older TinaBrowserUtils bundle is loaded.
+              const lit:string[] = w.__tinaGmeetSpeakers?.litNames?.() ?? [];
+              glow = lit.length === 1 ? lit[0] : undefined;
+              if (glow) {
+                participantId = w.__tinaGmeetSpeakers?.participantForName?.(glow) ?? null;
+                attrStats.glow++;
+              }
+            }
+            if (!glow) {
+              attrStats.unresolved++;
+              const nowMs = Date.now();
+              if (nowMs - lastUnresolvedDiagMs >= 30_000) {
+                lastUnresolvedDiagMs = nowMs;
+                reportGmeetDiag('audible-unresolved', index);
+              }
+            }
           }
-          else w.__tinaPerSpeakerAudioData(index, Array.from(pcm),timeline?.captureMs ?? Date.now(),timeline?.startSample);
+          if (glow) {
+            w.__tinaNamedAudioData(index, glow, Array.from(pcm),captureMs,participantId,timeline?.startSample);
+          }
+          else w.__tinaPerSpeakerAudioData(index, Array.from(pcm),captureMs,timeline?.startSample);
         },
       });
       await w.__tinaGmeetCapture.start();
@@ -1450,7 +1502,8 @@ export async function startCaptureBridge(
       try { w.__tinaTrackCtx?.close?.(); w.__tinaTrackCtx = null; } catch { /* best-effort */ }
       try { if (w.__tinaMixedCapture && typeof w.__tinaMixedCapture.stop === 'function') w.__tinaMixedCapture.stop(); } catch { /* best-effort */ }
       try { w.__tinaMixCtx?.close?.(); } catch { /* best-effort */ }
-      try { w.__tinaGmeetSpeakers?.destroy?.(); } catch { /* best-effort */ }
+      try { if (w.__tinaGmeetHealthTimer) { (globalThis as any).clearInterval(w.__tinaGmeetHealthTimer); w.__tinaGmeetHealthTimer = null; } } catch { /* */ }
+      try { w.__tinaGmeetSpeakers?.destroy?.(); w.__tinaGmeetSpeakers = null; } catch { /* best-effort */ }
     }).catch(() => { /* page already gone */ });
   };
 }

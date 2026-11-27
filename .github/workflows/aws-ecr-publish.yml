@@ -146,8 +146,13 @@ jobs:
                   "context": ".",
                   "dockerfile": "deploy/aws/bot-patch.Dockerfile",
                   "build_args": "BOT_BASE=${ECR_REGISTRY}/tina-foundation/bot@sha256:27f527453c8ec2aa10bcb08ad1804f499da6a00f5f6346d9b0726828e8f6a700\nTINA_IMAGE_VERSION=${TAG}",
-                  "paths": ("core/meetings/services/bot/", "deploy/aws/bot-patch.Dockerfile"),
-                  "smoke_cmd": "node -e \"import('/app/core/meetings/services/bot/dist/meeting-voice.js').then(m=>{if(typeof m.MeetingVoice!=='function')process.exit(1)})\"",
+                  "paths": (
+                      "core/meetings/services/bot/",
+                      "core/meetings/modules/gmeet-capture/",
+                      "core/meetings/modules/record-chunker/",
+                      "deploy/aws/bot-patch.Dockerfile",
+                  ),
+                  "smoke_cmd": "node -e \"Promise.resolve().then(async()=>{const m=await import('/app/core/meetings/services/bot/dist/meeting-voice.js');if(typeof m.MeetingVoice!=='function')process.exit(1);const fs=await import('node:fs');const s=fs.readFileSync('/app/browser-utils.global.js','utf8');if(!s.includes('resolvedSpeaker')||!s.includes('dynamically attached late stream'))process.exit(2)}).catch(e=>{console.error(e);process.exit(1)})\"",
               },
               "livekit-agent": {
                   "name": "livekit-agent",

@@ -39,8 +39,12 @@ export interface GmeetSpeakersOptions {
   onSelf?: (name: string) => void;
   /** Log sink (defaults to console.log). */
   log?: (msg: string) => void;
-  /** Poll interval (ms). Default 500. */
+  /** Poll interval (ms). Default 250. */
   pollMs?: number;
+  /** Short linger window (ms) after a single uncontested glow ends to cover poll/onset jitter. Default 600. */
+  lingerMs?: number;
+  /** Clock (epoch ms), injectable for deterministic tests. Default Date.now. */
+  now?: () => number;
 }
 
 export interface GmeetTileInfo {
@@ -48,6 +52,14 @@ export interface GmeetTileInfo {
   name: string | null;
   self: boolean;
   speaking: boolean;
+  presenting?: boolean;
+  effects?: boolean;
+}
+
+export interface GmeetResolvedSpeaker {
+  name: string;
+  participantId?: string;
+  via: 'glow' | 'linger' | 'sole-participant';
 }
 
 export interface GmeetSpeakersState {
@@ -67,6 +79,14 @@ export interface GmeetSpeakers {
    *  glow name at the chunk's capture time. Still RAW signal extraction: it reports
    *  who Meet renders as speaking; it does not itself attach a name to audio. */
   litNames(): string[];
+  /** Unambiguous speaker attribution for the current instant:
+   *  1) single glowing remote tile ('glow'),
+   *  2) never guesses during multi-tile overlap (returns undefined),
+   *  3) brief uncontested linger after a single glow ends ('linger'),
+   *  4) sole remote participant in a 1-on-1 room when glow classes miss ('sole-participant'). */
+  resolvedSpeaker(nowMs?: number): GmeetResolvedSpeaker | undefined;
+  /** Sole remote participant when the room contains exactly one non-self, non-effects human. */
+  soleRemoteSpeaker(): { name: string; participantId?: string } | undefined;
   /** A unique observed participant for this display label; ambiguity stays unresolved. */
   participantForName(name: string): string | undefined;
   /** One-shot structural dump of the live Meet DOM — for designing a robust,
@@ -92,61 +112,116 @@ export interface GmeetDomProbe {
 }
 
 const PARTICIPANT_SELECTORS = ['div[data-participant-id]', '[data-participant-id]'];
+const NAME_SELECTORS = [
+  'span.notranslate',
+  '.zWGUib',
+  '.cS7aqe.N2K3jd',
+  '.XWGOtd',
+  '.participant-name',
+  '.display-name',
+];
 const KNOWN_SPEAKING_CLASSES = [
   'Oaajhc', 'HX2H7', 'wEsLMd', 'OgVli',
   'speaking', 'active-speaker', 'speaker-active', 'speaking-indicator',
 ];
 const JUNK_NAME = /^Google Participant \(|spaces\/|devices\//;
 const JUNK_PHRASES = ['let participants', 'send messages', 'turn on captions'];
+const EFFECTS_TILE = /visual_effects|backgrounds and effects/i;
+const PRESENTING_SUFFIX = /\s*(?:\((?:presenting|presentation|đang trình bày)\)|(?:is presenting|đang trình bày))\s*$/i;
 
 export function createGmeetSpeakers(opts: GmeetSpeakersOptions = {}): GmeetSpeakers {
   const pollMs = opts.pollMs ?? 250;  // responsive: track the visible active-speaker glow closely
+  const lingerMs = opts.lingerMs ?? 600;
+  const now = opts.now ?? (() => Date.now());
 
   const knownClassHits: Record<string, number> = {};
-  let lastKnownHitMs = Date.now();
+  let lastKnownHitMs = now();
 
   /** Names currently lit (non-self, named) — drives start/stop hint edges. */
   const speakingNow = new Set<string>();
   const reportedSelf = new Set<string>();   // self names already reported via onSelf (fire once each)
+  const selfNamesLower = new Set<string>();
+  if (opts.selfName?.trim()) selfNamesLower.add(opts.selfName.trim().toLowerCase());
+  let lastSingleGlow: { name: string; participantId?: string; ts: number } | null = null;
 
   // ── DOM reading ─────────────────────────────────────────────────
 
-  function tileName(el: HTMLElement): string | null {
-    const nt = el.querySelector('span.notranslate') as HTMLElement | null;
-    let t = nt?.textContent?.trim() || '';
-    if (!t) {
-      const labeled = el.querySelector('[data-self-name]') as HTMLElement | null;
-      t = labeled?.getAttribute('data-self-name')?.trim() || '';
-    }
-    if (!t || t.length < 2 || t.length > 50) return null;
-    if (JUNK_NAME.test(t)) return null;
+  function normalizeTileLabel(raw: string): { name: string | null; presenting: boolean } {
+    let t = raw.trim();
+    if (!t) return { name: null, presenting: false };
+    const presenting = PRESENTING_SUFFIX.test(t);
+    if (presenting) t = t.replace(PRESENTING_SUFFIX, '').trim();
+    if (!t || t.length < 2 || t.length > 50) return { name: null, presenting };
+    if (JUNK_NAME.test(t)) return { name: null, presenting };
     const lower = t.toLowerCase();
-    if (JUNK_PHRASES.some(p => lower.includes(p))) return null;
-    return t;
+    if (JUNK_PHRASES.some(p => lower.includes(p))) return { name: null, presenting };
+    return { name: t, presenting };
   }
 
-  // The local participant's tile, located via Meet's OWN structural marker
+  function readTileName(el: HTMLElement): { name: string | null; presenting: boolean } {
+    for (const sel of NAME_SELECTORS) {
+      const node = el.querySelector(sel) as HTMLElement | null;
+      const raw = node?.textContent?.trim() || '';
+      if (raw) {
+        const parsed = normalizeTileLabel(raw);
+        if (parsed.name) return parsed;
+      }
+    }
+    const labeled = (el.hasAttribute('data-self-name') ? el : el.querySelector('[data-self-name]')) as HTMLElement | null;
+    const selfAttr = labeled?.getAttribute('data-self-name')?.trim() || '';
+    if (selfAttr) return normalizeTileLabel(selfAttr);
+    return { name: null, presenting: false };
+  }
+
+  function tileName(el: HTMLElement): string | null {
+    return readTileName(el).name;
+  }
+
+  function isEffectsTile(el: HTMLElement): boolean {
+    const label = el.getAttribute('aria-label') || el.textContent || '';
+    return EFFECTS_TILE.test(label);
+  }
+
+  // The local participant's tile(s), located via Meet's OWN structural marker
   // (data-self-name). Re-read every scan — the self tile can render late or move,
   // and the marker may sit on a child or sibling of the participant tile.
-  function selfParticipantId(): string | null {
-    const marker = document.querySelector('[data-self-name]');
-    const tile = marker?.closest('[data-participant-id]') as HTMLElement | null;
-    return tile?.getAttribute('data-participant-id') || null;
+  function selfParticipantIds(): Set<string> {
+    const ids = new Set<string>();
+    document.querySelectorAll('[data-self-name]').forEach(marker => {
+      const tile = (marker as HTMLElement).closest('[data-participant-id]') as HTMLElement | null;
+      const pid = tile?.getAttribute('data-participant-id');
+      if (pid) ids.add(pid);
+    });
+    return ids;
   }
 
-  // Self/host detection is PURELY STRUCTURAL — Meet's data-self-name marker, never
-  // name/aria text matching. The host tile is excluded so it can never emit a hint.
-  function isSelf(el: HTMLElement, id: string, selfId: string | null): boolean {
-    return el.hasAttribute('data-self-name')
-      || !!el.querySelector('[data-self-name]')
-      || (selfId !== null && id === selfId);
+  // Self/host detection combines Meet's structural data-self-name marker with a sticky
+  // selfName backstop (configured bot name or previously observed self tile name) so
+  // transient drops of data-self-name never allow the bot's own tile to compete with speakers.
+  function isSelf(el: HTMLElement, id: string, selfIds: Set<string>, name: string | null): boolean {
+    if (el.hasAttribute('data-self-name') || !!el.querySelector('[data-self-name]') || selfIds.has(id)) {
+      return true;
+    }
+    if (name && selfNamesLower.has(name.toLowerCase())) return true;
+    return false;
   }
 
   function tileSpeaking(el: HTMLElement): boolean {
+    // Semantic audio-level attribute first — survives Google Meet CSS class rotation.
+    const audioEl = (el.hasAttribute('data-audio-level') ? el : el.querySelector('[data-audio-level]')) as HTMLElement | null;
+    if (audioEl) {
+      const raw = audioEl.getAttribute('data-audio-level');
+      const level = raw !== null && raw !== '' ? Number(raw) : 0;
+      if (Number.isFinite(level) && level > 0) {
+        knownClassHits['data-audio-level'] = (knownClassHits['data-audio-level'] || 0) + 1;
+        lastKnownHitMs = now();
+        return true;
+      }
+    }
     for (const cls of KNOWN_SPEAKING_CLASSES) {
       if (el.classList.contains(cls) || el.querySelector('.' + CSS.escape(cls))) {
         knownClassHits[cls] = (knownClassHits[cls] || 0) + 1;
-        lastKnownHitMs = Date.now();
+        lastKnownHitMs = now();
         return true;
       }
     }
@@ -156,15 +231,19 @@ export function createGmeetSpeakers(opts: GmeetSpeakersOptions = {}): GmeetSpeak
   function scanTiles(): GmeetTileInfo[] {
     const out: GmeetTileInfo[] = [];
     const seen = new Set<string>();
-    const selfId = selfParticipantId();
+    const selfIds = selfParticipantIds();
     for (const sel of PARTICIPANT_SELECTORS) {
       document.querySelectorAll(sel).forEach(node => {
         const el = node as HTMLElement;
         const id = el.getAttribute('data-participant-id') || '';
         if (!id || seen.has(id)) return;
         seen.add(id);
-        const name = tileName(el);
-        out.push({ id, name, self: isSelf(el, id, selfId), speaking: tileSpeaking(el) });
+        const { name, presenting } = readTileName(el);
+        const aria = el.getAttribute('aria-label') || '';
+        const isPresenting = presenting || /\bpresentation\b|\bpresenting\b/i.test(id) || /\bpresenting\b|\bpresentation\b/i.test(aria);
+        const self = isSelf(el, id, selfIds, name);
+        const effects = !self && isEffectsTile(el);
+        out.push({ id, name, self, speaking: tileSpeaking(el), presenting: isPresenting, effects });
       });
     }
     return out;
@@ -173,6 +252,37 @@ export function createGmeetSpeakers(opts: GmeetSpeakersOptions = {}): GmeetSpeak
   // ── Main loop: emit start/stop HINTS on edge changes ─────────────
 
   let observedTiles: GmeetTileInfo[] = [];
+
+  function resolveParticipantId(tiles: GmeetTileInfo[], name: string): string | undefined {
+    const matches = tiles.filter(t => !t.self && !t.effects && t.name === name);
+    if (matches.length === 1) return matches[0].id;
+    if (matches.length > 1) {
+      const uniqueIds = new Set(matches.map(t => t.id));
+      if (uniqueIds.size === 1) return matches[0].id;
+      // Same person with camera tile + presentation tile: prefer the unique non-presenting tile.
+      const primary = matches.filter(t => !t.presenting);
+      if (primary.length === 1 && matches.some(t => t.presenting)) return primary[0].id;
+    }
+    return undefined;
+  }
+
+  function computeSoleRemote(tiles: GmeetTileInfo[]): { name: string; participantId?: string } | undefined {
+    const remote = tiles.filter(t => !t.self && !t.effects);
+    if (remote.length === 0) return undefined;
+    // If any non-presenting remote tile is unnamed, another real participant may be present — never guess.
+    if (remote.some(t => !t.name && !t.presenting)) return undefined;
+    const named = remote.filter(t => !!t.name);
+    const uniqueNames = new Set(named.map(t => t.name as string));
+    if (uniqueNames.size !== 1) return undefined;
+    const onlyName = [...uniqueNames][0];
+    const participantId = resolveParticipantId(tiles, onlyName);
+    // If two distinct non-presenting people share the same display name, participantId is undefined — refuse.
+    const primaryMatches = named.filter(t => !t.presenting);
+    const distinctPrimaryIds = new Set(primaryMatches.map(t => t.id));
+    if (distinctPrimaryIds.size > 1) return undefined;
+    return { name: onlyName, participantId };
+  }
+
   const timer = setInterval(() => {
     const tiles = scanTiles();
     observedTiles = tiles;
@@ -180,16 +290,27 @@ export function createGmeetSpeakers(opts: GmeetSpeakersOptions = {}): GmeetSpeak
     // Report the self/host name (once) so the binder can pin it as never-bindable —
     // the data-self-name marker can render late, so we watch every scan, not just start.
     for (const t of tiles) {
-      if (t.self && t.name && !reportedSelf.has(t.name)) {
-        reportedSelf.add(t.name);
-        try { opts.onSelf?.(t.name); } catch { /* consumer error */ }
+      if (t.self && t.name) {
+        selfNamesLower.add(t.name.toLowerCase());
+        if (!reportedSelf.has(t.name)) {
+          reportedSelf.add(t.name);
+          try { opts.onSelf?.(t.name); } catch { /* consumer error */ }
+        }
       }
     }
 
-    // Currently-lit, non-self, named tiles.
+    // Currently-lit, non-self, non-effects, named tiles.
     const litNow = new Set<string>(
-      tiles.filter(t => !t.self && t.speaking && t.name).map(t => t.name as string),
+      tiles.filter(t => !t.self && !t.effects && t.speaking && t.name).map(t => t.name as string),
     );
+
+    if (litNow.size === 1) {
+      const only = [...litNow][0];
+      lastSingleGlow = { name: only, participantId: resolveParticipantId(tiles, only), ts: now() };
+    } else if (litNow.size > 1) {
+      // Multi-speaker overlap invalidates linger immediately so overlap never inherits a stale name.
+      lastSingleGlow = null;
+    }
 
     // Newly lit → SPEAKER_START hint.
     for (const name of litNow) {
@@ -212,15 +333,31 @@ export function createGmeetSpeakers(opts: GmeetSpeakersOptions = {}): GmeetSpeak
       const tiles = scanTiles();
       return {
         tiles,
-        speakingNow: tiles.filter(t => !t.self && t.speaking && t.name).map(t => t.name as string),
+        speakingNow: tiles.filter(t => !t.self && !t.effects && t.speaking && t.name).map(t => t.name as string),
         participantCount: tiles.length,
         selectorStats: { knownClassHits: { ...knownClassHits }, lastKnownHitMs },
       };
     },
     litNames(): string[] { return [...speakingNow]; },
+    soleRemoteSpeaker(): { name: string; participantId?: string } | undefined {
+      return computeSoleRemote(observedTiles);
+    },
+    resolvedSpeaker(nowMs?: number): GmeetResolvedSpeaker | undefined {
+      if (speakingNow.size === 1) {
+        const only = [...speakingNow][0];
+        return { name: only, participantId: resolveParticipantId(observedTiles, only), via: 'glow' };
+      }
+      if (speakingNow.size > 1) return undefined;
+      const t = nowMs ?? now();
+      if (lastSingleGlow && t - lastSingleGlow.ts <= lingerMs) {
+        return { name: lastSingleGlow.name, participantId: lastSingleGlow.participantId, via: 'linger' };
+      }
+      const sole = computeSoleRemote(observedTiles);
+      if (sole) return { ...sole, via: 'sole-participant' };
+      return undefined;
+    },
     participantForName(name): string | undefined {
-      const matches = observedTiles.filter(t => !t.self && t.name === name);
-      return matches.length === 1 ? matches[0].id : undefined;
+      return resolveParticipantId(observedTiles, name);
     },
     probeDom(): GmeetDomProbe {
       // The captured elements are <audio> AND <video> with audio tracks (same set

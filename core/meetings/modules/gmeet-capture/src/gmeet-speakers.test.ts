@@ -117,5 +117,82 @@ const tile = (id: string, name: string, opts: { speaking?: boolean; self?: boole
   sp.destroy();
 }
 
+// ── opts.selfName backstop when data-self-name transiently drops ────────────────
+{
+  const hints: { name: string; isEnd: boolean }[] = [];
+  setDoc(e('body', {}, [
+    tile('bot-tile', 'TINA Bot', { speaking: true }), // no data-self-name attribute!
+    tile('p1', 'JKY LEE', { speaking: true }),
+  ]));
+  const sp = createGmeetSpeakers({ pollMs: 10, selfName: 'TINA Bot', onSpeaking: (name, isEnd) => hints.push({ name, isEnd }) });
+  tick();
+  check('selfName excludes bot tile even without data-self-name', !sp.litNames().includes('TINA Bot'));
+  check('remote speaker still wins uncontested when bot tile glows', sp.litNames().length === 1 && sp.litNames()[0] === 'JKY LEE');
+  check('resolvedSpeaker reports glow with participantId', sp.resolvedSpeaker()?.via === 'glow' && sp.resolvedSpeaker()?.participantId === 'p1');
+  sp.destroy();
+}
+
+// ── [data-audio-level] semantic speaking indicator + fallback name selector ────
+{
+  const tileNoClass = e('div', { 'data-participant-id': 'spaces/x/devices/348', 'data-audio-level': '0.42' }, [
+    t('div', 'JKY LEE', { class: 'zWGUib' }),
+  ]);
+  setDoc(e('body', {}, [tileNoClass]));
+  const sp = createGmeetSpeakers({ pollMs: 10 });
+  tick();
+  check('data-audio-level > 0 detects speaking without obfuscated CSS classes', sp.litNames().length === 1 && sp.litNames()[0] === 'JKY LEE');
+  check('fallback name selector .zWGUib resolves participantId', sp.participantForName('JKY LEE') === 'spaces/x/devices/348');
+  sp.destroy();
+}
+
+// ── presentation tile normalization + sole-participant fallback + linger/overlap ─
+{
+  let clock = 10000;
+  const effectsPhantom = e('div', { 'data-participant-id': 'effects-1', 'aria-label': 'Backgrounds and effects' }, []);
+  const selfTile = tile('bot-self', 'TINA Bot', { self: true });
+  const userTile = tile('spaces/x/devices/348', 'JKY LEE');
+  const presentTile = e('div', { 'data-participant-id': 'spaces/x/devices/348/presentation' }, [
+    t('span', 'JKY LEE (Presenting)', { class: 'notranslate' }),
+  ]);
+  setDoc(e('body', {}, [effectsPhantom, selfTile, userTile, presentTile]));
+  const sp = createGmeetSpeakers({ pollMs: 10, lingerMs: 600, now: () => clock });
+  tick();
+  check('camera + presenting tile for same person preserves canonical participantId', sp.participantForName('JKY LEE') === 'spaces/x/devices/348');
+  const sole = sp.resolvedSpeaker(clock);
+  check('1-on-1 room falls back to sole-participant when glow classes miss (Meeting #36 regression)',
+    sole?.name === 'JKY LEE' && sole?.participantId === 'spaces/x/devices/348' && sole?.via === 'sole-participant');
+
+  // Adding a second remote participant disables sole-participant guessing immediately.
+  setDoc(e('body', {}, [selfTile, tile('p1', 'JKY LEE', { speaking: true }), tile('p2', 'Bob')]));
+  tick();
+  check('multi-participant room resolves single glow', sp.resolvedSpeaker(clock)?.via === 'glow' && sp.resolvedSpeaker(clock)?.name === 'JKY LEE');
+
+  // Glow ends → brief linger within 600ms covers poll jitter, then expires to undefined (never guesses).
+  setDoc(e('body', {}, [selfTile, tile('p1', 'JKY LEE'), tile('p2', 'Bob')]));
+  clock += 300;
+  tick();
+  check('single glow lingers briefly (300ms <= 600ms)', sp.resolvedSpeaker(clock)?.via === 'linger' && sp.resolvedSpeaker(clock)?.name === 'JKY LEE');
+  clock += 400;
+  check('linger expires after 600ms and never guesses in multi-participant room', sp.resolvedSpeaker(clock) === undefined);
+
+  // Overlap invalidates linger immediately.
+  setDoc(e('body', {}, [selfTile, tile('p1', 'JKY LEE', { speaking: true }), tile('p2', 'Bob')]));
+  tick();
+  setDoc(e('body', {}, [selfTile, tile('p1', 'JKY LEE', { speaking: true }), tile('p2', 'Bob', { speaking: true })]));
+  tick();
+  check('overlap never guesses', sp.resolvedSpeaker(clock) === undefined);
+  setDoc(e('body', {}, [selfTile, tile('p1', 'JKY LEE'), tile('p2', 'Bob')]));
+  clock += 100;
+  tick();
+  check('linger stays cleared right after overlap', sp.resolvedSpeaker(clock) === undefined);
+
+  // An unnamed non-presenting remote tile suppresses sole-participant fallback.
+  const unnamedRemote = e('div', { 'data-participant-id': 'p-unknown' }, []);
+  setDoc(e('body', {}, [selfTile, tile('p1', 'JKY LEE'), unnamedRemote]));
+  tick();
+  check('unnamed remote tile prevents false sole-participant attribution', sp.soleRemoteSpeaker() === undefined);
+  sp.destroy();
+}
+
 if (failed) { console.error(`\n❌ gmeet-speakers: ${failed} checks FAILED.`); process.exit(1); }
-console.log(`\n✅ gmeet-speakers: glow→START/END hint edges, self-tile suppression, junk-name filter pass. (DOM scraping is live-validated.)`);
+console.log(`\n✅ gmeet-speakers: glow→START/END hint edges, selfName backstop, data-audio-level, presentation dedup, linger/overlap, and sole-participant pass.`);

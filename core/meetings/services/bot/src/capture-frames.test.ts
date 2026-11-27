@@ -40,3 +40,94 @@ test('experimental filter receives a copy path after raw archive and feeds ident
     assert.equal(asr[0][0],Math.fround(.05));assert.equal(vad[0],asr[0]);
   }finally{await stop();}
 });
+
+test('gmeet page bridge uses resolvedSpeaker (including sole-participant) and logs audible-unresolved diagnostics', async () => {
+  const callbacks = new Map<string, (...args: any[]) => void>();
+  const fed: any[][] = [];
+  const observations: any[] = [];
+  const botLogs: string[] = [];
+  let onAudioCb: ((index: number, pcm: Float32Array, timeline?: { captureMs: number; startSample: number }) => void) | undefined;
+  let currentResolved: { name: string; participantId?: string; via: 'glow' | 'linger' | 'sole-participant' } | undefined = {
+    name: 'JKY LEE',
+    participantId: 'spaces/x/devices/348',
+    via: 'sole-participant',
+  };
+  let speakersDestroyed = false;
+
+  const prevGlobal = {
+    TinaBrowserUtils: (globalThis as any).TinaBrowserUtils,
+    logBot: (globalThis as any).logBot,
+    __tinaGmeetCapture: (globalThis as any).__tinaGmeetCapture,
+    __tinaGmeetSpeakers: (globalThis as any).__tinaGmeetSpeakers,
+    __tinaGmeetHealthTimer: (globalThis as any).__tinaGmeetHealthTimer,
+    __tinaNamedAudioData: (globalThis as any).__tinaNamedAudioData,
+    __tinaPerSpeakerAudioData: (globalThis as any).__tinaPerSpeakerAudioData,
+    __tinaObservation: (globalThis as any).__tinaObservation,
+    __tinaRemoteAudioReady: (globalThis as any).__tinaRemoteAudioReady,
+  };
+
+  try {
+    (globalThis as any).logBot = (m: string) => botLogs.push(m);
+    (globalThis as any).TinaBrowserUtils = {
+      createGmeetSpeakers: () => ({
+        resolvedSpeaker: () => currentResolved,
+        litNames: () => [],
+        participantForName: () => undefined,
+        getState: () => ({
+          tiles: [{ id: 'spaces/x/devices/348', name: 'JKY LEE', self: false, speaking: false }],
+          speakingNow: [],
+          participantCount: 1,
+          selectorStats: { knownClassHits: {}, lastKnownHitMs: 0 },
+        }),
+        destroy: () => { speakersDestroyed = true; },
+      }),
+      createGmeetCapture: (opts: any) => {
+        onAudioCb = opts.onAudio;
+        return { async start() {}, stop() {} };
+      },
+    };
+
+    const page = {
+      async exposeFunction(name: string, fn: (...args: any[]) => void) {
+        callbacks.set(name, fn);
+        (globalThis as any)[name] = fn;
+      },
+      async evaluate(fn: (arg?: any) => any, arg?: any) {
+        return await fn(arg);
+      },
+    };
+
+    const stop = await startCaptureBridge(
+      page as any,
+      { platform: 'google_meet', voiceAgentEnabled: true, botName: 'TINA', transcribeEnabled: true } as any,
+      { feedAudio(...args: any[]) { fed.push(args); } } as any,
+      { captureFrame() {}, captureObservation(rec: any) { observations.push(rec); } } as any,
+    );
+
+    try {
+      assert.ok(onAudioCb, 'capture bridge registered gmeet onAudio callback');
+      // 1) Sole-participant fallback carries speaker name + participant_id into pipeline.feedAudio
+      onAudioCb!(3, new Float32Array(1024).fill(0.1), { captureMs: 1800000000100, startSample: 0 });
+      assert.equal(fed.length, 1);
+      assert.equal(fed[0][0], 3);
+      assert.equal(fed[0][1], 'JKY LEE');
+      assert.equal(fed[0][4], 'spaces/x/devices/348');
+
+      // 2) Audible frame with unresolved speaker emits gmeet-speakers diagnostic observation
+      currentResolved = undefined;
+      onAudioCb!(3, new Float32Array(1024).fill(0.1), { captureMs: 1800000000200, startSample: 1024 });
+      assert.equal(fed.length, 2);
+      assert.equal(fed[1][1], undefined);
+      const diag = observations.find((o) => o.source === 'gmeet-speakers' && o.observation?.type === 'audible-unresolved');
+      assert.ok(diag, 'audible-unresolved diagnostic observation emitted');
+      assert.equal(diag.observation.channel, 3);
+      assert.ok(botLogs.some((m) => m.includes('gmeet-speakers audible-unresolved')));
+    } finally {
+      await stop();
+    }
+    assert.equal(speakersDestroyed, true);
+    assert.equal((globalThis as any).__tinaGmeetHealthTimer, null);
+  } finally {
+    Object.assign(globalThis as any, prevGlobal);
+  }
+});

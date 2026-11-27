@@ -367,12 +367,18 @@ def register(app, subject_of, root: Path, meeting_api_url: str, complete):
             idx = group_index_by_id.get(target_group['group_id'], 0)
             ctx = []
             for prev in state['groups'][max(0, idx - 2):idx]:
-                if prev.get('translated_text'):
-                    ctx.append({
-                        'speaker': prev.get('speaker_name') or prev.get('speaker_id') or '',
-                        'source': prev['source_text'],
-                        'translated': prev['translated_text'],
-                    })
+                raw_translated = prev.get('translated_text')
+                if not raw_translated:
+                    continue
+                try:
+                    clean_translated = visible_translation(raw_translated)
+                except ValueError:
+                    continue
+                ctx.append({
+                    'speaker': prev.get('speaker_name') or prev.get('speaker_id') or '',
+                    'source': prev['source_text'],
+                    'translated': clean_translated,
+                })
             return ctx
         def _call_complete(text_payload, *, context=None, speaker=''):
             if getattr(complete, 'supports_context', False):

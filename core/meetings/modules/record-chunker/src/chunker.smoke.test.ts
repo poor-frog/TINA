@@ -48,7 +48,7 @@ class FakeMediaRecorder {
 (globalThis as any).window.MediaRecorder = FakeMediaRecorder; // brick reads window.MediaRecorder.isTypeSupported
 
 // import AFTER globals exist (the module reads window/MediaRecorder lazily at runtime)
-import { MediaRecorderChunker, type RecordingChunk } from './index';
+import { MediaRecorderChunker, createRecordingTap, type RecordingChunk } from './index';
 
 const decode = (b64: string): Uint8Array => new Uint8Array(Buffer.from(b64, 'base64'));
 const eqBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
@@ -105,6 +105,81 @@ async function main() {
     process.exit(1);
   }
   console.log('✅ PASS — seq increments 0,1, bodies round-trip base64, final chunk isFinal=true(empty), mimeType negotiated');
+
+  // ── dynamic late-stream attachment (Meet stream 3 mid-meeting regression) ──────
+  class FakeTrack {
+    endedListeners: (() => void)[] = [];
+    stopped = false;
+    addEventListener(ev: string, fn: () => void) { if (ev === 'ended') this.endedListeners.push(fn); }
+    stop() { this.stopped = true; }
+    fireEnded() { for (const fn of this.endedListeners) fn(); }
+  }
+  class FakeMediaStream {
+    constructor(public id: string, private tracks: FakeTrack[] = [new FakeTrack()]) {}
+    getAudioTracks() { return this.tracks; }
+    getTracks() { return this.tracks; }
+  }
+  (globalThis as any).MediaStream = FakeMediaStream;
+
+  const attachedIds: string[] = [];
+  let disconnectedCount = 0;
+  let ctxClosed = false;
+  (globalThis as any).AudioContext = class FakeAudioContext {
+    createMediaStreamDestination() { return { stream: new FakeMediaStream('dest-mix') }; }
+    createMediaStreamSource(s: FakeMediaStream) {
+      attachedIds.push(s.id);
+      return {
+        connect(_dest: any) {},
+        disconnect() { disconnectedCount++; },
+      };
+    }
+    async close() { ctxClosed = true; }
+  };
+
+  const track0 = new FakeTrack();
+  const els: any[] = [{ paused: false, srcObject: new FakeMediaStream('stream-0', [track0]) }];
+  (globalThis as any).document = { querySelectorAll: () => els };
+
+  const tapChunks: RecordingChunk[] = [];
+  const tap = createRecordingTap({
+    timesliceMs: 1000,
+    rescanMs: 25,
+    onChunk: async (c) => { tapChunks.push(c); return true; },
+  });
+  await tap.start();
+  if (attachedIds.length !== 1 || attachedIds[0] !== 'stream-0') {
+    console.log('❌ FAIL — initial stream not attached:', attachedIds);
+    process.exit(1);
+  }
+
+  // Simulate Google Meet spawning a new remote audio stream mid-meeting (stream 3).
+  els.push({ paused: false, srcObject: new FakeMediaStream('stream-3') });
+  await new Promise((r) => setTimeout(r, 70));
+  if (!attachedIds.includes('stream-3')) {
+    console.log('❌ FAIL — late stream-3 was not dynamically attached:', attachedIds);
+    process.exit(1);
+  }
+  // Duplicate rescan ticks must not double-attach the same stream.
+  const countBefore = attachedIds.length;
+  await new Promise((r) => setTimeout(r, 60));
+  if (attachedIds.length !== countBefore) {
+    console.log('❌ FAIL — duplicate attachment detected:', attachedIds);
+    process.exit(1);
+  }
+  // Ended stream can reconnect if recycled.
+  track0.fireEnded();
+  await new Promise((r) => setTimeout(r, 50));
+  if (attachedIds.filter((id) => id === 'stream-0').length !== 2) {
+    console.log('❌ FAIL — ended stream did not reconnect on rescan:', attachedIds);
+    process.exit(1);
+  }
+
+  await tap.stop();
+  if (!ctxClosed || disconnectedCount < 2) {
+    console.log('❌ FAIL — tap.stop() did not clean up AudioContext/sources');
+    process.exit(1);
+  }
+  console.log('✅ PASS — createRecordingTap dynamically attaches late streams, deduplicates, reconnects ended tracks, and cleans up');
   process.exit(0);
 }
 

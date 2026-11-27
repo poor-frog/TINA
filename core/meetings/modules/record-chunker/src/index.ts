@@ -261,6 +261,33 @@ export class MediaRecorderChunker implements RecordingTap {
 // createRecordingTap — the full browser recording tap (generic, all platforms)
 // ───────────────────────────────────────────────────────────────────────
 
+/** Extract a playable audio MediaStream from a media element (srcObject or captureStream fallback). */
+function streamFromElement(element: any): MediaStream | null {
+  try {
+    const direct = element?.srcObject;
+    if (direct instanceof MediaStream && direct.getAudioTracks().length > 0) return direct;
+    if (typeof element?.captureStream === "function") {
+      const cap = element.captureStream();
+      if (cap instanceof MediaStream && cap.getAudioTracks().length > 0) return cap;
+    }
+    if (typeof element?.mozCaptureStream === "function") {
+      const cap = element.mozCaptureStream();
+      if (cap instanceof MediaStream && cap.getAudioTracks().length > 0) return cap;
+    }
+  } catch { /* not probeable; skip */ }
+  return null;
+}
+
+/** Snapshot current audio-bearing media elements on the page (strict unpaused first, else relaxed). */
+function scanMediaElements(): HTMLMediaElement[] {
+  const all = Array.from(document.querySelectorAll("audio, video"));
+  const strict = all.filter((el: any) =>
+    !el.paused && el.srcObject instanceof MediaStream && el.srcObject.getAudioTracks().length > 0
+  ) as HTMLMediaElement[];
+  if (strict.length > 0) return strict;
+  return all.filter((el: any) => streamFromElement(el) !== null) as HTMLMediaElement[];
+}
+
 /**
  * Find active media elements that expose audio. Two-pass (strict → relaxed):
  * tiles can be paused or expose audio via captureStream() rather than a direct
@@ -275,14 +302,7 @@ async function findMediaElements(retries = 5, delay = 2000): Promise<HTMLMediaEl
     ) as HTMLMediaElement[];
     if (els.length > 0) { blog(`[record-chunker] ${els.length} media elements (strict)`); return els; }
 
-    els = all.filter((el: any) => {
-      try {
-        if (el.srcObject instanceof MediaStream && el.srcObject.getAudioTracks().length > 0) return true;
-        if (typeof el.captureStream === "function" && el.captureStream()?.getAudioTracks?.().length > 0) return true;
-        if (typeof el.mozCaptureStream === "function" && el.mozCaptureStream()?.getAudioTracks?.().length > 0) return true;
-      } catch { /* not probeable; skip */ }
-      return false;
-    }) as HTMLMediaElement[];
+    els = all.filter((el: any) => streamFromElement(el) !== null) as HTMLMediaElement[];
     if (els.length > 0) { blog(`[record-chunker] ${els.length} media elements (relaxed)`); return els; }
 
     await new Promise((r) => setTimeout(r, delay));
@@ -290,34 +310,82 @@ async function findMediaElements(retries = 5, delay = 2000): Promise<HTMLMediaEl
   return [];
 }
 
-/** Mix every media element's audio into one MediaStream via a destination node. */
-async function buildCombinedStream(mediaElements: HTMLMediaElement[]): Promise<{stream: MediaStream; close: () => Promise<void>}> {
+/** Mix every media element's audio into one MediaStream via a destination node,
+ *  and periodically rescan so late-arriving / rotated Meet streams join the live mix. */
+async function buildCombinedStream(
+  mediaElements: HTMLMediaElement[],
+  rescanMs = 5000,
+): Promise<{ stream: MediaStream; close: () => Promise<void> }> {
   if (mediaElements.length === 0) throw new Error("[record-chunker] no media elements to combine");
   const ctx = new AudioContext();
   const dest = ctx.createMediaStreamDestination();
+  const connectedStreamIds = new Set<string>();
+  const connectedSources: MediaStreamAudioSourceNode[] = [];
   let connected = 0;
-  mediaElements.forEach((element: any, index) => {
+
+  const attachElement = (element: any, label: string, dynamic: boolean): boolean => {
     try {
-      const s =
-        element.srcObject ||
-        (element.captureStream && element.captureStream()) ||
-        (element.mozCaptureStream && element.mozCaptureStream());
-      if (s instanceof MediaStream && s.getAudioTracks().length > 0) {
-        ctx.createMediaStreamSource(s).connect(dest);
-        connected++;
-        blog(`[record-chunker] connected element ${index + 1}/${mediaElements.length}`);
+      const s = streamFromElement(element);
+      if (!s) return false;
+      const streamId = s.id || `anon-${connected}`;
+      if (connectedStreamIds.has(streamId)) return false;
+      const src = ctx.createMediaStreamSource(s);
+      src.connect(dest);
+      connectedStreamIds.add(streamId);
+      connectedSources.push(src);
+      connected++;
+      const track = s.getAudioTracks()[0];
+      if (track && typeof track.addEventListener === "function") {
+        track.addEventListener("ended", () => { connectedStreamIds.delete(streamId); }, { once: true });
       }
-    } catch (e: any) { blog(`[record-chunker] could not connect element ${index + 1}: ${e?.message || e}`); }
+      if (dynamic) {
+        blog(`[record-chunker] dynamically attached late stream ${streamId.slice(0, 12)} (total=${connected})`);
+      } else {
+        blog(`[record-chunker] connected element ${label}`);
+      }
+      return true;
+    } catch (e: any) {
+      blog(`[record-chunker] could not connect element ${label}: ${e?.message || e}`);
+      return false;
+    }
+  };
+
+  mediaElements.forEach((element, index) => {
+    attachElement(element, `${index + 1}/${mediaElements.length}`, false);
   });
   if (connected === 0) { await ctx.close(); throw new Error("[record-chunker] could not connect any audio streams"); }
   blog(`[record-chunker] combined ${connected} streams`);
-  return { stream: dest.stream, close: async () => { dest.stream.getTracks().forEach(t => t.stop()); await ctx.close(); } };
+
+  let closed = false;
+  const rescanTimer = rescanMs > 0 ? setInterval(() => {
+    if (closed) return;
+    try {
+      for (const el of scanMediaElements()) {
+        attachElement(el, "dynamic", true);
+      }
+    } catch { /* rescan is best-effort */ }
+  }, rescanMs) : null;
+
+  return {
+    stream: dest.stream,
+    close: async () => {
+      closed = true;
+      if (rescanTimer !== null) clearInterval(rescanTimer);
+      for (const src of connectedSources) { try { src.disconnect(); } catch { /* */ } }
+      connectedSources.length = 0;
+      connectedStreamIds.clear();
+      dest.stream.getTracks().forEach(t => t.stop());
+      await ctx.close();
+    },
+  };
 }
 
 /** Options for createRecordingTap — combine all audio elements then optionally override. */
 export interface CreateRecordingTapOptions extends RecordingTapOptions {
   /** Provide a ready stream to record (e.g. the mixed-lane tab stream); else all audio elements are combined. */
   stream?: MediaStream;
+  /** Interval (ms) to rescan for newly created/rotated media elements when combining page audio. Default 5000. */
+  rescanMs?: number;
 }
 
 /**
@@ -344,7 +412,7 @@ export function createRecordingTap(opts: CreateRecordingTapOptions): RecordingTa
           const els = await findMediaElements();
           if (els.length === 0) { blog("[record-chunker] no media elements — cannot record"); return; }
           if (cancelled) return;
-          const combined = await buildCombinedStream(els); stream = combined.stream; closeCombined = combined.close;
+          const combined = await buildCombinedStream(els, opts.rescanMs ?? 5000); stream = combined.stream; closeCombined = combined.close;
         }
         if (cancelled) return;
         chunker = new MediaRecorderChunker({
