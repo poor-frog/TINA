@@ -104,6 +104,25 @@ def test_overview_falls_back_to_markdown_report_when_insights_missing():
     assert "Trong cuộc họp này" not in html
 
 
+def test_explicit_empty_insights_overview_does_not_turn_fallback_notice_into_overview_bullet():
+    fallback_notice = (
+        "Tina chưa tạo được tóm tắt có căn cứ từ bản chép lời. "
+        "Mở trang cuộc họp để xem bản chép lời và bản ghi nếu có."
+    )
+    html = render_followup(
+        "Tóm tắt",
+        "Cuộc họp ngắn",
+        BODY,
+        SUMMARY,
+        RECORDING,
+        report=fallback_notice,
+        insights={"question_count": 0, "action_item_count": 0, "topics": [], "overview": [], "action_items": []},
+    )
+    assert "Tổng quan cuộc họp" not in html
+    assert "Trong cuộc họp này" not in html
+    assert "TINA" not in html
+
+
 def test_user_copy_is_text_and_preview_notice_is_explicit():
     html = render_followup(
         "Subject <script>",

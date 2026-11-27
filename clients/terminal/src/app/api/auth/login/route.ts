@@ -1,7 +1,8 @@
-/** Direct email login — no SMTP, no magic link. POST {email} → find-or-create the user at admin-api,
- *  mint an APIToken (scopes bot,tx,browser), set the httpOnly `tina-token` + `tina-user-info` cookies.
+/** Direct email login (development/test only, `@example.test`). POST {email} → find-or-create the
+ *  user at admin-api, mint an APIToken (scopes bot,tx,browser), set the httpOnly `tina-token` +
+ *  `tina-user-info` cookies, and fire a best-effort sign-in/welcome notification (skipped on live
+ *  SES for RFC 2606 `.test` domains).
  *
- *  Mirrors the dashboard's TINA_ALLOW_DIRECT_LOGIN branch (without importing it). No email is ever sent.
  *  Must never be cached — a cached response would pin one identity for every subsequent login.
  */
 import { NextResponse, type NextRequest } from "next/server";

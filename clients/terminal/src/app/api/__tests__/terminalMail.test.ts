@@ -34,6 +34,7 @@ import {
   sendSesEmail,
 } from "../mail/sesMailer";
 import {
+  _resetInviteEmailRateLimitForTests,
   _resetLoginMailDedupeForTests,
   sendLoginEmail,
   sendWorkspaceInviteEmails,
@@ -53,6 +54,7 @@ describe("SES transactional mailer & templates", () => {
   beforeEach(() => {
     cookieStore.clear();
     _resetLoginMailDedupeForTests();
+    _resetInviteEmailRateLimitForTests();
     _setMailTransportForTests(null);
     canUseWorkspacePilot.mockResolvedValue(true);
     resolveApiKey.mockResolvedValue("user-api-key");
@@ -61,6 +63,7 @@ describe("SES transactional mailer & templates", () => {
   afterEach(() => {
     _setMailTransportForTests(null);
     _resetLoginMailDedupeForTests();
+    _resetInviteEmailRateLimitForTests();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
@@ -192,6 +195,7 @@ describe("SES transactional mailer & templates", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         workspace_id: "engineering-syncs",
+        workspace_name: "Engineering Syncs",
         role: "contributor",
         mode: "open",
         expires_in_sec: 604800,
@@ -204,17 +208,18 @@ describe("SES transactional mailer & templates", () => {
     const res = await mintWorkspaceInvite(req);
     expect(res.status).toBe(201);
     expect(forwardedBody).not.toHaveProperty("notify_emails");
+    expect(forwardedBody).not.toHaveProperty("workspace_name");
 
     const data = (await res.json()) as { token: string; email_delivery: { sent: string[]; failed: string[] } };
     expect(data.token).toBe("SECRET_INVITE_TOK");
     expect(data.email_delivery.sent).toEqual(["alice@company.com", "bob@company.com"]);
     expect(sent).toHaveLength(2);
-    expect(sent[0].subject).toContain("engineering-syncs");
+    expect(sent[0].subject).toContain("Engineering Syncs");
     expect(sent[0].text).toContain("https://meettina.site/?invite=SECRET_INVITE_TOK");
     expect(sent[0].text).toContain("Quang Thanh (lethanhquang094@gmail.com)");
   });
 
-  it("POST /api/workspace/invites/send-email verifies the invite token before emailing teammates", async () => {
+  it("POST /api/workspace/invites/send-email enforces invite permission, token validity, and rate limit", async () => {
     configureSesEnv();
     const sent: Array<{ to: string; text: string }> = [];
     _setMailTransportForTests(async (_cfg, payload) => {
@@ -225,16 +230,23 @@ describe("SES transactional mailer & templates", () => {
     cookieStore.set("tina-user-info", JSON.stringify({ name: "Quang Thanh" }));
     validateAuthToken.mockResolvedValue({ ok: true, userId: 2, email: "lethanhquang094@gmail.com", isAdmin: true });
 
+    let allowWorkspaceAuthz = true;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url.includes("token=REVOKED")) {
-          return new Response(JSON.stringify({ valid: false, reason: "revoked" }), { status: 200 });
+        if (url.includes("/agent/workspace/invites/preview")) {
+          if (url.includes("token=REVOKED")) {
+            return new Response(JSON.stringify({ valid: false, reason: "revoked" }), { status: 200 });
+          }
+          return new Response(
+            JSON.stringify({ workspace_id: "sales-hub", name: "Sales Hub", role: "viewer", valid: true }),
+            { status: 200 },
+          );
         }
-        return new Response(
-          JSON.stringify({ workspace_id: "sales-hub", name: "Sales Hub", role: "contributor", valid: true }),
-          { status: 200 },
-        );
+        if (url.includes("/agent/workspace/invites?workspace_id=sales-hub")) {
+          return new Response(JSON.stringify({ invites: [] }), { status: allowWorkspaceAuthz ? 200 : 403 });
+        }
+        return new Response("not found", { status: 404 });
       }),
     );
 
@@ -246,6 +258,18 @@ describe("SES transactional mailer & templates", () => {
     expect((await sendInviteLinkEmail(revokedReq)).status).toBe(400);
     expect(sent).toHaveLength(0);
 
+    // Non-member holding a valid open token is rejected with 403
+    allowWorkspaceAuthz = false;
+    const forbiddenReq = new NextRequest("https://meettina.site/api/workspace/invites/send-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "VALID_TOK", emails: ["alice@company.com"] }),
+    });
+    expect((await sendInviteLinkEmail(forbiddenReq)).status).toBe(403);
+    expect(sent).toHaveLength(0);
+
+    // Authorized member succeeds and formats viewer role accurately
+    allowWorkspaceAuthz = true;
     const okReq = new NextRequest("https://meettina.site/api/workspace/invites/send-email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -256,7 +280,47 @@ describe("SES transactional mailer & templates", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].to).toBe("alice@company.com");
     expect(sent[0].text).toContain("Sales Hub");
+    expect(sent[0].text).toContain("Viewer (Chỉ xem)");
     expect(sent[0].text).toContain("https://meettina.site/?invite=VALID_TOK");
+
+    // Exceeding 20 emails in window triggers 429
+    for (let batch = 0; batch < 2; batch++) {
+      const batchEmails = Array.from({ length: 10 }, (_, idx) => `u${batch}_${idx}@company.com`);
+      const batchReq = new NextRequest("https://meettina.site/api/workspace/invites/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: "VALID_TOK", emails: batchEmails }),
+      });
+      const r = await sendInviteLinkEmail(batchReq);
+      if (batch === 0) expect(r.status).toBe(200);
+      else expect(r.status).toBe(429);
+    }
+  });
+
+  it("folds long UTF-8 email subjects into <= 75-char RFC 2047 encoded-word chunks", () => {
+    const longSubject = "Lời mời tham gia workspace “Phòng Kỹ Thuật Sản Phẩm MeetTINA Việt Nam 2026” trên Tina";
+    const mime = buildMimeMessage(
+      "tina@meettina.site",
+      {
+        to: "lethanhquang094@gmail.com",
+        subject: longSubject,
+        text: "Xin chào",
+        html: "<p>Xin chào</p>",
+      },
+      "<msg-fold@meettina.site>",
+    );
+    const subjectLine = mime.split("\r\nDate:")[0].split("Subject: ")[1];
+    const words = subjectLine.split("\r\n ");
+    expect(words.length).toBeGreaterThan(1);
+    for (const w of words) {
+      expect(w.length).toBeLessThanOrEqual(75);
+      expect(w.startsWith("=?UTF-8?B?")).toBe(true);
+      expect(w.endsWith("?=")).toBe(true);
+    }
+    const decoded = words
+      .map((w) => Buffer.from(w.slice("=?UTF-8?B?".length, -2), "base64").toString("utf8"))
+      .join("");
+    expect(decoded).toBe(longSubject);
   });
 
   it("sendWorkspaceInviteEmails ignores invalid entries and deduplicates recipients", async () => {

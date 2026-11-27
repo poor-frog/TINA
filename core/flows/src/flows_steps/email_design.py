@@ -70,7 +70,8 @@ def _parse_overview_from_report(report: str, max_items: int = 6) -> list[dict[st
 
 def _normalize_overview(report: str, insights: dict[str, Any] | None) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
-    raw_overview = insights.get("overview") if isinstance(insights, dict) else None
+    has_explicit_overview = isinstance(insights, dict) and "overview" in insights
+    raw_overview = insights.get("overview") if has_explicit_overview else None
     if isinstance(raw_overview, list):
         for entry in raw_overview:
             if not isinstance(entry, dict):
@@ -81,7 +82,10 @@ def _normalize_overview(report: str, insights: dict[str, Any] | None) -> list[di
                 items.append({"title": title, "text": text})
             if len(items) >= 6:
                 break
-    if not items and report:
+    # Only fall back to parsing Markdown bullets from `report` when structured `insights.overview`
+    # was not supplied — an explicit empty `overview: []` (e.g. empty-claims fallback notice) must
+    # not turn a status notice into a fake "Meeting Overview" bullet.
+    if not items and not has_explicit_overview and report:
         items = _parse_overview_from_report(report, max_items=6)
     return items
 

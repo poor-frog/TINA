@@ -404,25 +404,25 @@ export default function MeetingFollowup({
                   <table role="presentation" width="100%" cellPadding="0" cellSpacing="0" border={0} style={{ marginTop: "14px" }}>
                     <tbody>
                       <tr>
-                        <td width="49%" valign="top">
+                        <td width="49%" valign="middle">
                           <Button href={summaryUrl} className="box-border" style={{
                             boxSizing: "border-box", display: "block", textAlign: "center",
                             backgroundColor: colors.brand, color: colors["on-brand"],
                             border: `1px solid ${colors.brand}`, borderRadius: "8px",
-                            padding: "13px 12px", fontSize: "14px", fontWeight: 600,
-                            lineHeight: "20px", textDecoration: "none",
+                            padding: "12px 10px", fontSize: "13px", fontWeight: 600,
+                            lineHeight: "18px", textDecoration: "none",
                           }}>
                             Xem tóm tắt cuộc họp
                           </Button>
                         </td>
                         <td width="2%" style={{ fontSize: "1px", lineHeight: "1px" }}>&nbsp;</td>
-                        <td width="49%" valign="top">
+                        <td width="49%" valign="middle">
                           <Button href={recordingUrl} className="box-border" style={{
                             boxSizing: "border-box", display: "block", textAlign: "center",
                             backgroundColor: colors.subtle, color: colors.brand,
                             border: `1px solid ${colors.line}`, borderRadius: "8px",
-                            padding: "13px 12px", fontSize: "14px", fontWeight: 600,
-                            lineHeight: "20px", textDecoration: "none",
+                            padding: "12px 10px", fontSize: "13px", fontWeight: 600,
+                            lineHeight: "18px", textDecoration: "none",
                           }}>
                             Xem bản ghi cuộc họp
                           </Button>

@@ -8,7 +8,7 @@ import { canUseWorkspacePilot } from "../../../auth/workspacePilot";
 import { AUTH_COOKIE, USER_INFO_COOKIE, validateAuthToken } from "../../../auth/adminApi";
 import { resolveApiKey } from "../../../proxyAuth";
 import { isValidEmailAddress } from "../../../mail/sesMailer";
-import { resolveAppBaseUrl, sendWorkspaceInviteEmails } from "../../../mail/templates";
+import { consumeInviteEmailQuota, resolveAppBaseUrl, sendWorkspaceInviteEmails } from "../../../mail/templates";
 
 export const dynamic = "force-dynamic";
 
@@ -69,8 +69,9 @@ export async function POST(req: NextRequest) {
 
   // Verify the invite token server-side so we only ever email genuine, active workspace invites.
   let preview: { workspace_id?: string; name?: string; role?: string; valid?: boolean; reason?: string | null };
+  let apiKey: string | null = null;
   try {
-    const apiKey = await resolveApiKey();
+    apiKey = await resolveApiKey();
     const res = await fetch(
       `${GATEWAY_URL}/agent/workspace/invites/preview?token=${encodeURIComponent(inviteToken)}`,
       {
@@ -90,10 +91,45 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Workspace service unavailable" }, { status: 502, headers: NO_STORE });
   }
 
-  if (!preview?.valid) {
+  if (!preview?.valid || !preview.workspace_id) {
     return NextResponse.json(
       { error: `Invite link is no longer valid${preview?.reason ? ` (${preview.reason})` : ""}` },
       { status: 400, headers: NO_STORE },
+    );
+  }
+
+  // Enforce workspace invite-management authorization: caller must be a contributor or owner of the
+  // target workspace (matching POST /api/workspace/invites) so non-members holding an open link
+  // cannot relay spam through TINA's SES domain.
+  try {
+    const authzRes = await fetch(
+      `${GATEWAY_URL}/agent/workspace/invites?workspace_id=${encodeURIComponent(preview.workspace_id)}`,
+      {
+        headers: apiKey ? { "X-API-Key": apiKey } : {},
+        cache: "no-store",
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    if (authzRes.status === 401 || authzRes.status === 403 || authzRes.status === 404) {
+      return NextResponse.json(
+        { error: "You do not have permission to send invites for this workspace" },
+        { status: 403, headers: NO_STORE },
+      );
+    }
+    if (!authzRes.ok) {
+      return NextResponse.json(
+        { error: "Could not verify workspace invite permission" },
+        { status: 502, headers: NO_STORE },
+      );
+    }
+  } catch {
+    return NextResponse.json({ error: "Workspace service unavailable" }, { status: 502, headers: NO_STORE });
+  }
+
+  if (!consumeInviteEmailQuota(String(auth.userId), validEmails.length)) {
+    return NextResponse.json(
+      { error: "Too many invite emails sent recently. Please wait a few minutes and try again." },
+      { status: 429, headers: NO_STORE },
     );
   }
 

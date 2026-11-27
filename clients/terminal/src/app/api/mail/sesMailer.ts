@@ -100,7 +100,34 @@ function wrapBase64(b64: string): string {
 function encodeHeaderUtf8(value: string): string {
   const clean = value.replace(/[\r\n]+/g, " ").trim();
   if (/^[\x20-\x7e]*$/.test(clean)) return clean;
-  return `=?UTF-8?B?${Buffer.from(clean, "utf8").toString("base64")}?=`;
+  // RFC 2047 §2: each encoded-word must be <= 75 chars ("=?UTF-8?B?" + b64 + "?=" = 12 + b64).
+  // 45 UTF-8 bytes base64-encode to 60 chars (72 chars total), splitting only on full codepoints.
+  const MAX_CHUNK_BYTES = 45;
+  const chunks: string[] = [];
+  let current = "";
+  let currentBytes = 0;
+  for (const ch of clean) {
+    const chBytes = Buffer.byteLength(ch, "utf8");
+    if (currentBytes + chBytes > MAX_CHUNK_BYTES && current) {
+      chunks.push(`=?UTF-8?B?${Buffer.from(current, "utf8").toString("base64")}?=`);
+      current = ch;
+      currentBytes = chBytes;
+    } else {
+      current += ch;
+      currentBytes += chBytes;
+    }
+  }
+  if (current) {
+    chunks.push(`=?UTF-8?B?${Buffer.from(current, "utf8").toString("base64")}?=`);
+  }
+  return chunks.join("\r\n ");
+}
+
+function maskEmailForLog(address: string): string {
+  const [local, domain] = address.split("@");
+  if (!domain) return "***";
+  const prefix = local ? `${local[0]}***` : "***";
+  return `${prefix}@${domain}`;
 }
 
 export function buildMimeMessage(
@@ -311,7 +338,7 @@ export async function sendSesEmail(payload: MailPayload): Promise<MailSendResult
   } catch (err) {
     const message = err instanceof Error ? err.message : "SES delivery failed";
     // eslint-disable-next-line no-console
-    console.warn(`[terminal-mail] SES send to ${to} failed: ${message}`);
+    console.warn(`[terminal-mail] SES send to ${maskEmailForLog(to)} failed: ${message}`);
     return { ok: false, error: message };
   }
 }

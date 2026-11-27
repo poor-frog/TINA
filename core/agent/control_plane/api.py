@@ -1864,7 +1864,7 @@ def create_app(
             # A valid empty result conveys no meeting facts. Let the normal follow-up deliver
             # the authorized artifact links with an explicit status in place of a summary.
             return {
-                "report": ("TINA ch\u01b0a t\u1ea1o \u0111\u01b0\u1ee3c t\xf3m t\u1eaft c\xf3 c\u0103n c\u1ee9 t\u1eeb b\u1ea3n ch\xe9p l\u1eddi. "
+                "report": ("Tina ch\u01b0a t\u1ea1o \u0111\u01b0\u1ee3c t\xf3m t\u1eaft c\xf3 c\u0103n c\u1ee9 t\u1eeb b\u1ea3n ch\xe9p l\u1eddi. "
                            "M\u1edf trang cu\u1ed9c h\u1ecdp \u0111\u1ec3 xem b\u1ea3n ch\xe9p l\u1eddi v\xe0 b\u1ea3n ghi n\u1ebfu c\xf3."),
                 "insights": {
                     "question_count": question_count,

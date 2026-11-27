@@ -161,8 +161,13 @@ export function SharedWorkspacesPanel() {
       return;
     }
     void runAction(async () => {
+      const workspaceName =
+        attached.slots[selectedWs]?.name ||
+        activeSet.find((m) => m.slug === selectedWs)?.name ||
+        undefined;
       const minted = await mintInvite({
         workspace_id: selectedWs,
+        workspace_name: workspaceName,
         role: inviteRole,
         mode: inviteMode,
         expires_in_sec: 7 * 86400,

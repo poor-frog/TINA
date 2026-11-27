@@ -14,8 +14,34 @@ const PROVIDER_LABELS: Record<LoginProvider, string> = {
 const LOGIN_DEDUPE_MS = 30_000;
 const recentLoginMails = new Map<string, number>();
 
+const INVITE_RATE_WINDOW_MS = 10 * 60 * 1000;
+const INVITE_MAX_EMAILS_PER_WINDOW = 20;
+const inviteSendHistory = new Map<string, number[]>();
+
 export function _resetLoginMailDedupeForTests(): void {
   recentLoginMails.clear();
+}
+
+export function _resetInviteEmailRateLimitForTests(): void {
+  inviteSendHistory.clear();
+}
+
+export function consumeInviteEmailQuota(userKey: string, count: number): boolean {
+  const now = Date.now();
+  const cutoff = now - INVITE_RATE_WINDOW_MS;
+  const recent = (inviteSendHistory.get(userKey) || []).filter((ts) => ts > cutoff);
+  if (recent.length + count > INVITE_MAX_EMAILS_PER_WINDOW) {
+    inviteSendHistory.set(userKey, recent);
+    return false;
+  }
+  for (let i = 0; i < count; i++) recent.push(now);
+  inviteSendHistory.set(userKey, recent);
+  if (inviteSendHistory.size > 500) {
+    for (const [key, list] of inviteSendHistory) {
+      if (!list.some((ts) => ts > cutoff)) inviteSendHistory.delete(key);
+    }
+  }
+  return true;
 }
 
 function escapeHtml(value: string): string {
@@ -265,7 +291,13 @@ export async function sendWorkspaceInviteEmails(opts: {
 
   const workspaceName = opts.workspaceName.trim() || "Workspace chung";
   const inviter = opts.inviterLabel.trim() || "Đồng đội của bạn";
-  const roleLabel = opts.role === "owner" ? "Owner (Quản trị)" : "Contributor (Thành viên)";
+  const normalizedRole = opts.role.trim().toLowerCase();
+  const roleLabel =
+    normalizedRole === "owner"
+      ? "Owner (Quản trị)"
+      : normalizedRole === "viewer"
+        ? "Viewer (Chỉ xem)"
+        : "Contributor (Thành viên)";
   const subject = `Lời mời tham gia workspace “${workspaceName}” trên Tina`;
 
   const paragraphs = [
@@ -287,9 +319,16 @@ export async function sendWorkspaceInviteEmails(opts: {
     secondaryNote,
   });
 
-  const results = await Promise.all(
-    unique.map(async (to) => ({ to, res: await sendSesEmail({ to, subject, text, html }) })),
-  );
+  // Bound concurrent TLS connections to Amazon SES to stay well within MaxSendRate.
+  const CONCURRENCY = 4;
+  const results: Array<{ to: string; res: MailSendResult }> = [];
+  for (let i = 0; i < unique.length; i += CONCURRENCY) {
+    const batch = unique.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(async (to) => ({ to, res: await sendSesEmail({ to, subject, text, html }) })),
+    );
+    results.push(...batchResults);
+  }
 
   const sent: string[] = [];
   const failed: string[] = [];

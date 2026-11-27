@@ -108,6 +108,7 @@ export async function setGitToken(token: string | null): Promise<SavedGitToken> 
 /** MINT a scoped invite for a shared workspace (owner/contributor). The token is returned ONCE. */
 export async function mintInvite(opts: {
   workspace_id: string;
+  workspace_name?: string;
   role?: string;
   mode?: string;
   expires_in_sec?: number;
@@ -121,6 +122,7 @@ export async function mintInvite(opts: {
       workspace_id: opts.workspace_id, role: opts.role ?? "contributor", mode: opts.mode ?? "open",
       expires_in_sec: opts.expires_in_sec ?? 604800, max_uses: opts.max_uses ?? 1,
       allowed_emails: opts.allowed_emails ?? null,
+      ...(opts.workspace_name ? { workspace_name: opts.workspace_name } : {}),
       ...(opts.notify_emails && opts.notify_emails.length > 0 ? { notify_emails: opts.notify_emails } : {}),
     }),
   });

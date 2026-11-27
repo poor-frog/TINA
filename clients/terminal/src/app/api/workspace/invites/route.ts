@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
   let parsedBody: Record<string, unknown> | null = null;
   let notifyEmails: string[] = [];
   let allowedEmails: string[] = [];
+  let workspaceDisplayName = "";
 
   try {
     rawBodyText = await req.text();
@@ -92,6 +93,10 @@ export async function POST(req: NextRequest) {
           notifyEmails = parsedBody.notify_emails.filter((v): v is string => typeof v === "string");
         }
         delete parsedBody.notify_emails;
+        if (typeof parsedBody.workspace_name === "string") {
+          workspaceDisplayName = parsedBody.workspace_name.trim().slice(0, 120);
+        }
+        delete parsedBody.workspace_name;
         if (Array.isArray(parsedBody.allowed_emails)) {
           allowedEmails = parsedBody.allowed_emails.filter((v): v is string => typeof v === "string");
         }
@@ -134,6 +139,7 @@ export async function POST(req: NextRequest) {
       const minted = JSON.parse(responseText) as {
         token?: string;
         workspace_id?: string;
+        name?: string;
         role?: string;
         expires_at?: string;
       };
@@ -143,7 +149,9 @@ export async function POST(req: NextRequest) {
         const inviterLabel = await resolveInviterLabel();
         const email_delivery = await sendWorkspaceInviteEmails({
           emails: recipients,
-          workspaceName: String(minted.workspace_id || parsedBody?.workspace_id || "Workspace chung"),
+          workspaceName: String(
+            workspaceDisplayName || minted.name || minted.workspace_id || parsedBody?.workspace_id || "Workspace chung",
+          ),
           inviterLabel,
           role: String(minted.role || parsedBody?.role || "contributor"),
           inviteUrl,
