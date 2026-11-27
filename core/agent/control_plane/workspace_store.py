@@ -62,6 +62,7 @@ class S3WorkspaceStore:
         self._states: dict[str, SyncState] = {}
         self._checked_at: dict[str, float] = {}
         self._state_etags: dict[str, tuple[Optional[str], float]] = {}
+        self._draft_etags: dict[tuple[str, str], tuple[Optional[str], float]] = {}
         self.root.mkdir(parents=True, exist_ok=True)
 
     @classmethod
@@ -188,6 +189,79 @@ class S3WorkspaceStore:
         resp = self.s3.put_object(**put_kwargs)
         with self._lock:
             self._state_etags[subject] = (resp.get("ETag"), time.monotonic())
+
+    # ── post-meeting draft latest.json sync ──────────────────────────────────
+
+    def _post_meeting_draft_key(self, subject: str, meeting_id: int | str) -> Optional[str]:
+        mid = str(meeting_id).strip()
+        if not subject or not subject.isdecimal() or not mid or not mid.isdecimal():
+            return None
+        return f"_post-meeting-drafts/{subject}/{mid}/latest.json"
+
+    def sync_post_meeting_draft(
+        self,
+        subject: str,
+        meeting_id: int | str,
+        dest: Path,
+        *,
+        force: bool = False,
+    ) -> None:
+        """Pull owner-scoped post-meeting draft state from KMS-encrypted S3 into local cache."""
+        s3_key = self._post_meeting_draft_key(subject, meeting_id)
+        if s3_key is None:
+            return
+        cache_key = (subject, str(meeting_id).strip())
+        now = time.monotonic()
+        with self._lock:
+            cached_etag, checked = self._draft_etags.get(cache_key, (None, 0.0))
+        if not force and dest.exists() and (now - checked) < _HEAD_CHECK_TTL_SEC:
+            return
+        try:
+            get_kwargs: dict[str, Any] = {"Bucket": self.bucket, "Key": s3_key}
+            if cached_etag and dest.exists():
+                get_kwargs["IfNoneMatch"] = cached_etag
+            resp = self.s3.get_object(**get_kwargs)
+            body = resp["Body"].read()
+            etag = resp.get("ETag")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dest.with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")
+            try:
+                tmp.write_bytes(body)
+                os.replace(tmp, dest)
+            finally:
+                if tmp.exists():
+                    tmp.unlink(missing_ok=True)
+            with self._lock:
+                self._draft_etags[cache_key] = (etag, time.monotonic())
+        except Exception as exc:
+            code, status = _s3_error_code(exc)
+            if status == 304 or code == "304":
+                with self._lock:
+                    self._draft_etags[cache_key] = (cached_etag, time.monotonic())
+                return
+            if _is_not_found(exc):
+                with self._lock:
+                    self._draft_etags[cache_key] = (None, time.monotonic())
+                return
+            raise
+
+    def push_post_meeting_draft(self, subject: str, meeting_id: int | str, src: Path) -> None:
+        """Persist owner-scoped post-meeting draft state durably to KMS-encrypted S3."""
+        s3_key = self._post_meeting_draft_key(subject, meeting_id)
+        if s3_key is None or not src.exists():
+            return
+        cache_key = (subject, str(meeting_id).strip())
+        body = src.read_bytes()
+        put_kwargs: dict[str, Any] = {
+            "Bucket": self.bucket,
+            "Key": s3_key,
+            "Body": body,
+            "ContentType": "application/json",
+            **_kms_kwargs(self.kms_key_id),
+        }
+        resp = self.s3.put_object(**put_kwargs)
+        with self._lock:
+            self._draft_etags[cache_key] = (resp.get("ETag"), time.monotonic())
 
     # ── workspace directory sync ──────────────────────────────────────────────
 

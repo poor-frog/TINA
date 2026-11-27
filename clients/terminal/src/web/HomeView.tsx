@@ -8,6 +8,7 @@ import type { WebNavView } from "./Sidebar";
 import { meetingPhase, type MeetingMock } from "../surfaces/meetingModel";
 import { listWorkspaceTree } from "../surfaces/workspaceApi";
 import { startStreamingDictation, type StreamingDictation } from "../ui-kit/micDictation";
+import { useOwnBriefIndex } from "./useOwnBriefIndex";
 
 function greetingByHour(): { text: string; emoji: string } {
   const hour = new Date().getHours();
@@ -69,6 +70,14 @@ export function HomeView({
   const liveMeetings = useMemo(() => meetings.filter((m) => meetingPhase(m) === "live"), [meetings]);
   const upcomingMeetings = useMemo(() => meetings.filter((m) => meetingPhase(m) === "prep"), [meetings]);
   const recentMeetings = useMemo(() => meetings.filter((m) => meetingPhase(m) === "post"), [meetings]);
+  const briefIndex = useOwnBriefIndex(!meetingsOnly && upcomingMeetings.length > 0);
+  const missingBriefCount = useMemo(
+    () =>
+      !meetingsOnly && briefIndex.loaded
+        ? upcomingMeetings.filter((m) => !m.shared && !briefIndex.hasBrief(m)).length
+        : 0,
+    [briefIndex, meetingsOnly, upcomingMeetings],
+  );
 
   const greeting = greetingByHour();
   const visibleFeed = tab === "live" ? liveMeetings : tab === "upcoming" ? upcomingMeetings : recentMeetings.slice(0, 6);
@@ -167,7 +176,9 @@ export function HomeView({
               <span className="tina-web-pa-title">Meeting Prep</span>
               <span className="tina-web-pa-sub">
                 {upcomingMeetings.length > 0
-                  ? `${upcomingMeetings.length} upcoming ${upcomingMeetings.length === 1 ? "meeting" : "meetings"}`
+                  ? `${upcomingMeetings.length} upcoming ${upcomingMeetings.length === 1 ? "meeting" : "meetings"}${
+                      missingBriefCount > 0 ? ` · ${missingBriefCount} needs brief` : ""
+                    }`
                   : "No upcoming meetings"}
               </span>
             </button>
@@ -237,6 +248,15 @@ export function HomeView({
                           <span>{label}</span>
                           {phase === "live" && <span className="tina-web-status-pill live">Live</span>}
                           {phase === "prep" && <span className="tina-web-status-pill scheduled">Upcoming</span>}
+                          {phase === "prep" && !meetingsOnly && briefIndex.loaded && !meeting.shared && (
+                            <span
+                              className={`tina-web-status-pill ${
+                                briefIndex.hasBrief(meeting) ? "brief-ready" : "brief-missing"
+                              }`}
+                            >
+                              {briefIndex.hasBrief(meeting) ? "Brief ready" : "No brief yet"}
+                            </span>
+                          )}
                           {meeting.shared && <span className="tina-web-status-pill completed">Shared</span>}
                         </span>
                         <span className="tina-web-feed-meta">

@@ -10,6 +10,7 @@ import { Markdown } from "../ui-kit/Markdown";
 import { computeSpeakerStats, formatTalkDuration } from "./SpeakerTalkTime";
 import { MeetingSmartSearch, type DiscussionSignalSummary } from "./MeetingSmartSearch";
 import { MeetingSidePanel, type MeetingVoiceReply } from "./MeetingSidePanel";
+import { MeetingPrepWorkspace } from "./MeetingPrepWorkspace";
 import { ChatGPTPlanNotice, type ChatGPTPlanIssue } from "../surfaces/ChatGPTPlanNotice";
 import { MeetingBottomPlayer, type MeetingBottomPlayerHandle } from "./MeetingBottomPlayer";
 import { LucianSelectionTooltip } from "./lucian/LucianSelectionTooltip";
@@ -55,9 +56,6 @@ import { useMeetingTranslation, type TranscriptLanguage } from "../canvas/Meetin
 import type { MeetingAudioFragment, MeetingAudioPosition } from "../canvas/MeetingAudioPlayer";
 import { streamChatTurn } from "../surfaces/chatStream";
 import { presentError, readApiFailure } from "../surfaces/apiClient";
-import { deletePlannedMeeting, updatePlannedMeeting } from "../surfaces/plannedApi";
-import { parseMeetingInput, meetingUrlFor } from "../surfaces/meetingId";
-import { defaultBotName } from "../surfaces/defaultBotName";
 import { terminalMeetingPath } from "../app/meetingRoute";
 import { meetingDurationMins } from "./meetingsFilter";
 import type { WebUser } from "./useWebIdentity";
@@ -283,6 +281,9 @@ export function MeetingDetailView({
   meetingsOnly,
   canOpenTerminal,
   user,
+  autoStartBrief = false,
+  onConsumeAutoStartBrief,
+  onOpenKnowledgeDoc,
   onBack,
   onOpenMeeting,
   onOpenMobileNav,
@@ -296,6 +297,9 @@ export function MeetingDetailView({
   meetingsOnly: boolean;
   canOpenTerminal: boolean;
   user?: WebUser;
+  autoStartBrief?: boolean;
+  onConsumeAutoStartBrief?: () => void;
+  onOpenKnowledgeDoc?: (docPath: string, wsSlug?: string) => void;
   onBack: () => void;
   onOpenMeeting?: (meetingId: string) => void;
   onOpenMobileNav?: () => void;
@@ -1712,9 +1716,9 @@ export function MeetingDetailView({
             </button>
           )}
 
-          {m && <BotControls m={m} connected={wsConnected} onOpenMeeting={onOpenMeeting} />}
+          {m && phase !== "prep" && <BotControls m={m} connected={wsConnected} onOpenMeeting={onOpenMeeting} />}
 
-          {m?.id && !m.shared && (
+          {m?.id && !m.shared && phase !== "prep" && (
             <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <ShareSessionButton key={m.id} meetingId={m.id} />
               <button
@@ -1765,11 +1769,16 @@ export function MeetingDetailView({
       )}
 
       {m && phase === "prep" ? (
-        <PlannedMeetingEditor
+        <MeetingPrepWorkspace
           key={m.id}
           meeting={m}
+          meetingsOnly={meetingsOnly}
+          firstName={user?.firstName || "there"}
+          autoStartBrief={autoStartBrief}
+          onConsumeAutoStartBrief={onConsumeAutoStartBrief}
           onBack={onBack}
           onOpenMeeting={onOpenMeeting}
+          onOpenKnowledgeDoc={onOpenKnowledgeDoc}
           onUpdated={() => {
             refreshMeetings();
             if (needsDetail) setDetailAttempt((a) => a + 1);
@@ -2467,183 +2476,6 @@ export function MeetingDetailView({
           </form>
         </div>
       )}
-    </div>
-  );
-}
-
-function PlannedMeetingEditor({
-  meeting,
-  onBack,
-  onOpenMeeting,
-  onUpdated,
-}: {
-  meeting: MeetingMock;
-  onBack: () => void;
-  onOpenMeeting?: (meetingId: string) => void;
-  onUpdated: () => void;
-}) {
-  const [title, setTitle] = useState(meeting.title_custom || meeting.title || "");
-  const [meetingUrl, setMeetingUrl] = useState(meeting.meeting_url || "");
-  const [scheduledAt, setScheduledAt] = useState(() => {
-    if (!meeting.scheduled_at) return "";
-    const dt = new Date(meeting.scheduled_at);
-    if (!Number.isFinite(dt.getTime())) return "";
-    return new Date(dt.getTime() - dt.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-  });
-  const [autoJoin, setAutoJoin] = useState(meeting.auto_join !== false);
-  const [busy, setBusy] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async (e: FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    setStatusMsg(null);
-    try {
-      await updatePlannedMeeting(meeting.id, {
-        title: title.trim() || null,
-        meeting_url: meetingUrl.trim() || null,
-        scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
-        auto_join: autoJoin,
-      });
-      onUpdated();
-      setStatusMsg("Saved meeting plan.");
-    } catch (err) {
-      setError(presentMeetingActionFailure(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const joinNow = async () => {
-    const parsed = parseMeetingInput(meetingUrl || meeting.native_id || "");
-    if (!parsed) {
-      setError("Add a valid Google Meet, Zoom, Teams, Jitsi, or Discord link first.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await fetch("/api/bots", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          platform: parsed.platform,
-          native_meeting_id: parsed.native_meeting_id,
-          meeting_url: meetingUrlFor(parsed, meetingUrl || meeting.native_id || ""),
-          bot_name: defaultBotName(),
-        }),
-      });
-      if (!r.ok) throw await readApiFailure(r);
-      const body = await r.json().catch(() => null);
-      const targetId = seedLiveMeetingFromResponse(body);
-      onUpdated();
-      if (targetId && targetId !== meeting.id) {
-        onOpenMeeting?.(targetId);
-        return;
-      }
-      setStatusMsg("Bot dispatched to meeting.");
-    } catch (err) {
-      setError(presentMeetingActionFailure(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const remove = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await deletePlannedMeeting(meeting.id);
-      refreshMeetings();
-      onBack();
-    } catch (err) {
-      setError(presentMeetingActionFailure(err));
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="tina-web-view-scroll">
-      <div className="tina-web-page-wrap" style={{ maxWidth: 680 }}>
-        <div className="tina-web-panel">
-          <h2 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 600 }}>Meeting Prep</h2>
-          <p style={{ margin: "0 0 18px", fontSize: 13.5, color: "var(--tw-text-3)" }}>
-            Configure details before the call starts. Once TINA joins, live bilingual transcription opens here automatically.
-          </p>
-
-          <form onSubmit={save} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <label className="tina-web-field">
-              <span>Title</span>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} disabled={busy} />
-            </label>
-            <label className="tina-web-field">
-              <span>Meeting link</span>
-              <input
-                value={meetingUrl}
-                onChange={(e) => setMeetingUrl(e.target.value)}
-                disabled={busy}
-                placeholder="https://meet.google.com/abc-defg-hij"
-              />
-            </label>
-            <label className="tina-web-field">
-              <span>Scheduled time</span>
-              <input
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(e) => setScheduledAt(e.target.value)}
-                disabled={busy}
-              />
-            </label>
-            <label
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: 13,
-                color: "var(--tw-text-2)",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={autoJoin}
-                onChange={(e) => setAutoJoin(e.target.checked)}
-                disabled={busy}
-              />
-              <span>Auto-join at start time</span>
-            </label>
-
-            {statusMsg && <div style={{ fontSize: 12.5, color: "var(--tw-mint)" }}>{statusMsg}</div>}
-            {error && (
-              <div role="alert" style={{ fontSize: 12.5, color: "var(--tw-danger)" }}>
-                {error}
-              </div>
-            )}
-
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-              <button type="submit" className="tina-web-btn-primary" disabled={busy}>
-                {busy ? "Saving…" : "Save changes"}
-              </button>
-              <button type="button" className="tina-web-btn-ghost" disabled={busy} onClick={() => void joinNow()}>
-                <WebIcon name="play" size={14} />
-                <span>Send bot now</span>
-              </button>
-              <button
-                type="button"
-                className="tina-web-btn-ghost"
-                disabled={busy}
-                onClick={() => void remove()}
-                style={{ marginLeft: "auto", color: "var(--tw-danger)" }}
-              >
-                <WebIcon name="trash" size={14} />
-                <span>Delete plan</span>
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
     </div>
   );
 }

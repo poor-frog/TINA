@@ -1,0 +1,1066 @@
+/* MeetingPrepWorkspace — 2-column Obsidian Teal / Porcelain Teal pre-meeting Brief Studio.
+ * Left stage: editable meeting details, workspace bind/share, live-updating Brief hero, and
+ * Live Assist goal & draft agenda. Right rail: live Brief Assistant SSE chat synced to the Brief. */
+
+.shell {
+  /* Bridge terminal surface variables used by PlannedLiveAssistEditor onto --tw-* tokens */
+  --line: var(--tw-line);
+  --panel: var(--tw-card);
+  --t1: var(--tw-text);
+  --t2: var(--tw-text-2);
+  --t3: var(--tw-text-4);
+  --accent: var(--tw-mint);
+  --danger: var(--tw-danger);
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 410px;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--tw-bg);
+  color: var(--tw-text);
+}
+
+.shellSingle {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* ── Left / Main Stage ───────────────────────────────────────────────────── */
+
+.mainScroll {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--tw-bg);
+}
+
+.mainInner {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 28px 36px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.subjectCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.eyebrowRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tw-mint);
+}
+
+.saveIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--tw-text-4);
+}
+
+.saveIndicatorSaved {
+  color: var(--tw-mint);
+}
+
+.titleInput {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin: 0 -12px;
+  background: transparent;
+  color: var(--tw-text);
+  font-family: var(--tw-font-display);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.titleInput:hover:not(:disabled) {
+  background: var(--tw-card);
+  border-color: var(--tw-line-soft);
+}
+
+.titleInput:focus {
+  background: var(--tw-card);
+  border-color: var(--tw-mint);
+  outline: none;
+}
+
+.titleInput::placeholder {
+  color: var(--tw-text-4);
+}
+
+.titleReadonly {
+  margin: 0;
+  font-family: var(--tw-font-display);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  color: var(--tw-text);
+}
+
+/* ── Compact Setup Grid ──────────────────────────────────────────────────── */
+
+.setupGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.setupCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--tw-line);
+  border-radius: 12px;
+  background: var(--tw-card);
+}
+
+.setupHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.setupLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--tw-text-2);
+}
+
+.detectedPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--tw-teal) 24%, transparent);
+  color: var(--tw-mint);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.schedulePill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--tw-raised);
+  color: var(--tw-text-3);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.schedulePillActive {
+  background: color-mix(in oklch, var(--tw-teal) 22%, transparent);
+  color: var(--tw-mint);
+}
+
+.fieldInput {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--tw-line);
+  border-radius: 8px;
+  background: var(--tw-bg);
+  color: var(--tw-text);
+  font: inherit;
+  font-size: 13px;
+  transition: border-color 140ms ease;
+}
+
+.fieldInput:focus {
+  border-color: var(--tw-mint);
+  outline: none;
+}
+
+.fieldInput::placeholder {
+  color: var(--tw-text-4);
+}
+
+.setupFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--tw-text-3);
+}
+
+.autoJoinLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--tw-text-2);
+}
+
+.helperMuted {
+  color: var(--tw-text-4);
+  font-size: 11.5px;
+}
+
+.inlineLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tw-mint);
+}
+
+.inlineLink:hover {
+  text-decoration: underline;
+}
+
+.clearTimeBtn {
+  font-size: 11.5px;
+  color: var(--tw-text-4);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.clearTimeBtn:hover {
+  color: var(--tw-text-2);
+  background: var(--tw-raised);
+}
+
+/* ── Attendees Strip ─────────────────────────────────────────────────────── */
+
+.attendeesBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attendeesList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attendeeChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 4px;
+  border: 1px solid var(--tw-line);
+  border-radius: 999px;
+  background: var(--tw-card);
+  color: var(--tw-text-2);
+  font-size: 12px;
+}
+
+.attendeeDeclined {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.attendeeInitials {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--tw-surface-teal);
+  color: var(--tw-mint);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* ── Workspace & Action Bar ──────────────────────────────────────────────── */
+
+.workspaceBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 11px 14px;
+  border: 1px solid var(--tw-line);
+  border-radius: 12px;
+  background: var(--tw-card);
+}
+
+.workspaceInfo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.workspaceTag {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tw-text-4);
+}
+
+.workspaceValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 8px;
+  background: var(--tw-raised);
+  color: var(--tw-text);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.workspaceValueShared {
+  background: color-mix(in oklch, var(--tw-teal) 20%, var(--tw-card));
+  color: var(--tw-mint);
+  border: 1px solid color-mix(in oklch, var(--tw-mint) 24%, transparent);
+}
+
+.workspaceDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tw-mint);
+}
+
+.utilityActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btnPrimary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background: var(--tw-teal);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 140ms ease, opacity 140ms ease;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  background: var(--tw-teal-hover);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.btnGhost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--tw-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tw-text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.btnGhost:hover:not(:disabled) {
+  background: var(--tw-raised);
+  border-color: var(--tw-line-strong);
+  color: var(--tw-text);
+}
+
+.btnGhost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btnDanger {
+  color: var(--tw-danger);
+  border-color: color-mix(in oklch, var(--tw-danger) 35%, var(--tw-line));
+}
+
+.btnDanger:hover:not(:disabled) {
+  background: var(--tw-danger-bg);
+  color: var(--tw-danger);
+}
+
+.selectInput {
+  min-height: 34px;
+  padding: 0 28px 0 12px;
+  border: 1px solid var(--tw-line);
+  border-radius: 8px;
+  background: var(--tw-bg);
+  color: var(--tw-text-2);
+  font: inherit;
+  font-size: 12.5px;
+  max-width: 260px;
+}
+
+.subRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--tw-line);
+  border-radius: 10px;
+  background: var(--tw-card);
+}
+
+.inviteInput {
+  flex: 1;
+  min-width: 180px;
+  padding: 6px 10px;
+  border: 1px solid var(--tw-line);
+  border-radius: 7px;
+  background: var(--tw-bg);
+  color: var(--tw-text-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+/* ── Hero Brief Stage ────────────────────────────────────────────────────── */
+
+.briefStage {
+  position: relative;
+  border: 1px solid var(--tw-line);
+  border-radius: 14px;
+  background: var(--tw-card);
+  overflow: hidden;
+}
+
+.briefStageEmpty {
+  border-color: color-mix(in oklch, var(--tw-mint) 28%, var(--tw-line));
+  background:
+    radial-gradient(ellipse 85% 65% at 0% 0%, color-mix(in oklch, var(--tw-teal) 18%, transparent), transparent 72%),
+    var(--tw-card);
+}
+
+.briefEmptyInner {
+  padding: 24px 24px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.briefEmptyHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.briefBadgeIcon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--tw-teal) 24%, var(--tw-bg));
+  border: 1px solid color-mix(in oklch, var(--tw-mint) 28%, transparent);
+  color: var(--tw-mint);
+}
+
+.briefEmptyCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.briefTitle {
+  margin: 0;
+  font-family: var(--tw-font-display);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.briefLead {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--tw-text-2);
+}
+
+.briefModes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.briefModeCard {
+  padding: 11px 13px;
+  border: 1px solid var(--tw-line-soft);
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--tw-bg) 72%, var(--tw-card));
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--tw-text-3);
+}
+
+.briefModeCard strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--tw-text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.briefActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.briefProgressBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 18px 20px;
+}
+
+.briefProgressLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pulseDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--tw-mint);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--tw-mint) 22%, transparent);
+  flex: none;
+  animation: briefPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes briefPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.86);
+  }
+}
+
+.briefDocHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--tw-line-soft);
+  background: color-mix(in oklch, var(--tw-chrome) 75%, var(--tw-card));
+}
+
+.briefDocSource {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--tw-mint);
+}
+
+.briefDocMeta {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--tw-text-4);
+}
+
+.briefDocActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.briefDocBody {
+  padding: 20px 22px 24px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--tw-text);
+}
+
+.briefDocBody :global(h1),
+.briefDocBody :global(h2),
+.briefDocBody :global(h3) {
+  font-family: var(--tw-font-display);
+  color: var(--tw-text);
+  margin-top: 1.15em;
+  margin-bottom: 0.45em;
+}
+
+.briefDocBody :global(h1):first-child,
+.briefDocBody :global(h2):first-child {
+  margin-top: 0;
+}
+
+.briefDocBody :global(p) {
+  margin: 0.55em 0;
+  color: var(--tw-text-2);
+}
+
+.briefDocBody :global(ul) {
+  list-style: disc;
+  padding-left: 1.35em;
+  margin: 0.5em 0;
+  color: var(--tw-text-2);
+}
+
+.briefDocBody :global(ol) {
+  list-style: decimal;
+  padding-left: 1.35em;
+  margin: 0.5em 0;
+  color: var(--tw-text-2);
+}
+
+.briefDocBody :global(li) {
+  margin: 0.25em 0;
+}
+
+/* ── Live Assist Goal & Agenda Card ──────────────────────────────────────── */
+
+.planCard {
+  padding: 18px 20px;
+  border: 1px solid var(--tw-line);
+  border-radius: 14px;
+  background: var(--tw-card);
+}
+
+.planCardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.planCardTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.planCardSub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tw-text-4);
+}
+
+.errorAlert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in oklch, var(--tw-danger) 42%, var(--tw-line));
+  border-radius: 10px;
+  background: var(--tw-danger-bg);
+  color: var(--tw-danger);
+  font-size: 12.5px;
+}
+
+/* ── Right Column: Live Brief Assistant Chat ─────────────────────────────── */
+
+.chatRail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--tw-line-soft);
+  background: var(--tw-chrome);
+}
+
+.chatHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--tw-line-soft);
+  flex: none;
+}
+
+.chatHeadTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tinaOrb {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--tw-teal), var(--tw-mint));
+  color: #0b1614;
+  flex: none;
+}
+
+.chatHeadText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chatHeadText strong {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--tw-text);
+  line-height: 1.2;
+}
+
+.chatHeadText span {
+  font-size: 11.5px;
+  color: var(--tw-text-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.chatHero {
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 20px 10px;
+}
+
+.chatHeroIcon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--tw-teal) 24%, var(--tw-card));
+  border: 1px solid color-mix(in oklch, var(--tw-mint) 26%, transparent);
+  color: var(--tw-mint);
+}
+
+.chatHero h3 {
+  margin: 0;
+  font-family: var(--tw-font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.chatHero p {
+  margin: 0;
+  max-width: 290px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--tw-text-3);
+}
+
+.starterList {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.starterBtn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 9px 12px;
+  border: 1px solid var(--tw-line);
+  border-radius: 10px;
+  background: var(--tw-card);
+  color: var(--tw-text-2);
+  font-size: 12.5px;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.starterBtn:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--tw-mint) 40%, var(--tw-line));
+  background: var(--tw-raised);
+  color: var(--tw-text);
+}
+
+.starterBtnPrimary {
+  border-color: color-mix(in oklch, var(--tw-mint) 36%, var(--tw-line));
+  background: color-mix(in oklch, var(--tw-teal) 18%, var(--tw-card));
+  color: var(--tw-text);
+  font-weight: 500;
+}
+
+.chatBubble {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.chatBubbleUser {
+  align-self: flex-end;
+  max-width: 88%;
+  padding: 9px 12px;
+  border-radius: 12px 12px 4px 12px;
+  background: var(--tw-surface-teal);
+  border: 1px solid color-mix(in oklch, var(--tw-mint) 22%, transparent);
+  color: var(--tw-text);
+}
+
+.chatBubbleAgent {
+  align-self: stretch;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--tw-card);
+  border: 1px solid var(--tw-line-soft);
+}
+
+.bubbleHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--tw-text-3);
+}
+
+.bubbleProse {
+  color: var(--tw-text-2);
+  font-size: 13px;
+  line-height: 1.58;
+  word-break: break-word;
+}
+
+.bubbleProse :global(p) {
+  margin: 0.4em 0;
+}
+
+.bubbleProse :global(p):first-child {
+  margin-top: 0;
+}
+
+.bubbleProse :global(p):last-child {
+  margin-bottom: 0;
+}
+
+.bubbleProse :global(ul) {
+  list-style: disc;
+  padding-left: 1.3em;
+  margin: 0.35em 0;
+}
+
+.bubbleProse :global(ol) {
+  list-style: decimal;
+  padding-left: 1.3em;
+  margin: 0.35em 0;
+}
+
+.bubbleFooter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.bubbleActionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--tw-text-4);
+}
+
+.bubbleActionBtn:hover {
+  background: var(--tw-raised);
+  color: var(--tw-text-2);
+}
+
+.commitPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--tw-teal) 22%, transparent);
+  color: var(--tw-mint);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.chatFoot {
+  padding: 12px 14px;
+  border-top: 1px solid var(--tw-line-soft);
+  flex: none;
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--tw-line);
+  border-radius: 12px;
+  background: var(--tw-bg);
+  transition: border-color 140ms ease;
+}
+
+.composer:focus-within {
+  border-color: var(--tw-mint);
+}
+
+.composer textarea {
+  flex: 1;
+  min-height: 36px;
+  max-height: 120px;
+  resize: none;
+  border: 0;
+  background: transparent;
+  color: var(--tw-text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 6px 0;
+  outline: none;
+}
+
+.composer textarea::placeholder {
+  color: var(--tw-text-4);
+}
+
+.sendBtn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--tw-teal);
+  color: #ffffff;
+  transition: background-color 140ms ease, opacity 140ms ease;
+}
+
+.sendBtn:hover:not(:disabled) {
+  background: var(--tw-teal-hover);
+}
+
+.sendBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.stopBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 9px;
+  background: var(--tw-danger-bg);
+  color: var(--tw-danger);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ── Light Theme Adjustments ─────────────────────────────────────────────── */
+
+:global(html[data-theme="light"]) .briefStageEmpty {
+  background:
+    radial-gradient(ellipse 85% 65% at 0% 0%, rgba(23, 107, 91, 0.08), transparent 72%),
+    var(--tw-card);
+}
+
+:global(html[data-theme="light"]) .chatBubbleUser {
+  background: #e5f2ee;
+  border-color: rgba(23, 107, 91, 0.18);
+  color: #111815;
+}
+
+:global(html[data-theme="light"]) .tinaOrb {
+  color: #ffffff;
+}
+
+/* ── Responsive Collapse ─────────────────────────────────────────────────── */
+
+@media (max-width: 1060px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) 400px;
+  }
+
+  .chatRail {
+    border-left: 0;
+    border-top: 1px solid var(--tw-line-soft);
+  }
+}
+
+@media (max-width: 720px) {
+  .mainInner {
+    padding: 20px 16px 36px;
+  }
+
+  .setupGrid,
+  .briefModes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -26,7 +26,8 @@ import { listWorkspaceTree, readActiveSet } from "../surfaces/workspaceApi";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
 import { routineCreationPrompt, stripContextBlocks } from "../surfaces/chat";
 import { presentError } from "../surfaces/apiClient";
-import type { MeetingMock } from "../surfaces/meetingModel";
+import type { MeetingFocus } from "../surfaces/chatContext";
+import { meetingPhase, type MeetingMock } from "../surfaces/meetingModel";
 import type { ToolApprovalDecision, ToolApprovalState } from "../workbench/toolApproval";
 
 interface ChatMessage {
@@ -39,7 +40,12 @@ interface ChatMessage {
   error?: string;
 }
 
-export type AskTinaPrompt = { text: string; mode: "send" | "draft"; meetingId?: string };
+export type AskTinaPrompt = {
+  text: string;
+  mode: "send" | "draft";
+  meetingId?: string;
+  focus?: MeetingFocus;
+};
 
 function newSessionId(): string {
   return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -476,7 +482,7 @@ export function AskTinaView({
   }, [sessions, activeSession, messages]);
 
   const sendMessage = useCallback(
-    async (rawPrompt: string, meetingOverrideId?: string) => {
+    async (rawPrompt: string, meetingOverrideId?: string, focusOverride?: MeetingFocus) => {
       const displayPrompt = rawPrompt.trim();
       if (!displayPrompt || abortRef.current || historyRef.current) return;
 
@@ -500,18 +506,25 @@ export function AskTinaView({
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const effectiveMeetingId = meetingOverrideId ?? selectedMeetingId;
+      const effectiveMeetingId = meetingOverrideId ?? focusOverride?.meeting_id ?? selectedMeetingId;
       const meeting = meetings.find((m) => m.id === effectiveMeetingId);
-      const activeContext = meeting
+      const activeContext: MeetingFocus | undefined = meeting
         ? {
-            kind: "meeting" as const,
+            kind: "meeting",
             meeting_id: meeting.id,
             platform: meeting.platform === "Google Meet" ? "google_meet" : meeting.platform.toLowerCase(),
             native_id: meeting.native_id || meeting.id,
             status: meeting.live_status,
             title: meeting.title_custom || meeting.title,
+            ...(meeting.scheduled_at ? { scheduled_at: meeting.scheduled_at } : {}),
+            ...(meeting.workspace_id ? { workspace_id: meeting.workspace_id } : {}),
+            ...(focusOverride ?? {}),
           }
-        : undefined;
+        : focusOverride;
+      const isPrep =
+        (meeting ? meetingPhase(meeting) === "prep" : false) ||
+        activeContext?.status === "idle" ||
+        activeContext?.status === "scheduled";
 
       try {
         await streamChatTurn(
@@ -521,7 +534,9 @@ export function AskTinaView({
             active: activeContext,
             context: {
               tz,
-              surface: activeContext ? { list: "meetings", tab: { kind: "meeting" } } : { list: "ask" },
+              surface: activeContext
+                ? { list: "meetings", tab: { kind: isPrep ? "meetingPrep" : "meeting" } }
+                : { list: "ask" },
               focus: activeContext ?? null,
             },
           },
@@ -690,15 +705,16 @@ export function AskTinaView({
 
   useEffect(() => {
     if (!initialPrompt) return;
-    const { text, mode, meetingId } = initialPrompt;
+    const { text, mode, meetingId, focus } = initialPrompt;
     const draftOnly = mode === "draft" || text.startsWith("/routine");
     if (!draftOnly && (busy || historyLoading)) return;
     onConsumeInitialPrompt();
-    if (meetingId) setSelectedMeetingId(meetingId);
+    const resolvedMeetingId = meetingId ?? focus?.meeting_id;
+    if (resolvedMeetingId) setSelectedMeetingId(resolvedMeetingId);
     if (draftOnly) {
       setDraft(text);
     } else if (text.trim()) {
-      void sendMessage(text, meetingId);
+      void sendMessage(text, resolvedMeetingId, focus);
     }
   }, [initialPrompt, onConsumeInitialPrompt, sendMessage, busy, historyLoading]);
 

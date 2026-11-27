@@ -23,6 +23,7 @@ export function WebTopBar({
   liveMeeting,
   liveMeetings,
   wsConnected,
+  meetingsOnly = false,
   hideBar = false,
   onOpenMobileNav,
   onOpenSearch,
@@ -37,10 +38,11 @@ export function WebTopBar({
   liveMeeting?: MeetingMock;
   liveMeetings?: MeetingMock[];
   wsConnected: boolean;
+  meetingsOnly?: boolean;
   hideBar?: boolean;
   onOpenMobileNav: () => void;
   onOpenSearch: () => void;
-  onOpenMeeting: (meetingId: string) => void;
+  onOpenMeeting: (meetingId: string, opts?: { startBrief?: boolean }) => void;
   onOpenCalendarSettings: () => void;
   captureOpen: boolean;
   captureMode?: CaptureModalMode;
@@ -176,10 +178,11 @@ export function WebTopBar({
       {captureOpen && (
         <CaptureMeetingModal
           initialMode={captureMode}
+          meetingsOnly={meetingsOnly}
           onClose={onCloseCapture}
-          onCaptured={(meetingId) => {
+          onCaptured={(meetingId, opts) => {
             onCloseCapture();
-            if (meetingId) onOpenMeeting(meetingId);
+            if (meetingId) onOpenMeeting(meetingId, opts);
           }}
         />
       )}
@@ -189,12 +192,14 @@ export function WebTopBar({
 
 function CaptureMeetingModal({
   initialMode = "live",
+  meetingsOnly = false,
   onClose,
   onCaptured,
 }: {
   initialMode?: CaptureModalMode;
+  meetingsOnly?: boolean;
   onClose: () => void;
-  onCaptured: (meetingId?: string) => void;
+  onCaptured: (meetingId?: string, opts?: { startBrief?: boolean }) => void;
 }) {
   const [mode, setMode] = useState<CaptureModalMode>(initialMode);
   const [urlInput, setUrlInput] = useState("");
@@ -264,8 +269,7 @@ function CaptureMeetingModal({
     }
   };
 
-  const submitSchedule = async (e: FormEvent) => {
-    e.preventDefault();
+  const scheduleMeeting = async (startBrief: boolean) => {
     if ((!titleInput.trim() && !urlInput.trim()) || busy) {
       setError("Provide a meeting title or a meeting link.");
       return;
@@ -281,13 +285,18 @@ function CaptureMeetingModal({
         auto_join: autoJoin,
       });
       refreshMeetings();
-      emitWebToast("Meeting scheduled");
-      onCaptured(created?.id != null ? String(created.id) : undefined);
+      emitWebToast(startBrief ? "Meeting scheduled — starting brief" : "Meeting scheduled");
+      onCaptured(created?.id != null ? String(created.id) : undefined, { startBrief });
     } catch (err) {
       setError(presentMeetingActionFailure(err));
     } finally {
       setBusy(false);
     }
+  };
+
+  const submitSchedule = async (e: FormEvent) => {
+    e.preventDefault();
+    await scheduleMeeting(false);
   };
 
   return (
@@ -396,8 +405,19 @@ function CaptureMeetingModal({
 
               {error && <div role="alert" style={{ fontSize: 12.5, color: "var(--tw-danger)" }}>{error}</div>}
 
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
                 <button type="button" className="tina-web-btn-ghost" onClick={onClose}>Cancel</button>
+                {!meetingsOnly && (
+                  <button
+                    type="button"
+                    className="tina-web-btn-ghost"
+                    disabled={busy}
+                    onClick={() => void scheduleMeeting(true)}
+                  >
+                    <WebIcon name="sparkleSmall" size={14} />
+                    <span>Save &amp; draft brief</span>
+                  </button>
+                )}
                 <button type="submit" className="tina-web-btn-primary" disabled={busy}>
                   {busy ? "Scheduling…" : "Save meeting plan"}
                 </button>

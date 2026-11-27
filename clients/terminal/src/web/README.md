@@ -20,12 +20,19 @@ TINA Terminal workbench at `/terminal`.
   `SpeakerTalkTimePanel` (computed from `fetchDurableTranscript`), `streamChatTurn` + `/api/chat/approval`,
   `RoutinesBoard`, `SharedWorkspacesPanel` (`workspaceApi`), and the real Settings panels
   (`CalendarConnectionsPanel`, `ModelsSection`, `VoiceSettings`, `TokensPanel`, `GitHubTokenCard`, `AsrStatusPanel`).
-- **Meetings Notebook (`MeetingsView.tsx` + `meetingsFilter.ts`)**: Date-grouped list (Live Now,
-  Upcoming by day, Recorded by day), multi-dimensional Filter popover (date range, platform,
-  participants, duration, recording), row `•••` action menu (Rename via `POST /api/meetings/{id}/annotate`,
-  Share session, Copy link, Ask TINA, Delete, bot actions); global Split-Button `Capture ▾` lives in
-  `TopBar.tsx`.
-- **Meeting Workspace (`MeetingDetailView.tsx` + `MeetingSmartSearch.tsx` + `MeetingSidePanel.tsx` + `MeetingBottomPlayer.tsx` + `meetingDetail.module.css`)**:
+- **Meetings Notebook (`MeetingsView.tsx` + `meetingsFilter.ts` + `useOwnBriefIndex.ts`)**: Date-grouped list (Live Now,
+  Upcoming by day with single-fetch `No brief yet` / `Brief ready` indicators, Recorded by day),
+  multi-dimensional Filter popover (date range, platform, participants, duration, recording), row
+  `•••` action menu (Rename via `POST /api/meetings/{id}/annotate`, Share session, Copy link, Ask TINA,
+  Delete, bot actions); global Split-Button `Capture ▾` lives in `TopBar.tsx` (with `Save & draft brief`
+  shortcut in Plan/Schedule mode).
+- **Meeting Workspace (`MeetingDetailView.tsx` + `MeetingPrepWorkspace.tsx` + `meetingPrepWorkspace.module.css` + `MeetingSmartSearch.tsx` + `MeetingSidePanel.tsx` + `MeetingBottomPlayer.tsx` + `meetingDetail.module.css`)**:
+  For upcoming/planned meetings (`phase === "prep"`), mounts the 2-column **Pre-meeting Brief Studio**
+  (`MeetingPrepWorkspace.tsx`): editable meeting setup, attendees, workspace binding & invite sharing,
+  live-updating Private (`kg/entities/meeting/brief-*.md` via `briefNote.ts`) or Shared (`README.md`)
+  Brief hero stage with `Open in Knowledge`, `PlannedLiveAssistGoal`/`PlannedLiveAssistAgenda`, and an
+  inline persisted **Brief Assistant** SSE chat (`brief-${meetingId}`) wired with `meetingPrep` grounding
+  and instant post-commit S3-settled brief refresh. For live and recorded meetings, mounts the
   3-column + bottom-player detail workspace: dedicated breadcrumb top bar (`#My Meetings / <code> •••`,
   inline Rename, Share session, BotControls, Enable live assist), left **Smart Search** rail (real AI
   Filters, Discussion Review / transcript metrics, interactive Speaker Talk Time with WPM & share rings,

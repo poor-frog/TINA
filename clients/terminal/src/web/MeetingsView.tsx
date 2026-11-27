@@ -21,6 +21,7 @@ import {
   type MeetingFilterState,
 } from "./meetingsFilter";
 import { meetingPhase, type MeetingMock } from "../surfaces/meetingModel";
+import { useOwnBriefIndex } from "./useOwnBriefIndex";
 import { actionsFor, presentMeetingActionFailure } from "../surfaces/meeting";
 import { refreshMeetings } from "../surfaces/liveMeetings";
 import { presentError, readApiFailure } from "../surfaces/apiClient";
@@ -183,6 +184,8 @@ export function MeetingsView({
 
   const facets = useMemo(() => extractFilterFacets(meetings), [meetings]);
   const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
+  const hasUpcoming = useMemo(() => meetings.some((m) => meetingPhase(m) === "prep"), [meetings]);
+  const briefIndex = useOwnBriefIndex(!meetingsOnly && hasUpcoming);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -670,6 +673,15 @@ export function MeetingsView({
                       <span className="tina-web-meeting-title-row">
                         <span className="tina-web-meeting-title">{label}</span>
                         <span className={`tina-web-status-pill ${statusClass(m)}`}>{statusLabel(m)}</span>
+                        {meetingPhase(m) === "prep" && !meetingsOnly && briefIndex.loaded && !m.shared && (
+                          <span
+                            className={`tina-web-status-pill ${
+                              briefIndex.hasBrief(m) ? "brief-ready" : "brief-missing"
+                            }`}
+                          >
+                            {briefIndex.hasBrief(m) ? "Brief ready" : "No brief yet"}
+                          </span>
+                        )}
                         {m.shared && <span className="tina-web-status-pill completed">Shared</span>}
                       </span>
                       <span className="tina-web-feed-meta">

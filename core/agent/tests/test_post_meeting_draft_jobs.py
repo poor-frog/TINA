@@ -1,4 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
+import io
+import shutil
 from threading import Event
 
 from fastapi import FastAPI, HTTPException
@@ -7,6 +9,7 @@ from fastapi.testclient import TestClient
 from control_plane import meeting_knowledge
 from control_plane.post_meeting_draft_jobs import register
 from control_plane.workspace_reader import WorkspaceReader
+from control_plane.workspace_store import S3WorkspaceStore
 
 
 def test_draft_job_deduplicates_and_checks_permissions_on_reload(tmp_path, monkeypatch):
@@ -69,3 +72,100 @@ def test_draft_job_allows_wildcard_pilot_users(tmp_path, monkeypatch):
         assert client.get('/api/workspace/meeting-knowledge/3/draft-job', headers={'x-user-id': '99'}).status_code == 200
         monkeypatch.setenv('TINA_DRAFT_PILOT_USER_IDS', '')
         assert client.get('/api/workspace/meeting-knowledge/3/draft-job', headers={'x-user-id': '99'}).status_code == 404
+
+
+class _FakeS3Error(Exception):
+    def __init__(self, code: str, status: int | None = None) -> None:
+        super().__init__(code)
+        self.response = {'Error': {'Code': code}}
+        if status is not None:
+            self.response['ResponseMetadata'] = {'HTTPStatusCode': status}
+
+
+class _FakeS3:
+    def __init__(self) -> None:
+        self.objects: dict[str, tuple[bytes, str, dict]] = {}
+        self.seq = 0
+        self.get_calls = 0
+
+    def put_object(self, *, Bucket, Key, Body, **kwargs):
+        self.seq += 1
+        etag = f'"etag-{self.seq}"'
+        raw = Body if isinstance(Body, bytes) else Body.read()
+        self.objects[Key] = (raw, etag, kwargs)
+        return {'ETag': etag}
+
+    def get_object(self, *, Bucket, Key, IfNoneMatch=None, **kwargs):
+        self.get_calls += 1
+        if Key not in self.objects:
+            raise _FakeS3Error('NoSuchKey', 404)
+        raw, etag, _ = self.objects[Key]
+        if IfNoneMatch and IfNoneMatch == etag:
+            raise _FakeS3Error('304', 304)
+        return {'Body': io.BytesIO(raw), 'ETag': etag}
+
+
+def test_draft_job_persists_to_s3_and_recovers_after_container_restart(tmp_path, monkeypatch):
+    monkeypatch.setenv('TINA_DRAFT_PILOT_USER_IDS', '*')
+    monkeypatch.setattr(meeting_knowledge, 'meeting_get',
+                        lambda *_: {'status': 'completed', 'user_id': 7})
+    s3 = _FakeS3()
+    answer = {
+        'claims': [{'text': 'Confirmed milestone', 'source_ids': ['s0', 's1']}],
+        'sources': [
+            {'key': 'tr:1', 'fingerprint': 'fp1', 'id': 's0'},
+            {'key': 'doc:spec:0', 'fingerprint': 'fp2', 'id': 's1'},
+        ],
+    }
+
+    def build_app(root):
+        app = FastAPI()
+        app.state.s3_workspace_store = S3WorkspaceStore(
+            s3=s3, bucket='tina-test-bucket', root=root, kms_key_id='kms-data-key',
+        )
+        register(
+            app,
+            lambda request: request.headers['x-user-id'],
+            lambda _: [{'slug': 'wiki', 'name': 'Team Wiki'}],
+            '',
+            WorkspaceReader(str(root)),
+            lambda *_: root,
+            lambda *_: ['notes/spec.md'],
+            lambda *_, **__: 'Spec content',
+            lambda *_: answer['sources'],
+            lambda *_: answer,
+        )
+        return app
+
+    url = '/api/workspace/meeting-knowledge/42/draft-job'
+    headers = {'x-user-id': '7'}
+    root_a = tmp_path / 'container-a'
+    root_a.mkdir()
+    with TestClient(build_app(root_a)) as client_a:
+        res = client_a.post(url, headers=headers, json={'workspace': 'wiki', 'path': 'notes/spec.md'})
+        assert res.status_code == 202
+        after = client_a.get(url, headers=headers)
+        assert after.status_code == 200
+        assert after.json()['job']['status'] == 'completed'
+        assert after.json()['job']['answer'] == answer
+
+    expected_key = '_post-meeting-drafts/7/42/latest.json'
+    assert expected_key in s3.objects
+    raw, _etag, put_kwargs = s3.objects[expected_key]
+    assert put_kwargs.get('ServerSideEncryption') == 'aws:kms'
+    assert put_kwargs.get('SSEKMSKeyId') == 'kms-data-key'
+    assert b'Confirmed milestone' in raw
+
+    # Simulate Fargate container restart with brand-new empty local ephemeral volume.
+    shutil.rmtree(root_a)
+    root_b = tmp_path / 'container-b'
+    root_b.mkdir()
+    with TestClient(build_app(root_b)) as client_b:
+        recovered = client_b.get(url, headers=headers)
+        assert recovered.status_code == 200
+        job = recovered.json()['job']
+        assert job['status'] == 'completed'
+        assert job['workspace'] == 'wiki'
+        assert job['path'] == 'notes/spec.md'
+        assert job['answer'] == answer
+        assert (root_b / '.post-meeting-drafts' / '7' / '42' / 'latest.json').is_file()

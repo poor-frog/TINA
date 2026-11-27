@@ -119,6 +119,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
   const [captureMode, setCaptureMode] = useState<CaptureModalMode>("live");
   const [pendingPrompt, setPendingPrompt] = useState<AskTinaPrompt | null>(null);
   const [pendingKnowledge, setPendingKnowledge] = useState<KnowledgeDeepLink | null>(null);
+  const [autoStartBriefId, setAutoStartBriefId] = useState<string | null>(null);
 
   const openCapture = useCallback((mode: CaptureModalMode = "live") => {
     setCaptureMode(mode);
@@ -182,8 +183,9 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
     }
   }, []);
 
-  const openMeeting = useCallback((meetingId: string) => {
+  const openMeeting = useCallback((meetingId: string, opts?: { startBrief?: boolean }) => {
     setActiveMeetingId(meetingId);
+    setAutoStartBriefId(opts?.startBrief ? meetingId : null);
     setView("meeting");
     setSidebarCollapsed(true);
     setUserMenuOpen(false);
@@ -224,7 +226,19 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
     };
     const onAskChat = (e: Event) => {
       const detail = (e as CustomEvent<AskChatDetail>).detail;
-      if (detail?.prompt) askTina(detail.prompt);
+      if (!detail?.prompt) return;
+      if (meetOnly) {
+        detail.onRejected?.("Workspace chat is unavailable.");
+        return;
+      }
+      detail.onAccepted?.();
+      setPendingPrompt({
+        text: detail.prompt,
+        mode: detail.composeOnly ? "draft" : "send",
+        meetingId: detail.focus?.meeting_id,
+        focus: detail.focus,
+      });
+      navigate("ask");
     };
     const onOpenEntity = (e: Event) => {
       if (meetOnly) return;
@@ -260,7 +274,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
       window.removeEventListener(OPEN_ENTITY_EVENT, onOpenEntity);
       window.removeEventListener("click", onWindowClick);
     };
-  }, [askTina, meetOnly, openKnowledgeDoc]);
+  }, [meetOnly, navigate, openKnowledgeDoc]);
 
   const terminalHref = view === "meeting" && activeMeetingId
     ? terminalMeetingPath(activeMeetingId)
@@ -294,6 +308,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
               liveMeeting={liveMeetings[0]}
               liveMeetings={liveMeetings}
               wsConnected={wsConnected}
+              meetingsOnly={meetOnly}
               hideBar={view === "meeting"}
               onOpenMobileNav={() => setMobileNavOpen((v) => !v)}
               onOpenSearch={() => setSearchOpen(true)}
@@ -345,6 +360,9 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
                 meetingsOnly={meetOnly}
                 canOpenTerminal={canOpenTerminal}
                 user={user}
+                autoStartBrief={autoStartBriefId === activeMeetingId}
+                onConsumeAutoStartBrief={() => setAutoStartBriefId(null)}
+                onOpenKnowledgeDoc={openKnowledgeDoc}
                 onBack={() => navigate("meetings")}
                 onOpenMeeting={openMeeting}
                 onOpenMobileNav={() => setMobileNavOpen((v) => !v)}

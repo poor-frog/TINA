@@ -20,7 +20,7 @@ import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
 import { presentError } from "../surfaces/apiClient";
 import { MeetingKnowledge } from "../surfaces/MeetingKnowledge";
 import { VoiceReplySources } from "../surfaces/VoiceReplySources";
-import type { MeetingMock, TranscriptLine } from "../surfaces/meetingModel";
+import { meetingPhase, type MeetingMock, type TranscriptLine } from "../surfaces/meetingModel";
 import type { ProcessedNoteDTO } from "../surfaces/liveMeetings";
 import type { TranscriptLanguage, TranslationSnapshot } from "../canvas/MeetingTranslation";
 import { projectTranslationGroups } from "../canvas/translationGroups";
@@ -257,8 +257,11 @@ export function MeetingSidePanel({
             native_id: meeting.native_id || meeting.id,
             status: meeting.live_status,
             title: meeting.title_custom || meeting.title,
+            ...(meeting.scheduled_at ? { scheduled_at: meeting.scheduled_at } : {}),
+            ...(meeting.workspace_id ? { workspace_id: meeting.workspace_id } : {}),
           }
         : { kind: "meeting" as const, meeting_id: meetingId, native_id: meetingId };
+      const tabKind = meeting && meetingPhase(meeting) === "prep" ? "meetingPrep" : "meeting";
 
       try {
         await streamChatTurn(
@@ -268,7 +271,7 @@ export function MeetingSidePanel({
             active: activeContext,
             context: {
               tz,
-              surface: { list: "meetings", tab: { kind: "meeting" } },
+              surface: { list: "meetings", tab: { kind: tabKind } },
               focus: activeContext,
             },
           },

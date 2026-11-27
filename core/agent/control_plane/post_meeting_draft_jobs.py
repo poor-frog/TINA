@@ -1,5 +1,6 @@
 """Owner-scoped background drafts stored with the meeting workspace data."""
 
+import contextlib
 import json
 import logging
 import os
@@ -58,6 +59,36 @@ def register(app, subject_of, list_workspaces, meeting_api_url, reader, read_tar
         directory = safe_dir(reader, reader.root, f'.post-meeting-drafts/{subject}/{meeting_id}')
         return directory / 'latest.json'
 
+    def s3_store():
+        return getattr(app.state, 's3_workspace_store', None)
+
+    def sync_from_s3(subject, meeting_id, path, *, force=False):
+        store = s3_store()
+        if store is None:
+            return
+        try:
+            store.sync_post_meeting_draft(subject, meeting_id, path, force=force)
+        except Exception as exc:
+            logger.warning('post-meeting draft S3 sync failed error=%s', type(exc).__name__)
+
+    def push_to_s3(subject, meeting_id, path):
+        store = s3_store()
+        if store is None:
+            return
+        try:
+            store.push_post_meeting_draft(subject, meeting_id, path)
+        except Exception as exc:
+            logger.warning('post-meeting draft S3 push failed error=%s', type(exc).__name__)
+
+    @contextlib.contextmanager
+    def draft_write_lock(subject, meeting_id, path, *, timeout=5.0):
+        store = s3_store()
+        with contextlib.ExitStack() as stack:
+            if store is not None:
+                stack.enter_context(store.distributed_lock(f'post-meeting-draft:{subject}:{meeting_id}', timeout=max(timeout, 5.0)))
+            stack.enter_context(workspace_write_lock(path.parent, timeout=timeout))
+            yield
+
     def load(path):
         try:
             record = json.loads(path.read_text())
@@ -78,7 +109,7 @@ def register(app, subject_of, list_workspaces, meeting_api_url, reader, read_tar
             if temporary and os.path.exists(temporary):
                 os.unlink(temporary)
 
-    def run(request, meeting_id, path, record):
+    def run(request, subject, meeting_id, path, record):
         try:
             authorize(request, meeting_id)
             answer = generate_draft(request, meeting_id, record['workspace'], record['path'], PROMPT)
@@ -89,10 +120,12 @@ def register(app, subject_of, list_workspaces, meeting_api_url, reader, read_tar
         except Exception as exc:
             logger.warning('post-meeting draft failed error=%s', type(exc).__name__)
             result = record | {'status': 'failed'}
-        with workspace_write_lock(path.parent):
+        with draft_write_lock(subject, meeting_id, path):
+            sync_from_s3(subject, meeting_id, path, force=True)
             current = load(path)
             if current and current['id'] == record['id'] and current['status'] == 'running':
                 save(path, result)
+                push_to_s3(subject, meeting_id, path)
 
     def respond(payload, status_code=200):
         return JSONResponse(payload, status_code=status_code, headers={'Cache-Control': 'private, no-store'})
@@ -109,7 +142,9 @@ def register(app, subject_of, list_workspaces, meeting_api_url, reader, read_tar
                 raise HTTPException(403, 'Workspace unavailable')
             base = read_target(request, workspace)
             return respond({'documents': document_paths(request, base) if base.is_dir() else []})
-        record = load(location(subject, meeting_id))
+        path = location(subject, meeting_id)
+        sync_from_s3(subject, meeting_id, path, force=not path.exists())
+        record = load(path)
         if record is None:
             return respond({'workspaces': options, 'job': None})
         job = public(record)
@@ -140,14 +175,16 @@ def register(app, subject_of, list_workspaces, meeting_api_url, reader, read_tar
             raise HTTPException(404, 'Workspace document not found')
         path = location(subject, meeting_id)
         try:
-            with workspace_write_lock(path.parent, timeout=0.5):
+            with draft_write_lock(subject, meeting_id, path, timeout=0.5):
+                sync_from_s3(subject, meeting_id, path, force=True)
                 record = load(path)
                 if record and record['status'] == 'running':
                     return respond({'job': {'id': record['id'], 'status': 'running'}}, 202)
                 record = body.model_dump() | {'id': uuid.uuid4().hex, 'status': 'running',
                                              'expires_at': time.time() + JOB_LEASE_SECONDS}
                 save(path, record)
+                push_to_s3(subject, meeting_id, path)
         except WorkspaceBusyError as exc:
             raise HTTPException(409, 'Draft is busy. Retry shortly.') from exc
-        background.add_task(run, request, meeting_id, path, record)
+        background.add_task(run, request, subject, meeting_id, path, record)
         return respond({'job': public(record)}, 202)

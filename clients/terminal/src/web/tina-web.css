@@ -1658,6 +1658,18 @@
   color: var(--tw-danger);
 }
 
+.tina-web-status-pill.brief-missing {
+  background: rgba(235, 179, 86, 0.14);
+  color: #f2c777;
+  border: 1px solid rgba(235, 179, 86, 0.25);
+}
+
+.tina-web-status-pill.brief-ready {
+  background: rgba(23, 107, 91, 0.28);
+  color: var(--tw-mint);
+  border: 1px solid rgba(145, 215, 190, 0.22);
+}
+
 .tina-web-row-actions {
   display: flex;
   align-items: center;
@@ -2761,6 +2773,18 @@ html[data-theme="light"] .tina-web .tina-web-nav-item:hover {
 html[data-theme="light"] .tina-web .tina-web-nav-item.active {
   background: rgba(23, 107, 91, 0.11);
   color: var(--tw-teal);
+}
+
+html[data-theme="light"] .tina-web .tina-web-status-pill.brief-missing {
+  background: rgba(180, 114, 18, 0.11);
+  color: #8f5605;
+  border-color: rgba(180, 114, 18, 0.24);
+}
+
+html[data-theme="light"] .tina-web .tina-web-status-pill.brief-ready {
+  background: rgba(23, 107, 91, 0.11);
+  color: #146353;
+  border-color: rgba(23, 107, 91, 0.22);
 }
 
 html[data-theme="light"] .tina-web .tina-web-collapse-btn {
