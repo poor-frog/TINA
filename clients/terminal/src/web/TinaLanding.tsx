@@ -807,6 +807,7 @@ export function TinaLanding({
               <h4>{copy.footer.col2}</h4>
               <ul>
                 <li><a href="#privacy">{copy.nav.privacy}</a></li>
+                <li><a href="/privacy">Privacy Policy</a></li>
                 <li><a href="#platforms">{copy.privacy.platformsLabel}</a></li>
                 <li><a href="#faq">{copy.nav.faq}</a></li>
               </ul>

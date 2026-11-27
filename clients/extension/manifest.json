@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "TINA Transcript Viewer",
+  "name": "MeetTina",
   "version": "0.1.0",
-  "description": "Send TINA Bot to supported meeting tabs and read authorized transcripts in TINA Viewer and Google Meet. This extension does not capture audio.",
+  "description": "Send MeetTina Bot to supported meeting tabs and read authorized transcripts in MeetTina and Google Meet. This extension does not capture audio.",
   "permissions": [
     "storage",
     "identity",
@@ -40,7 +40,7 @@
     "service_worker": "viewer-background.js"
   },
   "action": {
-    "default_title": "Open TINA Transcript Viewer",
+    "default_title": "Open MeetTina",
     "default_popup": "welcome.html",
     "default_icon": {
       "16": "assets/icons/icon16.png",

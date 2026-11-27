@@ -1,11 +1,17 @@
 import { context } from 'esbuild';
+import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WATCH = process.argv.includes('--watch');
+const RELEASE = process.argv.includes('--release');
+const PACK = process.argv.includes('--pack');
+const RELEASE_HOSTS = ['https://meettina.site/*', 'https://meet.google.com/*'];
 const outdir = 'dist';
+const releaseDir = 'release';
+
 try {
   rmSync(outdir, { recursive: true, force: true });
 } catch (error) {
@@ -29,9 +35,20 @@ const postBuild = {
       const version = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}.${minuteOfDay}`;
       const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
       manifest.version = version;
-      manifest.version_name = `viewer ${now.toLocaleString('en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}`;
+      manifest.version_name = `${RELEASE ? 'release' : 'viewer'} ${now.toLocaleString('en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}`;
+      if (RELEASE) {
+        manifest.host_permissions = manifest.host_permissions.filter(host => RELEASE_HOSTS.includes(host));
+      }
       writeFileSync(`${outdir}/manifest.json`, JSON.stringify(manifest, null, 2));
-      console.log(`Built TINA Transcript Viewer → dist/ (${manifest.version}${WATCH ? ', watching…' : ''})`);
+      console.log(`Built MeetTina → ${outdir}/ (${manifest.version}${RELEASE ? ', release' : ''}${WATCH ? ', watching…' : ''})`);
+      if (PACK) {
+        mkdirSync(releaseDir, { recursive: true });
+        const zipName = `meettina-extension-${manifest.version}.zip`;
+        const zipPath = resolve(__dirname, releaseDir, zipName);
+        rmSync(zipPath, { force: true });
+        execFileSync('zip', ['-qrX', zipPath, '.'], { cwd: resolve(__dirname, outdir) });
+        console.log(`Packed Chrome Web Store archive → ${releaseDir}/${zipName}`);
+      }
     });
   },
 };

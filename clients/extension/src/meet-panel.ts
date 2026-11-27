@@ -849,7 +849,7 @@ async function connect(): Promise<void> {
     if (!config.account) {
       voiceActivityView.update({ runtime: { session_active: false } });
       setBotStatus('Chưa đăng nhập', 'joining');
-      $('meetingTitle').textContent = 'TINA Transcript Viewer';
+      $('meetingTitle').textContent = 'MeetTina';
       $('emptyTitle').textContent = 'Đăng nhập để xem transcript';
       $('emptyMessage').textContent = 'Dùng tài khoản Google của bạn trên TINA Terminal.';
       return;
