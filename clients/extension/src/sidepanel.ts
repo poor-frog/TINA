@@ -89,7 +89,7 @@ function renderBot(): void {
   toggle.textContent = 'Watch transcript'; toggle.disabled = botWatching || !botMeeting;
   const stop = $('stopBtn') as HTMLButtonElement;
   stop.textContent = 'Ngừng xem'; stop.style.display = botWatching ? '' : 'none'; stop.disabled = false;
-  $('dashBtn').textContent = 'Open Terminal ↗';
+  $('dashBtn').textContent = 'Open MeetTina ↗';
   $('meetingBar').style.display = 'none';
   $('captureNotice').hidden = true;
   $('micGrantBtn').hidden = true;
