@@ -15,7 +15,7 @@ import { LucianBentoGrid } from "./lucian/LucianBentoGrid";
 import { LucianCursorGlowGrid } from "./lucian/LucianCursorGlowGrid";
 import { LucianGlowCta } from "./lucian/LucianGlowCta";
 import styles from "./tinaLanding.module.css";
-import "./landing/tokens.css";
+import "./tokens.css";
 
 const LANG_STORAGE_KEY = "tina.landing.lang";
 
