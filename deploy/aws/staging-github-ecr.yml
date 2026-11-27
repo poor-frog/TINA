@@ -15,6 +15,10 @@ Parameters:
     Type: String
     Default: main
     Description: Git branch allowed to assume this ECR publish role.
+  SubjectPrefix:
+    Type: String
+    Default: ''
+    Description: Optional immutable GitHub OIDC sub claim prefix (e.g. repo:org@123/repo@456 when GitHub immutable subjects are enabled). Leave empty for repo:org/repo.
   CreateOidcProvider:
     Type: String
     Default: 'true'
@@ -36,6 +40,7 @@ Parameters:
 Conditions:
   ShouldCreateOidcProvider: !Equals [!Ref CreateOidcProvider, 'true']
   HasSecondaryPrefix: !Not [!Equals [!Ref SecondaryRepositoryPrefix, '']]
+  HasCustomSubjectPrefix: !Not [!Equals [!Ref SubjectPrefix, '']]
 
 Resources:
   GitHubOidcProvider:
@@ -68,7 +73,10 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${AllowedBranch}'
+                token.actions.githubusercontent.com:sub: !If
+                  - HasCustomSubjectPrefix
+                  - !Sub '${SubjectPrefix}:ref:refs/heads/${AllowedBranch}'
+                  - !Sub 'repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${AllowedBranch}'
       Policies:
         - PolicyName: EcrPushScopedRepositories
           PolicyDocument:
