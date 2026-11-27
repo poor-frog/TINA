@@ -8,6 +8,10 @@ Parameters:
   DomainName:
     Type: String
     Description: Exact HTTPS hostname to serve TINA on CloudFront (e.g. staging.example.com or app.example.com).
+  AlternateDomainName:
+    Type: String
+    Default: ''
+    Description: Optional alternate HTTPS hostname covered on the same ACM certificate (e.g. www.example.com).
   RootDomainName:
     Type: String
     Default: ''
@@ -23,6 +27,7 @@ Parameters:
     Description: Existing Route53 Public Hosted Zone ID for automatic ACM DNS validation. Leave empty for external DNS.
 
 Conditions:
+  HasAlternateDomain: !Not [!Equals [!Ref AlternateDomainName, '']]
   ShouldCreateHostedZone: !And
     - !Equals [!Ref CreateHostedZone, 'true']
     - !Not [!Equals [!Ref RootDomainName, '']]
@@ -32,6 +37,9 @@ Conditions:
   HasRoute53Zone: !Or
     - !Condition ShouldCreateHostedZone
     - !Condition HasExistingHostedZone
+  HasRoute53AndAlternate: !And
+    - !Condition HasRoute53Zone
+    - !Condition HasAlternateDomain
 
 Resources:
   PublicHostedZone:
@@ -46,14 +54,25 @@ Resources:
 
   EdgeCertificate:
     Type: AWS::CertificateManager::Certificate
+    UpdateReplacePolicy: Retain
     Properties:
       DomainName: !Ref DomainName
+      SubjectAlternativeNames: !If
+        - HasAlternateDomain
+        - [!Ref AlternateDomainName]
+        - !Ref 'AWS::NoValue'
       ValidationMethod: DNS
       DomainValidationOptions: !If
-        - HasRoute53Zone
+        - HasRoute53AndAlternate
         - - DomainName: !Ref DomainName
             HostedZoneId: !If [ShouldCreateHostedZone, !Ref PublicHostedZone, !Ref ExistingHostedZoneId]
-        - !Ref 'AWS::NoValue'
+          - DomainName: !Ref AlternateDomainName
+            HostedZoneId: !If [ShouldCreateHostedZone, !Ref PublicHostedZone, !Ref ExistingHostedZoneId]
+        - !If
+          - HasRoute53Zone
+          - - DomainName: !Ref DomainName
+              HostedZoneId: !If [ShouldCreateHostedZone, !Ref PublicHostedZone, !Ref ExistingHostedZoneId]
+          - !Ref 'AWS::NoValue'
 
 Outputs:
   DomainName:

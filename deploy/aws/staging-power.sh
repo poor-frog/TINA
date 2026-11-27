@@ -7,7 +7,7 @@ PROFILE="${AWS_PROFILE:-tina}"
 REGION="${AWS_REGION:-us-east-1}"
 CLUSTER="${TINA_ECS_CLUSTER:-tina-foundation-ecs}"
 RDS_ID="${TINA_RDS_ID:-tina-staging-datastores-postgres-spq5zinq2xpt}"
-STAGE_URL="${TINA_STAGE_URL:-https://meettina.pages.dev}"
+STAGE_URL="${TINA_STAGE_URL:-https://meettina.site}"
 
 CORE_SERVICES=(
   "tina-staging-workspace-s3-EgressProxyService-s0ihtPvdiwuy"

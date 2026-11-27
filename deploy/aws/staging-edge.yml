@@ -14,6 +14,10 @@ Parameters:
     Type: String
     Default: ''
     Description: Optional custom HTTPS hostname (e.g. staging.example.com). Leave empty to use the default CloudFront domain.
+  AlternateDomainName:
+    Type: String
+    Default: ''
+    Description: Optional alternate hostname (e.g. www.example.com) that redirects 308 to CustomDomainName.
   AcmCertificateArn:
     Type: String
     Default: ''
@@ -27,9 +31,15 @@ Conditions:
   HasCustomDomain: !And
     - !Not [!Equals [!Ref CustomDomainName, '']]
     - !Not [!Equals [!Ref AcmCertificateArn, '']]
+  HasAlternateDomain: !And
+    - !Condition HasCustomDomain
+    - !Not [!Equals [!Ref AlternateDomainName, '']]
   CreateDnsAlias: !And
     - !Condition HasCustomDomain
     - !Not [!Equals [!Ref HostedZoneId, '']]
+  CreateAlternateDnsAlias: !And
+    - !Condition CreateDnsAlias
+    - !Condition HasAlternateDomain
 
 Resources:
   OriginSecurityGroup:
@@ -84,6 +94,40 @@ Resources:
         Name: !Ref AWS::StackName
         HTTPPort: 80
         OriginProtocolPolicy: http-only
+  CanonicalHostRedirectFunction:
+    Type: AWS::CloudFront::Function
+    Condition: HasAlternateDomain
+    Properties:
+      Name: !Sub '${AWS::StackName}-canonical-redirect'
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Redirect alternate hostname to canonical CustomDomainName
+        Runtime: cloudfront-js-2.0
+      FunctionCode: !Sub |
+        function handler(event) {
+          var req = event.request;
+          var host = req.headers.host && req.headers.host.value;
+          if (host && host.toLowerCase() === '${AlternateDomainName}'.toLowerCase()) {
+            var parts = [];
+            for (var k in req.querystring) {
+              var q = req.querystring[k];
+              if (q.multiValue) {
+                for (var i = 0; i < q.multiValue.length; i++) {
+                  parts.push(k + (q.multiValue[i].value !== '' ? '=' + q.multiValue[i].value : ''));
+                }
+              } else {
+                parts.push(k + (q.value !== '' ? '=' + q.value : ''));
+              }
+            }
+            var qs = parts.length ? '?' + parts.join('&') : '';
+            return {
+              statusCode: 308,
+              statusDescription: 'Permanent Redirect',
+              headers: { location: { value: 'https://${CustomDomainName}' + req.uri + qs } }
+            };
+          }
+          return req;
+        }
   Distribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -92,7 +136,10 @@ Resources:
         Enabled: true
         HttpVersion: http2
         WebACLId: !Ref WebAclArn
-        Aliases: !If [HasCustomDomain, [!Ref CustomDomainName], !Ref 'AWS::NoValue']
+        Aliases: !If
+          - HasAlternateDomain
+          - [!Ref CustomDomainName, !Ref AlternateDomainName]
+          - !If [HasCustomDomain, [!Ref CustomDomainName], !Ref 'AWS::NoValue']
         ViewerCertificate: !If
           - HasCustomDomain
           - AcmCertificateArn: !Ref AcmCertificateArn
@@ -110,6 +157,11 @@ Resources:
           AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
           CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # AWS managed CachingDisabled
           OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3 # AWS managed AllViewer
+          FunctionAssociations: !If
+            - HasAlternateDomain
+            - - EventType: viewer-request
+                FunctionARN: !GetAtt CanonicalHostRedirectFunction.FunctionMetadata.FunctionARN
+            - !Ref 'AWS::NoValue'
         CustomErrorResponses:
           - ErrorCode: 503
             ErrorCachingMinTTL: 0
@@ -126,6 +178,23 @@ Resources:
             DNSName: !GetAtt Distribution.DomainName
             HostedZoneId: Z2FDTNDATAQYW2
         - Name: !Ref CustomDomainName
+          Type: AAAA
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+
+  AlternateDomainAliasRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Condition: CreateAlternateDnsAlias
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        - Name: !Ref AlternateDomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+        - Name: !Ref AlternateDomainName
           Type: AAAA
           AliasTarget:
             DNSName: !GetAtt Distribution.DomainName
