@@ -57,6 +57,8 @@ CASES = [
     ("GET", "/meetings/42/voice-assistant", "/meetings/{meeting_id}/voice-assistant"),
     ("GET", "/meetings/42/voice-assistant/sources/00000000-0000-4000-8000-000000000001",
      "/meetings/{meeting_id}/voice-assistant/sources/{request_id}"),
+    ("GET", "/meetings/42/voice-assistant/audio/00000000-0000-4000-8000-000000000001",
+     "/meetings/{meeting_id}/voice-assistant/audio/{request_id}"),
     ("PUT", "/meetings/42/voice-assistant", "/meetings/{meeting_id}/voice-assistant"),
     ("POST", "/meetings/42/voice-assistant/navigation/00000000-0000-4000-8000-000000000123",
      "/meetings/{meeting_id}/voice-assistant/navigation/{request_id}"),

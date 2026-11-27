@@ -550,6 +550,12 @@ describe("WebShell production UI (Option A & Option B)", () => {
       if (url.includes("/api/chat/approval") && init?.method === "POST") {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
+      if (url.includes("/api/meetings/") && url.includes("/voice-assistant/audio/")) {
+        return new Response(new Uint8Array([82, 73, 70, 70, 0, 0, 0, 0]), {
+          status: 200,
+          headers: { "Content-Type": "audio/wav" },
+        });
+      }
       if (url.includes("/api/meetings/") && url.includes("/voice-assistant")) {
         return new Response(
           JSON.stringify({
@@ -1564,13 +1570,29 @@ describe("WebShell production UI (Option A & Option B)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close audio drawer" }));
 
     // Transcript tab -> #458 Voice Orb + #476 Read Aloud on Voice Agent reply + #220 Selection Tooltip mounted
-    fireEvent.click(screen.getByRole("tab", { name: /Transcript/i }));
-    expect(await screen.findByTestId("lucian-voice-orb")).toBeTruthy();
-    const readAloudBtn = await screen.findByRole("button", { name: "Read aloud" });
-    fireEvent.click(readAloudBtn);
-    expect(screen.getByRole("button", { name: "Pause read aloud" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Pause read aloud" }));
-    expect(screen.getAllByTestId("lucian-selection-tooltip").length).toBeGreaterThanOrEqual(1);
+    const origPlay = HTMLMediaElement.prototype.play;
+    const origPause = HTMLMediaElement.prototype.pause;
+    const origCreateUrl = URL.createObjectURL;
+    const origRevokeUrl = URL.revokeObjectURL;
+    HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined);
+    HTMLMediaElement.prototype.pause = vi.fn();
+    URL.createObjectURL = vi.fn(() => "blob:vieneu-test");
+    URL.revokeObjectURL = vi.fn();
+    try {
+      fireEvent.click(screen.getByRole("tab", { name: /Transcript/i }));
+      expect(await screen.findByTestId("lucian-voice-orb")).toBeTruthy();
+      const readAloudBtn = await screen.findByRole("button", { name: "Read aloud" });
+      fireEvent.click(readAloudBtn);
+      const pauseBtn = await screen.findByRole("button", { name: "Pause read aloud" });
+      expect(pauseBtn).toBeTruthy();
+      fireEvent.click(pauseBtn);
+      expect(screen.getAllByTestId("lucian-selection-tooltip").length).toBeGreaterThanOrEqual(1);
+    } finally {
+      HTMLMediaElement.prototype.play = origPlay;
+      HTMLMediaElement.prototype.pause = origPause;
+      URL.createObjectURL = origCreateUrl;
+      URL.revokeObjectURL = origRevokeUrl;
+    }
   });
 
   it("supports Lucian Package 3A: #471 Command K button, #046 Command Palette, #039 Sliding Pill Tabs, #014/#093 Task Checklist Celebration, and #439 Skeleton", async () => {

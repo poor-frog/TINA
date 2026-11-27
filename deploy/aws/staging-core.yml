@@ -182,6 +182,7 @@ Resources:
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:s3:::${RecordingsBucket}/recordings/*'
                   - !Sub 'arn:${AWS::Partition}:s3:::${RecordingsBucket}/signal/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${RecordingsBucket}/voice-replies/*'
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition

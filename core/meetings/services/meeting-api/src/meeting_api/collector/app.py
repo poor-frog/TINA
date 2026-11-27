@@ -132,6 +132,7 @@ def build_router(
     calendar_sync_status: Optional[Callable] = None,
     attendee_email_lookup: Optional[Callable] = None,
     artifact_object_deleter: Optional[Callable] = None,
+    voice_artifact_deleter: Optional[Callable] = None,
     refiner=None,
     diarizer=None,
     aligner=None,
@@ -944,6 +945,8 @@ def build_router(
                 # Storage FIRST. Any exception deliberately aborts before DB paths/transcripts are
                 # scrubbed, so the same owner-scoped request can retry with the original keys.
                 deleted_objects += len(await artifact_object_deleter(recording))
+            if voice_artifact_deleter is not None:
+                deleted_objects += len(await voice_artifact_deleter(user_id, meeting_id))
 
             finalized = await store.finalize_completed_artifact_deletion(user_id, meeting_id)
             if finalized is None:

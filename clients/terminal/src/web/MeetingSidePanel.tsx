@@ -1261,7 +1261,12 @@ export function MeetingSidePanel({
                       <LucianReadAloud
                         text={displayText}
                         textClassName={styles.voiceReplyText}
-                        autoPlay={reply.state === "started"}
+                        showControls={!(partial && !reply.played_text?.trim())}
+                        audioUrl={
+                          partial && !reply.played_text?.trim()
+                            ? undefined
+                            : `${voiceApiBase}/audio/${encodeURIComponent(reply.request_id)}`
+                        }
                         highlighted={Boolean(highlightedKeys[item.key])}
                       />
 

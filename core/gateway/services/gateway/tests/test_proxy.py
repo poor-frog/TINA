@@ -59,7 +59,7 @@ def test_extension_cors_only_allows_configured_origin_and_preserves_authenticati
         create_app(FakeAuthorizer(), downstream, FakeRedis(), extension_origins=("*",))
 
 
-@pytest.mark.parametrize('method,kind',[('POST','navigation'),('POST','handoff'),('GET','handoff')])
+@pytest.mark.parametrize('method,kind',[('POST','navigation'),('POST','handoff'),('GET','handoff'),('GET','audio')])
 def test_owner_voice_transfer_forwards_with_required_scopes(method,kind):
     path=f'/meetings/1/voice-assistant/{kind}/00000000-0000-4000-8000-000000000123'
     client,downstream=_client()

@@ -283,21 +283,24 @@ def create_app(
         playback_redis = FakeRedis(decode_responses=True)
     app.state.speech_playback = PlaybackStore(playback_redis, meeting_repo.save_voice_reply)
     app.include_router(build_speak_router(meeting_repo, command_publisher, app.state.speech_playback))
-    from .lifecycle.voice import build_voice_router
-    app.include_router(build_voice_router(meeting_repo, playback_redis, command_publisher, app.state.speech_playback))
+    # Resolve the shared recording storage before mounting voice + collector: voice reply audio cache
+    # and completed-meeting erasure both use this same port.
+    if storage is None:
+        storage = _recordings_fakes().InMemoryStorage()
+
+    from .lifecycle.voice import build_voice_router, delete_voice_reply_objects
+    app.include_router(build_voice_router(meeting_repo, playback_redis, command_publisher, app.state.speech_playback, storage=storage))
     from .lifecycle.audio import build_audio_router
     app.include_router(build_audio_router(meeting_repo))
     from .lifecycle.voice_settings import build_voice_settings_router
-
-    # Resolve the shared recording storage before mounting the collector: completed-meeting erasure
-    # uses this same port to delete objects before its transcript/JSONB finalization.
-    if storage is None:
-        storage = _recordings_fakes().InMemoryStorage()
 
     async def _delete_recording_objects(recording: dict) -> list[str]:
         from .recordings.deletion import delete_recording_objects
 
         return await delete_recording_objects(storage, recording)
+
+    async def _delete_voice_reply_objects(user_id: int, meeting_id: int) -> list[str]:
+        return await delete_voice_reply_objects(storage, user_id, meeting_id)
 
     # --- collector: transcripts + meetings + ws-authorize (api.v1) ---
     if transcript_store is None:
@@ -321,7 +324,8 @@ def create_app(
                                             calendar_sync_now=calendar_sync_now,
                                             calendar_sync_status=calendar_sync_status,
                                             attendee_email_lookup=attendee_email_lookup,
-                                            artifact_object_deleter=_delete_recording_objects))
+                                            artifact_object_deleter=_delete_recording_objects,
+                                            voice_artifact_deleter=_delete_voice_reply_objects))
 
     # --- recordings: chunk upload + finalize → meeting.data JSONB (recording.v1) ---
     if recording_repo is None:

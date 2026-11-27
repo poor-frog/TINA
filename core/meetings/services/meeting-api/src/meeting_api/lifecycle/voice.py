@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import io
 import json
 import logging
 import os
 import re
 import asyncio
 import time
+import wave
 from contextlib import suppress
 from uuid import UUID
 from typing import Literal, Annotated
@@ -285,11 +287,27 @@ def policy_of(row):
     return VoicePolicy.model_validate(saved)
 
 
-def build_voice_router(repo, redis, publisher, playback=None, client_factory=httpx.AsyncClient):
+VOICE_REPLY_MAX_PCM_BYTES = 24000 * 2 * 120
+
+
+async def delete_voice_reply_objects(storage, user_id, meeting_id) -> list[str]:
+    """Delete all cached VieNeu WAVs and pinned speech profiles for one owned meeting."""
+    if storage is None or user_id is None or meeting_id is None:
+        return []
+    from .speech_profile import voice_reply_storage_prefix
+    prefix = voice_reply_storage_prefix(user_id, meeting_id)
+    keys = await storage.list(prefix)
+    for key in keys:
+        await storage.delete(key)
+    return keys
+
+
+def build_voice_router(repo, redis, publisher, playback=None, client_factory=httpx.AsyncClient, storage=None):
     router = APIRouter()
     task_flows = TaskFlowStore(redis, playback)
     handoffs = VoiceHandoffs(redis, playback)
     ready_inflight: dict[str, asyncio.Task[tuple[bool, str | None]]] = {}
+    audio_inflight: dict[str, asyncio.Task[bytes]] = {}
 
     async def meeting(mid, user=None, session: str | None = None, authorization=None):
         row = await repo.get_meeting(mid)
@@ -548,6 +566,155 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
             raise HTTPException(409, 'Voice sources changed')
         return result
 
+    @router.get('/meetings/{meeting_id}/voice-assistant/audio/{request_id}')
+    async def reply_audio(meeting_id: int, request_id: UUID, x_user_id: str | None = Header(default=None)):
+        user = _resolve_user_id(x_user_id)
+        row = await meeting(meeting_id, user)
+        if (row.get('data') or {}).get('artifact_deletion'):
+            raise HTTPException(404, 'Meeting artifacts were deleted')
+        record = ((row.get('data') or {}).get('voice_replies') or {}).get(str(request_id))
+        if record is None:
+            raise HTTPException(404, 'Voice reply not found')
+        reply = VoiceReply.model_validate({k: v for k, v in record.items() if k != 'session_uid'})
+        spoken_text = (
+            (reply.played_text or '').strip()
+            if reply.state == 'stopped' and reply.played_text is not None
+            else reply.text.strip()
+        )
+        if not spoken_text:
+            raise HTTPException(404, 'Voice reply has no spoken audio')
+
+        from .speech_profile import resolve_reply_speech_profile, voice_reply_storage_prefix
+        voice, profile = await resolve_reply_speech_profile(
+            row, record.get('session_uid'), redis, client_factory, storage=storage
+        )
+        cache_hash = hashlib.sha256(
+            json.dumps(
+                {'v': 1, 'text': spoken_text, 'voice': voice, 'profile': profile or ''},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(',', ':'),
+            ).encode('utf-8')
+        ).hexdigest()[:24]
+        cache_key = f"{voice_reply_storage_prefix(row['user_id'], meeting_id)}{request_id}/{cache_hash}.wav"
+
+        if storage is not None:
+            try:
+                if await storage.exists(cache_key):
+                    cached_wav = await storage.get(cache_key)
+                    if isinstance(cached_wav, (bytes, bytearray)) and len(cached_wav) > 44 and bytes(cached_wav[:4]) == b'RIFF':
+                        return Response(
+                            bytes(cached_wav),
+                            media_type='audio/wav',
+                            headers={'Cache-Control': 'no-store', 'X-Voice-Audio-Cache': 'hit'},
+                        )
+            except Exception:
+                log.warning('Voice reply audio cache read failed for meeting %s', meeting_id)
+
+        url = os.environ.get('TTS_SERVICE_URL', '').rstrip('/')
+        token = os.environ.get('TTS_API_TOKEN', '')
+        if not url or not token:
+            raise HTTPException(503, 'Dịch vụ giọng đọc VieNeu chưa được cấu hình trên máy chủ.')
+
+        async def _synthesize() -> bytes:
+            payload = {
+                'model': 'tts-1',
+                'voice': voice,
+                'response_format': 'pcm',
+                'input': spoken_text,
+                'meeting_id': meeting_id,
+                **({'profile': profile} if profile else {}),
+            }
+            started = time.monotonic()
+            busy_error = False
+            try:
+                timeout = httpx.Timeout(connect=5.0, read=28.0, write=10.0, pool=5.0)
+                async with client_factory(timeout=timeout, follow_redirects=False) as client:
+                    async with client.stream(
+                        'POST',
+                        url + '/v1/audio/speech',
+                        headers={'X-API-Key': token},
+                        json=payload,
+                    ) as response:
+                        if response.status_code != 200:
+                            err_raw = bytearray()
+                            async for chunk in response.aiter_bytes():
+                                err_raw.extend(chunk)
+                                if len(err_raw) >= 4096:
+                                    break
+                            err_text = err_raw.decode('utf-8', errors='ignore').lower()
+                            busy_error = response.status_code in (429, 503) and any(
+                                kw in err_text for kw in ('queue', 'busy', 'timed out', 'timeout')
+                            )
+                            raise ValueError('TTS upstream status error')
+                        if (
+                            response.headers.get('X-Audio-Sample-Rate') != '24000'
+                            or response.headers.get('X-Audio-Channels') != '1'
+                        ):
+                            raise ValueError('Unexpected PCM format')
+                        pcm = bytearray()
+                        async for chunk in response.aiter_bytes():
+                            pcm.extend(chunk)
+                            if len(pcm) > VOICE_REPLY_MAX_PCM_BYTES:
+                                raise ValueError('Oversized voice reply audio')
+                if not pcm or len(pcm) % 2:
+                    raise ValueError('Invalid PCM')
+                output = io.BytesIO()
+                with wave.open(output, 'wb') as wav:
+                    wav.setparams((1, 2, 24000, 0, 'NONE', 'not compressed'))
+                    wav.writeframes(pcm)
+                wav_bytes = output.getvalue()
+            except httpx.TimeoutException as exc:
+                raise HTTPException(
+                    503,
+                    'Dịch vụ giọng đọc VieNeu đang bận phục vụ cuộc họp. Vui lòng thử lại sau vài giây.',
+                ) from exc
+            except (httpx.HTTPError, ValueError) as exc:
+                if busy_error:
+                    raise HTTPException(
+                        503,
+                        'Dịch vụ giọng đọc VieNeu đang bận phục vụ cuộc họp. Vui lòng thử lại sau vài giây.',
+                    ) from exc
+                raise HTTPException(
+                    503,
+                    'Chưa thể tạo giọng đọc VieNeu lúc này. Vui lòng thử lại.',
+                ) from exc
+
+            fresh = await repo.get_meeting(meeting_id)
+            if fresh is None or str(fresh.get('user_id')) != str(user) or (fresh.get('data') or {}).get('artifact_deletion'):
+                raise HTTPException(404, 'Meeting artifacts were deleted')
+
+            if storage is not None:
+                try:
+                    await storage.upload(cache_key, wav_bytes, content_type='audio/wav')
+                except Exception:
+                    log.warning('Voice reply audio cache write failed for meeting %s', meeting_id)
+            log.info('%s', json.dumps({
+                'type': 'voice_reply_audio_synthesized',
+                'request_id': str(request_id),
+                'elapsed_ms': round((time.monotonic() - started) * 1000),
+                'bytes': len(wav_bytes),
+            }))
+            return wav_bytes
+
+        task = audio_inflight.get(cache_key)
+        if task is None or task.done():
+            task = asyncio.create_task(_synthesize())
+            audio_inflight[cache_key] = task
+            def _cleanup_audio(done_task: asyncio.Task, key: str = cache_key) -> None:
+                if audio_inflight.get(key) is done_task:
+                    audio_inflight.pop(key, None)
+                if not done_task.cancelled():
+                    with suppress(BaseException):
+                        done_task.exception()
+            task.add_done_callback(_cleanup_audio)
+        wav_bytes = await asyncio.shield(task)
+        return Response(
+            wav_bytes,
+            media_type='audio/wav',
+            headers={'Cache-Control': 'no-store', 'X-Voice-Audio-Cache': 'miss'},
+        )
+
     @router.put('/meetings/{meeting_id}/voice-assistant')
     async def set_policy(meeting_id: int, body: VoicePolicy, x_user_id: str | None = Header(default=None)):
         mid = meeting_id
@@ -590,7 +757,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         row = await meeting(mid, session=session, authorization=authorization)
         policy = policy_of(row)
         from .speech_profile import room_profile
-        speech_profile=await room_profile(row,session,redis,client_factory) if policy.enabled else None
+        speech_profile=await room_profile(row,session,redis,client_factory,storage=storage) if policy.enabled else None
         ready = False
         reason = None
         if policy.enabled:
