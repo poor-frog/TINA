@@ -1242,4 +1242,23 @@ async def test_config_readiness_coalesces_concurrent_probes_and_bounds_agent_rea
         assert r1.json()['ready'] is True and r2.json()['ready'] is True
         assert ready_calls == 1
         assert all(t == 4 for t in timeouts)
-        assert 0 < await redis.ttl('meeting:voice:1:current:ready:1') <= 15
+        assert 5 < await redis.ttl('meeting:voice:1:current:ready:1') <= 15
+
+
+async def test_config_readiness_uses_short_negative_cache_ttl_for_faster_recovery(setup):
+    _, repo, redis, *_ = setup
+
+    async def failing_upstream(request):
+        return httpx.Response(503, json={'detail': 'unavailable'})
+
+    app = FastAPI()
+    app.include_router(build_voice_router(
+        repo, redis, redis,
+        client_factory=lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(failing_upstream), **kw),
+    ))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        res = await client.get('/bots/voice/1/current/config', headers=headers())
+        assert res.status_code == 200
+        assert res.json()['ready'] is False
+        assert res.json()['unavailable_reason'] == 'sources_unavailable'
+        assert 0 < await redis.ttl('meeting:voice:1:current:ready:1') <= 5

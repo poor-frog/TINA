@@ -130,6 +130,7 @@ class S3WorkspaceStore:
         token = uuid.uuid4().hex
         deadline = time.monotonic() + timeout
         acquired = False
+        timed_out = False
         while time.monotonic() < deadline:
             status = self._try_acquire_lock(client, lock_key, token)
             if status is True:
@@ -138,6 +139,10 @@ class S3WorkspaceStore:
             if status is None:
                 break
             time.sleep(0.05)
+        else:
+            timed_out = True
+        if timed_out and not acquired:
+            log.warning("distributed_lock timeout key=%s timeout=%.1fs", key, timeout)
         try:
             yield
         finally:
@@ -155,19 +160,44 @@ class S3WorkspaceStore:
         token = uuid.uuid4().hex
         deadline = time.monotonic() + timeout
         acquired = False
+        timed_out = False
         while time.monotonic() < deadline:
-            status = await asyncio.to_thread(self._try_acquire_lock, client, lock_key, token)
+            acquire_task = asyncio.create_task(
+                asyncio.to_thread(self._try_acquire_lock, client, lock_key, token),
+            )
+            try:
+                status = await asyncio.shield(acquire_task)
+            except asyncio.CancelledError:
+                def _release_if_acquired(done: asyncio.Task[Optional[bool]]) -> None:
+                    if not done.cancelled() and done.exception() is None and done.result() is True:
+                        cleanup = asyncio.create_task(
+                            asyncio.to_thread(self._release_lock, client, lock_key, token),
+                        )
+                        cleanup.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+                acquire_task.add_done_callback(_release_if_acquired)
+                raise
             if status is True:
                 acquired = True
                 break
             if status is None:
                 break
             await asyncio.sleep(0.05)
+        else:
+            timed_out = True
+        if timed_out and not acquired:
+            log.warning("async_distributed_lock timeout key=%s timeout=%.1fs", key, timeout)
         try:
             yield
         finally:
             if acquired:
-                await asyncio.to_thread(self._release_lock, client, lock_key, token)
+                release_task = asyncio.create_task(
+                    asyncio.to_thread(self._release_lock, client, lock_key, token),
+                )
+                try:
+                    await asyncio.shield(release_task)
+                except asyncio.CancelledError:
+                    release_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+                    raise
 
     # ── attach state.json sync ────────────────────────────────────────────────
 

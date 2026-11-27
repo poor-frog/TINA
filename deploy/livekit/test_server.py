@@ -877,3 +877,52 @@ async def test_real_disconnect_does_not_poison_runtime_failed_flag(service):
         gate.set()
         srv.should_exit = True
         await serving
+
+
+@pytest.mark.parametrize('settles_cleanly', [True, False])
+async def test_disconnect_during_generate_reply_marks_failed_only_when_interrupt_hangs(service, monkeypatch, settles_cleanly):
+    client, calls, state, app = service
+    started = asyncio.Event()
+    interrupted = asyncio.Event()
+    hang = asyncio.Event()
+
+    class SyntheticHandle:
+        def interrupt(self):
+            interrupted.set()
+
+        def exception(self):
+            return None
+
+        async def wait_for_playout(self):
+            started.set()
+            if settles_cleanly:
+                await interrupted.wait()
+            else:
+                await hang.wait()
+
+    monkeypatch.setattr(AgentSession, 'generate_reply', lambda self, **kw: SyntheticHandle())
+    sock = socket.socket()
+    sock.bind(('127.0.0.1', 0))
+    sock.listen()
+    port = sock.getsockname()[1]
+    srv = uvicorn.Server(uvicorn.Config(app, lifespan='off', access_log=False, log_level='critical', timeout_graceful_shutdown=1))
+    serving = asyncio.create_task(srv.serve(sockets=[sock]))
+    try:
+        while not srv.started:
+            await asyncio.sleep(.01)
+        async with httpx.AsyncClient(base_url=f'http://127.0.0.1:{port}') as http:
+            pending = asyncio.create_task(http.post(URL + '/answer', headers=HEADERS, json=question()))
+            await asyncio.wait_for(started.wait(), 3)
+            pending.cancel()
+            with suppress(asyncio.CancelledError):
+                await pending
+            row = next(iter(app.state.rows.values()))
+            async with asyncio.timeout(4):
+                while row.lock.locked():
+                    await asyncio.sleep(.02)
+            assert interrupted.is_set()
+            assert row.failed is (not settles_cleanly)
+    finally:
+        hang.set()
+        srv.should_exit = True
+        await serving

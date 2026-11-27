@@ -124,6 +124,12 @@ const SAFE_NETWORK_CODES = new Set([
   'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET',
 ]);
 
+const TRANSIENT_HTTP_CODES = new Set(['http_429', 'http_500', 'http_502', 'http_503', 'http_504']);
+
+function isTransientProbeError(code: string): boolean {
+  return code === 'timeout' || code === 'error' || TRANSIENT_HTTP_CODES.has(code) || SAFE_NETWORK_CODES.has(code);
+}
+
 function safeErrorCode(err: unknown): string {
   if (err instanceof VoiceApiError) return err.code;
   if (err instanceof Error) {
@@ -585,8 +591,9 @@ export class MeetingVoice {
       }
       this.publishState(this.state, this.requestId);
     } catch (err) {
-      this.log(`poll_failed:${probing ? 'probe' : 'setup'}:${safeErrorCode(err)}`);
-      if (probing && this.processing && !this.externalSpeaking && ['THINKING', 'SPEAKING'].includes(this.state)) {
+      const errCode = safeErrorCode(err);
+      this.log(`poll_failed:${probing ? 'probe' : 'setup'}:${errCode}`);
+      if (probing && isTransientProbeError(errCode) && this.processing && !this.externalSpeaking && ['THINKING', 'SPEAKING'].includes(this.state)) {
         if (++this.activePollFailures < 3) return;
       }
       this.activePollFailures = 0;
@@ -595,6 +602,7 @@ export class MeetingVoice {
       if (!this.closed && this.state === 'ERROR' && !this.worker && !this.requestId && !this.externalSpeaking) {
         this.probeRecovery = recoverable;
         this.diagnose('services_unavailable');
+        this.publishState('ERROR');
         return;
       }
       if (!this.closed && await this.cancel(true)) {

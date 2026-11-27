@@ -92,6 +92,10 @@ class Stop(BaseModel):
 class _ClientDisconnected(Exception):
     """Raised when the HTTP caller closes the connection before completion."""
 
+    def __init__(self, *, settled: bool = True):
+        super().__init__('Client disconnected')
+        self.settled = settled
+
 
 async def connect_room(name):
     room = rtc.Room()
@@ -381,12 +385,20 @@ def create_app(client=None, room_connector=connect_room):
             while not task.done():
                 await asyncio.sleep(.05)
                 if await request.is_disconnected():
-                    handle.interrupt(); raise _ClientDisconnected()
+                    handle.interrupt()
+                    settled = False
+                    try:
+                        await asyncio.wait_for(asyncio.shield(task), 1.0)
+                        settled = True
+                    except (TimeoutError, Exception):
+                        settled = task.done()
+                    raise _ClientDisconnected(settled=settled)
             await task
             if handle.exception() is not None: raise HTTPException(503,'Agent pipeline failed')
         finally:
-            if not task.done(): handle.interrupt(); task.cancel()
-            with suppress(asyncio.CancelledError): await task
+            if not task.done():
+                handle.interrupt(); task.cancel()
+                with suppress(asyncio.CancelledError, Exception): await task
 
     async def wait_flow(task, request):
         try:
@@ -475,8 +487,8 @@ def create_app(client=None, room_connector=connect_room):
                 if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
                 if not row.model.result: raise HTTPException(503,'TINA answer failed')
                 return row.model.result | {'voice_runtime':'livekit'}
-            except _ClientDisconnected:
-                disconnected = True
+            except _ClientDisconnected as exc:
+                disconnected = exc.settled
                 return JSONResponse({'detail': 'Client disconnected'}, status_code=499)
             except asyncio.CancelledError:
                 if (mid,session,rid) in stopped or row.closing is not None: raise HTTPException(409,'Voice turn stopped') from None

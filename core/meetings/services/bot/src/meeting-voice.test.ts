@@ -1642,3 +1642,77 @@ test('repeated poll failures while already in ERROR do not flap OFF to ERROR and
     await voice.stop();
   }
 });
+
+test('third consecutive transient poll failure aborts THINKING, and authoritative 409/401 aborts immediately', async () => {
+  // 1. Third consecutive transient timeout aborts active turn into ERROR.
+  const pending1 = deferred<{text: string}>();
+  const f1 = fixture(() => pending1.promise);
+  let fail1 = false;
+  const origConfig1 = f1.api.config;
+  f1.api.config = async signal => {
+    if (fail1) {
+      const err = new Error('transient');
+      err.name = 'TimeoutError';
+      throw err;
+    }
+    return origConfig1(signal);
+  };
+  const pollOf = (voice: MeetingVoice) => async () => {
+    clearTimeout((voice as any).pollTimer);
+    await (voice as any).poll();
+    clearTimeout((voice as any).pollTimer);
+  };
+  try {
+    await f1.voice.start();
+    clearTimeout((f1.voice as any).pollTimer);
+    await f1.capture();
+    assert.equal(f1.states.at(-1), 'THINKING');
+    fail1 = true;
+    await pollOf(f1.voice)();
+    await pollOf(f1.voice)();
+    assert.equal(f1.states.at(-1), 'THINKING');
+    await pollOf(f1.voice)();
+    assert.equal(f1.states.at(-1), 'ERROR');
+  } finally {
+    pending1.resolve({text: 'late'});
+    await f1.voice.stop();
+  }
+
+  // 2. Authoritative HTTP 409 / 401 from /config aborts active turn immediately on the 1st failure.
+  for (const status of [409, 401] as const) {
+    let rejectConfig = false;
+    const pending2 = deferred<{text: string}>();
+    const api = voiceApi('http://core.test/bots/voice/1/s', 'cap', async url => {
+      if (String(url).endsWith('/config')) {
+        if (rejectConfig) return new Response('Session ended', {status});
+        return Response.json({enabled: true, ready: true, revision: 1});
+      }
+      if (String(url).endsWith('/state')) return Response.json({accepted: true});
+      return Response.json(await pending2.promise);
+    });
+    const states: string[] = [], logs: string[] = [];
+    let emit!: (v: Record<string, unknown>) => void;
+    const origState = api.state;
+    api.state = async (s, ...rest) => { states.push(s); return origState(s, ...rest); };
+    const voice = new MeetingVoice(api, {speak: async () => 'completed', stop: async () => {}}, async () => {},
+      cb => { emit = cb; return {send: () => true, close() {}}; }, line => { logs.push(line); });
+    try {
+      await voice.start();
+      clearTimeout((voice as any).pollTimer);
+      emit({event: 'state', state: 'LISTENING', generation: 0});
+      const start = Date.now() + 1; await tick(5);
+      voice.hypothesis({channel: 0, speakerKey: 's', startMs: start, endMs: start + 10, text: 'TINA ơi ai làm?', final: true});
+      emit({event: 'activity', channel: 0, speech: false, endMs: start + 10, stamp: start + 20, generation: 0});
+      await tick(450);
+      assert.equal(states.at(-1), 'THINKING');
+      rejectConfig = true;
+      await pollOf(voice)();
+      await tick(10);
+      assert.equal(states.at(-1), 'ERROR', `HTTP ${status} must abort THINKING on the first poll`);
+      assert(logs.includes(`poll_failed:probe:http_${status}`));
+    } finally {
+      pending2.resolve({text: 'late'});
+      await voice.stop();
+    }
+  }
+});

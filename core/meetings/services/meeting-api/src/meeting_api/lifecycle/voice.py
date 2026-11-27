@@ -635,7 +635,8 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                             probe_ready = False
                         if not probe_ready: probe_reason = 'livekit_unavailable'
                     # Readiness is advisory; answers always recheck live policy/source fingerprints.
-                    await redis.set(ready_key, json.dumps({'ready': probe_ready, 'reason': probe_reason}), ex=15)
+                    await redis.set(ready_key, json.dumps({'ready': probe_ready, 'reason': probe_reason}),
+                                    ex=15 if probe_ready else 5)
                     return probe_ready, probe_reason
 
                 flight_key = f'{ready_key}:{policy.source_profile_id or ""}'

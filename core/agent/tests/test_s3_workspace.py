@@ -1233,6 +1233,26 @@ def test_async_distributed_lock_does_not_block_event_loop_and_translations_skip_
 
     asyncio.run(_run_contention())
 
+    # 1b. Cancelling a coroutine while holding async_distributed_lock still releases the Redis lock.
+    async def _run_cancel_release():
+        entered = asyncio.Event()
+        never = asyncio.Event()
+
+        async def cancelled_holder():
+            async with store.async_distributed_lock("subject:8", timeout=5.0):
+                entered.set()
+                await never.wait()
+
+        task = asyncio.create_task(cancelled_holder())
+        await entered.wait()
+        assert "tina:ws-lock:subject:8" in store._redis_client.keys
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert "tina:ws-lock:subject:8" not in store._redis_client.keys
+
+    asyncio.run(_run_cancel_release())
+
     # 2. /api/meeting-translations bypasses S3 middleware completely, while workspace writes use async_distributed_lock.
     monkeypatch.setenv("TINA_WORKSPACE_STORAGE", "s3")
     monkeypatch.setenv("TINA_S3_WORKSPACE_BUCKET", "ws-bucket")
