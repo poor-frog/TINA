@@ -360,6 +360,11 @@ describe("AuthGate pre-login TINA landing", () => {
     expect(screen.getByText("TINA Chrome Extension")).toBeTruthy();
     expect(screen.getAllByText("TINA Agent").length).toBeGreaterThan(0);
 
+    const transcriptPause = screen.getByRole("button", { name: "Tạm dừng hội thoại mẫu" });
+    fireEvent.click(transcriptPause);
+    expect(transcriptPause.getAttribute("aria-label")).toBe("Tiếp tục hội thoại mẫu");
+    expect(screen.getByText("Nguồn (2): Đoạn 09:40:12 và biên bản 18/11")).toBeTruthy();
+
     // Calling TINA switches the hero scene to its spoken answer.
     fireEvent.click(screen.getByRole("button", { name: /Gọi “Tina ơi”/i }));
     expect(screen.getByText(/Tuần trước nhóm chốt 2 mục/i)).toBeTruthy();

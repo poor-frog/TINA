@@ -59,6 +59,7 @@ export function TinaLanding({
   const [menuOpen, setMenuOpen] = useState(false);
   const [tickerPaused, setTickerPaused] = useState(false);
   const [activeLine, setActiveLine] = useState(2);
+  const [transcriptPaused, setTranscriptPaused] = useState(false);
   const [extTab, setExtTab] = useState<ExtPreviewTab>("bilingual");
   const [wikiSaved, setWikiSaved] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
@@ -68,6 +69,8 @@ export function TinaLanding({
   const copy = LANDING_COPY[lang];
   const hasOAuth = providers.google || providers.microsoft;
   const tickerAction = tickerPaused ? copy.ticker.resume : copy.ticker.pause;
+  const transcriptLineCount = copy.live.lines.length;
+  const transcriptAction = transcriptPaused ? copy.live.resume : copy.live.pause;
 
   useEffect(() => {
     try {
@@ -109,13 +112,15 @@ export function TinaLanding({
   }, [menuOpen]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (transcriptPaused) return;
+    const motion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
     const timer = window.setInterval(() => {
-      setActiveLine((cur) => (cur + 1) % LANDING_COPY.vi.live.lines.length);
+      if (!motion?.matches) {
+        setActiveLine((cur) => (cur + 1) % transcriptLineCount);
+      }
     }, 3000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [transcriptLineCount, transcriptPaused]);
 
   const triggerPrimarySignIn = () => {
     if (providers.google) {
@@ -385,40 +390,59 @@ export function TinaLanding({
               <p className={styles.sectionSub}>{copy.live.sub}</p>
             </div>
 
-            <div className={styles.transcriptShell}>
-              <div className={styles.transcriptTop}>
-                <span>{copy.live.shellTitle}</span>
-                <span>{copy.scene.demo}</span>
+            <figure className={styles.transcriptShell}>
+              <figcaption className={styles.transcriptTop}>
+                <span className={styles.transcriptTitle}>{copy.live.shellTitle}</span>
+                <span className={styles.transcriptSample}>{copy.scene.demo}</span>
+                <button
+                  type="button"
+                  className={styles.transcriptToggle}
+                  aria-label={transcriptAction}
+                  title={transcriptAction}
+                  onClick={() => setTranscriptPaused((paused) => !paused)}
+                >
+                  <WebIcon name={transcriptPaused ? "play" : "pause"} size={16} />
+                </button>
+              </figcaption>
+              <div className={styles.transcriptColumns} aria-hidden="true">
+                <span>{copy.live.columns.speaker}</span>
+                <span>{copy.live.columns.original}</span>
+                <span>{copy.live.columns.translation}</span>
               </div>
-              <div className={styles.transcriptLines}>
+              <ol className={styles.transcriptLines} role="list">
                 {copy.live.lines.map((row, idx) => (
-                  <div
+                  <li
                     key={row.time}
-                    className={`${styles.transcriptLine} ${row.isAgent ? styles.transcriptLineAgent : ""} ${idx !== activeLine && !row.isAgent ? styles.transcriptLineDim : ""}`}
+                    className={styles.transcriptLine}
+                    data-agent={row.isAgent || undefined}
+                    data-current={idx === activeLine || undefined}
                   >
-                    <span className={`${styles.avatar} ${row.isAgent ? styles.avatarAgent : ""}`} aria-hidden="true">
-                      {row.initials}
-                    </span>
-                    <div>
-                      <div className={styles.speakerRow}>
-                        <span className={`${styles.speaker} ${row.isAgent ? styles.speakerAgent : ""}`}>
-                          {row.speaker}
-                        </span>
-                        {row.badge && <span className={styles.voiceBadge}>{row.badge}</span>}
-                      </div>
-                      <div className={styles.txPrimary}>“{row.primary}”</div>
-                      <span className={styles.txSecondary}>{row.secondary}</span>
+                    <div className={styles.transcriptSpeaker}>
+                      <time className={styles.txTime} dateTime={row.time}>{row.time}</time>
+                      <strong>{row.speaker}</strong>
+                      {row.role && <span>{row.role}</span>}
                     </div>
-                    <time className={styles.txTime}>{row.time}</time>
-                  </div>
+                    {row.isAgent ? (
+                      <div className={styles.transcriptReply}>
+                        <p className={styles.txPrimary}><q>{row.primary}</q></p>
+                        <p className={styles.txSources}>{row.secondary}</p>
+                        <span className={styles.voiceBadge}>{copy.live.voiceReply}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <p className={styles.txPrimary} lang={row.originalLang}><q>{row.primary}</q></p>
+                        <p className={styles.txSecondary} lang={row.originalLang === "en" ? "vi" : "en"}>{row.secondary}</p>
+                      </>
+                    )}
+                  </li>
                 ))}
-              </div>
+              </ol>
               <ul className={styles.transcriptFoot}>
                 {copy.live.bullets.map((bullet) => (
                   <li key={bullet}>{bullet}</li>
                 ))}
               </ul>
-            </div>
+            </figure>
           </div>
         </section>
 

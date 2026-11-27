@@ -85,10 +85,14 @@ export interface LandingCopy {
     titleSerif: string;
     sub: string;
     shellTitle: string;
+    columns: { speaker: string; original: string; translation: string };
+    pause: string;
+    resume: string;
+    voiceReply: string;
     lines: Array<{
-      initials: string;
       speaker: string;
-      badge?: string;
+      role?: string;
+      originalLang?: LandingLang;
       time: string;
       primary: string;
       secondary: string;
@@ -308,36 +312,41 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       titleSerif: "và hỏi TINA thành tiếng.",
       sub: "Lời thoại tiếng Việt và bản dịch tiếng Anh hiển thị theo thời gian thực cùng tên người nói, xen kẽ trực tiếp câu trả lời giọng nói của TINA Agent và nút xem nguồn trích dẫn.",
       shellTitle: "Transcript Việt – Anh",
+      columns: { speaker: "Người nói", original: "Nguyên văn", translation: "Bản dịch" },
+      pause: "Tạm dừng hội thoại mẫu",
+      resume: "Tiếp tục hội thoại mẫu",
+      voiceReply: "Trả lời bằng giọng nói",
       lines: [
         {
-          initials: "MN",
-          speaker: "Minh Nguyễn · Product Lead",
+          speaker: "Minh Nguyễn",
+          role: "Product Lead",
+          originalLang: "vi",
           time: "09:40:12",
           primary: "Mình cần chốt lại tiến độ bản phát hành Q4 và phần đánh giá bảo mật cho đối tác Singapore trước thứ 6.",
           secondary: "We need to lock the Q4 release timeline and security review for our Singapore partner by Friday.",
           isAgent: false,
         },
         {
-          initials: "LH",
-          speaker: "Linh Hoàng · Operations",
+          speaker: "Linh Hoàng",
+          role: "Operations",
+          originalLang: "vi",
           time: "09:40:38",
           primary: "Tina ơi, nhắc lại 2 cam kết tuần trước mình đã thống nhất với đối tác giúp cả nhóm nhé.",
           secondary: "Tina, remind the team of the two commitments we agreed on with the partner last week.",
           isAgent: false,
         },
         {
-          initials: "TA",
           speaker: "TINA Agent",
-          badge: "Đã đọc · Nguồn meeting",
           time: "09:40:44",
           primary:
             "Tuần trước nhóm đã chốt 2 cam kết: hoàn tất đánh giá bảo mật vào thứ 4 và triển khai chạy thử song ngữ cho 20 nhân sự vận hành trong tuần tới.",
-          secondary: "Nguồn (2) · Trích dẫn trực tiếp từ đoạn 09:40:12 & biên bản 18/11",
+          secondary: "Nguồn (2): Đoạn 09:40:12 và biên bản 18/11",
           isAgent: true,
         },
         {
-          initials: "DL",
-          speaker: "Daniel Lee · Partner",
+          speaker: "Daniel Lee",
+          role: "Partner",
+          originalLang: "en",
           time: "09:41:02",
           primary: "Exact match — please save this summary and action list straight to our shared workspace.",
           secondary: "Chính xác — nhờ lưu bản tóm tắt và danh sách đầu việc này thẳng vào không gian làm việc chung nhé.",
@@ -345,10 +354,10 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
         },
       ],
       bullets: [
-        "Phân tách người nói & Talk Time — thống kê tốc độ nói (WPM) và tỉ lệ phát biểu",
-        "Dịch song ngữ VI + EN theo cụm câu hoàn chỉnh — rõ nghĩa, không vụn chữ",
-        "Trợ lý giọng nói “Tina ơi” — trả lời có căn cứ kèm nút Nguồn (N) cuộn về câu gốc",
-        "Đồng bộ âm thanh — bấm vào bất kỳ dòng thoại nào để nghe lại đúng giây đó",
+        "Talk Time: thời lượng, tốc độ và tỉ lệ phát biểu theo người nói",
+        "Bản dịch Việt – Anh theo cụm câu",
+        "Trả lời bằng giọng nói kèm nguồn khi có",
+        "Trong cuộc họp đã ghi, chọn dòng thoại để nghe lại từ mốc đó",
       ],
     },
     extension: {
@@ -705,36 +714,41 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       titleSerif: "and ask TINA out loud.",
       sub: "Live Vietnamese and English transcripts stream with speaker diarization, interleaved directly with TINA Agent’s spoken replies and clickable source citations.",
       shellTitle: "Vietnamese and English transcript",
+      columns: { speaker: "Speaker", original: "Original", translation: "Translation" },
+      pause: "Pause sample conversation",
+      resume: "Resume sample conversation",
+      voiceReply: "Spoken reply",
       lines: [
         {
-          initials: "MN",
-          speaker: "Minh Nguyen · Product Lead",
+          speaker: "Minh Nguyen",
+          role: "Product Lead",
+          originalLang: "vi",
           time: "09:40:12",
           primary: "Mình cần chốt lại tiến độ bản phát hành Q4 và phần đánh giá bảo mật cho đối tác Singapore trước thứ 6.",
           secondary: "We need to lock the Q4 release timeline and security review for our Singapore partner by Friday.",
           isAgent: false,
         },
         {
-          initials: "LH",
-          speaker: "Linh Hoang · Operations",
+          speaker: "Linh Hoang",
+          role: "Operations",
+          originalLang: "vi",
           time: "09:40:38",
           primary: "Tina ơi, nhắc lại 2 cam kết tuần trước mình đã thống nhất với đối tác giúp cả nhóm nhé.",
           secondary: "Tina, remind the team of the two commitments we agreed on with the partner last week.",
           isAgent: false,
         },
         {
-          initials: "TA",
           speaker: "TINA Agent",
-          badge: "Spoken · Meeting sources",
           time: "09:40:44",
           primary:
             "Last week the team locked two commitments: deliver the security assessment on Wednesday and launch a 20-seat bilingual pilot next week.",
-          secondary: "Sources (2) · Cited directly from 09:40:12 & Nov 18 sync",
+          secondary: "Sources (2): 09:40:12 and the Nov 18 meeting notes",
           isAgent: true,
         },
         {
-          initials: "DL",
-          speaker: "Daniel Lee · Partner",
+          speaker: "Daniel Lee",
+          role: "Partner",
+          originalLang: "en",
           time: "09:41:02",
           primary: "Exact match — please save this summary and action list straight to our shared workspace.",
           secondary: "Chính xác — nhờ lưu bản tóm tắt và danh sách đầu việc này thẳng vào không gian làm việc chung nhé.",
@@ -742,10 +756,10 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
         },
       ],
       bullets: [
-        "Speaker diarization & Talk Time — per-speaker WPM and speaking share",
-        "Phrase-grouped VI + EN overlay — natural translations, zero fragmented chunks",
-        "“Tina ơi” Voice TTS — grounded spoken replies with clickable Sources (N)",
-        "Audio-synced rows — click any line to jump straight to that second",
+        "Talk Time: duration, pace, and speaking share by speaker",
+        "Vietnamese and English translation by phrase",
+        "Voice replies with sources when available",
+        "In a recorded meeting, select a line to replay from that timestamp",
       ],
     },
     extension: {
