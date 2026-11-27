@@ -7,7 +7,9 @@
   "scripts": {
     "build": "node build.mjs",
     "build:release": "node build.mjs --release",
+    "build:unpacked": "node build.mjs --release --unpacked",
     "pack": "node build.mjs --release --pack",
+    "pack:unpacked": "node build.mjs --release --unpacked --pack",
     "dev": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "tsx src/endpoints.test.ts && tsx src/bot-transcript.test.ts && tsx src/capture-liveness.test.ts && node src/bot-retry.test.mjs && node src/session-lifecycle.test.mjs && node src/panel-state.test.mjs && tsx src/audio-clock.test.ts && tsx src/pcm-replay.test.ts && tsx src/translation.test.ts && tsx src/meet-panel-state.test.ts"
