@@ -1520,7 +1520,7 @@
 }
 
 .composer:focus-within {
-  border-color: var(--mt-accent-line);
+  border-color: var(--mt-focus);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28), 0 0 0 3px rgba(23, 107, 91, 0.14);
 }
 
@@ -1537,6 +1537,10 @@
   font-family: inherit;
   font-size: 13.5px;
   line-height: 1.5;
+}
+
+:global(.tina-web) .composer textarea:focus-visible {
+  outline: none;
 }
 
 .composer textarea::placeholder {

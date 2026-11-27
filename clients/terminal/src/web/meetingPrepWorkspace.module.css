@@ -965,7 +965,7 @@
 }
 
 .composer:focus-within {
-  border-color: var(--tw-mint);
+  border-color: var(--focus);
 }
 
 .composer textarea {
@@ -980,6 +980,10 @@
   font-size: 13px;
   line-height: 1.45;
   padding: 6px 0;
+  outline: none;
+}
+
+:global(.tina-web) .composer textarea:focus-visible {
   outline: none;
 }
 
