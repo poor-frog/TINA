@@ -6,6 +6,7 @@
 .tina-web,
 .tina-login-shell {
   --tw-teal: var(--teal-600, #176b5b);
+  --tw-on-teal: #fff;
   --tw-teal-hover: var(--teal-700, #115447);
   --tw-mint: var(--teal-300, #91d7be);
   --tw-mint-bright: var(--teal-200, #b5e8d1);
@@ -2761,6 +2762,14 @@
   background: var(--tw-chrome);
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65);
   overflow: hidden;
+}
+
+.tina-web-backdrop-schedule {
+  padding-block: 20px;
+}
+
+.tina-web-backdrop-schedule .tina-web-modal {
+  max-height: calc(100dvh - 40px);
 }
 
 .tina-web-modal-head {

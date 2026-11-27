@@ -1,196 +1,253 @@
+// Lucian UX/UI Prompt #431 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#431
 "use client";
-/** DateTimePicker — a compact, dependency-free date+time picker (popover calendar + time slots).
- *
- *  Replaces the native `datetime-local` input (tiny hit-targets, locale-hostile formatting) on the
- *  planned-meeting surfaces. One button shows the friendly value ("Mon, Jul 13 · 10:00"); clicking
- *  opens a popover with quick-pick chips, a month grid, and a 15-minute time list. Emits an ISO
- *  string via `onChange` when BOTH halves are chosen (picking a day keeps the current time;
- *  picking a time keeps the current day). `onClear` (optional) renders a "No time" action —
- *  clearing a planned meeting's time flips it back to `idle`.
- */
-import { useEffect, useMemo, useRef, useState } from "react";
 
-const DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-const MONTHS = ["January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"];
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import styles from "./dateTimePicker.module.css";
 
-function fmtValue(d: Date): string {
-  return `${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} · ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DATE_FORMAT = { weekday: "short", month: "short", day: "numeric", year: "numeric" } as const;
+
+function dayAt(date: Date, offset = 0): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset, 12);
 }
+
 function sameDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
-function atTime(day: Date, h: number, m: number): Date {
-  const d = new Date(day); d.setHours(h, m, 0, 0); return d;
-}
-/** Round UP to the next half-hour boundary — the default for a fresh plan. */
-export function nextHalfHour(from = new Date()): Date {
-  const d = new Date(from); d.setSeconds(0, 0);
-  d.setMinutes(d.getMinutes() + (15 - (d.getMinutes() % 15)));
-  return d;
+  return dayAt(a).getTime() === dayAt(b).getTime();
 }
 
-const chipStyle = {
-  fontSize: 11.5, padding: "3px 9px", borderRadius: 12, border: "1px solid var(--line)",
-  background: "var(--panel)", color: "var(--t2)", cursor: "pointer", whiteSpace: "nowrap",
-} as const;
+function timeText(date: Date): string {
+  return [date.getHours(), date.getMinutes()].map((part) => String(part).padStart(2, "0")).join(":");
+}
 
-export function DateTimePicker({ value, onChange, onClear, disabled, placeholder = "Pick a time" }: {
-  value?: string;                       // ISO8601 (or undefined = unset)
+function shiftMonth(date: Date, amount: number): Date {
+  const end = new Date(date.getFullYear(), date.getMonth() + amount + 1, 0).getDate();
+  return new Date(date.getFullYear(), date.getMonth() + amount, Math.min(date.getDate(), end), 12);
+}
+
+function timeZoneText(date: Date): string {
+  const browserZone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const zone = browserZone === "Asia/Saigon" ? "Asia/Ho_Chi_Minh" : browserZone;
+  const offset = new Intl.DateTimeFormat(undefined, { timeZoneName: "shortOffset" })
+    .formatToParts(date).find((part) => part.type === "timeZoneName")?.value.replace("GMT", "UTC");
+  return offset && zone !== offset ? zone + " (" + offset + ")" : zone;
+}
+
+export function DateTimePicker({
+  value,
+  onChange,
+  onClear,
+  onOpenChange,
+  disabled,
+  id,
+  placeholder = "Pick a time",
+}: {
+  value?: string | null;
   onChange: (iso: string) => void;
   onClear?: () => void;
+  onOpenChange?: (open: boolean) => void;
   disabled?: boolean;
+  id?: string;
   placeholder?: string;
 }) {
+  const panelId = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const dayButton = useRef<HTMLButtonElement>(null);
+  const timeInput = useRef<HTMLInputElement>(null);
+  const focusDayOnRender = useRef(false);
   const [open, setOpen] = useState(false);
-  const selected = useMemo(() => {
-    if (!value) return null;
-    const d = new Date(value);
-    return Number.isFinite(d.getTime()) ? d : null;
-  }, [value]);
-  const [viewMonth, setViewMonth] = useState(() => selected ?? new Date());
-  const ref = useRef<HTMLDivElement>(null);
-  const timeListRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setViewMonth(selected ?? new Date());
-    const close = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open, selected]);
-
-  // scroll the time list to the selected (or working-hours) slot when the popover opens
-  useEffect(() => {
-    if (!open || !timeListRef.current) return;
-    const idx = selected ? selected.getHours() * 4 + Math.floor(selected.getMinutes() / 15) : 36; // 09:00
-    timeListRef.current.scrollTop = Math.max(0, idx * 26 - 52);
-  }, [open, selected]);
-
-  const base = selected ?? nextHalfHour();
-  const pickDay = (day: Date) => onChange(atTime(day, base.getHours(), base.getMinutes()).toISOString());
-  const pickTime = (h: number, m: number) => onChange(atTime(base, h, m).toISOString());
-
-  // month grid (Monday-first)
-  const first = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1);
+  const [date, setDate] = useState(() => dayAt(new Date()));
+  const [focusDate, setFocusDate] = useState(date);
+  const [time, setTime] = useState("");
+  const [error, setError] = useState("");
+  const parsed = value ? new Date(value) : null;
+  const selected = parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
+  const now = new Date();
+  const today = dayAt(now);
+  const first = new Date(focusDate.getFullYear(), focusDate.getMonth(), 1, 12);
   const lead = (first.getDay() + 6) % 7;
-  const daysInMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 0).getDate();
-  const today = new Date();
+  const days = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+  const prevMonth = new Date(first.getFullYear(), first.getMonth(), 0, 12);
+  const match = /^([01]\d|2[0-3]):?([0-5]\d)$/.exec(time);
+  const candidate = match
+    ? new Date(date.getFullYear(), date.getMonth(), date.getDate(), Number(match[1]), Number(match[2]))
+    : null;
 
-  const quick: { label: string; d: Date }[] = [
-    { label: "In 1 hour", d: nextHalfHour(new Date(Date.now() + 3600_000)) },
-    { label: "Today 17:00", d: atTime(today, 17, 0) },
-    { label: "Tomorrow 09:00", d: atTime(new Date(Date.now() + 86400_000), 9, 0) },
-    { label: "Tomorrow 14:00", d: atTime(new Date(Date.now() + 86400_000), 14, 0) },
-  ].filter((q) => q.d.getTime() > Date.now());
+  useEffect(() => {
+    if (open && focusDayOnRender.current) {
+      focusDayOnRender.current = false;
+      dayButton.current?.focus({ preventScroll: true });
+    }
+  }, [focusDate, open]);
+
+  const close = () => {
+    setOpen(false);
+    onOpenChange?.(false);
+    trigger.current?.focus();
+  };
+
+  const toggle = () => {
+    if (open) {
+      close();
+      return;
+    }
+    const base = selected && selected >= now ? selected : new Date(now.getTime() + 60 * 60 * 1000);
+    const day = dayAt(base);
+    setDate(day);
+    setFocusDate(day);
+    setTime(timeText(base));
+    setError("");
+    focusDayOnRender.current = true;
+    setOpen(true);
+    onOpenChange?.(true);
+  };
+
+  const apply = () => {
+    if (!match || !candidate) {
+      setError("Enter a time from 00:00 to 23:59.");
+    } else if (timeText(candidate) !== match[1] + ":" + match[2]) {
+      setError("This local time does not exist. Choose a different time.");
+    } else if (candidate <= new Date()) {
+      setError("Choose a time in the future.");
+    } else {
+      onChange(candidate.toISOString());
+      close();
+      return;
+    }
+    timeInput.current?.focus();
+  };
+
+  const moveDayFocus = (event: KeyboardEvent<HTMLButtonElement>, day: Date) => {
+    const steps = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 } as const;
+    const step = steps[event.key as keyof typeof steps];
+    const next = step
+      ? dayAt(day, step)
+      : event.key === "PageUp" || event.key === "PageDown"
+        ? shiftMonth(day, event.key === "PageUp" ? -1 : 1)
+        : null;
+    if (!next) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const target = next < today ? today : next;
+    if (sameDay(target, focusDate)) return;
+    focusDayOnRender.current = true;
+    setFocusDate(target);
+  };
 
   return (
-    <div ref={ref} style={{ position: "relative", display: "inline-block", minWidth: 0 }}>
-      <button type="button" disabled={disabled} onClick={() => setOpen((v) => !v)}
-        style={{
-          display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, padding: "6px 10px",
-          background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 7,
-          color: selected ? "var(--t1)" : "var(--t3)", cursor: disabled ? "default" : "pointer",
-          opacity: disabled ? 0.6 : 1, whiteSpace: "nowrap",
-        }}>
-        <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--accent)", flexShrink: 0 }}>
-          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-          <line x1="16" y1="2" x2="16" y2="6" />
-          <line x1="8" y1="2" x2="8" y2="6" />
-          <line x1="3" y1="10" x2="21" y2="10" />
+    <div className={styles.root} onKeyDown={(event) => {
+      if (open && event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+      }
+    }}>
+      <button
+        ref={trigger}
+        id={id}
+        type="button"
+        className={styles.trigger}
+        disabled={disabled}
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        aria-describedby={panelId + "-zone"}
+        onClick={toggle}
+      >
+        <span>{selected ? selected.toLocaleDateString(undefined, DATE_FORMAT) + ", " + timeText(selected) : placeholder}</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+          <rect x="3" y="5" width="18" height="16" rx="2" />
+          <path d="M3 10h18M8 3v4m8-4v4" />
         </svg>
-        {selected ? fmtValue(selected) : placeholder}
       </button>
+      <p id={panelId + "-zone"} className={styles.zone}>{timeZoneText(selected ?? now)}</p>
+
       {open && (
-        <div role="dialog" aria-label="Pick date and time"
-          style={{ position: "absolute", top: "100%", left: 0, marginTop: 6, zIndex: 60, width: 336,
-            background: "var(--panel)", border: "1px solid var(--line2)", borderRadius: 10,
-            boxShadow: "0 10px 32px rgba(0,0,0,.35)", padding: 12 }}>
-          {quick.length > 0 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-              {quick.map((q) => (
-                <button key={q.label} type="button" style={chipStyle}
-                  onClick={() => { onChange(q.d.toISOString()); setOpen(false); }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel2)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "var(--panel)")}>
-                  {q.label}
+        <div id={panelId} className={styles.panel} role="group" aria-label="Pick date and time">
+          <div className={styles.layout}>
+            <div className={styles.calendar}>
+              <div className={styles.month}>
+                <strong aria-live="polite">{first.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong>
+                <button type="button" aria-label="Previous month" disabled={prevMonth < today} onClick={() => {
+                  const previous = shiftMonth(focusDate, -1);
+                  setFocusDate(previous < today ? today : previous);
+                }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg>
                 </button>
-              ))}
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 12 }}>
-            {/* calendar */}
-            <div style={{ flex: "none", width: 196 }}>
-              <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
-                <button type="button" aria-label="Previous month"
-                  onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}
-                  style={{ background: "transparent", border: "none", color: "var(--t2)", cursor: "pointer", fontSize: 13, padding: "0 6px" }}>‹</button>
-                <span style={{ flex: 1, textAlign: "center", fontSize: 12, fontWeight: 600, color: "var(--t1)" }}>
-                  {MONTHS[viewMonth.getMonth()]} {viewMonth.getFullYear()}
-                </span>
-                <button type="button" aria-label="Next month"
-                  onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1))}
-                  style={{ background: "transparent", border: "none", color: "var(--t2)", cursor: "pointer", fontSize: 13, padding: "0 6px" }}>›</button>
+                <button type="button" aria-label="Next month" onClick={() => setFocusDate(shiftMonth(focusDate, 1))}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m10 6 6 6-6 6" /></svg>
+                </button>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 1 }}>
-                {DAYS.map((d) => (
-                  <span key={d} style={{ fontSize: 9.5, color: "var(--t3)", textAlign: "center", padding: "2px 0", textTransform: "uppercase" }}>{d}</span>
-                ))}
-                {Array.from({ length: lead }).map((_, i) => <span key={`x${i}`} />)}
-                {Array.from({ length: daysInMonth }).map((_, i) => {
-                  const day = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), i + 1);
-                  const isSel = selected != null && sameDay(day, selected);
-                  const isToday = sameDay(day, today);
-                  const past = atTime(day, 23, 59).getTime() < Date.now();
+              <div className={styles.days} aria-hidden="true">
+                {WEEKDAYS.map((day) => <span key={day}>{day}</span>)}
+              </div>
+              <div className={styles.days} role="group" aria-label="Dates">
+                {Array.from({ length: lead }, (_, i) => <span key={"blank-" + i} aria-hidden="true" />)}
+                {Array.from({ length: days }, (_, i) => {
+                  const day = dayAt(first, i);
+                  const focused = sameDay(day, focusDate);
                   return (
-                    <button key={i} type="button" disabled={past} onClick={() => pickDay(day)}
-                      style={{
-                        fontSize: 11.5, padding: "4px 0", borderRadius: 6, cursor: past ? "default" : "pointer",
-                        border: isToday && !isSel ? "1px solid var(--line2)" : "1px solid transparent",
-                        background: isSel ? "var(--accent)" : "transparent",
-                        color: isSel ? "var(--bg)" : past ? "var(--t3)" : "var(--t1)",
-                        opacity: past ? 0.45 : 1, fontWeight: isSel ? 650 : 400,
+                    <button
+                      key={i}
+                      ref={focused ? dayButton : undefined}
+                      type="button"
+                      disabled={day < today}
+                      tabIndex={focused ? 0 : -1}
+                      aria-label={day.toLocaleDateString(undefined, DATE_FORMAT)}
+                      aria-current={sameDay(day, today) ? "date" : undefined}
+                      aria-pressed={sameDay(day, date)}
+                      onKeyDown={(event) => moveDayFocus(event, day)}
+                      onClick={() => {
+                        setDate(day);
+                        setFocusDate(day);
+                        setError("");
                       }}
-                      onMouseEnter={(e) => { if (!isSel && !past) e.currentTarget.style.background = "var(--panel2)"; }}
-                      onMouseLeave={(e) => { if (!isSel) e.currentTarget.style.background = "transparent"; }}>
-                      {i + 1}
+                    >
+                      {day.getDate()}
                     </button>
                   );
                 })}
               </div>
             </div>
-            {/* time slots */}
-            <div ref={timeListRef} style={{ flex: 1, maxHeight: 208, overflowY: "auto", borderLeft: "1px solid var(--line)", paddingLeft: 10 }}>
-              {Array.from({ length: 96 }).map((_, i) => {
-                const h = Math.floor(i / 4), m = (i % 4) * 15;
-                const label = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-                const isSel = selected != null && selected.getHours() === h
-                  && selected.getMinutes() - (selected.getMinutes() % 15) === m;
-                return (
-                  <button key={label} type="button" onClick={() => { pickTime(h, m); setOpen(false); }}
-                    style={{
-                      display: "block", width: "100%", textAlign: "center", fontSize: 12, height: 26,
-                      borderRadius: 6, border: "none", cursor: "pointer",
-                      background: isSel ? "var(--accent)" : "transparent",
-                      color: isSel ? "var(--bg)" : "var(--t2)", fontWeight: isSel ? 650 : 400,
-                      fontFamily: "var(--mono)",
-                    }}
-                    onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = "var(--panel2)"; }}
-                    onMouseLeave={(e) => { if (!isSel) e.currentTarget.style.background = "transparent"; }}>
-                    {label}
-                  </button>
-                );
-              })}
+            <div className={styles.time}>
+              <label htmlFor={panelId + "-time"}>Time</label>
+              <input
+                ref={timeInput}
+                id={panelId + "-time"}
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder="HH:mm"
+                maxLength={5}
+                value={time}
+                aria-invalid={Boolean(error)}
+                aria-describedby={panelId + "-hint" + (error ? " " + panelId + "-error" : "")}
+                onChange={(event) => {
+                  setTime(event.currentTarget.value);
+                  setError("");
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    apply();
+                  }
+                }}
+              />
+              <p id={panelId + "-hint"} className={styles.zone}>24-hour time, for example 09:07.</p>
+              {candidate && timeZoneText(candidate) !== timeZoneText(selected ?? now) && (
+                <p className={styles.zone}>{timeZoneText(candidate)}</p>
+              )}
+              {error && <p id={panelId + "-error"} role="alert" className={styles.error}>{error}</p>}
             </div>
           </div>
-          {onClear && (
-            <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-              <button type="button" onClick={() => { onClear(); setOpen(false); }}
-                style={{ fontSize: 11.5, background: "transparent", border: "none", color: "var(--t3)", cursor: "pointer", textDecoration: "underline" }}>
-                No time (join immediately on start)
-              </button>
-            </div>
-          )}
+          <div className={styles.actions}>
+            {onClear && selected && (
+              <button type="button" className={styles.clear} onClick={() => {
+                onClear();
+                close();
+              }}>Clear time</button>
+            )}
+            <button type="button" onClick={close}>Cancel time selection</button>
+            <button type="button" className={styles.apply} onClick={apply}>Use date and time</button>
+          </div>
         </div>
       )}
     </div>

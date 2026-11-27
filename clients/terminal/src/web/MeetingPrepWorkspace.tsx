@@ -11,6 +11,7 @@ import { LucianToolApprovalCard } from "./lucian/LucianToolApprovalCard";
 import { emitWebToast } from "./lucian/webToast";
 import { notifyBriefChanged } from "./useOwnBriefIndex";
 import { Markdown } from "../ui-kit/Markdown";
+import { DateTimePicker } from "../ui-kit/DateTimePicker";
 import { presentError, readApiFailure } from "../surfaces/apiClient";
 import { briefNotePath, findBriefNote, isExampleNote } from "../surfaces/briefNote";
 import { stripContextBlocks } from "../surfaces/chat";
@@ -63,13 +64,6 @@ interface PrepChatMessage {
   approvals?: ToolApprovalState[];
   commit?: string;
   error?: string;
-}
-
-function toDatetimeLocal(iso?: string | null): string {
-  if (!iso) return "";
-  const dt = new Date(iso);
-  if (!Number.isFinite(dt.getTime())) return "";
-  return new Date(dt.getTime() - dt.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
 
 function shortWorkspaceLabel(workspaceId: string): string {
@@ -136,7 +130,7 @@ export function MeetingPrepWorkspace({
   // Editable form state synced per meeting ID
   const [title, setTitle] = useState(meeting.title_custom ?? meeting.title ?? "");
   const [meetingUrl, setMeetingUrl] = useState(meeting.meeting_url ?? "");
-  const [scheduledAt, setScheduledAt] = useState(() => toDatetimeLocal(meeting.scheduled_at));
+  const [scheduledAt, setScheduledAt] = useState(meeting.scheduled_at ?? "");
   const [autoJoin, setAutoJoin] = useState(meeting.auto_join !== false);
   const [savingField, setSavingField] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
@@ -193,7 +187,7 @@ export function MeetingPrepWorkspace({
   useEffect(() => {
     setTitle(meeting.title_custom ?? meeting.title ?? "");
     setMeetingUrl(meeting.meeting_url ?? "");
-    setScheduledAt(toDatetimeLocal(meeting.scheduled_at));
+    setScheduledAt(meeting.scheduled_at ?? "");
     setAutoJoin(meeting.auto_join !== false);
     setInviteLink(null);
     setRebindOpen(false);
@@ -1022,16 +1016,13 @@ export function MeetingPrepWorkspace({
                   </span>
                 </div>
 
-                <input
+                <DateTimePicker
                   id={`prep-time-${meeting.id}`}
-                  type="datetime-local"
-                  className={styles.fieldInput}
                   value={scheduledAt}
                   disabled={readOnly || busyAction}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setScheduledAt(val);
-                    void patchMeeting({ scheduled_at: val ? new Date(val).toISOString() : null });
+                  onChange={(iso) => {
+                    setScheduledAt(iso);
+                    void patchMeeting({ scheduled_at: iso });
                   }}
                 />
 

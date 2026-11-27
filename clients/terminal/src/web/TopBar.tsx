@@ -3,6 +3,7 @@
  *  and Split-Button `Capture ▾` (Join live now | Plan / Schedule | Connect Calendar). */
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
+import { DateTimePicker } from "../ui-kit/DateTimePicker";
 import { LucianCommandKButton } from "./lucian/LucianCommandKButton";
 import { LucianThemeToggle } from "./lucian/LucianThemeToggle";
 import { LucianDynamicIsland } from "./lucian/LucianDynamicIsland";
@@ -205,9 +206,11 @@ function CaptureMeetingModal({
   const [urlInput, setUrlInput] = useState("");
   const [titleInput, setTitleInput] = useState("");
   const [scheduledAt, setScheduledAt] = useState(() => {
-    const dt = new Date(Date.now() + 3600_000);
-    return new Date(dt.getTime() - dt.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    const nextHour = new Date(Date.now() + 3600_000);
+    nextHour.setSeconds(0, 0);
+    return nextHour.toISOString();
   });
+  const [editingSchedule, setEditingSchedule] = useState(false);
   const [autoJoin, setAutoJoin] = useState(true);
   const [jitsiHosts, setJitsiHosts] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -215,6 +218,7 @@ function CaptureMeetingModal({
 
   useEffect(() => {
     setMode(initialMode);
+    setEditingSchedule(false);
   }, [initialMode]);
 
   useEffect(() => {
@@ -270,18 +274,18 @@ function CaptureMeetingModal({
   };
 
   const scheduleMeeting = async (startBrief: boolean) => {
-    if ((!titleInput.trim() && !urlInput.trim()) || busy) {
+    if (busy || editingSchedule) return;
+    if (!titleInput.trim() && !urlInput.trim()) {
       setError("Provide a meeting title or a meeting link.");
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const iso = scheduledAt ? new Date(scheduledAt).toISOString() : null;
       const created = await createPlannedMeeting({
         title: titleInput.trim() || null,
         meeting_url: urlInput.trim() || null,
-        scheduled_at: iso,
+        scheduled_at: scheduledAt || null,
         auto_join: autoJoin,
       });
       refreshMeetings();
@@ -300,7 +304,7 @@ function CaptureMeetingModal({
   };
 
   return (
-    <div className="tina-web-backdrop" role="dialog" aria-modal="true" aria-label="Capture meeting" onClick={onClose}>
+    <div className={`tina-web-backdrop ${editingSchedule ? "tina-web-backdrop-schedule" : ""}`} role="dialog" aria-modal="true" aria-label="Capture meeting" onClick={onClose}>
       <div className="tina-web-modal" onClick={(e) => e.stopPropagation()}>
         <div className="tina-web-modal-head">
           <h2>Capture a meeting</h2>
@@ -316,6 +320,7 @@ function CaptureMeetingModal({
               className={`tina-web-tab ${mode === "live" ? "active" : ""}`}
               onClick={() => {
                 setMode("live");
+                setEditingSchedule(false);
                 setError(null);
               }}
             >
@@ -389,14 +394,17 @@ function CaptureMeetingModal({
                 />
               </label>
 
-              <label className="tina-web-field">
-                <span>Scheduled time</span>
-                <input
-                  type="datetime-local"
+              <div className="tina-web-field">
+                <label htmlFor="capture-scheduled-time">Scheduled time</label>
+                <DateTimePicker
+                  id="capture-scheduled-time"
                   value={scheduledAt}
-                  onChange={(e) => setScheduledAt(e.target.value)}
+                  disabled={busy}
+                  onChange={setScheduledAt}
+                  onClear={() => setScheduledAt("")}
+                  onOpenChange={setEditingSchedule}
                 />
-              </label>
+              </div>
 
               <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--tw-text-2)", cursor: "pointer" }}>
                 <input type="checkbox" checked={autoJoin} onChange={(e) => setAutoJoin(e.target.checked)} />
@@ -411,14 +419,14 @@ function CaptureMeetingModal({
                   <button
                     type="button"
                     className="tina-web-btn-ghost"
-                    disabled={busy}
+                    disabled={busy || editingSchedule}
                     onClick={() => void scheduleMeeting(true)}
                   >
                     <WebIcon name="sparkleSmall" size={14} />
                     <span>Save &amp; draft brief</span>
                   </button>
                 )}
-                <button type="submit" className="tina-web-btn-primary" disabled={busy}>
+                <button type="submit" className="tina-web-btn-primary" disabled={busy || editingSchedule}>
                   {busy ? "Scheduling…" : "Save meeting plan"}
                 </button>
               </div>

@@ -1,0 +1,237 @@
+/* Hallmark · component: date and time picker · shape: app screen · theme: TINA Obsidian Teal · v2.0.0 */
+/* Critique · one local time, one selected day, and an inline panel that cannot cover the form actions. */
+.root {
+  --date-surface: var(--tw-card, var(--panel));
+  --date-raised: var(--tw-raised, var(--panel2));
+  --date-ink: var(--tw-text, var(--t1));
+  --date-muted: var(--tw-text-3, var(--t2));
+  --date-line: var(--tw-line, var(--line));
+  --date-field: var(--tw-text-4, var(--line2));
+  --date-accent: var(--brand);
+  --date-on-accent: var(--on-brand);
+  --date-hover: var(--brand-hover);
+  --date-focus: var(--focus);
+  --date-error: var(--tw-danger, var(--danger));
+
+  min-width: 0;
+  color: var(--date-ink);
+  font-size: 13px;
+}
+
+:global(.tina-web) .root {
+  --date-accent: var(--tw-teal);
+  --date-on-accent: var(--tw-on-teal);
+  --date-hover: var(--tw-teal-hover);
+  --date-focus: var(--tw-mint);
+}
+
+:global(html[data-theme="light"] .tina-web) .root {
+  --date-focus: var(--tw-teal);
+}
+
+.root button,
+.root input {
+  color: var(--date-ink);
+  font: inherit;
+}
+
+.root button:focus-visible,
+.root input:focus-visible {
+  outline: 2px solid var(--date-focus);
+  outline-offset: 2px;
+}
+
+.root button:disabled {
+  color: var(--tw-text-4, var(--date-muted));
+  background: transparent;
+  cursor: not-allowed;
+}
+
+.root button:hover:not(:disabled) {
+  background: var(--date-raised);
+}
+
+.root button:active:not(:disabled) {
+  box-shadow: inset 0 0 0 1px var(--date-field);
+}
+
+.root .trigger {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--date-field);
+  border-radius: 8px;
+  background: var(--date-surface);
+  text-align: start;
+  font-variant-numeric: tabular-nums;
+}
+
+.trigger svg {
+  flex: none;
+  color: var(--date-accent);
+}
+
+.zone {
+  margin: 4px 0 0;
+  color: var(--date-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.panel {
+  margin-block-start: 8px;
+  padding: 12px;
+  border: 1px solid var(--date-line);
+  border-radius: 12px;
+  background: var(--date-surface);
+  container-type: inline-size;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(104px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.calendar {
+  min-width: 0;
+}
+
+.month {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.month strong {
+  flex: 1;
+  min-width: 0;
+  padding: 4px;
+  font-size: 14px;
+  overflow-wrap: break-word;
+}
+
+.month button,
+.days button {
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+}
+
+.month button {
+  width: 36px;
+  min-height: 36px;
+  border-radius: 8px;
+}
+
+.days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.days > span {
+  min-width: 0;
+  padding-block: 4px;
+  color: var(--date-muted);
+  text-align: center;
+  font-size: 11px;
+}
+
+.days button {
+  justify-self: center;
+  min-width: 0;
+  width: min(100%, 40px);
+  min-height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  font-variant-numeric: tabular-nums;
+}
+
+.days button[aria-current="date"] {
+  border-color: var(--date-focus);
+}
+
+.root .days button[aria-pressed="true"],
+.root .apply {
+  background: var(--date-accent);
+  color: var(--date-on-accent);
+  font-weight: 600;
+}
+
+.root .days button[aria-pressed="true"]:hover,
+.root .apply:hover {
+  background: var(--date-hover);
+}
+
+.time {
+  min-width: 0;
+  padding-inline-start: 16px;
+  border-inline-start: 1px solid var(--date-line);
+}
+
+.time label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.root .time input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding-inline: 12px;
+  border: 1px solid var(--date-field);
+  border-radius: 8px;
+  background: var(--date-surface);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.root .time input[aria-invalid="true"] {
+  border-color: var(--date-error);
+}
+
+.error {
+  margin: 8px 0 0;
+  color: var(--date-error);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-block-start: 12px;
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--date-line);
+}
+
+.actions button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--date-line);
+  border-radius: 8px;
+}
+
+.actions .clear {
+  margin-inline-end: auto;
+}
+
+@container (max-width: 380px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .time {
+    padding-inline-start: 0;
+    padding-block-start: 12px;
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--date-line);
+  }
+}

@@ -528,6 +528,40 @@ describe("WebShell production UI (Option A & Option B)", () => {
     localStorage.clear();
   });
 
+  it("commits the selected time before posting a meeting plan", async () => {
+    vi.setSystemTime(new Date(2027, 0, 27, 12));
+    try {
+      const fetchMock = mockEnvironment({ admin: false });
+      render(<WebShell />);
+      fireEvent.click(screen.getByRole("button", { name: "More capture options" }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: /Plan \/ Schedule meeting/i }));
+      fireEvent.change(screen.getByPlaceholderText("Weekly Product Review"), { target: { value: "Planning" } });
+      fireEvent.click(screen.getByRole("button", { name: "Scheduled time" }));
+      const save = screen.getByRole<HTMLButtonElement>("button", { name: "Save meeting plan" });
+      expect(save.disabled).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: /28.*2027/ }));
+      const time = screen.getByRole("textbox", { name: "Time" });
+      fireEvent.change(time, { target: { value: "09:07" } });
+      fireEvent.keyDown(time, { key: "Enter" });
+      expect(fetchMock).not.toHaveBeenCalledWith("/api/meetings", expect.objectContaining({ method: "POST" }));
+      expect(save.disabled).toBe(false);
+      fireEvent.click(save);
+
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledWith("/api/meetings", expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            title: "Planning", meeting_url: null,
+            scheduled_at: new Date(2027, 0, 28, 9, 7).toISOString(), auto_join: true,
+          }),
+        }));
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("supports split-button Capture ▾, Meetings Notebook multi-filter, date grouping, rename & ••• menu", async () => {
     const fetchMock = mockEnvironment({ admin: false });
     render(<WebShell />);
