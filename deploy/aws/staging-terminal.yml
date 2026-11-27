@@ -27,6 +27,7 @@ Parameters:
   WorkspacePilotStage: {Type: String, Default: closed, AllowedValues: [closed, chat, wiki, routines]}
   WorkspacePilotUserIds: {Type: String, Default: '', AllowedPattern: '(|[*]|[0-9]+(,[0-9]+)*)'}
   HideModelSettings: {Type: String, Default: 'false', AllowedValues: ['true', 'false']}
+  GatewayExtensionOrigins: {Type: String, Default: ''}
 
 Conditions:
   GoogleEnabled: !Not [!Equals [!Ref GoogleSecretArn, '']]
@@ -37,6 +38,7 @@ Conditions:
   WithAdminEmails: !Not [!Equals [!Ref AdminEmails, '']]
   WithWorkspacePilot: !Not [!Equals [!Ref WorkspacePilotUserIds, '']]
   WithHideModelSettings: !Equals [!Ref HideModelSettings, 'true']
+  WithExtensionOrigins: !Not [!Equals [!Ref GatewayExtensionOrigins, '']]
 
 Resources:
   NextAuthSecret:
@@ -145,6 +147,7 @@ Resources:
             - !If [WithTranscription, {Name: TRANSCRIPTION_SERVICE_URL, Value: !Ref TranscriptionUrl}, !Ref 'AWS::NoValue']
             - !If [WithTranscription, {Name: TRANSCRIPTION_MODEL, Value: !Ref TranscriptionModel}, !Ref 'AWS::NoValue']
             - !If [WithAdminEmails, {Name: TINA_ADMIN_EMAILS, Value: !Ref AdminEmails}, !Ref 'AWS::NoValue']
+            - !If [WithExtensionOrigins, {Name: TINA_GATEWAY_EXTENSION_ORIGINS, Value: !Ref GatewayExtensionOrigins}, !Ref 'AWS::NoValue']
             - {Name: NEXTAUTH_URL, Value: !Ref StageUrl}
             - {Name: TERMINAL_URL, Value: !Ref StageUrl}
           Secrets:

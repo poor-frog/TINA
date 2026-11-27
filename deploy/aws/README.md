@@ -300,9 +300,9 @@ callbacks, MCP public origins, and Chrome Extension CORS stay fixed across rebui
 2. **Attach the custom domain to CloudFront** by updating `tina-staging-edge` with [`staging-edge.yml`](staging-edge.yml):
    - Pass `CustomDomainName=<host>`, `AcmCertificateArn=<CertificateArn>`, and `HostedZoneId=<zone-id>` (for automatic Route53 `A`/`AAAA` Alias records; for external DNS leave `HostedZoneId=""` and point a CNAME/ALIAS at `CloudFrontDomainName`).
 3. **Update public origins & Chrome Extension CORS** across the application stacks:
-   - `tina-staging-terminal`: update `StageUrl=https://<host>` (updates `NEXTAUTH_URL` and `TERMINAL_URL`).
+   - `tina-staging-terminal`: update `StageUrl=https://<host>` (updates `NEXTAUTH_URL` and `TERMINAL_URL`) and set `GatewayExtensionOrigins=chrome-extension://<extension-id>` once the Chrome Extension ID is known.
    - `tina-staging-mcp`: update `PublicOrigin=https://<host>` (updates `TINA_MCP_PUBLIC_ORIGIN`).
-   - `tina-staging-core`: set `GatewayExtensionOrigins=chrome-extension://<extension-id>` (can be enabled before custom domain cutover).
+   - `tina-staging-core`: set `GatewayExtensionOrigins=chrome-extension://<extension-id>` (matching `tina-staging-terminal`; can be enabled before custom domain cutover).
 4. **Update Google Cloud Console & verify**:
    - Add Authorized JavaScript origin `https://<host>` and Authorized redirect URIs `https://<host>/api/auth/callback/google` and `https://<host>/api/auth/callback/google-calendar`.
    - Verify `GET https://<host>/edge-health` returns `TINA_EDGE_READY`, `GET https://<host>/api/auth/me` returns `401` unauthenticated, and OAuth sign-in returns `200`.
