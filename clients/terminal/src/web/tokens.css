@@ -20,6 +20,7 @@
   --lp-danger: #b42318;
   --lp-danger-bg: #fef3f2;
   --lp-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --lp-serif: "Instrument Serif", Georgia, "Times New Roman", serif;
   --lp-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --lp-radius-sm: 10px;
   --lp-radius: 18px;
@@ -31,4 +32,8 @@
   --lp-lime-hover: #8aeec6;
   --lp-shadow-ink: #0f110c;
   --lp-dark-muted: #484a40;
+}
+
+.tina-landing:lang(vi) {
+  --lp-serif: "Newsreader", Georgia, "Times New Roman", serif;
 }

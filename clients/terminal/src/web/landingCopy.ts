@@ -32,7 +32,11 @@ export interface LandingCopy {
     claimBadge: string;
     claimHeading: string;
     claimLead: string;
-    title: string;
+    titleLine1: string;
+    titleSerif: string;
+    titleMid: string;
+    titleLine3Prefix: string;
+    titleAccent: string;
     lead: string;
     googleCta: string;
     microsoftCta: string;
@@ -68,6 +72,12 @@ export interface LandingCopy {
       rollingBotOut: string;
     };
     beats: Record<SceneBeatId, SceneBeatCopy>;
+  };
+  ticker: {
+    label: string;
+    pause: string;
+    resume: string;
+    items: string[];
   };
   live: {
     label: string;
@@ -195,7 +205,11 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       claimHeading: "Thiết lập không gian TINA",
       claimLead:
         "Hệ thống TINA này chưa có quản trị viên. Tài khoản đăng nhập đầu tiên sẽ trở thành Admin để cấu hình mô hình AI, nhận dạng giọng nói và mời thành viên.",
-      title: "TINA ghi và trả lời trong cuộc họp",
+      titleLine1: "Đồng đội AI",
+      titleSerif: "biết nghe, dịch",
+      titleMid: " và",
+      titleLine3Prefix: "trả lời ",
+      titleAccent: "ngay trong họp.",
       lead: "Xem transcript Việt – Anh trên Google Meet, Zoom và Teams. Gọi “Tina ơi” để hỏi bằng giọng nói khi trợ lý được bật.",
       googleCta: "Tiếp tục với Google",
       microsoftCta: "Tiếp tục với Microsoft",
@@ -272,6 +286,21 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
           posClass: "posJky",
         },
       },
+    },
+    ticker: {
+      label: "Điểm nổi bật của TINA",
+      pause: "Tạm dừng thanh chữ chạy",
+      resume: "Tiếp tục thanh chữ chạy",
+      items: [
+        "GOOGLE MEET",
+        "ZOOM",
+        "MICROSOFT TEAMS",
+        "DỊCH SONG NGỮ VI + EN",
+        "TRỢ LÝ GIỌNG NÓI “TINA ƠI”",
+        "CHROME EXTENSION",
+        "BẮT KỊP 60 GIÂY",
+        "BẢO MẬT DOANH NGHIỆP",
+      ],
     },
     live: {
       label: "Trong cuộc họp",
@@ -573,7 +602,11 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       claimHeading: "Set up your instance",
       claimLead:
         "This TINA instance has no administrator yet. The first sign-in becomes the admin to configure AI models, speech transcription, and invite teammates.",
-      title: "TINA takes notes and answers in meetings",
+      titleLine1: "An AI teammate",
+      titleSerif: "that listens, translates",
+      titleMid: " &",
+      titleLine3Prefix: "speaks ",
+      titleAccent: "in the room.",
       lead: "Follow Vietnamese and English transcripts on Google Meet, Zoom, and Teams. Say “Tina ơi” to ask a question when the voice assistant is enabled.",
       googleCta: "Continue with Google",
       microsoftCta: "Continue with Microsoft",
@@ -650,6 +683,21 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
           posClass: "posJky",
         },
       },
+    },
+    ticker: {
+      label: "TINA highlights",
+      pause: "Pause highlights",
+      resume: "Resume highlights",
+      items: [
+        "GOOGLE MEET",
+        "ZOOM",
+        "MICROSOFT TEAMS",
+        "BILINGUAL VI + EN",
+        "“TINA ƠI” VOICE AGENT",
+        "CHROME EXTENSION",
+        "60-SECOND CATCH-UP",
+        "ENTERPRISE PRIVACY",
+      ],
     },
     live: {
       label: "In the meeting",

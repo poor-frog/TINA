@@ -348,6 +348,14 @@ describe("AuthGate pre-login TINA landing", () => {
     }) as typeof fetch;
 
     render(<AuthGate><div>App</div></AuthGate>);
+    expect(await screen.findByRole("heading", { level: 1, name: "Đồng đội AI biết nghe, dịch và trả lời ngay trong họp." })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Điểm nổi bật của TINA" })).toBeTruthy();
+    const playPause = screen.getByRole("button", { name: "Tạm dừng thanh chữ chạy" });
+    fireEvent.click(playPause);
+    expect(playPause.getAttribute("aria-label")).toBe("Tiếp tục thanh chữ chạy");
+    fireEvent.click(playPause);
+    expect(playPause.getAttribute("aria-label")).toBe("Tạm dừng thanh chữ chạy");
+
     expect(await screen.findByText("Trong cuộc họp")).toBeTruthy();
     expect(screen.getByText("TINA Chrome Extension")).toBeTruthy();
     expect(screen.getAllByText("TINA Agent").length).toBeGreaterThan(0);

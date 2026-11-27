@@ -484,10 +484,38 @@
   min-width: 0;
 }
 
-.heroTitle {
-  font-size: clamp(36px, 4.6vw, 64px);
+.root .heroTitle {
+  font-size: clamp(40px, 4.9vw, 68px);
   letter-spacing: -0.04em;
-  line-height: 1.08;
+  line-height: 1.04;
+  text-wrap: wrap;
+}
+
+.heroSerif {
+  font-family: var(--lp-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+.heroAccent {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+  z-index: 0;
+}
+
+.heroAccent::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: -2%;
+  right: -2%;
+  bottom: 5%;
+  height: 36%;
+  border-radius: 4px;
+  background: var(--lp-lime);
+  transform: skewY(-1deg);
 }
 
 .heroLead {
@@ -602,6 +630,101 @@
   margin: 0;
   color: var(--lp-muted);
   font-size: 13px;
+}
+
+/* Scrolling highlights under the landing hero */
+.ticker {
+  display: flex;
+  align-items: center;
+  min-height: 64px;
+  border-block: 2px solid var(--lp-ink);
+  background: var(--lp-lime);
+  color: var(--lp-ink-on-lime);
+  font: 600 12.5px/1.5 var(--lp-mono);
+  letter-spacing: 0.06em;
+}
+
+.tickerViewport {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, black 5%, black 95%, transparent);
+}
+
+.tickerTrack {
+  display: flex;
+  width: max-content;
+  animation: tinaTicker 32s linear infinite;
+}
+
+.tickerTrack[data-paused="true"],
+.tickerViewport:hover .tickerTrack {
+  animation-play-state: paused;
+}
+
+.tickerList {
+  display: flex;
+  align-items: center;
+  gap: 48px;
+  margin: 0;
+  padding: 0 48px 0 0;
+  list-style: none;
+}
+
+.tickerItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.tickerStar {
+  font-size: 16px;
+}
+
+.tickerToggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  min-height: 44px;
+  margin-inline-end: 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+
+.tickerToggle:hover {
+  background: var(--lp-lime-soft);
+}
+
+@keyframes tinaTicker {
+  to { transform: translateX(-50%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tickerViewport {
+    mask-image: none;
+  }
+
+  .tickerTrack {
+    width: auto;
+    animation: none;
+  }
+
+  .tickerList {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 24px;
+    padding: 12px;
+  }
+
+  .tickerList[aria-hidden="true"],
+  .tickerStar,
+  .tickerToggle {
+    display: none;
+  }
 }
 
 /* Sections */
@@ -1666,8 +1789,8 @@
   .homeHero {
     padding: 96px 0 52px;
   }
-  .heroTitle {
-    font-size: 40px;
+  .root .heroTitle {
+    font-size: clamp(32px, 10vw, 40px);
   }
   .homeSection,
   .homeHow {

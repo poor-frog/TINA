@@ -5,6 +5,7 @@
  *  spotlight, interactive cel-animated Hero scene, and private-infrastructure governance. */
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { HeroMeetingScene } from "./HeroMeetingScene";
+import { WebIcon } from "./Icons";
 import { LandingKnowledgeGraphCard } from "./LandingKnowledgeGraphCard";
 import { LANDING_COPY, type LandingLang } from "./landingCopy";
 import { PrivateInfraIso } from "./PrivateInfraIso";
@@ -56,6 +57,7 @@ export function TinaLanding({
   const [scrolled, setScrolled] = useState(false);
   const [scrollPct, setScrollPct] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [tickerPaused, setTickerPaused] = useState(false);
   const [activeLine, setActiveLine] = useState(2);
   const [extTab, setExtTab] = useState<ExtPreviewTab>("bilingual");
   const [wikiSaved, setWikiSaved] = useState(false);
@@ -65,6 +67,7 @@ export function TinaLanding({
 
   const copy = LANDING_COPY[lang];
   const hasOAuth = providers.google || providers.microsoft;
+  const tickerAction = tickerPaused ? copy.ticker.resume : copy.ticker.pause;
 
   useEffect(() => {
     try {
@@ -231,7 +234,17 @@ export function TinaLanding({
                 )}
 
                 <h1 className={styles.heroTitle}>
-                  {claiming ? copy.hero.claimHeading : copy.hero.title}
+                  {claiming ? copy.hero.claimHeading : (
+                    <>
+                      {copy.hero.titleLine1}{" "}
+                      <br />
+                      <span className={styles.heroSerif}>{copy.hero.titleSerif}</span>
+                      {copy.hero.titleMid}{" "}
+                      <br />
+                      {copy.hero.titleLine3Prefix}
+                      <span className={styles.heroAccent}>{copy.hero.titleAccent}</span>
+                    </>
+                  )}
                 </h1>
 
                 <p className={styles.heroLead}>
@@ -333,6 +346,32 @@ export function TinaLanding({
             </div>
           </div>
         </section>
+
+        <div className={styles.ticker} role="region" aria-label={copy.ticker.label}>
+          <div className={styles.tickerViewport}>
+            <div className={styles.tickerTrack} data-paused={tickerPaused}>
+              {[false, true].map((duplicate) => (
+                <ul key={String(duplicate)} className={styles.tickerList} role="list" aria-hidden={duplicate || undefined}>
+                  {copy.ticker.items.map((label) => (
+                    <li key={label} className={styles.tickerItem}>
+                      {label}
+                      <span className={styles.tickerStar} aria-hidden="true">✦</span>
+                    </li>
+                  ))}
+                </ul>
+              ))}
+            </div>
+          </div>
+          <button
+            type="button"
+            className={styles.tickerToggle}
+            aria-label={tickerAction}
+            title={tickerAction}
+            onClick={() => setTickerPaused((paused) => !paused)}
+          >
+            <WebIcon name={tickerPaused ? "play" : "pause"} size={16} />
+          </button>
+        </div>
 
         {/* 01 · LIVE IN-CALL TRANSCRIPT & VOICE AGENT (moved up right after Hero!) */}
         <section className={styles.homeSection} id="transcription">
