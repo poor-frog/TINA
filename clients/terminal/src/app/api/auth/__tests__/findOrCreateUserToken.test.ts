@@ -250,7 +250,7 @@ describe("findOrCreateUserToken — bounded login-token minting (#638)", () => {
 
   it("edge: a fresh user with zero tokens mints exactly once and prunes nothing", async () => {
     const r = await findOrCreateUserToken("new@example.test");
-    expect(r.ok).toBe(true);
+    expect(r).toMatchObject({ ok: true, justCreated: true });
     expect(fake.countRevokes()).toBe(0);
 
     const created = fake.users.get("new@example.test");
@@ -271,7 +271,7 @@ describe("Google sign-in account binding", () => {
   it("links an unbound Gmail to its existing TINA user without creating a new account", async () => {
     const user = fake.seedUser("existing@gmail.com");
     const first = await findOrCreateUserToken(user.email, "verified-subject");
-    expect(first).toMatchObject({ ok: true, user });
+    expect(first).toMatchObject({ ok: true, user, justCreated: false });
     expect(fake.googleBindings.get("verified-subject")).toBe(user.id);
     expect(fake.users.size).toBe(1);
 

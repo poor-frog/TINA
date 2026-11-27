@@ -51,6 +51,13 @@
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
   --sans: var(--font-body);
   --display: var(--font-display, Georgia, serif);
+  --google-surface: light-dark(#fff, #131314);
+  --google-line: light-dark(#747775, #8e918f);
+  --google-ink: light-dark(#1f1f1f, #e3e3e3);
+  --google-red: #ea4335;
+  --google-blue: #4285f4;
+  --google-yellow: #fbbc05;
+  --google-green: #34a853;
 }
 
 html,

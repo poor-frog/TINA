@@ -14,6 +14,7 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { AUTH_COOKIE, USER_INFO_COOKIE } from "../adminApi";
+import { CALENDAR_WELCOME_COOKIE } from "../googleCalendarLink";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +84,7 @@ export async function POST() {
   // (`.example.com`, where a webapp reuses the same OAuth app) — a host-only deletion can't reach
   // those, which is what trapped users at a stale-token 401. Clear them across host + every parent scope.
   for (const name of [AUTH_COOKIE, USER_INFO_COOKIE]) emit(name, domainScopes(host));
+  emit(CALENDAR_WELCOME_COOKIE, [undefined]);
 
   // NextAuth always writes its cookies host-scoped (no Domain), so host-only clearing suffices. Keeping
   // these host-only also keeps the total Set-Cookie header size small — emitting every NextAuth name ×

@@ -6,13 +6,26 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { signIn } from "next-auth/react";
 import { TinaLanding } from "../web/TinaLanding";
+import { CalendarWelcome } from "../web/CalendarWelcome";
 import landingStyles from "../web/tinaLanding.module.css";
 
 type Status = "checking" | "out" | "in";
 type Providers = { google: boolean; microsoft: boolean };
+const CALENDAR_DISMISSED_KEY = "tina.calendar-welcome-dismissed";
 
-export function AuthGate({ children }: { children: React.ReactNode }) {
+function shouldOfferCalendar(key: string): boolean {
+  const url = new URL(window.location.href);
+  if (url.pathname !== "/" || [...url.searchParams.keys()].some((name) => name !== "error")) return false;
+  try {
+    return localStorage.getItem(CALENDAR_DISMISSED_KEY) !== key;
+  } catch {
+    return true;
+  }
+}
+
+export function AuthGate({ children, calendarWelcome = false }: { children: React.ReactNode; calendarWelcome?: boolean }) {
   const [status, setStatus] = useState<Status>("checking");
+  const [welcomeKey, setWelcomeKey] = useState<string | null>(null);
   const [providers, setProviders] = useState<Providers>({ google: false, microsoft: false });
   const [adminExists, setAdminExists] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
@@ -23,7 +36,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let active = true;
     fetch("/api/auth/me", { cache: "no-store" })
-      .then((r) => (active ? setStatus(r.ok ? "in" : "out") : undefined))
+      .then(async (r) => {
+        const profile = r.ok && calendarWelcome
+          ? await r.json().catch(() => null) as { calendarWelcome?: unknown } | null
+          : null;
+        if (!active) return;
+        const key = profile?.calendarWelcome;
+        if (typeof key === "string" && key && shouldOfferCalendar(key)) setWelcomeKey(key);
+        setStatus(r.ok ? "in" : "out");
+      })
       .catch(() => active && setStatus("out"));
     fetch("/api/auth/providers", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : {}))
@@ -38,7 +59,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [calendarWelcome]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -65,6 +86,25 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
   };
 
+  if (status === "in" && welcomeKey) {
+    return (
+      <CalendarWelcome
+        googleIcon={<GoogleMark />}
+        initialError={new URLSearchParams(window.location.search).has("error")}
+        onSkip={() => {
+          try {
+            localStorage.setItem(CALENDAR_DISMISSED_KEY, welcomeKey);
+          } catch { /* still dismiss this screen when storage is unavailable */ }
+          const url = new URL(window.location.href);
+          if (url.searchParams.has("error")) {
+            url.searchParams.delete("error");
+            window.history.replaceState(window.history.state, "", url);
+          }
+          setWelcomeKey(null);
+        }}
+      />
+    );
+  }
   if (status === "in") return <>{children}</>;
   if (status === "checking") return <div className={`tina-landing ${landingStyles.checking}`} />;
 

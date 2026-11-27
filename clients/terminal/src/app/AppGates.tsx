@@ -115,13 +115,13 @@ function InviteConsent({
   );
 }
 
-export function AppGates({ children }: { children: ReactNode }) {
+export function AppGates({ children, calendarWelcome }: { children: ReactNode; calendarWelcome?: boolean }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) return <div style={{ height: "100vh", background: "var(--bg)" }} />;
 
   return (
-    <AuthGate>
+    <AuthGate calendarWelcome={calendarWelcome}>
       <InviteGate>
         <SetupGate>
           <OnboardingGate>{children}</OnboardingGate>

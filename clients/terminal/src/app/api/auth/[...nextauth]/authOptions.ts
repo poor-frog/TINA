@@ -16,7 +16,7 @@ import { cookies } from "next/headers";
 import { AUTH_COOKIE, USER_INFO_COOKIE, findOrCreateUserToken, linkGoogleCalendarAccount, validateAuthToken } from "../adminApi";
 import { sendLoginEmail } from "../../mail/templates";
 import { googleAvatarUrl } from "../googleAvatar";
-import { GOOGLE_CALENDAR_LINK_COOKIE, listGoogleCalendars, verifyGoogleCalendarLinkIntent } from "../googleCalendarLink";
+import { CALENDAR_WELCOME_COOKIE, GOOGLE_CALENDAR_LINK_COOKIE, listGoogleCalendars, verifyGoogleCalendarLinkIntent } from "../googleCalendarLink";
 import { GOOGLE_CALENDAR_PROVIDER, GOOGLE_CALENDAR_AUTHORIZATION_PARAMS, GOOGLE_CALENDAR_SCOPES } from "../../../../lib/googleCalendar";
 
 const isGoogleEnabled = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
@@ -109,6 +109,11 @@ export const authOptions: AuthOptions = {
             calendars,
           });
           clearIntent();
+          if (saved.ok && cookieStore.get(CALENDAR_WELCOME_COOKIE)) {
+            cookieStore.set(CALENDAR_WELCOME_COOKIE, "", {
+              httpOnly: true, secure: isSecureRequest(), sameSite: "lax", maxAge: 0, path: "/",
+            });
+          }
           return saved.ok;
         } catch {
           clearIntent();
@@ -138,6 +143,11 @@ export const authOptions: AuthOptions = {
       };
       const cookieStore = await cookies();
       cookieStore.set(AUTH_COOKIE, result.token, opts);
+      if (result.justCreated && isGoogleEnabled()) {
+        cookieStore.set(CALENDAR_WELCOME_COOKIE, crypto.randomUUID(), { ...opts, maxAge: 24 * 60 * 60 });
+      } else if (cookieStore.get(CALENDAR_WELCOME_COOKIE)) {
+        cookieStore.set(CALENDAR_WELCOME_COOKIE, "", { ...opts, maxAge: 0 });
+      }
       const displayName = user.name || result.user.name || result.user.email.split("@")[0];
       const image = provider === "google" ? googleAvatarUrl(user.image) : null;
       cookieStore.set(USER_INFO_COOKIE, JSON.stringify({ email: result.user.email, name: displayName, image }), opts);

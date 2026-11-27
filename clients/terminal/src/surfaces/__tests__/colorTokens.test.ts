@@ -14,7 +14,8 @@ const SCAN_DIRS = ["surfaces", "canvas", "workbench", "ui-kit", "app"];
 // Non-color or deliberate exceptions:
 //  - routines.tsx switch knob: a white knob is correct on both themes' green track.
 //  - AuthGate/App boxShadow rgba + icon assets are shadows/artwork, not palette colors.
-const HEX_ALLOWLIST = new Set(["surfaces/routines.tsx"]);
+//  - Transactional HTML emails render outside the app and cannot use its CSS tokens.
+const HEX_ALLOWLIST = new Set(["surfaces/routines.tsx", "app/api/mail/templates.ts"]);
 const HEX_RE = /(?:color|background|border(?:Color|Bottom|Top|Left|Right)?)\s*:\s*[^,;}]*#[0-9a-fA-F]{3,8}\b/;
 
 function* sourceFiles(dir: string): Generator<string> {

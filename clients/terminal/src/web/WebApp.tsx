@@ -529,7 +529,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
 
 export function WebApp({ initialMeetingId }: { initialMeetingId?: string }) {
   return (
-    <AppGates>
+    <AppGates calendarWelcome={!initialMeetingId}>
       <WebShell initialMeetingId={initialMeetingId} />
     </AppGates>
   );

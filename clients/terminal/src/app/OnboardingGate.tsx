@@ -25,7 +25,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       if (!forced && isOnboarded(uid)) return;   // already onboarded → straight to the workbench
       await initWorkspace().catch(() => null);   // ensure the workspace exists (idempotent)
       setOnboarded(uid, true);                   // flip the durable bool BEFORE firing → a reload never re-runs it
-      if (window.location.search) window.history.replaceState({}, "", window.location.pathname);
+      if (forced) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("onboard");
+        window.history.replaceState(window.history.state, "", url);
+      }
       // Let the chat surface mount + register its listener, then seed the cached greeting into it.
       window.setTimeout(() => window.dispatchEvent(new CustomEvent(ONBOARDING_SEED_EVENT)), 600);
     })();

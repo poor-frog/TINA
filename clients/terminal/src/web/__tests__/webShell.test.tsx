@@ -296,6 +296,59 @@ describe("computeSpeakerStats talk-time analytics", () => {
   });
 });
 
+describe("Calendar welcome after sign-in", () => {
+  beforeEach(() => {
+    localStorage.removeItem("tina.calendar-welcome-dismissed");
+    vi.mocked(signIn).mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    window.history.replaceState({}, "", "/");
+    localStorage.removeItem("tina.calendar-welcome-dismissed");
+  });
+
+  function mockProfile(calendarWelcome?: string) {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) =>
+      Response.json(String(input) === "/api/auth/me" ? { calendarWelcome } : {}),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    return fetcher;
+  }
+
+  it("opens the existing Google Calendar OAuth flow and returns to Calendar settings", async () => {
+    const fetcher = mockProfile("new-account");
+    render(<AuthGate calendarWelcome><div>App</div></AuthGate>);
+    expect(await screen.findByText("Sample week")).toBeTruthy();
+    expect(screen.getByText("Project review").closest("li")?.textContent).toBe("Wed14:00Project review");
+    expect(screen.queryByText("Bot auto-join is off by default.")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Google Calendar" }));
+    await waitFor(() => expect(signIn).toHaveBeenCalledWith("google-calendar", {
+      callbackUrl: `${window.location.origin}/?nav=settings&settingsWorkspace=personal&settingsSection=calendar`,
+    }, expect.objectContaining({ access_type: "offline" })));
+    expect(fetcher).toHaveBeenCalledWith("/api/auth/google-calendar-link", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("remembers Skip across reloads and preserves links to other views", async () => {
+    mockProfile("new-account");
+    const first = render(<AuthGate calendarWelcome><div>App</div></AuthGate>);
+    fireEvent.click(await screen.findByRole("button", { name: "Skip for now" }));
+    expect(await screen.findByText("App")).toBeTruthy();
+    first.unmount();
+
+    const later = render(<AuthGate calendarWelcome><div>App</div></AuthGate>);
+    expect(await screen.findByText("App")).toBeTruthy();
+    later.unmount();
+
+    mockProfile("another-new-account");
+    window.history.replaceState({}, "", "/?nav=settings&settingsSection=calendar");
+    render(<AuthGate calendarWelcome><div>App</div></AuthGate>);
+    expect(await screen.findByText("App")).toBeTruthy();
+    expect(window.location.search).toContain("settingsSection=calendar");
+  });
+});
+
 describe("AuthGate pre-login TINA landing", () => {
   const origFetch = globalThis.fetch;
 

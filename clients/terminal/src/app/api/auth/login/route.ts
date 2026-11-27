@@ -8,6 +8,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { AUTH_COOKIE, USER_INFO_COOKIE, findOrCreateUserToken } from "../adminApi";
 import { sendLoginEmail } from "../../mail/templates";
+import { CALENDAR_WELCOME_COOKIE } from "../googleCalendarLink";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -60,6 +61,9 @@ export async function POST(request: NextRequest) {
   const cookieStore = await cookies();
   const opts = { httpOnly: true, secure, sameSite: "lax" as const, maxAge: 60 * 60 * 24 * 30, path: "/" };
   cookieStore.set(AUTH_COOKIE, token, opts);
+  if (cookieStore.get(CALENDAR_WELCOME_COOKIE)) {
+    cookieStore.set(CALENDAR_WELCOME_COOKIE, "", { ...opts, maxAge: 0 });
+  }
   const displayName = user.name || user.email.split("@")[0];
   cookieStore.set(USER_INFO_COOKIE, JSON.stringify({ email: user.email, name: displayName }), opts);
 

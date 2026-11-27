@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createGoogleCalendarLinkIntent, listGoogleCalendars, GOOGLE_CALENDAR_LINK_COOKIE } from "../googleCalendarLink";
+import { CALENDAR_WELCOME_COOKIE, createGoogleCalendarLinkIntent, listGoogleCalendars, GOOGLE_CALENDAR_LINK_COOKIE } from "../googleCalendarLink";
 import { GOOGLE_CALENDAR_PROVIDER, GOOGLE_CALENDAR_SCOPES } from "../../../../lib/googleCalendar";
 
 const mocks = vi.hoisted(() => ({
@@ -54,11 +54,13 @@ describe("Calendar callback never falls back to TINA login", () => {
   });
   it("links a different Google account to the authenticated TINA owner", async () => {
     mocks.jar.set("tina-token", "existing-owner-token");
+    mocks.jar.set(CALENDAR_WELCOME_COOKIE, "first-login");
     mocks.jar.set(GOOGLE_CALENDAR_LINK_COOKIE, createGoogleCalendarLinkIntent(1)!);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response([{ id: "calendar", summary: "Work" }])));
     expect(await signIn()).toBe(true);
     expect(mocks.save).toHaveBeenCalledWith("existing-owner-token", expect.objectContaining({ email: "linked@example.test" }));
     expect(mocks.login).not.toHaveBeenCalled();
+    expect(mocks.set).toHaveBeenCalledWith(CALENDAR_WELCOME_COOKIE, "", expect.objectContaining({ maxAge: 0 }));
   });
   it("continues normal Google login even when a stale link cookie exists", async () => {
     mocks.jar.set(GOOGLE_CALENDAR_LINK_COOKIE, "stale-intent");
@@ -66,6 +68,7 @@ describe("Calendar callback never falls back to TINA login", () => {
     expect(await signIn("google")).toBe(true);
     expect(mocks.login).toHaveBeenCalledOnce();
     expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.set.mock.calls.some(([name]) => name === CALENDAR_WELCOME_COOKIE)).toBe(false);
   });
   it("never saves a partial CalendarList during reauthorization", async () => {
     mocks.jar.set("tina-token", "existing-owner-token");
@@ -77,6 +80,22 @@ describe("Calendar callback never falls back to TINA login", () => {
     expect(mocks.save).not.toHaveBeenCalled();
     expect(mocks.login).not.toHaveBeenCalled();
   });
+});
+
+it("offers Calendar on a new account only and clears a stale offer on returning login", async () => {
+  vi.stubEnv("GOOGLE_CLIENT_ID", "synthetic-client");
+  vi.stubEnv("GOOGLE_CLIENT_SECRET", "synthetic-secret");
+  const login = { ok: true, token: "login-token", user: { email: "linked@example.test" } };
+  mocks.login.mockResolvedValueOnce({ ...login, justCreated: true })
+    .mockResolvedValueOnce({ ...login, justCreated: false });
+
+  expect(await signIn("google")).toBe(true);
+  expect(mocks.set).toHaveBeenCalledWith(CALENDAR_WELCOME_COOKIE, expect.stringMatching(/^[\da-f-]{36}$/),
+    expect.objectContaining({ maxAge: 86_400, httpOnly: true }));
+
+  mocks.jar.set(CALENDAR_WELCOME_COOKIE, "first-login");
+  expect(await signIn("google")).toBe(true);
+  expect(mocks.set).toHaveBeenCalledWith(CALENDAR_WELCOME_COOKIE, "", expect.objectContaining({ maxAge: 0 }));
 });
 
 it("reads every page before returning a complete CalendarList", async () => {
