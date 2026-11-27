@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Amazon SES domain identity, Route53 DKIM/SPF/DMARC DNS records, and least-privilege SMTP sender for TINA.
+Description: Amazon SES domain identity, Route53 DKIM/SPF/DMARC DNS records, bounce/complaint reputation alarms, and least-privilege SMTP sender for TINA.
 Metadata:
   AWSToolsMetrics:
     AWSAgentToolkit: aws-cloudformation@3
@@ -20,6 +20,10 @@ Parameters:
     Type: String
     Default: ''
     Description: Optional email address for DMARC aggregate reports (rua=mailto:...).
+  AlertEmail:
+    Type: String
+    Default: ''
+    Description: Optional operator email subscribed to SNS alerts for SES bounces, complaints, rejects, and reputation rate alarms.
   SmtpSecretName:
     Type: String
     Default: tina-staging/ses-smtp
@@ -27,12 +31,30 @@ Parameters:
 
 Conditions:
   HasDmarcReportEmail: !Not [!Equals [!Ref DmarcReportEmail, '']]
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
 
 Resources:
+  SesConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties:
+      Name: !Sub '${AWS::StackName}-config'
+      DeliveryOptions:
+        TlsPolicy: REQUIRE
+      ReputationOptions:
+        ReputationMetricsEnabled: true
+      SendingOptions:
+        SendingEnabled: true
+      SuppressionOptions:
+        SuppressedReasons:
+          - BOUNCE
+          - COMPLAINT
+
   DomainIdentity:
     Type: AWS::SES::EmailIdentity
     Properties:
       EmailIdentity: !Ref DomainName
+      ConfigurationSetAttributes:
+        ConfigurationSetName: !Ref SesConfigurationSet
       DkimAttributes:
         SigningEnabled: true
       DkimSigningAttributes:
@@ -88,6 +110,122 @@ Resources:
               - !Sub '"v=DMARC1; p=none; rua=mailto:${DmarcReportEmail}"'
               - '"v=DMARC1; p=none"'
 
+  SesAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-alerts'
+      DisplayName: TINA SES Alerts
+
+  SesAlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref SesAlertTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowSesAndCloudWatchPublish
+            Effect: Allow
+            Principal:
+              Service:
+                - ses.amazonaws.com
+                - cloudwatch.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref SesAlertTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref 'AWS::AccountId'
+
+  SesAlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref SesAlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  SesSnsEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    DependsOn: SesAlertTopicPolicy
+    Properties:
+      ConfigurationSetName: !Ref SesConfigurationSet
+      EventDestination:
+        Name: bounce-complaint-reject-sns
+        Enabled: true
+        MatchingEventTypes:
+          - bounce
+          - complaint
+          - reject
+        SnsDestination:
+          TopicARN: !Ref SesAlertTopic
+
+  SesCloudWatchEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Properties:
+      ConfigurationSetName: !Ref SesConfigurationSet
+      EventDestination:
+        Name: reputation-cloudwatch
+        Enabled: true
+        MatchingEventTypes:
+          - send
+          - delivery
+          - bounce
+          - complaint
+          - reject
+        CloudWatchDestination:
+          DimensionConfigurations:
+            - DimensionName: ses_configuration_set
+              DimensionValueSource: messageTag
+              DefaultDimensionValue: !Ref AWS::StackName
+
+  SesBounceRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-bounce-rate-high'
+      AlarmDescription: !Sub 'Amazon SES bounce rate >= 3% on ${DomainName} (AWS review threshold is 5%).'
+      Namespace: AWS/SES
+      MetricName: Reputation.BounceRate
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0.03
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref SesAlertTopic
+
+  SesComplaintRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-complaint-rate-high'
+      AlarmDescription: !Sub 'Amazon SES complaint rate >= 0.08% on ${DomainName} (AWS review threshold is 0.1%).'
+      Namespace: AWS/SES
+      MetricName: Reputation.ComplaintRate
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0.0008
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref SesAlertTopic
+
+  SesRejectAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-rejects'
+      AlarmDescription: !Sub 'Amazon SES rejected >= 1 outbound email on ${DomainName} within 5 minutes.'
+      Namespace: AWS/SES
+      MetricName: Reject
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref SesAlertTopic
+
   SmtpSenderUser:
     Type: AWS::IAM::User
     Properties:
@@ -102,7 +240,9 @@ Resources:
                 Action:
                   - ses:SendRawEmail
                   - ses:SendEmail
-                Resource: !Sub 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*'
+                  - !Sub 'arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${SesConfigurationSet}'
                 Condition:
                   StringLike:
                     ses:FromAddress: !Sub '*@${DomainName}'
@@ -120,6 +260,10 @@ Outputs:
     Value: !Ref DomainName
   MailFromDomain:
     Value: !Sub '${MailFromSubdomain}.${DomainName}'
+  ConfigurationSetName:
+    Value: !Ref SesConfigurationSet
+  AlertTopicArn:
+    Value: !Ref SesAlertTopic
   SmtpEndpoint:
     Value: !Sub 'email-smtp.${AWS::Region}.amazonaws.com'
   SmtpUserName:
