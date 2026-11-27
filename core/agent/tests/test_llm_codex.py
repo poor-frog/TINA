@@ -850,3 +850,187 @@ def test_codex_uses_completed_native_text_when_no_deltas_arrive(monkeypatch, tmp
     monkeypatch.setattr('llm.codex.subprocess.Popen', lambda *_args, **_kwargs: proc)
     events = list(CodexHarness().run_turn(tmp_path, 'research', allowed_tools=['Read']))
     assert events[-1]['reply'] == 'Native complete text. [Nguồn chưa có liên kết]'
+
+
+@pytest.mark.parametrize("env_key,env_val", [
+    ("TINA_WORKSPACE_SYNC_SIDECAR", "1"),
+    ("ECS_CONTAINER_METADATA_URI_V4", "http://169.254.170.2/v4/task"),
+])
+@pytest.mark.parametrize("read_only_turn", [False, True])
+def test_codex_fargate_disables_shell_and_attaches_workspace_mcp(
+    monkeypatch, tmp_path, env_key, env_val, read_only_turn,
+):
+    private = tmp_path / "2"
+    global_dir = tmp_path / "_global"
+    system_dir = tmp_path / "_system"
+    for d in (private, global_dir, system_dir):
+        d.mkdir(parents=True)
+    proc = _FakeCodexProcess()
+    captured = {}
+    harness = CodexHarness()
+    harness.prepare(private, chat_root=system_dir)
+
+    def spawn(argv, **kwargs):
+        captured["argv"] = argv
+        captured["stderr"] = kwargs.get("stderr")
+        assert harness._codex_home is not None
+        captured["config"] = (harness._codex_home / "config.toml").read_text(encoding="utf-8")
+        mounts_files = list(harness._codex_home.glob("tina-mounts-*.json"))
+        assert len(mounts_files) == 1
+        captured["mounts_file"] = mounts_files[0]
+        captured["mounts_payload"] = json.loads(mounts_files[0].read_text(encoding="utf-8"))
+        return proc
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("TINA_CODEX_AUTH_MODE", raising=False)
+    monkeypatch.setenv(env_key, env_val)
+    monkeypatch.setenv("TINA_MOUNTS", json.dumps([
+        {"slug": "2", "path": str(private), "role": "private", "write": True, "primary": True},
+        {"slug": "_global", "path": str(global_dir), "role": "global", "write": False},
+        {"slug": "_system", "path": str(system_dir), "role": "system", "write": True},
+    ]))
+    monkeypatch.setattr("llm.codex.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr("llm.codex.subprocess.Popen", spawn)
+
+    tools = ["Read"] if read_only_turn else ["Read", "Write", "Edit", "Bash", "WebFetch"]
+    events = list(harness.run_turn(
+        private, "Summarize Jane Liu",
+        allowed_tools=tools,
+        mcp_servers={"tina-reach": {"command": "python", "args": ["-m", "llm.reach_mcp"]}},
+        mcp_tools={"tina-reach": ["reach_web_search"]},
+    ))
+
+    assert events[-1]["ok"] is True
+    assert "features.shell_tool=false" in captured["argv"]
+    assert "features.unified_exec=false" in captured["argv"]
+    settings = tomllib.loads("\n".join(
+        captured["argv"][i + 1] for i, arg in enumerate(captured["argv"]) if arg == "-c"
+    ))
+    assert settings["permissions"]["tina-offline"]["filesystem"] == {":root": "read"}
+    by_method = {r.get("method"): r for r in proc.requests}
+    assert by_method["turn/start"]["params"]["permissions"] == "tina-offline"
+    dev_instructions = by_method["thread/start"]["params"]["developerInstructions"]
+    assert "tina-workspace" in dev_instructions
+    assert "'2'" in dev_instructions and "'_global'" in dev_instructions
+    assert "'_system'" not in dev_instructions
+
+    mcp_cfg = tomllib.loads(captured["config"])["mcp_servers"]
+    assert "tina-workspace" in mcp_cfg
+    ws_server = mcp_cfg["tina-workspace"]
+    assert ws_server["default_tools_approval_mode"] == "auto"
+    assert ws_server["required"] is True
+    if read_only_turn:
+        assert ws_server["enabled_tools"] == ["list_wiki", "search_wiki", "read_wiki"]
+        assert "--readonly" in ws_server["args"]
+        assert all(m["write"] is False for m in captured["mounts_payload"])
+    else:
+        assert set(ws_server["enabled_tools"]) == {
+            "list_wiki", "search_wiki", "read_wiki",
+            "create_wiki", "update_wiki", "move_wiki", "delete_wiki",
+        }
+        assert "--readonly" not in ws_server["args"]
+    assert not any(m["slug"] == "_system" for m in captured["mounts_payload"])
+    assert not captured["mounts_file"].exists()
+    assert not (harness._codex_home / "config.toml").exists()
+
+
+def test_codex_fargate_voice_sandbox_keeps_no_tools_without_workspace_mcp(monkeypatch, tmp_path):
+    proc = _FakeCodexProcess()
+    captured = {}
+    harness = CodexHarness()
+    harness.prepare(tmp_path, chat_root=tmp_path / "private")
+
+    def spawn(argv, **_kwargs):
+        captured["argv"] = argv
+        assert harness._codex_home is not None
+        captured["config"] = (harness._codex_home / "config.toml").read_text(encoding="utf-8")
+        return proc
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("TINA_WORKSPACE_SYNC_SIDECAR", "1")
+    monkeypatch.setenv("TINA_MOUNTS", json.dumps([
+        {"slug": "2", "path": str(tmp_path), "role": "private", "write": True},
+    ]))
+    monkeypatch.setattr("llm.codex.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr("llm.codex.subprocess.Popen", spawn)
+
+    events = list(harness.run_turn(tmp_path, "voice turn", allowed_tools=()))
+    assert events[-1]["ok"] is True
+    assert "features.shell_tool=false" in captured["argv"]
+    assert "features.browser_use=false" in captured["argv"]
+    assert "tina-workspace" not in captured["config"]
+
+
+def test_codex_groq_fargate_catalog_guides_workspace_mcp(monkeypatch, tmp_path):
+    proc = _FakeCodexProcess()
+    captured = {}
+
+    @contextmanager
+    def proxy(_key):
+        yield "http://127.0.0.1:12345/v1"
+
+    def spawn(argv, **_kwargs):
+        profile_arg = next(arg for arg in argv if arg.startswith("model_catalog_json="))
+        profile_path = Path(json.loads(profile_arg.partition("=")[2]))
+        captured["profile"] = json.loads(profile_path.read_text())["models"][0]
+        return proc
+
+    monkeypatch.setattr("llm.groq_responses.groq_responses_proxy", proxy)
+    monkeypatch.setattr("llm.codex.subprocess.Popen", spawn)
+    monkeypatch.setattr("llm.codex.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setenv("TINA_CODEX_AUTH_MODE", "groq")
+    monkeypatch.setenv("TINA_LLM_API_KEY", "groq-secret")
+    monkeypatch.setenv("TINA_WORKSPACE_SYNC_SIDECAR", "1")
+
+    harness = CodexHarness()
+    harness.prepare(tmp_path, chat_root=tmp_path / "private")
+    events = list(harness.run_turn(tmp_path, "summarize", allowed_tools=["Read"]))
+    assert events[-1]["ok"] is True
+    assert "tina-workspace" in captured["profile"]["base_instructions"]
+    assert "exec_command" not in captured["profile"]["base_instructions"]
+
+
+def test_codex_tool_result_flags_sandbox_namespace_failure_and_redacts_stderr(
+    monkeypatch, tmp_path, caplog,
+):
+    import io
+    import logging
+
+    notifications = [
+        {"method": "item/completed", "params": {"item": {
+            "id": "cmd-fail",
+            "type": "commandExecution",
+            "command": "ls",
+            "status": "completed",
+            "exitCode": None,
+            "aggregatedOutput": "bwrap: Creating new namespace failed: Operation not permitted",
+        }}},
+        {"method": "item/completed", "params": {"item": {
+            "id": "cmd-ok",
+            "type": "commandExecution",
+            "command": "echo bwrap: ok",
+            "status": "completed",
+            "exitCode": 0,
+            "aggregatedOutput": "bwrap: ok",
+        }}},
+    ]
+    proc = _FakeCodexProcess(
+        notifications=notifications,
+        turn_status="failed",
+        turn_error="sandbox blocked",
+    )
+    proc.stderr = io.StringIO("ERROR bwrap failed with key sk-super-secret-value\n")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-super-secret-value")
+    monkeypatch.delenv("TINA_CODEX_AUTH_MODE", raising=False)
+    monkeypatch.setattr("llm.codex.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr("llm.codex.subprocess.Popen", lambda *_args, **_kwargs: proc)
+
+    with caplog.at_level(logging.WARNING, logger="tina.codex"):
+        events = list(CodexHarness().run_turn(tmp_path, "list files", allowed_tools=["Read", "Bash"]))
+
+    results = {e["callId"]: e for e in events if e["type"] == "tool-result"}
+    assert results["cmd-fail"]["ok"] is False
+    assert results["cmd-ok"]["ok"] is True
+    assert "bwrap failed" in caplog.text
+    assert "sk-super-secret-value" not in caplog.text
+    assert "[redacted]" in caplog.text

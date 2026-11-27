@@ -221,6 +221,16 @@ offline turns. TINA enables the proxy feature and selects an explicit named offl
 it never combines these profiles with the legacy `sandboxPolicy`. A missing restrictive policy
 keeps shell networking offline; a globally forced proxy is rejected before starting a turn.
 
+When the worker container blocks Linux user namespaces (such as AWS ECS Fargate, where bubblewrap's
+`CLONE_NEWUSER` fails under the default seccomp profile), `CodexHarness` automatically disables
+Codex's shell tools (`shell_tool`, `unified_exec`), keeps Codex's native filesystem profile read-only,
+and attaches the built-in `tina-workspace` stdio MCP server (`workspace_mcp.py`) exposing bounded,
+mount-scoped Markdown tools (`list_wiki`, `search_wiki`, `read_wiki`, plus `create_wiki`,
+`update_wiki`, `move_wiki`, `delete_wiki` on writable turns) and read-only workspace resources.
+Groq's loopback Responses proxy flattens and restores both `mcp__tina_reach` and
+`mcp__tina_workspace` namespaces when granted. App-server stderr is drained into a bounded redacted
+tail for failure diagnostics without blocking or leaking credentials.
+
 The real CLI smoke probes in `tests/codex_network_smoke.py` and `tests/codex_web_smoke.py` verify
 network/filesystem isolation and web-tool request construction without a provider account. Their
 fixture responses do not establish live search availability, provider quota, or account access.

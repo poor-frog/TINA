@@ -5,23 +5,114 @@ workspace mounts and maps the resulting assistant text into the existing UnitEve
 """
 from __future__ import annotations
 
+from collections import deque
+import functools
 import glob
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Optional
+from uuid import uuid4
 
 from llm.errors import LLMError, looks_like_auth_failure
 from llm.model_capabilities import groq_chat_model_error, normalized_effort
 from llm.ports import harness_subprocess_env
 from llm.citations import render_citations, web_sources
+from llm.workspace_mcp import (
+    READ_TOOLS as _WORKSPACE_MCP_READ_TOOLS,
+    WRITE_TOOLS as _WORKSPACE_MCP_WRITE_TOOLS,
+    load_mounts as _load_workspace_mounts,
+)
 
 
+log = logging.getLogger("tina.codex")
 _CLIENT = {"name": "tina", "title": "TINA", "version": "0.12.0"}
+_REAL_POPEN = subprocess.Popen
+_WORKSPACE_MCP_SERVER = "tina-workspace"
+_SANDBOX_ERROR_PATTERNS = (
+    "bwrap:",
+    "creating new namespace failed",
+    "sandbox namespace",
+    "failed to create sandbox",
+    "setting up uid map",
+)
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_linux_userns() -> bool:
+    """Check once in a short-lived child whether Linux unprivileged user+mount namespaces work."""
+    probe = (
+        "import ctypes, sys; "
+        "libc = ctypes.CDLL(None, use_errno=True); "
+        "sys.exit(0 if libc.unshare(0x10000000 | 0x00020000) == 0 else 1)"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            check=False,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _shell_sandbox_available() -> bool:
+    """Return False when the container runtime blocks Linux user namespaces (e.g. AWS ECS Fargate)."""
+    if (
+        os.environ.get("TINA_WORKSPACE_SYNC_SIDECAR") == "1"
+        or os.environ.get("ECS_CONTAINER_METADATA_URI_V4")
+        or os.environ.get("ECS_CONTAINER_METADATA_URI")
+    ):
+        return False
+    if sys.platform != "linux":
+        return True
+    if subprocess.Popen is not _REAL_POPEN:
+        return True
+    return _probe_linux_userns()
+
+
+def _workspace_mcp_instructions(
+    mounts: dict[str, dict],
+    tools: list[str],
+    *,
+    read_only: bool,
+) -> str:
+    mount_summary = ", ".join(
+        f"'{slug}' ({m.get('role')}, {'writable' if m.get('write') else 'read-only'})"
+        for slug, m in mounts.items()
+    )
+    tool_list = ", ".join(tools)
+    mode_note = (
+        "This turn is read-only; do not attempt to modify files."
+        if read_only
+        else (
+            "For writes, use create_wiki, update_wiki (mode='append' or 'replace' after read_wiki), "
+            "move_wiki, or delete_wiki on writable workspaces only. Files under "
+            "kg/entities/<type>/<slug>.md (except index.md/log.md) must start with YAML frontmatter "
+            "containing type, id, and title."
+        )
+    )
+    return (
+        "## Workspace access (MCP)\n"
+        "Shell execution is disabled in this container runtime. Do NOT call shell or apply_patch tools. "
+        f"Use the connected `{_WORKSPACE_MCP_SERVER}` MCP tools ({tool_list}) to inspect and work with "
+        "workspace Markdown files.\n"
+        f"Authorized workspaces: {mount_summary}.\n"
+        "Pass an exact workspace slug above (or 'personal' for your private space, or '*' with search_wiki) "
+        "and a relative Markdown path under kg/, wiki/, notes/, sources/, concepts/, docs/, or README.md "
+        "(CLAUDE.md and mail/*.md are also readable in '_global').\n"
+        + mode_note
+    )
 
 
 class CodexHarness:
@@ -257,7 +348,8 @@ class CodexHarness:
 
     def _argv(self, shell_environment_excludes: Iterable[str] = (), *, web_search: str = "disabled",
               writable_roots: Iterable[str] = (), groq_base_url: Optional[str] = None,
-              groq_model_catalog: Optional[Path] = None, no_tools: bool = False) -> list[str]:
+              groq_model_catalog: Optional[Path] = None, no_tools: bool = False,
+              shell_disabled: bool = False) -> list[str]:
         mode = (os.environ.get("TINA_CODEX_AUTH_MODE") or "api-key").strip()
         argv = [self._executable, "app-server", "--listen", "stdio://"]
         if mode == "groq":
@@ -322,6 +414,9 @@ class CodexHarness:
             for feature in ('shell_tool', 'unified_exec', 'apps', 'browser_use', 'computer_use',
                             'multi_agent', 'view_image', 'image_generation', 'skill_search', 'code_mode_host'):
                 settings[f'features.{feature}'] = 'false'
+        elif shell_disabled:
+            settings["features.shell_tool"] = "false"
+            settings["features.unified_exec"] = "false"
         for profile in ("tina-offline", "tina-online"):
             settings[f"permissions.{profile}.filesystem"] = rules
             settings[f"permissions.{profile}.network.enabled"] = "true" if profile == "tina-online" else "false"
@@ -330,22 +425,29 @@ class CodexHarness:
         return argv
 
     @staticmethod
-    def _write_groq_model_catalog(directory: Path, model: str) -> Path:
+    def _write_groq_model_catalog(directory: Path, model: str, *, shell_disabled: bool = False) -> Path:
         """Configure the pinned CLI natively for Groq's function-only tool contract.
 
         Dropping apply_patch at the HTTP boundary alone leaves GPT-specific instructions
         telling the model to call it. Codex 0.149 only supports a freeform patch tool;
-        disable that tool in its model profile and retain sandboxed exec for file edits.
+        disable that tool in its model profile and retain sandboxed exec (or scoped
+        tina-workspace MCP tools when Linux user namespaces are unavailable) for file work.
         No credential or caller-selected endpoint is written here.
         """
+        file_guidance = (
+            "Read or edit workspace Markdown files using the connected tina-workspace tools "
+            "(list_wiki, search_wiki, read_wiki, and write tools if provided). "
+            if shell_disabled
+            else "Read or edit files with exec_command inside the granted sandbox roots. "
+        )
         info = {
             "slug": model, "display_name": model, "description": "TINA through Groq",
             "base_instructions": (
                 "You are TINA, a meeting and workspace assistant served through Groq. "
                 "Follow the workspace instructions and the user's request. "
                 "Use only the function tools provided in the current request. "
-                "Read or edit files with exec_command inside the granted sandbox roots. "
-                "Never call a tool that is absent from the available tools. "
+                + file_guidance
+                + "Never call a tool that is absent from the available tools. "
                 "Preserve existing user changes and report what you actually verified."
             ),
             "model_messages": None, "apply_patch_tool_type": None,
@@ -405,8 +507,14 @@ class CodexHarness:
             return None
         status = item.get("status")
         ok = status == "completed"
-        if item_type == "commandExecution" and item.get("exitCode") not in (None, 0):
-            ok = False
+        if item_type == "commandExecution":
+            exit_code = item.get("exitCode")
+            if exit_code not in (None, 0):
+                ok = False
+            elif exit_code is None:
+                output_lower = str(item.get("aggregatedOutput") or "").lower()
+                if any(marker in output_lower for marker in _SANDBOX_ERROR_PATTERNS):
+                    ok = False
         result = item.get("result")
         if isinstance(result, dict) and result.get("isError") is True:
             ok = False
@@ -482,7 +590,9 @@ class CodexHarness:
         from llm.groq_responses import groq_responses_proxy
         try:
             with tempfile.TemporaryDirectory(prefix="tina-groq-model-") as directory:
-                catalog = self._write_groq_model_catalog(Path(directory), target)
+                catalog = self._write_groq_model_catalog(
+                    Path(directory), target, shell_disabled=not _shell_sandbox_available(),
+                )
                 with groq_responses_proxy(os.environ["TINA_LLM_API_KEY"]) as base:
                     yield from self._run_turn(work, prompt, groq_base_url=base,
                                               groq_model_catalog=catalog, **kwargs)
@@ -539,23 +649,100 @@ class CodexHarness:
                 'If a URL or title is unavailable, say so instead of inventing it.'
             )
         gated_servers = set(gated_mcp_servers)
+        shell_disabled = bool(allowed) and not _shell_sandbox_available()
+        mounts_file: Optional[Path] = None
+        effective_allowed = set(allowed)
+        effective_mcp_servers = mcp_servers
+        effective_mcp_tools = dict(mcp_tools) if mcp_tools else {}
+        if shell_disabled:
+            ws_mounts = _load_workspace_mounts(mounts, read_only=read_only)
+            ws_tools: list[str] = []
+            if {"Read", "Glob", "Grep", "Bash"}.intersection(allowed):
+                ws_tools.extend(_WORKSPACE_MCP_READ_TOOLS)
+            if not read_only and {"Write", "Edit"}.intersection(allowed):
+                ws_tools.extend(_WORKSPACE_MCP_WRITE_TOOLS)
+            if ws_mounts and ws_tools and self._codex_home is not None:
+                mounts_file = self._codex_home / f"tina-mounts-{uuid4().hex}.json"
+                mounts_file.write_text(
+                    json.dumps(list(ws_mounts.values()), ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                try:
+                    mounts_file.chmod(0o600)
+                except OSError:
+                    pass
+                if effective_mcp_servers is None:
+                    loaded_servers: dict = {}
+                    if mcp_config and Path(mcp_config).is_file():
+                        try:
+                            raw_cfg = json.loads(Path(mcp_config).read_text(encoding="utf-8"))
+                            if isinstance(raw_cfg, dict) and isinstance(raw_cfg.get("mcpServers"), dict):
+                                loaded_servers = dict(raw_cfg["mcpServers"])
+                        except (OSError, json.JSONDecodeError):
+                            loaded_servers = {}
+                    effective_mcp_servers = loaded_servers
+                else:
+                    effective_mcp_servers = dict(effective_mcp_servers)
+                ws_args = [
+                    "-B",
+                    str(Path(__file__).resolve().with_name("workspace_mcp.py")),
+                    "--mounts-file", str(mounts_file),
+                    "--tools", *ws_tools,
+                ]
+                if read_only:
+                    ws_args.append("--readonly")
+                effective_mcp_servers[_WORKSPACE_MCP_SERVER] = {
+                    "command": sys.executable,
+                    "args": ws_args,
+                }
+                effective_mcp_tools[_WORKSPACE_MCP_SERVER] = ws_tools
+                effective_allowed.add(f"mcp__{_WORKSPACE_MCP_SERVER}")
+                ws_guidance = _workspace_mcp_instructions(ws_mounts, ws_tools, read_only=read_only)
+                developer_instructions = (
+                    f"{developer_instructions}\n\n{ws_guidance}" if developer_instructions else ws_guidance
+                )
         config_path, shell_environment_excludes = self._prepare_mcp_config(
-            mcp_config, allowed, env, gated_mcp_servers=gated_servers,
-            mcp_servers=mcp_servers, mcp_env=mcp_env, mcp_tools=mcp_tools,
+            mcp_config, effective_allowed, env, gated_mcp_servers=gated_servers,
+            mcp_servers=effective_mcp_servers, mcp_env=mcp_env, mcp_tools=effective_mcp_tools,
         )
         # Tool allowlists do not constrain Codex's built-in shell. Match the filesystem sandbox to
-        # the TINA turn policy so a read-only event cannot write through that shell.
+        # the TINA turn policy so a read-only event cannot write through that shell. When Linux
+        # user namespaces are unavailable (e.g. AWS ECS Fargate), shell execution is disabled and
+        # native filesystem roots stay read-only so all workspace writes flow through tina-workspace MCP.
         try:
             proc = subprocess.Popen(
                 self._argv(shell_environment_excludes, web_search=web_search,
-                           writable_roots=[] if read_only else writable_roots,
-                           groq_base_url=groq_base_url, groq_model_catalog=groq_model_catalog, no_tools=not allowed),
+                           writable_roots=[] if (read_only or shell_disabled) else writable_roots,
+                           groq_base_url=groq_base_url, groq_model_catalog=groq_model_catalog,
+                           no_tools=not allowed, shell_disabled=shell_disabled),
                 cwd=str(work), env=env, stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
             )
         except OSError as exc:
+            if mounts_file is not None:
+                mounts_file.unlink(missing_ok=True)
+            if config_path is not None:
+                config_path.unlink(missing_ok=True)
             yield {"type": "done", "ok": False, "reply": f"Could not start Codex app-server: {exc}"}
             return
+
+        stderr_tail: deque[str] = deque(maxlen=40)
+        stderr_thread: Optional[threading.Thread] = None
+        stderr_pipe = getattr(proc, "stderr", None)
+        if stderr_pipe is not None:
+            def _drain_stderr() -> None:
+                try:
+                    for raw_line in stderr_pipe:
+                        cleaned = self._redact_secrets(" ".join(str(raw_line).split()))[:240]
+                        if cleaned:
+                            stderr_tail.append(cleaned)
+                except (OSError, ValueError):
+                    pass
+
+            stderr_thread = threading.Thread(
+                target=_drain_stderr, name="codex-stderr-drain", daemon=True,
+            )
+            stderr_thread.start()
 
         request_id = 0
 
@@ -595,7 +782,7 @@ class CodexHarness:
             if network.get("enabled") is True:
                 raise LLMError("Codex managed network policy must leave enabled unset so offline turns stay offline.")
             network_access = (
-                not read_only and {"Bash", "WebFetch"}.issubset(allowed)
+                not read_only and not shell_disabled and {"Bash", "WebFetch"}.issubset(allowed)
                 and network.get("enabled") is None
                 and network.get("managedAllowedDomainsOnly") is True
                 and not network.get("allowUnixSockets")
@@ -733,6 +920,15 @@ class CodexHarness:
                         event = self._tool_result_event(item)
                         if event:
                             started_tools.discard(event["callId"])
+                            if not event["ok"]:
+                                log.warning(
+                                    "Codex tool failed type=%s call_id=%s status=%s exit_code=%s summary=%s",
+                                    item.get("type"),
+                                    event["callId"],
+                                    item.get("status"),
+                                    item.get("exitCode"),
+                                    self._redact_secrets(event["summary"]),
+                                )
                             yield event
                 elif method == "turn/completed":
                     turn = params.get("turn") or {}
@@ -742,6 +938,8 @@ class CodexHarness:
                     if output_schema is None and not self._save_sources(thread_id, turn_id, sources):
                         reply += '\n\nKhông lưu được metadata nguồn; liên kết có thể thiếu sau khi tải lại.'
                     if not ok:
+                        if stderr_tail:
+                            log.warning("Codex app-server stderr tail: %s", " | ".join(list(stderr_tail)[-10:]))
                         if looks_like_auth_failure(detail):
                             reply = self._auth_failure_reply()
                         elif detail:
@@ -755,6 +953,8 @@ class CodexHarness:
                     return
         except Exception as exc:  # noqa: BLE001 — normalize the app-server boundary to UnitEvents
             detail = self._redact_secrets(str(exc))[:400]
+            if stderr_tail:
+                log.warning("Codex app-server stderr tail: %s", " | ".join(list(stderr_tail)[-10:]))
             reply = self._auth_failure_reply() if looks_like_auth_failure(detail) else f"Codex app-server failed: {detail}"
             yield {"type": "done", "reply": reply, "ok": False,
                    **({"detail": detail} if detail else {})}
@@ -769,8 +969,20 @@ class CodexHarness:
                     proc.kill()
                 except OSError:
                     pass
+            if stderr_thread is not None:
+                stderr_thread.join(timeout=0.5)
+            if stderr_pipe is not None:
+                try:
+                    stderr_pipe.close()
+                except OSError:
+                    pass
             if config_path is not None:
                 try:
                     config_path.unlink()
+                except OSError:
+                    pass
+            if mounts_file is not None:
+                try:
+                    mounts_file.unlink()
                 except OSError:
                     pass

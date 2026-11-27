@@ -93,7 +93,7 @@ jobs:
                   "dockerfile": "core/agent/worker/Dockerfile",
                   "build_args": "",
                   "paths": ("core/agent/", "packages/", "behavior/"),
-                  "smoke_cmd": "python -B -c 'import boto3, worker.workspace_sync, worker.workspace_stream; from llm.registry import HARNESS_RUNNERS; assert \"bedrock-workspace\" in HARNESS_RUNNERS'",
+                  "smoke_cmd": "python -B -c 'import boto3, worker.workspace_sync, worker.workspace_stream, llm.workspace_mcp; from llm.registry import HARNESS_RUNNERS; assert \"bedrock-workspace\" in HARNESS_RUNNERS'",
               },
               "runtime": {
                   "name": "runtime",

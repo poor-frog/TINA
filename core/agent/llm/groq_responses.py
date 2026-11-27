@@ -26,19 +26,31 @@ _UNSUPPORTED_FIELDS = frozenset({
     "prompt_cache_key", "prompt", "client_metadata",
 })
 _REACH_NAMESPACE = 'mcp__tina_reach'
-_REACH_TOOLS = {f'{_REACH_NAMESPACE}__reach_{channel}_{action}': f'reach_{channel}_{action}'
-                for channel in ('web','github') for action in ('search','read')}
+_WORKSPACE_NAMESPACE = 'mcp__tina_workspace'
+_FLATTENED_NAMESPACE_TOOLS: dict[str, tuple[str, str]] = {
+    **{
+        f'{_REACH_NAMESPACE}__reach_{channel}_{action}': (_REACH_NAMESPACE, f'reach_{channel}_{action}')
+        for channel in ('web', 'github') for action in ('search', 'read')
+    },
+    **{
+        f'{_WORKSPACE_NAMESPACE}__{tool}': (_WORKSPACE_NAMESPACE, tool)
+        for tool in ('list_wiki', 'search_wiki', 'read_wiki', 'create_wiki', 'update_wiki', 'move_wiki', 'delete_wiki')
+    },
+}
+_FLATTENED_NAMESPACES = frozenset({_REACH_NAMESPACE, _WORKSPACE_NAMESPACE})
 
 
 def _reach_call(item, *, restore=False):
     if not isinstance(item, dict) or item.get('type') != 'function_call':
         return item
-    if restore and item.get('name') in _REACH_TOOLS:
-        return item | {'name': _REACH_TOOLS[item['name']], 'namespace': _REACH_NAMESPACE}
-    if not restore and item.get('namespace') == _REACH_NAMESPACE:
-        name = f"{_REACH_NAMESPACE}__{item.get('name')}"
-        if name in _REACH_TOOLS:
-            return {k:v for k,v in (item | {'name':name}).items() if k != 'namespace'}
+    if restore and item.get('name') in _FLATTENED_NAMESPACE_TOOLS:
+        namespace, tool_name = _FLATTENED_NAMESPACE_TOOLS[item['name']]
+        return item | {'name': tool_name, 'namespace': namespace}
+    namespace = item.get('namespace')
+    if not restore and namespace in _FLATTENED_NAMESPACES:
+        name = f"{namespace}__{item.get('name')}"
+        if name in _FLATTENED_NAMESPACE_TOOLS:
+            return {k: v for k, v in (item | {'name': name}).items() if k != 'namespace'}
     return item
 
 
@@ -56,8 +68,9 @@ def sanitize_responses_request(payload: dict) -> dict:
     """Return Groq's supported subset without changing the original request.
 
     Groq does not persist response state; Codex already supplies conversation
-    history in ``input``. The four public Reach functions flatten their namespace
-    for Groq; other namespace/custom/built-in tools are omitted. Grants still come from Codex.
+    history in ``input``. Granted Reach and built-in ``tina-workspace`` MCP functions
+    flatten their namespace for Groq; other namespace/custom/built-in tools are omitted.
+    Grants still come from Codex.
     """
     cleaned = {key: value for key, value in payload.items() if key not in _UNSUPPORTED_FIELDS}
     if "tools" in cleaned:
@@ -66,13 +79,14 @@ def sanitize_responses_request(payload: dict) -> dict:
                             if isinstance(tool, dict) and tool.get("type") == "function"] \
             if isinstance(tools, list) else []
         for namespace in tools if isinstance(tools, list) else []:
-            if not isinstance(namespace, dict) or namespace.get('type') != 'namespace' or namespace.get('name') != _REACH_NAMESPACE:
+            ns_name = namespace.get('name') if isinstance(namespace, dict) else None
+            if not isinstance(namespace, dict) or namespace.get('type') != 'namespace' or ns_name not in _FLATTENED_NAMESPACES:
                 continue
             functions = namespace.get('tools')
             for tool in functions if isinstance(functions, list) else []:
                 if not isinstance(tool, dict) or tool.get('type') != 'function': continue
-                name = f"{_REACH_NAMESPACE}__{tool.get('name')}"
-                if name in _REACH_TOOLS: cleaned['tools'].append(tool | {'name':name})
+                name = f"{ns_name}__{tool.get('name')}"
+                if name in _FLATTENED_NAMESPACE_TOOLS: cleaned['tools'].append(tool | {'name': name})
     if isinstance(cleaned.get('input'), list):
         cleaned['input'] = [_reach_call(item) for item in cleaned['input']]
     # Codex uses developer messages for workspace/sandbox instructions. Groq's
