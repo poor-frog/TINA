@@ -6,26 +6,47 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { signIn } from "next-auth/react";
 import { TinaLanding } from "../web/TinaLanding";
-import { CalendarWelcome } from "../web/CalendarWelcome";
+import { CALENDAR_WELCOME_SETTINGS, CalendarWelcome } from "../web/CalendarWelcome";
+import { ExtensionWelcome } from "../web/ExtensionWelcome";
 import landingStyles from "../web/tinaLanding.module.css";
 
 type Status = "checking" | "out" | "in";
 type Providers = { google: boolean; microsoft: boolean };
 const CALENDAR_DISMISSED_KEY = "tina.calendar-welcome-dismissed";
 
-function shouldOfferCalendar(key: string): boolean {
+type WelcomeProfile = { calendarWelcome?: unknown; extensionWelcome?: unknown; extensionStoreUrl?: unknown };
+type WelcomeOffer = { key: string; step: "calendar" | "extension"; storeUrl: string | null };
+
+function readWelcome(profile: WelcomeProfile | null): WelcomeOffer | null {
+  const linked = typeof profile?.extensionWelcome === "string" && !!profile.extensionWelcome;
+  const key = linked ? profile?.extensionWelcome : profile?.calendarWelcome;
+  if (typeof key !== "string" || !key) return null;
+
   const url = new URL(window.location.href);
-  if (url.pathname !== "/" || [...url.searchParams.keys()].some((name) => name !== "error")) return false;
+  const calendarReturn = linked && url.pathname + url.search === CALENDAR_WELCOME_SETTINGS;
+  if (!calendarReturn && (url.pathname !== "/" || [...url.searchParams.keys()].some(name => name !== "error"))) return null;
+
+  let progress: string | null = null;
   try {
-    return localStorage.getItem(CALENDAR_DISMISSED_KEY) !== key;
-  } catch {
-    return true;
-  }
+    progress = localStorage.getItem(CALENDAR_DISMISSED_KEY);
+  } catch { /* New accounts can still complete onboarding in this tab. */ }
+  if (progress === key) return null;
+  return {
+    key,
+    step: linked || progress === "extension:" + key ? "extension" : "calendar",
+    storeUrl: typeof profile?.extensionStoreUrl === "string" ? profile.extensionStoreUrl : null,
+  };
+}
+
+function saveWelcomeProgress(value: string) {
+  try {
+    localStorage.setItem(CALENDAR_DISMISSED_KEY, value);
+  } catch { /* Still advance this tab when storage is unavailable. */ }
 }
 
 export function AuthGate({ children, calendarWelcome = false }: { children: React.ReactNode; calendarWelcome?: boolean }) {
   const [status, setStatus] = useState<Status>("checking");
-  const [welcomeKey, setWelcomeKey] = useState<string | null>(null);
+  const [welcome, setWelcome] = useState<WelcomeOffer | null>(null);
   const [providers, setProviders] = useState<Providers>({ google: false, microsoft: false });
   const [adminExists, setAdminExists] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
@@ -38,11 +59,10 @@ export function AuthGate({ children, calendarWelcome = false }: { children: Reac
     fetch("/api/auth/me", { cache: "no-store" })
       .then(async (r) => {
         const profile = r.ok && calendarWelcome
-          ? await r.json().catch(() => null) as { calendarWelcome?: unknown } | null
+          ? await r.json().catch(() => null) as WelcomeProfile | null
           : null;
         if (!active) return;
-        const key = profile?.calendarWelcome;
-        if (typeof key === "string" && key && shouldOfferCalendar(key)) setWelcomeKey(key);
+        setWelcome(readWelcome(profile));
         setStatus(r.ok ? "in" : "out");
       })
       .catch(() => active && setStatus("out"));
@@ -86,24 +106,28 @@ export function AuthGate({ children, calendarWelcome = false }: { children: Reac
     }
   };
 
-  if (status === "in" && welcomeKey) {
+  if (status === "in" && welcome?.step === "calendar") {
     return (
       <CalendarWelcome
         googleIcon={<GoogleMark />}
         initialError={new URLSearchParams(window.location.search).has("error")}
         onSkip={() => {
-          try {
-            localStorage.setItem(CALENDAR_DISMISSED_KEY, welcomeKey);
-          } catch { /* still dismiss this screen when storage is unavailable */ }
+          saveWelcomeProgress("extension:" + welcome.key);
           const url = new URL(window.location.href);
           if (url.searchParams.has("error")) {
             url.searchParams.delete("error");
             window.history.replaceState(window.history.state, "", url);
           }
-          setWelcomeKey(null);
+          setWelcome({ ...welcome, step: "extension" });
         }}
       />
     );
+  }
+  if (status === "in" && welcome?.step === "extension") {
+    return <ExtensionWelcome storeUrl={welcome.storeUrl} onContinue={() => {
+      saveWelcomeProgress(welcome.key);
+      setWelcome(null);
+    }} />;
   }
   if (status === "in") return <>{children}</>;
   if (status === "checking") return <div className={`tina-landing ${landingStyles.checking}`} />;
