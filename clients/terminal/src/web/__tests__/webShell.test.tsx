@@ -348,19 +348,19 @@ describe("AuthGate pre-login TINA landing", () => {
     }) as typeof fetch;
 
     render(<AuthGate><div>App</div></AuthGate>);
-    expect(await screen.findByText("01 · TRẢI NGHIỆM TRONG PHÒNG HỌP")).toBeTruthy();
-    expect(screen.getByText("02 · TINA CHROME EXTENSION")).toBeTruthy();
+    expect(await screen.findByText("Trong cuộc họp")).toBeTruthy();
+    expect(screen.getByText("TINA Chrome Extension")).toBeTruthy();
     expect(screen.getAllByText("TINA Agent").length).toBeGreaterThan(0);
 
     // Calling TINA switches the hero scene to its spoken answer.
     fireEvent.click(screen.getByRole("button", { name: /Gọi “Tina ơi”/i }));
     expect(screen.getByText(/Tuần trước nhóm chốt 2 mục/i)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("tab", { name: /Bắt kịp 60s/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Bắt kịp$/i }));
     expect(screen.getByText(/Cửa sổ 09:40:02/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: /Ask TINA/i }));
     fireEvent.click(screen.getByRole("button", { name: /Lưu vào Wiki/i }));
-    expect(screen.getByText(/Đã lưu vào Wiki/i)).toBeTruthy();
+    expect(screen.getByText(/Đã mô phỏng lưu vào Wiki/i)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Tiếp tục với Google/i }));
     expect(signIn).toHaveBeenCalledWith("google", expect.objectContaining({ callbackUrl: expect.any(String) }));
@@ -412,7 +412,7 @@ describe("WebShell production UI (Option A & Option B)", () => {
           JSON.stringify({
             sessions: [
               { session: "sess-alpha", title: "Q4 Rollout Checklist", last_active: TODAY_ISO },
-              { session: "sess-beta", title: "Pricing Review", last_active: YESTERDAY_START },
+              { session: "sess-beta", title: '[Context: Space "Sales"] Pricing Review', last_active: YESTERDAY_START },
             ],
           }),
           { status: 200 },
@@ -568,6 +568,27 @@ describe("WebShell production UI (Option A & Option B)", () => {
     expect(shareLinkInput.value).toContain("tshare=tshare_xyz789");
   });
 
+  it("offers the latest recording in Ask Tina and lets the user finish a routine draft", async () => {
+    mockEnvironment({ admin: false });
+    render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+
+    const composer = await screen.findByLabelText<HTMLTextAreaElement>("Message Ask Tina");
+    fireEvent.click(screen.getByRole("button", { name: "Schedule a routine" }));
+    expect(composer.value).toBe("/routine ");
+    expect(document.activeElement).toBe(composer);
+    expect(capturedChatCallbacks).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Summarize Design Review" }));
+    await waitFor(() => {
+      expect(mockStreamChatTurn).toHaveBeenLastCalledWith(
+        expect.objectContaining({ active: expect.objectContaining({ meeting_id: "102" }) }),
+        expect.anything(),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+  });
+
   it("supports Ask Tina chat search, MCP Tool Approval decisions, and Copy/Share response actions", async () => {
     const fetchMock = mockEnvironment({ admin: false });
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -650,7 +671,7 @@ describe("WebShell production UI (Option A & Option B)", () => {
     await waitFor(() => {
       expect(screen.queryByText("Q4 Rollout Checklist")).toBeNull();
     });
-    expect(await screen.findByText("What would you like to know?")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Ask Tina" })).toBeTruthy();
     expect(screen.getByText("Pricing Review")).toBeTruthy();
 
     // Clear all remaining conversations with inline confirmation

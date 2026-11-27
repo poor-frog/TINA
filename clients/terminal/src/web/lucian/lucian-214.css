@@ -18,16 +18,16 @@
 
 .u214-hd small {
   font-size: 11px;
-  font-weight: 850;
+  font-weight: 700;
   letter-spacing: .08em;
   text-transform: uppercase;
   color: var(--ux-accent);
 }
 
 .u214-hd h3 {
-  margin: 4px 0 0;
+  margin: 12px 0 0;
   font-size: 20px;
-  font-weight: 850;
+  font-weight: 700;
   letter-spacing: -.03em;
   color: var(--ux-ink);
 }
@@ -66,7 +66,7 @@
   z-index: 1;
   display: block;
   font-size: 13.5px;
-  font-weight: 800;
+  font-weight: 700;
   color: var(--ux-ink);
 }
 
@@ -301,7 +301,7 @@
   place-items: center;
   font-style: normal;
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 @media (max-width: 720px) {

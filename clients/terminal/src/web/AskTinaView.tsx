@@ -3,7 +3,7 @@
  *  MCP Tool Approval cards (`/api/chat/approval`), real `/routine` prompt compilation, Copy/Share
  *  message actions, parsed context pills, and searchable `/api/sessions` history. */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
-import { WebIcon, type WebIconName } from "./Icons";
+import { WebIcon } from "./Icons";
 import { AgentActivitySteps, describeAgentTool } from "./AgentActivitySteps";
 import { LucianThinkingText } from "./lucian/LucianThinkingText";
 import { LucianToolApprovalCard } from "./lucian/LucianToolApprovalCard";
@@ -40,36 +40,6 @@ interface ChatMessage {
 }
 
 export type AskTinaPrompt = { text: string; mode: "send" | "draft"; meetingId?: string };
-
-interface StarterCard {
-  id: string;
-  icon: WebIconName;
-  title: string;
-  prompt: string;
-  badge?: string;
-}
-
-const STARTERS: StarterCard[] = [
-  {
-    id: "brief",
-    icon: "fileText",
-    title: "Latest meeting brief",
-    prompt: "Summarize key decisions and action items from my latest meeting.",
-  },
-  {
-    id: "tasks",
-    icon: "listChecks",
-    title: "Open follow-ups",
-    prompt: "What tasks are still open across my meetings?",
-  },
-  {
-    id: "routine",
-    icon: "skills",
-    title: "Schedule a routine",
-    badge: "/routine",
-    prompt: "/routine Every weekday at 9:00 AM, prepare a short daily meeting brief.",
-  },
-];
 
 function newSessionId(): string {
   return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -114,10 +84,21 @@ function sessionTimeBucket(stamp?: string | number | null): SessionTimeBucket {
   return "Older";
 }
 
+function conversationTitle(title?: string | null): string {
+  if (!title) return "Untitled conversation";
+  // Older servers saved a flattened prefix, sometimes with the whole question truncated.
+  const prefix = /^\s*\[Context: Space "/;
+  if (!prefix.test(title)) return title;
+  const body = parseUserContext(title).body;
+  if (body !== title) return body;
+  const question = title.match(/^\s*\[Context: Space ".*?\]\s+(.+)$/)?.[1];
+  return question && question !== "…" ? question : "Untitled conversation";
+}
+
 /** Extract leading `[Context: ...]` metadata prepended by Knowledge/Meeting deep-links
  *  into human-friendly chips so raw bracket headers never clutter user chat bubbles. */
 function parseUserContext(raw: string): { badges: string[]; body: string } {
-  const match = raw.match(/^\s*\[Context:\s*([^\]]+)\]\s*(?:\r?\n)+([\s\S]*)$/);
+  const match = raw.match(/^\s*\[Context:\s*([^\r\n]+)\]\s*(?:\r?\n)+([\s\S]*)$/);
   if (!match) return { badges: [], body: raw };
   const meta = match[1].trim();
   const body = match[2].trim();
@@ -287,7 +268,7 @@ export function AskTinaView({
     const q = sessionQuery.trim().toLowerCase();
     if (!q) return sessions;
     return sessions.filter((s) =>
-      `${s.title || ""} ${s.session} ${formatSessionStamp(s.last_active || s.created)}`
+      `${conversationTitle(s.title)} ${s.session} ${formatSessionStamp(s.last_active || s.created)}`
         .toLowerCase()
         .includes(q),
     );
@@ -311,6 +292,15 @@ export function AskTinaView({
     () => meetings.find((m) => m.id === selectedMeetingId) ?? null,
     [meetings, selectedMeetingId],
   );
+
+  const latestRecording = meetings.reduce<MeetingMock | undefined>((latest, meeting) => {
+    if (meeting.status !== "past" || !meeting.has_recording) return latest;
+    const stamp = meeting.end_time ?? meeting.start_time ?? "";
+    const latestStamp = latest?.end_time ?? latest?.start_time ?? "";
+    return !latest || stamp > latestStamp ? meeting : latest;
+  }, undefined);
+
+  const suggestedMeeting = selectedMeeting ?? latestRecording;
 
   const allMentionTargets = useMemo<MentionTarget[]>(() => {
     const out: MentionTarget[] = [];
@@ -478,9 +468,12 @@ export function AskTinaView({
 
   const activeConversationTitle = useMemo(() => {
     const match = sessions.find((s) => s.session === activeSession);
-    if (match?.title) return match.title;
-    return messages.length > 0 ? "Ask Tina" : "New conversation";
-  }, [sessions, activeSession, messages.length]);
+    if (!match) return messages.length > 0 ? "Ask Tina" : "New conversation";
+    const title = conversationTitle(match.title);
+    if (title !== "Untitled conversation") return title;
+    const question = messages.find((message) => message.role === "user");
+    return question ? parseUserContext(question.text).body.slice(0, 60) : "New conversation";
+  }, [sessions, activeSession, messages]);
 
   const sendMessage = useCallback(
     async (rawPrompt: string, meetingOverrideId?: string) => {
@@ -929,7 +922,7 @@ export function AskTinaView({
 
   const renderSessionRow = (s: SessionSummary) => {
     const stamp = formatSessionStamp(s.last_active || s.created);
-    const label = s.title || s.session;
+    const label = conversationTitle(s.title);
     const isDeleting = Boolean(deletingSessions[s.session]);
     const isConfirming = confirmDeleteSession === s.session;
     return (
@@ -1164,41 +1157,34 @@ export function AskTinaView({
               </div>
             ) : messages.length === 0 ? (
               <div className="tina-web-ask-hero">
-                <div className="tina-web-ask-hero-badge" aria-hidden="true">
-                  <WebIcon name="tinaAsk" size={24} />
-                </div>
-                <div className="tina-web-ask-hero-pill">
-                  <WebIcon name="sparkleSmall" size={13} />
-                  <span>Grounded in your meetings &amp; workspace</span>
-                </div>
-                <h1 className="tina-web-ask-hero-title">What would you like to know?</h1>
+                <h1 className="tina-web-ask-hero-title">
+                  {selectedMeeting ? "Ask about this meeting" : "Ask Tina"}
+                </h1>
                 <p className="tina-web-ask-hero-sub">
-                  Ask across past meetings, draft follow-ups, create tasks, or schedule a recurring{" "}
-                  <code>/routine</code>.
+                  {selectedMeeting
+                    ? "Ask what was decided, who took an action item, or where it came up."
+                    : "Ask about your meeting transcripts or workspace documents. Select a meeting to narrow the search."}
                 </p>
-
                 <div className="tina-web-ask-starter-grid">
-                  {STARTERS.map((s) => (
+                  {suggestedMeeting && (
                     <button
-                      key={s.id}
                       type="button"
                       className="tina-web-ask-starter-card"
-                      disabled={historyLoading}
-                      onClick={() => (s.prompt.startsWith("/routine") ? setDraft(s.prompt) : void sendMessage(s.prompt))}
+                      onClick={() => void sendMessage("What decisions and action items came out of this meeting?", suggestedMeeting.id)}
                     >
-                      <span className="tina-web-ask-starter-top">
-                        <span className="tina-web-ask-starter-icon" aria-hidden="true">
-                          <WebIcon name={s.icon} size={16} />
-                        </span>
-                        {s.badge && <code className="tina-web-ask-starter-tag">{s.badge}</code>}
-                        <span className="tina-web-ask-starter-arrow" aria-hidden="true">
-                          <WebIcon name="chevronRight" size={14} />
-                        </span>
-                      </span>
-                      <span className="tina-web-ask-starter-title">{s.title}</span>
-                      <span className="tina-web-ask-starter-prompt">{s.prompt}</span>
+                      {selectedMeeting ? "Summarize this meeting" : `Summarize ${suggestedMeeting.title_custom || suggestedMeeting.title}`}
                     </button>
-                  ))}
+                  )}
+                  <button
+                    type="button"
+                    className="tina-web-ask-starter-card"
+                    onClick={() => {
+                      setDraft("/routine ");
+                      composerRef.current?.focus();
+                    }}
+                  >
+                    Schedule a routine
+                  </button>
                 </div>
               </div>
             ) : (

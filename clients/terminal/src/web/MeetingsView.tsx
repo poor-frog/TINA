@@ -673,7 +673,7 @@ export function MeetingsView({
                         {m.shared && <span className="tina-web-status-pill completed">Shared</span>}
                       </span>
                       <span className="tina-web-feed-meta">
-                        {m.platform} · {m.when}
+                        {!label.startsWith(`${m.platform} · `) && `${m.platform} · `}{m.when}
                         {durMins !== null ? ` · ${formatShortDuration(durMins)}` : ""}
                         {m.participants.length > 0 ? ` · ${m.participants.length} participants` : ""}
                         {m.has_recording ? " · Recording ready" : ""}

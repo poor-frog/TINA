@@ -15,6 +15,7 @@ import { LucianBentoGrid } from "./lucian/LucianBentoGrid";
 import { LucianCursorGlowGrid } from "./lucian/LucianCursorGlowGrid";
 import { LucianGlowCta } from "./lucian/LucianGlowCta";
 import styles from "./tinaLanding.module.css";
+import "./landing/tokens.css";
 
 const LANG_STORAGE_KEY = "tina.landing.lang";
 
@@ -137,9 +138,9 @@ export function TinaLanding({
   };
 
   return (
-    <div className={`${styles.root} ${lang === "vi" ? styles.rootVi : ""}`} lang={lang}>
+    <div className={`tina-landing ${styles.root}`} lang={lang}>
       <div className={styles.grain} aria-hidden="true" />
-      <div className={styles.scrollBar} style={{ width: `${scrollPct}%` }} aria-hidden="true" />
+      <div className={styles.scrollBar} style={{ transform: `scaleX(${scrollPct / 100})` }} aria-hidden="true" />
 
       <header className={`${styles.navWrap} ${scrolled ? styles.navWrapScrolled : ""}`}>
         <div className={styles.container}>
@@ -183,11 +184,10 @@ export function TinaLanding({
 
               <button
                 type="button"
-                className={`${styles.button} ${styles.buttonDark}`}
+                className={`${styles.button} ${styles.buttonDark} ${styles.navSignIn}`}
                 onClick={triggerPrimarySignIn}
               >
                 <span>{claiming ? copy.nav.claimAdmin : copy.nav.signIn}</span>
-                <span aria-hidden="true">→</span>
               </button>
 
               <button
@@ -231,34 +231,11 @@ export function TinaLanding({
                 )}
 
                 <h1 className={styles.heroTitle}>
-                  {claiming ? (
-                    <>{copy.hero.claimHeading}</>
-                  ) : (
-                    <>
-                      {copy.hero.titleLine1}
-                      <br />
-                      <span className={styles.serif}>{copy.hero.titleSerif}</span>
-                      {copy.hero.titleMid}
-                      <br />
-                      {copy.hero.titleLine3Prefix}
-                      <span className={styles.heroNoWrap}>
-                        <span className={styles.heroAccent}>{copy.hero.titleAccent}</span>
-                      </span>
-                    </>
-                  )}
+                  {claiming ? copy.hero.claimHeading : copy.hero.title}
                 </h1>
 
                 <p className={styles.heroLead}>
-                  {claiming ? (
-                    <>{copy.hero.claimLead}</>
-                  ) : (
-                    <>
-                      <strong>{copy.hero.leadBrand}</strong>
-                      {copy.hero.leadBeforeWake}
-                      <strong>{copy.hero.leadWake}</strong>
-                      {copy.hero.leadAfterWake}
-                    </>
-                  )}
+                  {claiming ? copy.hero.claimLead : copy.hero.lead}
                 </p>
 
                 <div className={styles.authBox} id="signin">
@@ -287,7 +264,6 @@ export function TinaLanding({
                       >
                         {googleIcon}
                         <span>{copy.hero.googleCta}</span>
-                        <span aria-hidden="true">→</span>
                       </button>
                     )}
 
@@ -299,7 +275,6 @@ export function TinaLanding({
                       >
                         {microsoftIcon}
                         <span>{copy.hero.microsoftCta}</span>
-                        <span aria-hidden="true">→</span>
                       </button>
                     )}
 
@@ -351,10 +326,6 @@ export function TinaLanding({
 
                   {claiming && <p className={styles.claimFoot}>{copy.hero.claimFoot}</p>}
 
-                  <div className={styles.securityStrip}>
-                    <LockGlyph />
-                    <span>{copy.hero.securityStrip}</span>
-                  </div>
                 </div>
               </div>
 
@@ -363,22 +334,6 @@ export function TinaLanding({
           </div>
         </section>
 
-        {/* MARQUEE TICKER */}
-        <div className={styles.ticker} aria-label="TINA highlights">
-          <div className={styles.tickerTrack}>
-            {copy.ticker.concat(copy.ticker).map((label, idx) => (
-              <span
-                key={`${label}-${idx}`}
-                className={styles.tickerItem}
-                aria-hidden={idx >= copy.ticker.length ? true : undefined}
-              >
-                {label}
-                <span className={styles.tickerStar} aria-hidden="true">✦</span>
-              </span>
-            ))}
-          </div>
-        </div>
-
         {/* 01 · LIVE IN-CALL TRANSCRIPT & VOICE AGENT (moved up right after Hero!) */}
         <section className={styles.homeSection} id="transcription">
           <div className={styles.container}>
@@ -386,7 +341,7 @@ export function TinaLanding({
               <span className={styles.sectionLabel}>{copy.live.label}</span>
               <h2 className={styles.sectionTitle}>
                 {copy.live.titleLead}
-                <span className={styles.serif}>{copy.live.titleSerif}</span>
+                {copy.live.titleSerif}
               </h2>
               <p className={styles.sectionSub}>{copy.live.sub}</p>
             </div>
@@ -394,7 +349,7 @@ export function TinaLanding({
             <div className={styles.transcriptShell}>
               <div className={styles.transcriptTop}>
                 <span>{copy.live.shellTitle}</span>
-                <span className={styles.statusLive}>{copy.live.shellStatus}</span>
+                <span>{copy.scene.demo}</span>
               </div>
               <div className={styles.transcriptLines}>
                 {copy.live.lines.map((row, idx) => (
@@ -436,7 +391,7 @@ export function TinaLanding({
               <span className={styles.sectionLabel}>{copy.extension.label}</span>
               <h2 className={styles.sectionTitle}>
                 {copy.extension.titleLead}
-                <span className={styles.serif}>{copy.extension.titleSerif}</span>
+                {copy.extension.titleSerif}
               </h2>
               <p className={styles.sectionSub}>{copy.extension.sub}</p>
             </div>
@@ -461,8 +416,7 @@ export function TinaLanding({
                     <i />
                     <i />
                   </span>
-                  <span className={styles.extPreviewUrl}>{copy.extension.previewWindowTitle}</span>
-                  <span className={styles.statusLive}>{copy.extension.previewStatus}</span>
+                  <span className={styles.extPreviewUrl}>{copy.scene.demo}</span>
                 </div>
 
                 <div className={styles.extTabBar} role="tablist" aria-label="Chrome Extension features">
@@ -549,12 +503,11 @@ export function TinaLanding({
               <span className={styles.sectionLabel}>{copy.how.label}</span>
               <h2 className={styles.sectionTitle}>
                 {copy.how.titleLine1}
-                <br />
-                <span className={styles.serif}>{copy.how.titleSerif}</span>
+                {" "}
+                {copy.how.titleSerif}
                 {copy.how.titleLine2Rest}
               </h2>
               <p className={styles.sectionSub}>{copy.how.sub}</p>
-              <span className={styles.liveTag}>{copy.how.tag}</span>
             </div>
 
             <div className={styles.stepsGrid}>
@@ -595,7 +548,6 @@ export function TinaLanding({
                 <div className={styles.stepBody}>
                   <div className={styles.stepKicker}>
                     <span className={styles.stepNumber}>03</span>
-                    <span className={`${styles.stepSymbol} ${styles.stepSymbolOrange}`} aria-hidden="true">→</span>
                     <span>{copy.how.steps[2].kicker}</span>
                   </div>
                   <h3>{copy.how.steps[2].title}</h3>
@@ -628,7 +580,6 @@ export function TinaLanding({
                 onClick={triggerPrimarySignIn}
               >
                 <span>{copy.how.proofCta}</span>
-                <span aria-hidden="true">→</span>
               </button>
             </div>
           </div>
@@ -642,7 +593,7 @@ export function TinaLanding({
               <span className={styles.sectionLabel}>{copy.useCases.label}</span>
               <h2 className={styles.sectionTitle}>
                 {copy.useCases.titleLead}
-                <span className={styles.serif}>{copy.useCases.titleSerif}</span>
+                {copy.useCases.titleSerif}
                 {copy.useCases.titleTail}
               </h2>
               <p className={styles.sectionSub}>{copy.useCases.sub}</p>
@@ -676,7 +627,7 @@ export function TinaLanding({
               <span className={styles.sectionLabel}>{copy.privacy.label}</span>
               <h2 className={styles.sectionTitle}>
                 {copy.privacy.titleLead}
-                <span className={styles.serif}>{copy.privacy.titleSerif}</span>
+                {copy.privacy.titleSerif}
               </h2>
               <p className={styles.sectionSub}>{copy.privacy.sub}</p>
             </div>
@@ -703,7 +654,7 @@ export function TinaLanding({
                   <span className={styles.sectionLabel}>{copy.privacy.platformsLabel}</span>
                   <h2 className={styles.sectionTitle}>
                     {copy.privacy.platformsTitleLead}
-                    <span className={styles.serif}>{copy.privacy.platformsTitleSerif}</span>
+                    {copy.privacy.platformsTitleSerif}
                     {copy.privacy.platformsTitleTail}
                   </h2>
                   <p className={styles.sectionSub}>{copy.privacy.platformsSub}</p>
@@ -738,12 +689,8 @@ export function TinaLanding({
           <div className={styles.squiggle} aria-hidden="true" />
           <div className={styles.container}>
             <div className={`${styles.sectionHead} ${styles.sectionHeadCenter}`}>
-              <span className={styles.sectionLabel}>{copy.faq.label}</span>
               <h2 className={styles.sectionTitle}>
-                {copy.faq.titleLine1}
-                <br />
-                <span className={styles.serif}>{copy.faq.titleSerif}</span>
-                {copy.faq.titleLine2Rest}
+                {copy.faq.label}
               </h2>
             </div>
 
@@ -781,14 +728,12 @@ export function TinaLanding({
         <section className={styles.ctaSection} id="home-cta">
           <div className={styles.container}>
             <LucianGlowCta
-              lang={lang}
               titleLine1={copy.cta.titleLine1}
               titleSerif={copy.cta.titleSerif}
               sub={copy.cta.sub}
               primaryLabel={claiming ? copy.cta.primaryClaim : copy.cta.primary}
               secondaryLabel={copy.cta.backToTop}
               secondaryHref="#home-hero"
-              serifClassName={styles.serif}
               onPrimaryClick={triggerPrimarySignIn}
             />
           </div>
@@ -832,7 +777,7 @@ export function TinaLanding({
               <h4>{copy.footer.col3}</h4>
               <ul>
                 <li>
-                  <button type="button" onClick={triggerPrimarySignIn}>
+                  <button className={styles.footerSignIn} type="button" onClick={triggerPrimarySignIn}>
                     {claiming ? copy.footer.col3Claim : copy.footer.col3SignIn}
                   </button>
                 </li>
@@ -848,14 +793,5 @@ export function TinaLanding({
         </div>
       </footer>
     </div>
-  );
-}
-
-function LockGlyph() {
-  return (
-    <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="2.5" y="7.2" width="11" height="7" rx="1.6" />
-      <path d="M4.8 7.2V4.8a3.2 3.2 0 0 1 6.4 0v2.4" />
-    </svg>
   );
 }

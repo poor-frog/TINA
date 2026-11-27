@@ -32,19 +32,11 @@ export interface LandingCopy {
     claimBadge: string;
     claimHeading: string;
     claimLead: string;
-    titleLine1: string;
-    titleSerif: string;
-    titleMid: string;
-    titleLine3Prefix: string;
-    titleAccent: string;
-    leadBrand: string;
-    leadBeforeWake: string;
-    leadWake: string;
-    leadAfterWake: string;
+    title: string;
+    lead: string;
     googleCta: string;
     microsoftCta: string;
     secondaryCta: string;
-    securityStrip: string;
     claimFoot: string;
     devNoticePrefix: string;
     devNoticeSuffix: string;
@@ -66,7 +58,7 @@ export interface LandingCopy {
     leaveTable: string;
     autoplayOn: string;
     autoplayPaused: string;
-    hint: string;
+    demo: string;
     hotspots: {
       minh: string;
       seatedBot: string;
@@ -77,14 +69,12 @@ export interface LandingCopy {
     };
     beats: Record<SceneBeatId, SceneBeatCopy>;
   };
-  ticker: string[];
   live: {
     label: string;
     titleLead: string;
     titleSerif: string;
     sub: string;
     shellTitle: string;
-    shellStatus: string;
     lines: Array<{
       initials: string;
       speaker: string;
@@ -102,8 +92,6 @@ export interface LandingCopy {
     titleSerif: string;
     sub: string;
     points: Array<{ tag: string; title: string; body: string }>;
-    previewWindowTitle: string;
-    previewStatus: string;
     tabs: {
       bilingual: string;
       catchup: string;
@@ -125,7 +113,6 @@ export interface LandingCopy {
     titleSerif: string;
     titleLine2Rest: string;
     sub: string;
-    tag: string;
     steps: [
       { kicker: string; title: string; body: string },
       { kicker: string; title: string; body: string },
@@ -167,9 +154,6 @@ export interface LandingCopy {
   };
   faq: {
     label: string;
-    titleLine1: string;
-    titleSerif: string;
-    titleLine2Rest: string;
     items: Array<{ q: string; a: string }>;
   };
   cta: {
@@ -211,20 +195,11 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       claimHeading: "Thiết lập không gian TINA",
       claimLead:
         "Hệ thống TINA này chưa có quản trị viên. Tài khoản đăng nhập đầu tiên sẽ trở thành Admin để cấu hình mô hình AI, nhận dạng giọng nói và mời thành viên.",
-      titleLine1: "Đồng đội AI",
-      titleSerif: "biết nghe, dịch",
-      titleMid: " và",
-      titleLine3Prefix: "trả lời ",
-      titleAccent: "ngay trong họp.",
-      leadBrand: "TINA",
-      leadBeforeWake:
-        " tham gia Google Meet, Zoom và Microsoft Teams như một thành viên thực thụ — ghi chép song ngữ Việt – Anh theo thời gian thực, trả lời thành tiếng khi bạn gọi ",
-      leadWake: "“Tina ơi”",
-      leadAfterWake: " kèm trích dẫn nguồn, và giữ trọn dữ liệu trong hạ tầng riêng của doanh nghiệp.",
+      title: "TINA ghi và trả lời trong cuộc họp",
+      lead: "Xem transcript Việt – Anh trên Google Meet, Zoom và Teams. Gọi “Tina ơi” để hỏi bằng giọng nói khi trợ lý được bật.",
       googleCta: "Tiếp tục với Google",
       microsoftCta: "Tiếp tục với Microsoft",
       secondaryCta: "Xem TINA hoạt động",
-      securityStrip: "Hạ tầng riêng · Khóa API giữ ở máy chủ · Phân quyền theo chủ cuộc họp",
       claimFoot: "Màn hình khởi tạo này sẽ tự ẩn sau khi đã có quản trị viên.",
       devNoticePrefix: "Chế độ kiểm thử nội bộ — chỉ hỗ trợ email @example.test. Thêm ",
       devNoticeSuffix: " để bật đăng nhập OAuth.",
@@ -246,7 +221,7 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       leaveTable: "Rời bàn",
       autoplayOn: "Tự động",
       autoplayPaused: "Tạm dừng",
-      hint: "Click nhân vật hoặc bot để tương tác",
+      demo: "Hội thoại minh họa",
       hotspots: {
         minh: "Nghe Minh đặt câu hỏi",
         seatedBot: "Xem TINA Agent tổng hợp",
@@ -269,7 +244,7 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
         linh: {
           speaker: "Linh · Ops",
           badge: "GỌI GIỌNG NÓI",
-          text: "“Tina ơi, nhắc lại 2 cam kết đã chốt tuần trước với khách!”",
+          text: "“Tina ơi, ta đã chốt gì tuần trước?!”",
           sub: "Đang đánh thức TINA Voice Agent…",
           isAgent: false,
           botSeated: true,
@@ -298,23 +273,12 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
         },
       },
     },
-    ticker: [
-      "GOOGLE MEET",
-      "ZOOM",
-      "MICROSOFT TEAMS",
-      "DỊCH SONG NGỮ VI + EN",
-      "TRỢ LÝ GIỌNG NÓI “TINA ƠI”",
-      "CHROME EXTENSION",
-      "BẮT KỊP 60 GIÂY",
-      "BẢO MẬT DOANH NGHIỆP",
-    ],
     live: {
-      label: "01 · TRẢI NGHIỆM TRONG PHÒNG HỌP",
+      label: "Trong cuộc họp",
       titleLead: "Nghe rõ ai nói gì — ",
       titleSerif: "và hỏi TINA thành tiếng.",
       sub: "Lời thoại tiếng Việt và bản dịch tiếng Anh hiển thị theo thời gian thực cùng tên người nói, xen kẽ trực tiếp câu trả lời giọng nói của TINA Agent và nút xem nguồn trích dẫn.",
-      shellTitle: "LIVE TRANSCRIPT · SONG NGỮ VI + EN",
-      shellStatus: "TRỰC TIẾP",
+      shellTitle: "Transcript Việt – Anh",
       lines: [
         {
           initials: "MN",
@@ -359,7 +323,7 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       ],
     },
     extension: {
-      label: "02 · TINA CHROME EXTENSION",
+      label: "TINA Chrome Extension",
       titleLead: "Hiện diện ngay trong Google Meet — ",
       titleSerif: "không cần chuyển tab.",
       sub: "TINA Chrome Extension gắn một khung điều khiển nhỏ gọn ngay trên màn hình Google Meet giúp bạn theo dõi phụ đề song ngữ, bắt kịp mạch họp chỉ bằng một cú bấm và hỏi TINA ngay tại chỗ.",
@@ -385,11 +349,9 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
           body: "Extension không xin quyền microphone hay thu âm tab — chỉ hiển thị dữ liệu đã phân quyền từ TINA Bot.",
         },
       ],
-      previewWindowTitle: "meet.google.com/kuz-wvic-dfc · TINA Overlay",
-      previewStatus: "BOT ĐANG NGHE",
       tabs: {
-        bilingual: "Song ngữ VI+EN",
-        catchup: "Bắt kịp 60s",
+        bilingual: "Song ngữ",
+        catchup: "Bắt kịp",
         ask: "Ask TINA",
       },
       bilingualRows: [
@@ -417,15 +379,14 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       askAnswer: "Đối tác cần nhận bản đánh giá bảo mật vào thứ 4 và danh sách 20 tài khoản chạy thử nghiệm song ngữ.",
       askCitation: "Nguồn (2) · 09:40:12 (Minh Nguyễn) · 09:41:02 (Daniel Lee)",
       askWikiBtn: "Lưu vào Wiki",
-      askWikiSaved: "Đã lưu vào Wiki ✓",
+      askWikiSaved: "Đã mô phỏng lưu vào Wiki",
     },
     how: {
-      label: "03 · BẮT ĐẦU TRONG 3 BƯỚC",
+      label: "Thiết lập",
       titleLine1: "Một chạm đăng nhập Google.",
       titleSerif: "TINA",
       titleLine2Rest: " sẵn sàng vào họp.",
-      sub: "Đăng nhập vào không gian làm việc riêng của bạn, chọn mô hình AI ưa thích một lần và gửi TINA Bot vào bất kỳ cuộc họp nào.",
-      tag: "SẴN SÀNG TRONG < 2 PHÚT",
+      sub: "Đăng nhập, kiểm tra mô hình được bật rồi gửi TINA vào một cuộc họp được hỗ trợ.",
       steps: [
         {
           kicker: "ĐĂNG NHẬP",
@@ -435,32 +396,32 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
         {
           kicker: "CHỌN AI",
           title: "Tự chọn mô hình AI & giọng nói.",
-          body: "Kết nối ChatGPT Plan, Claude, Gemini, DeepSeek, Groq hoặc AWS Bedrock ngay trong Cài đặt — không bị trói buộc vào một nhà cung cấp.",
+          body: "Xem các mô hình và dịch vụ giọng nói đã được bật trong Cài đặt.",
         },
         {
           kicker: "VÀO HỌP",
           title: "Gửi TINA & tương tác bằng giọng nói.",
           body: "Dán link Google Meet, Zoom, Teams hoặc bấm Gửi Bot từ Chrome Extension. Gọi trực tiếp khi cần tổng hợp:",
-          wakePrompt: "Tina ơi, nhắc lại 2 cam kết đã chốt tuần trước với khách",
+          wakePrompt: "Tina ơi, ta đã chốt gì tuần trước?",
         },
       ],
       copy: "Sao chép",
       copied: "Đã chép",
       proofPrefix: "Phiên dịch song ngữ theo thời gian thực, ",
       proofHighlight1: "trợ lý giọng nói có nguồn trích dẫn",
-      proofMid: ", và kho tri thức cuộc họp — vận hành trọn vẹn trong ",
+      proofMid: ", và tài liệu cuộc họp trong ",
       proofHighlight2: "hạ tầng riêng của bạn",
       proofCta: "Mở không gian TINA",
     },
     useCases: {
-      label: "04 · BỀ MẶT ĐỒNG BỘ & ỨNG DỤNG",
+      label: "BỀ MẶT ĐỒNG BỘ & ỨNG DỤNG",
       titleLead: "Một trợ lý xuyên suốt ",
       titleSerif: "trước, trong và sau",
       titleTail: " cuộc họp.",
       sub: "Mọi cuộc họp đều liên thông dữ liệu giữa phòng họp trực tiếp, Google Meet Extension và không gian hậu kỳ 3 cột.",
       surfaces: [
         {
-          tag: "VOICE BOT TRONG PHÒNG HỌP",
+          tag: "Bot trong cuộc họp",
           title: "Ghi âm, dịch & trả lời trực tiếp",
           body: "Tham gia cuộc họp công khai như một thành viên, lưu ghi âm vào kho riêng, nhận dạng người nói và trả lời thành tiếng khi được gọi “Tina ơi”.",
           bestFor: "Phù hợp: Họp nhóm song ngữ · Q&A trực tiếp · Ghi biên bản rảnh tay",
@@ -472,13 +433,13 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
           bestFor: "Phù hợp: Tập trung hoàn toàn vào cuộc họp, không cần chuyển tab",
         },
         {
-          tag: "WORKSPACE HẬU KỲ 3 CỘT",
+          tag: "Không gian sau cuộc họp",
           title: "Biên bản, Talk Time & Routines",
           body: "Tóm tắt điều hành, tìm kiếm thông minh, thống kê thời lượng nói từng người, Ask TINA có duyệt công cụ an toàn và lịch chạy tổng hợp định kỳ.",
           bestFor: "Phù hợp: Theo dõi việc cần làm · Xây Wiki nhóm · Báo cáo tự động",
         },
       ],
-      casesHeading: "Đội ngũ đang dùng TINA trong những buổi họp nào?",
+      casesHeading: "Tình huống sử dụng",
       cases: [
         {
           num: "01 / ĐỐI TÁC QUỐC TẾ",
@@ -503,15 +464,15 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       ],
     },
     privacy: {
-      label: "05 · BẢO MẬT & CHỦ QUYỀN DỮ LIỆU",
+      label: "Dữ liệu và quyền truy cập",
       titleLead: "Dữ liệu cuộc họp luôn thuộc ",
       titleSerif: "quyền kiểm soát của bạn.",
-      sub: "TINA được thiết kế cho doanh nghiệp đặt quyền riêng tư lên hàng đầu — vận hành độc lập trong hạ tầng của tổ chức với phân quyền chặt chẽ.",
+      sub: "Quản trị viên cấu hình nơi lưu bản ghi, transcript và tài liệu Wiki. Quyền truy cập phụ thuộc vào quyền sở hữu và cách chia sẻ.",
       cards: [
         {
           tag: "A / HẠ TẦNG RIÊNG BIỆT",
-          title: "Lưu trữ trọn vẹn tại tổ chức.",
-          body: "Bản ghi âm, transcript và Wiki được lưu trong cơ sở dữ liệu và kho lưu trữ mã hóa riêng của bạn — không phụ thuộc đám mây công cộng bên thứ ba.",
+          title: "Kho lưu trữ do quản trị viên cấu hình",
+          body: "TINA lưu bản ghi, transcript và Wiki trong cơ sở dữ liệu và kho lưu trữ của bản triển khai.",
         },
         {
           tag: "B / BẢO VỆ KHÓA & PHIÊN",
@@ -521,10 +482,10 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
         {
           tag: "C / PHÂN QUYỀN CHẶT CHẼ",
           title: "Mặc định riêng tư, không train AI.",
-          body: "Chỉ chủ cuộc họp và thành viên được mời trong không gian nhóm mới xem được transcript; nội dung họp không bao giờ dùng để huấn luyện AI.",
+          body: "Chủ cuộc họp và những người được cấp quyền có thể mở transcript.",
         },
       ],
-      platformsLabel: "HỆ SINH THÁI TƯƠNG THÍCH",
+      platformsLabel: "Tích hợp",
       platformsTitleLead: "Kết nối linh hoạt với ",
       platformsTitleSerif: "nền tảng & mô hình",
       platformsTitleTail: " đội ngũ đang dùng.",
@@ -549,10 +510,7 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       ],
     },
     faq: {
-      label: "06 · CÂU HỎI THƯỜNG GẶP",
-      titleLine1: "Thắc mắc phổ biến.",
-      titleSerif: "Giải đáp",
-      titleLine2Rest: " thẳng thắn.",
+      label: "Câu hỏi thường gặp",
       items: [
         {
           q: "Làm thế nào để bắt đầu đăng nhập TINA?",
@@ -564,15 +522,15 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
         },
         {
           q: "Trợ lý giọng nói “Tina ơi” có tự bịa thông tin khi trả lời không?",
-          a: "Không. TINA chỉ tổng hợp từ phần transcript đã xác nhận của cuộc họp và các tài liệu trong không gian làm việc được bạn cấp quyền. Mỗi câu trả lời đều đi kèm nút Nguồn (N) để kiểm chứng ngay tại dòng thoại gốc.",
+          a: "TINA dựa vào transcript và tài liệu bạn có quyền truy cập. Câu trả lời có thể sai hoặc thiếu ngữ cảnh. Mở mục Nguồn khi có để đối chiếu với nội dung gốc.",
         },
         {
           q: "Dữ liệu ghi âm và biên bản cuộc họp được lưu ở đâu?",
-          a: "Toàn bộ bản ghi âm, bản dịch song ngữ và Wiki đều nằm trong hạ tầng riêng của tổ chức bạn với cơ chế phân quyền theo chủ sở hữu. Dữ liệu của bạn không bị chia sẻ hay dùng để huấn luyện mô hình AI bên ngoài.",
+          a: "Bản ghi, transcript và Wiki nằm trong kho lưu trữ do quản trị viên cấu hình. Khi tổ chức dùng dịch vụ AI bên ngoài, TINA có thể gửi phần nội dung cần xử lý cho nhà cung cấp đó.",
         },
         {
           q: "Tôi có thể dùng tài khoản ChatGPT Plan hoặc API key AI riêng không?",
-          a: "Hoàn toàn được. Sau khi đăng nhập, bạn mở Cài đặt → AI Models & Transcription để kết nối trực tiếp tài khoản ChatGPT Plan (OAuth) hoặc nhập API key Claude, OpenAI, Gemini, DeepSeek, Groq, AWS Bedrock hay gateway riêng.",
+          a: "Cài đặt → AI Models & Transcription hiển thị các nhà cung cấp mà quản trị viên đã bật. Kết nối ChatGPT Plan từ trình duyệt chỉ khả dụng trên bản chạy local.",
         },
       ],
     },
@@ -615,20 +573,11 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       claimHeading: "Set up your instance",
       claimLead:
         "This TINA instance has no administrator yet. The first sign-in becomes the admin to configure AI models, speech transcription, and invite teammates.",
-      titleLine1: "An AI teammate",
-      titleSerif: "that listens, translates",
-      titleMid: " &",
-      titleLine3Prefix: "speaks ",
-      titleAccent: "in the room.",
-      leadBrand: "TINA",
-      leadBeforeWake:
-        " joins Google Meet, Zoom, and Microsoft Teams as a visible teammate — streaming real-time VI + EN transcripts, answering aloud when you say ",
-      leadWake: "“Tina ơi”",
-      leadAfterWake: " with source citations, and keeping every recording inside your private infrastructure.",
+      title: "TINA takes notes and answers in meetings",
+      lead: "Follow Vietnamese and English transcripts on Google Meet, Zoom, and Teams. Say “Tina ơi” to ask a question when the voice assistant is enabled.",
       googleCta: "Continue with Google",
       microsoftCta: "Continue with Microsoft",
       secondaryCta: "See TINA in action",
-      securityStrip: "Private infrastructure · Server-side credentials · Owner-scoped transcripts",
       claimFoot: "This claim screen disappears once an administrator exists.",
       devNoticePrefix: "Development test mode — sign-in is limited to @example.test addresses. Add ",
       devNoticeSuffix: " to enable OAuth.",
@@ -650,7 +599,7 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       leaveTable: "Step back",
       autoplayOn: "Autoplay",
       autoplayPaused: "Paused",
-      hint: "Click any teammate or bot to interact",
+      demo: "Sample conversation",
       hotspots: {
         minh: "Hear Minh ask about Q4 launch",
         seatedBot: "Trigger TINA Agent summary",
@@ -673,7 +622,7 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
         linh: {
           speaker: "Linh · Ops",
           badge: "WAKE WORD",
-          text: "“Tina ơi, remind us of the 2 commitments from last week!”",
+          text: "“Tina ơi, what did we agree on last week?!”",
           sub: "Waking TINA Voice Agent…",
           isAgent: false,
           botSeated: true,
@@ -702,23 +651,12 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
         },
       },
     },
-    ticker: [
-      "GOOGLE MEET",
-      "ZOOM",
-      "MICROSOFT TEAMS",
-      "BILINGUAL VI + EN",
-      "“TINA ƠI” VOICE AGENT",
-      "CHROME EXTENSION",
-      "60-SECOND CATCH-UP",
-      "ENTERPRISE PRIVACY",
-    ],
     live: {
-      label: "01 · LIVE IN-CALL EXPERIENCE",
+      label: "In the meeting",
       titleLead: "Know who said what — ",
       titleSerif: "and ask TINA out loud.",
       sub: "Live Vietnamese and English transcripts stream with speaker diarization, interleaved directly with TINA Agent’s spoken replies and clickable source citations.",
-      shellTitle: "LIVE TRANSCRIPT · BILINGUAL VI + EN",
-      shellStatus: "LIVE",
+      shellTitle: "Vietnamese and English transcript",
       lines: [
         {
           initials: "MN",
@@ -763,7 +701,7 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       ],
     },
     extension: {
-      label: "02 · TINA CHROME EXTENSION",
+      label: "TINA Chrome Extension",
       titleLead: "Right inside Google Meet — ",
       titleSerif: "without switching tabs.",
       sub: "The TINA Chrome Extension floats cleanly beside your Google Meet call so you can follow bilingual transcripts, catch up on the last 60 seconds, and ask TINA in place.",
@@ -789,11 +727,9 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
           body: "The extension never asks for mic or tab audio permissions — it only reads owner-authorized data from TINA Bot.",
         },
       ],
-      previewWindowTitle: "meet.google.com/kuz-wvic-dfc · TINA Overlay",
-      previewStatus: "BOT LISTENING",
       tabs: {
-        bilingual: "VI + EN Live",
-        catchup: "60s Catch-up",
+        bilingual: "Bilingual",
+        catchup: "Catch up",
         ask: "Ask TINA",
       },
       bilingualRows: [
@@ -821,15 +757,14 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       askAnswer: "The partner requires the security assessment by Wednesday plus the 20-seat bilingual pilot roster.",
       askCitation: "Sources (2) · 09:40:12 (Minh Nguyen) · 09:41:02 (Daniel Lee)",
       askWikiBtn: "Save to Wiki",
-      askWikiSaved: "Saved to Wiki ✓",
+      askWikiSaved: "Simulated Wiki save",
     },
     how: {
-      label: "03 · START IN 3 STEPS",
+      label: "Setup",
       titleLine1: "One Google sign-in.",
       titleSerif: "TINA",
       titleLine2Rest: " is in your meeting.",
-      sub: "Sign in to your private workspace, choose your preferred AI model once, and dispatch TINA Bot to any meeting.",
-      tag: "READY IN < 2 MINUTES",
+      sub: "Sign in, check which models are enabled, and send TINA to a supported meeting.",
       steps: [
         {
           kicker: "SIGN IN",
@@ -839,13 +774,13 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
         {
           kicker: "MODELS",
           title: "Pick your own AI & speech.",
-          body: "Use ChatGPT Plan, Claude, Gemini, DeepSeek, Groq, or AWS Bedrock in Settings — never locked into a single provider.",
+          body: "Check Settings for the AI models and speech services enabled for your workspace.",
         },
         {
           kicker: "JOIN CALL",
           title: "Send TINA & speak live.",
           body: "Paste a Google Meet, Zoom, or Teams link — or click Send Bot from Chrome Extension. Summon TINA aloud anytime:",
-          wakePrompt: "Tina ơi, remind us of the 2 commitments from last week",
+          wakePrompt: "Tina ơi, what did we agree on last week?",
         },
       ],
       copy: "Copy",
@@ -857,7 +792,7 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       proofCta: "Open TINA workspace",
     },
     useCases: {
-      label: "04 · SYNCED SURFACES & USE CASES",
+      label: "SYNCED SURFACES & USE CASES",
       titleLead: "One companion across ",
       titleSerif: "before, during & after",
       titleTail: " every call.",
@@ -882,7 +817,7 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
           bestFor: "Best for: Action follow-ups · Shared team Wiki · Automated recaps",
         },
       ],
-      casesHeading: "Where teams put TINA to work every day",
+      casesHeading: "Example use cases",
       cases: [
         {
           num: "01 / GLOBAL PARTNERS",
@@ -907,15 +842,15 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       ],
     },
     privacy: {
-      label: "05 · ENTERPRISE PRIVACY & CONTROL",
+      label: "Data and access",
       titleLead: "Your meetings stay ",
       titleSerif: "under your control.",
-      sub: "Built for organizations where meeting confidentiality is non-negotiable — private infrastructure, strict permissions, and zero model training.",
+      sub: "Your administrator configures where recordings, transcripts, and Wiki documents are stored. Access follows ownership and sharing permissions.",
       cards: [
         {
           tag: "A / PRIVATE INFRASTRUCTURE",
-          title: "Everything stays on your stack.",
-          body: "Recordings, transcripts, and team Wikis live in your own encrypted database and private storage — never in shared third-party clouds.",
+          title: "Storage configured by your administrator",
+          body: "TINA stores recordings, transcripts, and team Wikis in the database and storage configured for the deployment.",
         },
         {
           tag: "B / SERVER-SIDE CREDENTIALS",
@@ -924,11 +859,11 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
         },
         {
           tag: "C / DEFAULT-DENY ACCESS",
-          title: "Owner-scoped, never trained on.",
-          body: "Only the meeting owner and invited workspace teammates can view transcripts; your conversations are never used to train external AI.",
+          title: "Transcript access follows sharing permissions",
+          body: "Meeting owners and people granted access can view transcripts.",
         },
       ],
-      platformsLabel: "ECOSYSTEM & MODELS",
+      platformsLabel: "Integrations",
       platformsTitleLead: "Works with the ",
       platformsTitleSerif: "platforms & models",
       platformsTitleTail: " your team already trusts.",
@@ -953,10 +888,7 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
       ],
     },
     faq: {
-      label: "06 · FAQ",
-      titleLine1: "Common questions.",
-      titleSerif: "Straight",
-      titleLine2Rest: " answers.",
+      label: "Frequently asked questions",
       items: [
         {
           q: "How do I sign in to TINA?",
@@ -968,15 +900,15 @@ export const LANDING_COPY: Record<LandingLang, LandingCopy> = {
         },
         {
           q: "Does the “Tina ơi” voice assistant ever hallucinate facts?",
-          a: "No. TINA answers strictly from confirmed meeting transcripts and authorized workspace documents, attaching clickable Sources (N) citations directly to the original lines.",
+          a: "TINA uses the transcript and documents you can access. Replies can be wrong or miss context. Open Sources when available to check the original material.",
         },
         {
           q: "Where are recordings and transcripts stored?",
-          a: "All recordings, bilingual transcripts, and Wikis stay inside your organization’s private infrastructure with owner-scoped access controls and are never used to train third-party AI models.",
+          a: "Recordings, transcripts, and Wiki content are stored in the services configured by your administrator. When an external AI service is enabled, TINA can send it the context needed to process the request.",
         },
         {
           q: "Can I bring my own ChatGPT Plan or AI API keys?",
-          a: "Yes. Once signed in, open Settings → AI Models & Transcription to link your ChatGPT Plan via OAuth or plug in Claude, OpenAI, Gemini, DeepSeek, Groq, AWS Bedrock, or a custom gateway.",
+          a: "Settings → AI Models & Transcription lists the providers enabled by your administrator. Browser-based ChatGPT Plan sign-in is available on local installs.",
         },
       ],
     },

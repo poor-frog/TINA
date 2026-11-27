@@ -1,6 +1,6 @@
 "use client";
 /** HeroMeetingScene — Interactive layered animation built from the original hero.png
- *  hand-drawn ink illustration. Fully bilingual (VI / EN) with realistic Q4 enterprise
+ *  hand-drawn ink illustration. Fully bilingual (VI / EN) with sample
  *  meeting beats, rolling cel bot, CRT voice equalizer, and clickable characters. */
 import { useCallback, useEffect, useState, type MouseEvent } from "react";
 import { LANDING_COPY, type LandingLang, type SceneBeatId } from "./landingCopy";
@@ -248,13 +248,13 @@ export function HeroMeetingScene({ lang = "vi" }: { lang?: LandingLang }) {
 
       {/* Compact editorial interactive control strip */}
       <figcaption className={styles.controlBar}>
+        <span className={styles.hintText}>{copy.demo}</span>
         <div className={styles.controlGroup}>
           <button
             type="button"
             className={`${styles.chip} ${beat === "tina-reply" ? styles.chipActive : ""}`}
             onClick={() => selectBeat("tina-reply")}
           >
-            <span aria-hidden="true">✦</span>
             <span>{copy.callTina}</span>
           </button>
           <button
@@ -262,7 +262,6 @@ export function HeroMeetingScene({ lang = "vi" }: { lang?: LandingLang }) {
             className={`${styles.chip} ${botSeated ? styles.chipActive : ""}`}
             onClick={toggleBotSeat}
           >
-            <span aria-hidden="true">↔</span>
             <span>{botSeated ? copy.leaveTable : copy.joinTable}</span>
           </button>
           <button
@@ -271,11 +270,9 @@ export function HeroMeetingScene({ lang = "vi" }: { lang?: LandingLang }) {
             onClick={() => setAutoplay((v) => !v)}
             aria-pressed={autoplay}
           >
-            <span aria-hidden="true">{autoplay ? "❚❚" : "▶"}</span>
             <span>{autoplay ? copy.autoplayOn : copy.autoplayPaused}</span>
           </button>
         </div>
-        <span className={styles.hintText}>{copy.hint}</span>
       </figcaption>
     </figure>
   );

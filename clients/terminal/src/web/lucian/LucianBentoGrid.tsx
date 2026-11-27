@@ -16,8 +16,8 @@ const PLATFORMS: ReadonlyArray<readonly [string, string]> = [
 function bentoCopy(lang: "vi" | "en") {
   if (lang === "vi") {
     return {
-      kicker: "Hệ sinh thái tích hợp",
-      title: "Mọi công cụ cuộc họp trong một không gian sống",
+      kicker: "Minh họa",
+      title: "Công cụ cho cuộc họp",
       aTitle: "Phiên âm song ngữ",
       aSub: "3 người đang trao đổi trực tiếp",
       aIdle: "Chốt lộ trình triển khai Q3…",
@@ -33,8 +33,8 @@ function bentoCopy(lang: "vi" | "en") {
     };
   }
   return {
-    kicker: "Interactive workspace",
-    title: "Everything your meeting workflow needs, built in",
+    kicker: "Demo",
+    title: "Meeting tools",
     aTitle: "Live bilingual capture",
     aSub: "3 speakers transcribed in sync",
     aIdle: "Finalizing Q3 pilot rollout…",

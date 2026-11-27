@@ -47,7 +47,7 @@ const SECTIONS: readonly SectionDef[] = [
     workspace: "personal",
     group: "Meetings",
     label: "Calendar & Auto-join",
-    description: "Connect Google or Outlook calendars so TINA tracks upcoming calls and joins automatically.",
+    description: "Connect Google or Outlook to see upcoming meetings. Enable Auto-join for the calendars where you want TINA to join.",
     icon: "calendar",
     keywords: "calendar google microsoft outlook schedule auto join meeting recording",
   },

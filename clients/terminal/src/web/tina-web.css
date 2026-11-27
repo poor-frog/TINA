@@ -2018,151 +2018,42 @@
   font-size: 13.5px;
 }
 
-/* Ask Tina Empty Hero & Starter Cards */
 .tina-web-ask-hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
   padding: 48px 0 20px;
-}
-
-.tina-web-ask-hero-badge {
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 16px;
-  background:
-    radial-gradient(circle at 28% 24%, rgba(181, 232, 209, 0.24), transparent 62%),
-    linear-gradient(145deg, rgba(23, 107, 91, 0.5), rgba(23, 59, 54, 0.72));
-  border: 1px solid rgba(145, 215, 190, 0.3);
-  color: var(--tw-mint-bright);
-  box-shadow: 0 12px 32px rgba(23, 107, 91, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.14);
-}
-
-.tina-web-ask-hero-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border-radius: 999px;
-  background: rgba(23, 107, 91, 0.16);
-  border: 1px solid rgba(145, 215, 190, 0.22);
-  color: var(--tw-mint);
-  font-size: 12px;
-  font-weight: 500;
-  margin-bottom: 14px;
 }
 
 .tina-web-ask-hero-title {
   margin: 0 0 8px;
   font-family: var(--tw-font-display);
   font-size: 28px;
-  font-weight: 600;
-  letter-spacing: -0.025em;
   color: var(--tw-text);
 }
 
 .tina-web-ask-hero-sub {
-  margin: 0 0 28px;
-  max-width: 520px;
+  margin: 0 0 16px;
+  max-width: 56ch;
   color: var(--tw-text-3);
   font-size: 14px;
   line-height: 1.55;
 }
 
-.tina-web-ask-hero-sub code {
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: var(--tw-card);
-  border: 1px solid var(--tw-line-soft);
-  color: var(--tw-mint);
-  font-family: var(--mono);
-  font-size: 12.5px;
-}
-
 .tina-web-ask-starter-grid {
-  width: 100%;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .tina-web-ask-starter-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 7px;
-  padding: 16px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  background: rgba(255, 255, 255, 0.025);
-  text-align: left;
-  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
-}
-
-.tina-web-ask-starter-card:hover:not(:disabled) {
-  border-color: rgba(145, 215, 190, 0.34);
-  background: rgba(255, 255, 255, 0.045);
-  transform: translateY(-1px);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
-}
-
-.tina-web-ask-starter-top {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 2px;
-}
-
-.tina-web-ask-starter-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--tw-surface-teal);
-  border: 1px solid rgba(145, 215, 190, 0.22);
-  color: var(--tw-mint-bright);
-}
-
-.tina-web-ask-starter-tag {
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(145, 215, 190, 0.12);
-  border: 1px solid rgba(145, 215, 190, 0.22);
-  color: var(--tw-mint);
-  font-family: var(--mono);
-  font-size: 11px;
-}
-
-.tina-web-ask-starter-arrow {
-  margin-left: auto;
-  color: var(--tw-text-4);
-  display: inline-flex;
-  transition: transform 140ms ease, color 140ms ease;
-}
-
-.tina-web-ask-starter-card:hover:not(:disabled) .tina-web-ask-starter-arrow {
-  transform: translateX(2px);
-  color: var(--tw-mint);
-}
-
-.tina-web-ask-starter-title {
-  font-size: 13.5px;
-  font-weight: 600;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--tw-line-soft);
+  background: var(--tw-card);
   color: var(--tw-text);
 }
 
-.tina-web-ask-starter-prompt {
-  font-size: 12.5px;
-  line-height: 1.48;
-  color: var(--tw-text-3);
+.tina-web-ask-starter-card:hover {
+  border-color: var(--tw-mint);
 }
 
 /* Conversation Turns & Open Editorial Agent Replies */
@@ -4507,18 +4398,6 @@ html[data-theme="light"] .tina-web .tina-web-ask-topbar-scope {
   color: #0f4c41;
 }
 
-html[data-theme="light"] .tina-web .tina-web-ask-starter-card {
-  border-color: rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.8);
-}
-
-html[data-theme="light"] .tina-web .tina-web-ask-starter-card:hover:not(:disabled) {
-  border-color: rgba(23, 107, 91, 0.34);
-  background: #ffffff;
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.07);
-}
-
-html[data-theme="light"] .tina-web .tina-web-ask-hero-badge,
 html[data-theme="light"] .tina-web .tina-web-agent-avatar {
   background: linear-gradient(145deg, rgba(23, 107, 91, 0.16), rgba(23, 107, 91, 0.08));
   border-color: rgba(23, 107, 91, 0.24);
@@ -4526,12 +4405,9 @@ html[data-theme="light"] .tina-web .tina-web-agent-avatar {
   box-shadow: 0 6px 18px rgba(23, 107, 91, 0.1);
 }
 
-html[data-theme="light"] .tina-web .tina-web-ask-hero-pill,
 html[data-theme="light"] .tina-web .tina-web-agent-phase,
 html[data-theme="light"] .tina-web .tina-web-commit-pill,
 html[data-theme="light"] .tina-web .tina-web-op-chip,
-html[data-theme="light"] .tina-web .tina-web-ask-starter-icon,
-html[data-theme="light"] .tina-web .tina-web-ask-starter-tag,
 html[data-theme="light"] .tina-web .tina-web-ask-live-pill,
 html[data-theme="light"] .tina-web .tina-web-ask-slash-btn {
   background: rgba(23, 107, 91, 0.1);
@@ -4850,7 +4726,6 @@ html[data-theme="light"] .tina-web .tina-web-session-confirm-del:hover:not(:disa
   .tina-web-page-wrap { padding: 18px 16px 48px; }
   .tina-web-ask-scroll { padding: 20px 16px 16px; }
   .tina-web-ask-footer { padding: 10px 16px 16px; }
-  .tina-web-ask-starter-grid { grid-template-columns: 1fr; }
   .tina-web-agent-content { padding-left: 0; }
 }
 

@@ -515,6 +515,17 @@ def test_chat_defaults_session_to_main(tmp_path):
     assert rows[0]["session"] == "main" and rows[0]["title"] == "no session given"
 
 
+def test_chat_title_uses_the_question_after_workspace_context():
+    c = TestClient(create_app(
+        Dispatcher(load_settings(), _FakeRuntime(), _FakeIdentity()), stream_reader=_FakeReader(),
+    ))
+    prompt = '[Context: Space "My Space", open page "plans/[q4].md"]\n\nWhat did we decide?'
+    r = c.post("/api/chat", json={"prompt": prompt, "subject": "u_jane", "session": "wiki-chat"})
+    assert r.status_code == 200
+    rows = c.get("/api/sessions", params={"subject": "u_jane"}).json()["sessions"]
+    assert next(row["title"] for row in rows if row["session"] == "wiki-chat") == "What did we decide?"
+
+
 class _CursorReader:
     """A StreamReader fake that surfaces per-event Stream cursors (``(event, cursor)`` tuples) — what the
     RESUMABLE chat SSE emits as ``id:`` lines — and records the ``resume`` cursor it was asked to read from."""

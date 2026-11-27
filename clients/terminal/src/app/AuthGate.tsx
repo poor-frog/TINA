@@ -66,7 +66,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   };
 
   if (status === "in") return <>{children}</>;
-  if (status === "checking") return <div className={landingStyles.checking} />;
+  if (status === "checking") return <div className={`tina-landing ${landingStyles.checking}`} />;
 
   const claiming = !adminExists;
   const directLoginAvailable = process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";

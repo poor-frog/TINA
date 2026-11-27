@@ -106,7 +106,8 @@ def _upload_filename(name: str | None) -> str:
 
 def _truncate_title(text: str, *, limit: int = 60) -> str:
     """A session's default title — the first prompt, single-lined + truncated."""
-    title = " ".join((text or "").split())
+    question = re.sub(r'^\s*\[Context: Space "[^\r\n]*\]\r?\n\r?\n', "", text or "", count=1)
+    title = " ".join(question.split())
     return title[: limit - 1] + "…" if len(title) > limit else title
 
 

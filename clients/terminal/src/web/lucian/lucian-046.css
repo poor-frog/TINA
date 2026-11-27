@@ -66,7 +66,7 @@
   background: none;
   font: inherit;
   font-size: 15px;
-  font-weight: 550;
+  font-weight: 600;
   color: var(--ux-ink);
   outline: none;
 }
@@ -145,8 +145,8 @@
 
 .u046-g {
   padding: 10px 10px 5px;
-  font-size: 10.5px;
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: 700;
   letter-spacing: .08em;
   text-transform: uppercase;
   color: var(--ux-ink-3);
@@ -172,7 +172,7 @@
 .u046-op mark {
   background: none;
   color: var(--ux-accent);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .u046-ic {
@@ -259,7 +259,7 @@
   height: 20px;
   padding: 0 5px;
   margin-right: 4px;
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 .u046-done {

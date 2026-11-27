@@ -37,7 +37,7 @@
 .u201-hd b {
   display: block;
   font-size: 14px;
-  font-weight: 850;
+  font-weight: 700;
   letter-spacing: -.02em;
   color: var(--ux-ink);
 }
@@ -47,7 +47,7 @@
   align-items: center;
   gap: 5px;
   margin-top: 2px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--ux-ink-3);
 }
@@ -61,6 +61,7 @@
 }
 
 .u201 button.u201-run {
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -72,7 +73,7 @@
   color: var(--ux-surface);
   font-family: inherit;
   font-size: 11.5px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
   cursor: pointer;
   white-space: nowrap;
@@ -173,7 +174,7 @@
 .u201-tx b {
   display: block;
   font-size: 11px;
-  font-weight: 850;
+  font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -183,8 +184,8 @@
 .u201-tx span {
   display: block;
   margin-top: 1px;
-  font-size: 9.5px;
-  font-weight: 650;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--ux-ink-3);
   white-space: nowrap;
   overflow: hidden;
@@ -241,8 +242,8 @@
   position: absolute;
   right: 8px;
   bottom: -14px;
-  font-size: 9px;
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: 700;
   font-style: normal;
   color: #059669;
   opacity: 0;
@@ -263,8 +264,8 @@
   border-radius: 999px;
   background: #059669;
   color: #ffffff;
-  font-size: 10.5px;
-  font-weight: 800;
+  font-size: 11px;
+  font-weight: 700;
   white-space: nowrap;
   opacity: 0;
   transition: opacity .3s, transform .4s cubic-bezier(.3, 1.5, .5, 1);

@@ -1,0 +1,34 @@
+.tina-landing {
+  --lp-bg: #f3f0e8;
+  --lp-bg-2: #ebe7dc;
+  --lp-card: #ffffff;
+  --lp-dark: #0e0f0d;
+  --lp-dark-2: #16170f;
+  --lp-ink: #0c0d0a;
+  --lp-ink-2: #1a1c19;
+  --lp-ink-on-lime: #0a0b07;
+  --lp-lime: #6ee7b7;
+  --lp-lime-soft: #b5e8d1;
+  --lp-teal: #176b5b;
+  --lp-line: #d8d3c4;
+  --lp-line-2: #c6c0ad;
+  --lp-line-dark: #2a2c24;
+  --lp-muted: #5a584f;
+  --lp-muted-2: #8d8a7e;
+  --lp-orange: #ff5b25;
+  --lp-blue: #8cabff;
+  --lp-danger: #b42318;
+  --lp-danger-bg: #fef3f2;
+  --lp-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --lp-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --lp-radius-sm: 10px;
+  --lp-radius: 18px;
+  --lp-radius-lg: 28px;
+  --lp-shadow-md: 0 14px 40px -16px color-mix(in srgb, var(--lp-shadow-ink) 16%, transparent), 0 4px 10px -4px color-mix(in srgb, var(--lp-shadow-ink) 6%, transparent);
+  --lp-shadow-lg: 0 30px 80px -30px color-mix(in srgb, var(--lp-shadow-ink) 18%, transparent), 0 8px 20px -10px color-mix(in srgb, var(--lp-shadow-ink) 8%, transparent);
+  --lp-stamp: 5px 5px 0 var(--lp-ink);
+  --lp-stamp-sm: 3px 3px 0 var(--lp-ink);
+  --lp-lime-hover: #8aeec6;
+  --lp-shadow-ink: #0f110c;
+  --lp-dark-muted: #484a40;
+}
