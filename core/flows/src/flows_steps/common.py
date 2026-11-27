@@ -19,11 +19,40 @@ import flows_config
 from flows import StepError
 
 
+#: Consumer webmail domains that MUST NOT become an implicit organization-wide attendee
+#: allow-list when neither `attendee_domains` nor `TINA_FLOWS_ATTENDEE_DOMAINS` is set.
+#: Without this guard, an organizer using `@gmail.com` would implicitly email unrelated
+#: `@gmail.com` guests in the same meeting (spam / SES complaint risk).
+PUBLIC_EMAIL_DOMAINS: frozenset[str] = frozenset({
+    "gmail.com",
+    "googlemail.com",
+    "outlook.com",
+    "hotmail.com",
+    "live.com",
+    "msn.com",
+    "yahoo.com",
+    "ymail.com",
+    "icloud.com",
+    "me.com",
+    "mac.com",
+    "proton.me",
+    "protonmail.com",
+    "aol.com",
+    "zoho.com",
+})
+
+
 def attendee_domains(ctx, organizer: str) -> set[str]:
     """Resolve the outbound domain policy for both follow-up flow versions."""
     configured = ctx.flow.param("attendee_domains") if ctx.flow else None
     if not configured:
-        return flows_config.domains("TINA_FLOWS_ATTENDEE_DOMAINS", organizer if "@" in organizer else "")
+        explicit = flows_config.domains("TINA_FLOWS_ATTENDEE_DOMAINS")
+        if explicit:
+            return explicit
+        fallback = organizer.rsplit("@", 1)[-1].strip().lower() if "@" in organizer else ""
+        if not fallback or fallback in PUBLIC_EMAIL_DOMAINS:
+            return set()
+        return {fallback}
     if isinstance(configured, str):
         configured = configured.split(",")
     if not isinstance(configured, (list, tuple)):

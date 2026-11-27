@@ -12,6 +12,7 @@ import { GitHubTokenCard, TokensPanel } from "../surfaces/tokens";
 import { WebAvatar } from "./Avatar";
 import { WebIcon, type WebIconName } from "./Icons";
 import { SharedWorkspacesPanel } from "./SharedWorkspacesPanel";
+import { EmailNotificationsCard } from "./EmailNotificationsCard";
 import { WebModelsPanel } from "./WebModelsPanel";
 import type { WebUser } from "./useWebIdentity";
 
@@ -47,9 +48,9 @@ const SECTIONS: readonly SectionDef[] = [
     workspace: "personal",
     group: "Profile",
     label: "Account",
-    description: "View your profile, access, and sign-in options.",
+    description: "View your profile, email notifications, access, and sign-in options.",
     icon: "user",
-    keywords: "account profile user email sign out logout terminal admin",
+    keywords: "account profile user email notifications summary minutes rsvp sign out logout terminal admin",
   },
   {
     id: "calendar",
@@ -441,6 +442,7 @@ export function SettingsView({
                 </div>
               </dl>
             </section>
+            <EmailNotificationsCard email={user.email} />
             {(canOpenTerminal || onSignOut) && (
               <section className="tina-web-settings-card tina-web-account-session" aria-labelledby="account-session-heading">
                 <h2 id="account-session-heading">Access and session</h2>

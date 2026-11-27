@@ -3803,6 +3803,56 @@ html[data-theme="light"] .tina-web-settings-item.active svg {
   color: var(--tw-danger);
 }
 
+.tina-web-account-subtitle {
+  margin: 6px 0 0;
+  color: var(--tw-text-3);
+  font-size: 13px;
+}
+
+.tina-web-account-error {
+  margin: 12px 0 0;
+  color: var(--tw-danger);
+  font-size: 12.5px;
+}
+
+.tina-web-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 42px;
+  height: 24px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--tw-raised);
+  border: 1px solid var(--tw-line-strong);
+  transition: background 150ms ease, border-color 150ms ease;
+  flex-shrink: 0;
+}
+
+.tina-web-switch.on {
+  background: var(--tw-teal);
+  border-color: var(--tw-teal);
+}
+
+.tina-web-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tina-web-switch-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transform: translateX(0);
+  transition: transform 150ms ease;
+}
+
+.tina-web-switch.on .tina-web-switch-thumb {
+  transform: translateX(18px);
+}
+
 /* ---------- Harmonized Routines Surface ---------- */
 
 .tina-web-routines-bar {

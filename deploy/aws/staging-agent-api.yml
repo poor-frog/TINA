@@ -118,6 +118,11 @@ Resources:
   Logs:
     Type: AWS::Logs::LogGroup
     Properties: {RetentionInDays: 7}
+  ClientSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Trusted staging clients of the TINA Agent API (e.g. Flows worker)
+      VpcId: !Ref VpcId
   Ingress:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -125,6 +130,14 @@ Resources:
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - {IpProtocol: tcp, FromPort: 8100, ToPort: 8100, SourceSecurityGroupId: !Ref CoreIngressSecurityGroupId}
+  ClientIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt Ingress.GroupId
+      SourceSecurityGroupId: !GetAtt ClientSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 8100
+      ToPort: 8100
   WorkspaceSchedulerIngress:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: WithWorkspacePilot
@@ -551,6 +564,7 @@ Resources:
 Outputs:
   ServiceName: {Value: !GetAtt AgentApi.Name}
   AgentApiUrl: {Value: 'http://agent-api.tina-staging.local:8100'}
+  ClientSecurityGroupId: {Value: !GetAtt ClientSecurityGroup.GroupId}
   TaskDefinitionArn: {Value: !Ref TaskDefinition}
   LogGroupName: {Value: !Ref Logs}
   WorkspaceFileSystemId:

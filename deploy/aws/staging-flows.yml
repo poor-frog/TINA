@@ -8,6 +8,7 @@ Parameters:
   AppSubnetIds: {Type: 'List<AWS::EC2::Subnet::Id>'}
   AppSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
   CoreClientSecurityGroupId: {Type: 'AWS::EC2::SecurityGroup::Id'}
+  CoreIngressSecurityGroupId: {Type: String, Default: ''}
   ServiceNamespaceId: {Type: String}
   PostgresHost: {Type: String}
   PostgresSecretArn: {Type: String}
@@ -28,6 +29,7 @@ Parameters:
 
 Conditions:
   WithMailbox: !Not [!Equals [!Ref MailboxSecretArn, '']]
+  WithCoreIngressSg: !Not [!Equals [!Ref CoreIngressSecurityGroupId, '']]
   WithTerminalUrl: !Not [!Equals [!Ref TerminalUrl, '']]
   WithAgentApi: !Not [!Equals [!Ref AgentApiUrl, '']]
   WithAgentApiSg: !Not [!Equals [!Ref AgentApiClientSecurityGroupId, '']]
@@ -62,6 +64,15 @@ Resources:
           FromPort: 8200
           ToPort: 8200
           SourceSecurityGroupId: !Ref CoreClientSecurityGroupId
+  CoreIngressRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: WithCoreIngressSg
+    Properties:
+      GroupId: !GetAtt Ingress.GroupId
+      SourceSecurityGroupId: !Ref CoreIngressSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 8200
+      ToPort: 8200
   Discovery:
     Type: AWS::ServiceDiscovery::Service
     Properties:

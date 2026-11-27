@@ -87,6 +87,56 @@ def test_attendee_domain_policy_blocks_mail_and_share_minting(world, monkeypatch
     assert not shares
 
 
+def test_public_consumer_organizer_domain_never_implicitly_mails_other_guests(world, monkeypatch):
+    from flows_steps import common, meeting
+
+    reg, channel, ctx, _, shares = world
+    monkeypatch.delenv("TINA_FLOWS_ATTENDEE_DOMAINS")
+    row = meeting.meeting_row("7", 41)
+    row["data"]["attendees"] = [
+        {"email": "owner@gmail.com"},
+        {"email": "stranger@gmail.com"},
+        {"email": "colleague@meettina.site"},
+    ]
+    real_http = common.http
+
+    def gmail_owner_http(method, url, headers, body=None):
+        if method == "GET" and url.endswith("/admin/users/7"):
+            return 200, {"id": 7, "email": "owner@gmail.com"}
+        return real_http(method, url, headers, body)
+
+    monkeypatch.setattr(common, "http", gmail_owner_http)
+    result = reg.steps["email_meeting_followup"](ctx)
+    assert isinstance(result, Done) and result.result["sent"] == 1
+    assert [message["to"] for message in channel.sent] == ["owner@gmail.com"]
+    assert shares == []
+
+
+def test_public_consumer_organizer_still_honors_explicit_attendee_domains(world, monkeypatch):
+    from flows_steps import common, meeting
+
+    reg, channel, ctx, _, shares = world
+    monkeypatch.setenv("TINA_FLOWS_ATTENDEE_DOMAINS", "meettina.site")
+    row = meeting.meeting_row("7", 41)
+    row["data"]["attendees"] = [
+        {"email": "owner@gmail.com"},
+        {"email": "stranger@gmail.com"},
+        {"email": "colleague@meettina.site"},
+    ]
+    real_http = common.http
+
+    def gmail_owner_http(method, url, headers, body=None):
+        if method == "GET" and url.endswith("/admin/users/7"):
+            return 200, {"id": 7, "email": "owner@gmail.com"}
+        return real_http(method, url, headers, body)
+
+    monkeypatch.setattr(common, "http", gmail_owner_http)
+    result = reg.steps["email_meeting_followup"](ctx)
+    assert isinstance(result, Done) and result.result["sent"] == 2
+    assert [message["to"] for message in channel.sent] == ["owner@gmail.com", "colleague@meettina.site"]
+    assert shares == ["colleague@meettina.site"]
+
+
 def test_retry_keeps_successes_and_minted_links_after_a_partial_failure(world, monkeypatch):
     from flows_steps import followup
 
