@@ -340,6 +340,22 @@ def test_only_explicit_shared_sources_enter_voice_prompt(voice):
     assert not (root / '.meeting-knowledge').exists()
 
 
+def test_voice_context_skips_canonical_when_transcript_unshared_and_reuses_meeting_row(voice, monkeypatch):
+    client, row, _, _, _ = voice
+    original = api.meeting_get
+    fetched = []
+    def spy(base, user, mid, path):
+        fetched.append(path)
+        return original(base, user, mid, path)
+    monkeypatch.setattr(api, 'meeting_get', spy)
+    row['data']['voice_assistant']['include_transcript'] = False
+    response = client.post(URL, headers=HEADERS, json={'question': 'Budget?', 'revision': 1})
+    assert response.status_code == 200, response.text
+    assert not any(p.endswith('/canonical') for p in fetched), f'unexpected canonical fetch: {fetched}'
+    # Exactly 2 /meetings/1 fetches: initial voice_context + final stale-check voice_context (no duplicate inside load()).
+    assert fetched.count('/meetings/1') == 2
+
+
 @pytest.mark.parametrize('linked', ['direct', 'linked_first', 'linked_late'])
 def test_selected_voice_document_survives_unselected_documents_filling_the_load_budget(voice, linked):
     client, row, root, _, _ = voice

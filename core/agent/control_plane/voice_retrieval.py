@@ -17,6 +17,7 @@ FILES = {
 DIRECTORY = Path(os.environ.get('TINA_VOICE_EMBED_DIR', Path.home() / '.cache/tina/voice-retrieval'))
 log = logging.getLogger(__name__)
 _lock = threading.Lock()
+_LOCK_TIMEOUT = 0.25
 _encoder = None
 _failed = False
 _retry_at = 0.0
@@ -127,7 +128,9 @@ class Encoder:
 def semantic_rank(scope, question, sources):
     global _encoder, _failed, _retry_at
     if not sources: return []
-    if not _lock.acquire(timeout=.05): return []
+    if not _lock.acquire(timeout=_LOCK_TIMEOUT):
+        log.warning('voice semantic retrieval skipped lock_busy=true candidates=%d', len(sources))
+        return []
     try:
         if time.monotonic() < _retry_at: return []
         if _encoder is None: _encoder = Encoder(DIRECTORY)

@@ -21,7 +21,7 @@ async def service(monkeypatch):
     monkeypatch.setenv('TTS_API_TOKEN', 'synthetic-tts-' + 'x' * 40)
     calls=[];blocked=[None];entered=asyncio.Event();connect_gate=[None];connect_entered=asyncio.Event();context_gate=[None]
     connect_names=[]
-    broken_tts=[False];config_hook=[None];config_status=[200]
+    broken_tts=[False];config_hook=[None];config_status=[200];turn_hook=[None];tts_stream=[None]
     class PartialTTS(httpx.AsyncByteStream):
         async def __aiter__(self):
             yield b'\0\0'*24000
@@ -32,6 +32,7 @@ async def service(monkeypatch):
     async def upstream(request):
         calls.append(request)
         if '/turn/' in request.url.path:
+            if turn_hook[0]: await turn_hook[0](request)
             return httpx.Response(200,json={'current':state.get('turn_current',True)})
         if request.url.path.endswith('/config'):
             assert request.url.host=='meeting-api' and request.url.port==8080
@@ -77,6 +78,7 @@ async def service(monkeypatch):
         if request.url.path.endswith('/state'):
             return httpx.Response(state.get('cancel_status',200),json={'accepted':state.get('cancel_ack',True)})
         if broken_tts[0]: return httpx.Response(200,stream=PartialTTS())
+        if tts_stream[0]: return httpx.Response(200,stream=tts_stream[0](),headers={'x-audio-sample-rate':'24000','x-audio-channels':'1'})
         return httpx.Response(200,content=b'\0\0'*2400,headers={'x-audio-sample-rate':'24000','x-audio-channels':'1'})
     original_start=AgentSession.start
     async def start(self,agent,**kwargs):return await original_start(self,agent)
@@ -98,6 +100,8 @@ async def service(monkeypatch):
         app.state.broken_tts=broken_tts
         app.state.config_hook=config_hook
         app.state.config_status=config_status
+        app.state.turn_hook=turn_hook
+        app.state.tts_stream=tts_stream
         app.state.heard=heard
         app.state.flow_gate=flow_gate
         app.state.lookup_gate=lookup_gate;app.state.lookup_started=lookup_started
@@ -229,6 +233,11 @@ async def test_actual_session_distinguishes_empty_temporary_and_revoked_lookups(
         assert result.status_code==200,result.text
         assert len(answers)==1
         assert operations.count('plan')==(1 if mode=='partial' else 2)
+    elif mode=='revoked':
+        assert result.status_code==409 and not answers
+        assert operations.count('plan')==1
+        assert 'PRIVATE' not in result.text
+        assert app.state.rows[(1,SESSION)].failed is False
     else:
         assert result.status_code==503 and not answers
         assert operations.count('plan')==1
@@ -926,3 +935,267 @@ async def test_disconnect_during_generate_reply_marks_failed_only_when_interrupt
         hang.set()
         srv.should_exit = True
         await serving
+
+
+async def test_reaper_survives_unexpected_room_errors_and_reaps_remaining_rooms(monkeypatch):
+    monkeypatch.setattr(server, 'REAP_INTERVAL', 0.05)
+    monkeypatch.delenv('MEETING_API_URL', raising=False)
+    monkeypatch.setenv('TTS_API_TOKEN', 'synthetic-tts-' + 'x' * 40)
+    state = {'engine': 'livekit', 'enabled': True, 'revision': 1}
+    async def upstream(request):
+        if request.url.path.endswith('/config'):
+            return httpx.Response(200, json=state)
+        return httpx.Response(200, json={'accepted': True})
+    original_start = AgentSession.start
+    async def start(self, agent, **kwargs): return await original_start(self, agent)
+    monkeypatch.setattr(AgentSession, 'start', start)
+    async def disconnect(): pass
+    async def connect(name):
+        from types import SimpleNamespace
+        return SimpleNamespace(disconnect=disconnect)
+    async def delete(name): pass
+    monkeypatch.setattr(server, 'delete_room', delete)
+    original_close = server.Runtime.close
+    failed_once = {'raised': False}
+    broken_row = {'ref': None}
+    async def flaky_close(row):
+        if row is broken_row['ref'] and not failed_once['raised']:
+            failed_once['raised'] = True
+            raise RuntimeError('synthetic close failure')
+        await original_close(row)
+    monkeypatch.setattr(server.Runtime, 'close', flaky_close)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as upstream_client:
+        app = server.create_app(client=upstream_client, room_connector=connect)
+        async with app.router.lifespan_context(app):
+            s1, s2, s3 = str(uuid4()), str(uuid4()), str(uuid4())
+            r1 = await app.state.get_runtime(1, s1, HEADERS['Authorization'], 1)
+            r2 = await app.state.get_runtime(2, s2, HEADERS['Authorization'], 1)
+            broken_row['ref'] = r1
+            r1.touched = 0
+            r2.touched = 0
+            async with asyncio.timeout(2):
+                while app.state.rows:
+                    await asyncio.sleep(0.02)
+            assert failed_once['raised'] is True
+            # Verify reaper task is still alive by adding a 3rd idle room and confirming it gets reaped too.
+            r3 = await app.state.get_runtime(3, s3, HEADERS['Authorization'], 1)
+            r3.touched = 0
+            async with asyncio.timeout(2):
+                while (3, s3) in app.state.rows:
+                    await asyncio.sleep(0.02)
+            assert not app.state.rows
+
+
+async def test_livekit_max_rooms_is_configurable_via_env(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    class LiveKit:
+        room = SimpleNamespace(list_rooms=AsyncMock(return_value=None))
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+    monkeypatch.setattr(server.api, 'LiveKitAPI', LiveKit)
+    async def upstream(request): return httpx.Response(200)
+    monkeypatch.setenv('LIVEKIT_MAX_ROOMS', '5')
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as upstream_client:
+        app = server.create_app(client=upstream_client)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://pilot') as client:
+            res = await client.get('/health')
+            assert res.status_code == 200 and res.json()['capacity'] == 5
+    monkeypatch.setenv('LIVEKIT_MAX_ROOMS', 'invalid')
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as upstream_client:
+        app = server.create_app(client=upstream_client)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://pilot') as client:
+            res = await client.get('/health')
+            assert res.status_code == 200 and res.json()['capacity'] == server.MAX_ROOMS
+
+
+async def test_speech_streams_pcm_without_blocking_on_slow_periodic_turn_permit(service, monkeypatch):
+    _, calls, state, app = service
+    monkeypatch.setattr(server, 'PERMIT_CHECK_INTERVAL', 0.05)
+    permit_calls = 0
+    periodic_entered = asyncio.Event()
+    release_periodic = asyncio.Event()
+    async def slow_periodic(_request):
+        nonlocal permit_calls
+        permit_calls += 1
+        # Call 1 = pre-lock check, Call 2 = inside-lock check, Call 3 = first periodic background check.
+        if permit_calls == 3:
+            periodic_entered.set()
+            await release_periodic.wait()
+    app.state.turn_hook[0] = slow_periodic
+
+    class SlowPcmStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for _ in range(10):
+                yield b'\x01\x00' * 1200  # 50ms of 24kHz PCM per chunk
+                await asyncio.sleep(0.03)
+    app.state.tts_stream[0] = SlowPcmStream
+
+    listener = socket.socket()
+    listener.bind(('127.0.0.1', 0))
+    port = listener.getsockname()[1]
+    worker = uvicorn.Server(uvicorn.Config(app, lifespan='off', log_config=None, log_level='critical',
+                                           access_log=False, timeout_graceful_shutdown=1))
+    serving = asyncio.create_task(worker.serve(sockets=[listener]))
+    bytes_while_blocked = 0
+    total_bytes = 0
+    try:
+        async with asyncio.timeout(3):
+            while not worker.started: await asyncio.sleep(0.01)
+        async with httpx.AsyncClient(base_url=f'http://127.0.0.1:{port}', timeout=5) as client:
+            async with client.stream('POST', URL + '/v1/audio/speech', headers=HEADERS | {
+                'X-Voice-Revision': '1', 'X-Voice-Request-Id': str(uuid4())},
+                json={'input': 'Synthetic smooth audio.', 'meeting_id': 1}) as response:
+                assert response.status_code == 200
+                async for chunk in response.aiter_bytes():
+                    total_bytes += len(chunk)
+                    if periodic_entered.is_set() and not release_periodic.is_set():
+                        bytes_while_blocked += len(chunk)
+                        if bytes_while_blocked >= 4800:
+                            release_periodic.set()
+                release_periodic.set()
+        assert periodic_entered.is_set()
+        assert bytes_while_blocked >= 4800, 'PCM must keep streaming while periodic turn_permit is slow'
+        assert total_bytes >= 24000
+    finally:
+        release_periodic.set()
+        worker.should_exit = True
+        await asyncio.wait_for(serving, 3)
+        listener.close()
+
+
+async def test_speech_aborts_mid_stream_when_background_turn_permit_is_revoked(service, monkeypatch):
+    _, calls, state, app = service
+    monkeypatch.setattr(server, 'PERMIT_CHECK_INTERVAL', 0.05)
+    permit_calls = 0
+    async def revoke_on_periodic(_request):
+        nonlocal permit_calls
+        permit_calls += 1
+        if permit_calls >= 3:
+            state['turn_current'] = False
+    app.state.turn_hook[0] = revoke_on_periodic
+
+    class LongPcmStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for _ in range(40):
+                yield b'\x01\x00' * 1200
+                await asyncio.sleep(0.03)
+    app.state.tts_stream[0] = LongPcmStream
+
+    listener = socket.socket()
+    listener.bind(('127.0.0.1', 0))
+    port = listener.getsockname()[1]
+    worker = uvicorn.Server(uvicorn.Config(app, lifespan='off', log_config=None, log_level='critical',
+                                           access_log=False, timeout_graceful_shutdown=1))
+    serving = asyncio.create_task(worker.serve(sockets=[listener]))
+    received = 0
+    try:
+        async with asyncio.timeout(3):
+            while not worker.started: await asyncio.sleep(0.01)
+        async with httpx.AsyncClient(base_url=f'http://127.0.0.1:{port}', timeout=5) as client:
+            async with client.stream('POST', URL + '/v1/audio/speech', headers=HEADERS | {
+                'X-Voice-Revision': '1', 'X-Voice-Request-Id': str(uuid4())},
+                json={'input': 'Synthetic revoked audio.', 'meeting_id': 1}) as response:
+                assert response.status_code == 200
+                with pytest.raises(httpx.RemoteProtocolError):
+                    async for chunk in response.aiter_bytes():
+                        received += len(chunk)
+        assert received > 0
+        row = app.state.rows[(1, SESSION)]
+        assert row.failed is False, 'turn revocation must not poison room health'
+        assert row.pending_audio == 0 and not row.lock.locked()
+    finally:
+        state['turn_current'] = True
+        worker.should_exit = True
+        await asyncio.wait_for(serving, 3)
+        listener.close()
+
+
+async def test_lookahead_speech_prefetches_tts_while_current_sentence_holds_lock(service):
+    client, calls, state, app = service
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
+    release_first = asyncio.Event()
+    tts_inputs = []
+
+    class GatedStream(httpx.AsyncByteStream):
+        def __init__(self, idx):
+            self.idx = idx
+        async def __aiter__(self):
+            if self.idx == 1:
+                first_started.set()
+                yield b'\x01\x00' * 1200
+                await release_first.wait()
+                yield b'\x01\x00' * 1200
+            else:
+                second_started.set()
+                yield b'\x02\x00' * 2400
+
+    stream_count = [0]
+    def make_stream():
+        stream_count[0] += 1
+        tts_inputs.append(stream_count[0])
+        return GatedStream(stream_count[0])
+    app.state.tts_stream[0] = make_stream
+
+    rid = str(uuid4())
+    headers = HEADERS | {'X-Voice-Revision': '1', 'X-Voice-Request-Id': rid}
+    first = asyncio.create_task(client.post(URL + '/v1/audio/speech', headers=headers,
+        json={'input': 'First sentence.', 'meeting_id': 1}))
+    second = None
+    try:
+        await asyncio.wait_for(first_started.wait(), 3)
+        second = asyncio.create_task(client.post(URL + '/v1/audio/speech', headers=headers,
+            json={'input': 'Second lookahead sentence.', 'meeting_id': 1}))
+        # Lookahead TTS must start synthesizing while sentence 1 still holds row.lock.
+        await asyncio.wait_for(second_started.wait(), 3)
+        assert not first.done()
+        release_first.set()
+        r1, r2 = await asyncio.wait_for(asyncio.gather(first, second), 5)
+        assert r1.status_code == 200 and len(r1.content) > 0
+        assert r2.status_code == 200 and len(r2.content) > 0
+        row = app.state.rows[(1, SESSION)]
+        assert row.tts.speech is row.tts.base_speech
+        assert row.pending_audio == 0
+    finally:
+        release_first.set()
+        for t in (first, second):
+            if t and not t.done(): t.cancel()
+        await asyncio.gather(*[t for t in (first, second) if t], return_exceptions=True)
+
+
+def test_livekit_agents_logger_emits_redacted_errors_without_private_text(caplog):
+    import logging
+    lk_logger = logging.getLogger('livekit.agents')
+    assert lk_logger.level == logging.ERROR
+    with caplog.at_level(logging.ERROR, logger='livekit.agents'):
+        try:
+            raise ConnectionError('Bearer SECRET_TOKEN PRIVATE_QUESTION')
+        except ConnectionError:
+            lk_logger.error('SDK failure with PRIVATE_QUESTION and Bearer SECRET_TOKEN', exc_info=True)
+    assert any('ConnectionError' in r.getMessage() for r in caplog.records)
+    assert 'SECRET_TOKEN' not in caplog.text and 'PRIVATE_QUESTION' not in caplog.text
+
+
+def test_staging_voice_template_defines_bounded_container_resources():
+    from pathlib import Path
+    import yaml
+
+    class _CfnLoader(yaml.SafeLoader):
+        pass
+
+    for tag in ('!Ref', '!Sub', '!GetAtt', '!If'):
+        _CfnLoader.add_constructor(tag, lambda loader, node: loader.construct_scalar(node) if isinstance(node, yaml.ScalarNode) else loader.construct_sequence(node))
+
+    tpl = yaml.load((Path(__file__).resolve().parents[1] / 'aws/staging-voice.yml').read_text(), Loader=_CfnLoader)
+    task_props = tpl['Resources']['TaskDefinition']['Properties']
+    task_cpu = int(task_props['Cpu'])
+    task_mem = int(task_props['Memory'])
+    defs = {c['Name']: c for c in task_props['ContainerDefinitions']}
+    assert set(defs) == {'vieneu', 'livekit', 'agent'}
+    assert sum(c['Cpu'] for c in defs.values()) == task_cpu
+    assert sum(c['MemoryReservation'] for c in defs.values()) <= task_mem
+    for c in defs.values():
+        assert 0 < c['MemoryReservation'] <= c['Memory'] <= task_mem
+    env_names = {e['Name'] for e in defs['agent']['Environment']}
+    assert 'LIVEKIT_MAX_ROOMS' in env_names

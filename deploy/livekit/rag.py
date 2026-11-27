@@ -85,7 +85,10 @@ async def run_rag(request, agent, answer, is_current):
                 try:
                     async with asyncio.TaskGroup() as group:
                         tasks = [group.create_task(execute(call)) for call in calls]
-                except ExceptionGroup:
+                except ExceptionGroup as group:
+                    matched, _ = group.split(SourceAccessChanged)
+                    if matched is not None:
+                        raise SourceAccessChanged('TINA parallel lookup failed: source access changed') from None
                     raise RuntimeError('TINA parallel lookup failed') from None
                 outcomes = [task.result() for task in tasks]
             else:

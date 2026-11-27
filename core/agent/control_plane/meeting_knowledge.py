@@ -5,6 +5,7 @@ import math
 import os
 import re
 import tempfile
+import threading
 import urllib.error
 import urllib.request
 import uuid
@@ -287,14 +288,15 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
         return items
 
     def load(request, meeting_id, slug=None, *, with_canonical=True, preferred=None, profile_documents=(),
-             include_workspace_wiki=False, meeting_row=None, transcript_only=False):
+             include_workspace_wiki=False, meeting_row=None, transcript_only=False, base=None):
         voice = preferred is not None
         preferred = set(preferred or ())
         subject = subject_of(request)
         row = meeting_row if meeting_row is not None else meeting_get(meeting_api_url, subject, meeting_id, f'/meetings/{meeting_id}')
         canonical = (meeting_get(meeting_api_url, subject, meeting_id, f'/transcripts/by-id/{meeting_id}/canonical')
                      if with_canonical else {'segments': []})
-        base = read_target(request, slug)
+        if base is None:
+            base = read_target(request, slug)
         if transcript_only:
             return base, canonical, {}
         if voice and include_workspace_wiki:
@@ -558,9 +560,11 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
             request.state.chatgpt_voice_pilot = True
         base = read_target(request, None)
         paths = resolve_profile(base, subject, policy)
-        base, canonical, documents = load(request, meeting_id, with_canonical=with_canonical,
+        need_canonical = with_canonical and policy.get('include_transcript') is True
+        base, canonical, documents = load(request, meeting_id, with_canonical=need_canonical,
             preferred=policy.get('documents', []), profile_documents=paths,
-            include_workspace_wiki=policy.get('include_workspace_wiki') is True)
+            include_workspace_wiki=policy.get('include_workspace_wiki') is True,
+            meeting_row=row, base=base)
         if policy.get('source_profile_id') and any(p not in documents for p in policy.get('documents', [])):
             raise HTTPException(409, 'A selected project document is unavailable')
         return request, row, base, canonical, documents
@@ -707,7 +711,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
     def semantic_for(row, policy):
         def rank(question, sources):
             with voice_span('semantic_retrieval') as metrics:
-                result = semantic_rank(f"{row['user_id']}:{row['id']}:{policy['revision']}", question, sources)
+                result = semantic_rank(f"{row['user_id']}:{row['id']}", question, sources)
                 metrics.update(input_sources=len(sources), output_sources=len(result))
                 return result
         return rank
@@ -719,6 +723,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
         return complete(request, json.dumps(value, ensure_ascii=False))
 
     source_routes = {}
+    source_routes_lock = threading.Lock()
 
     def source_route(request, question, policy, history, deadline_ms=None):
         from shared.voice_prices import gold_followup
@@ -747,9 +752,10 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
         turn = request.headers.get('x-tina-voice-request-id')
         cache_key = (subject_of(request), turn, policy.get('revision'), question)
         now = time.monotonic()
-        for key, (stamp, _) in list(source_routes.items()):
-            if now - stamp > 60: source_routes.pop(key, None)
-        if turn and cache_key in source_routes: return source_routes[cache_key][1]
+        with source_routes_lock:
+            for key, (stamp, _) in list(source_routes.items()):
+                if now - stamp > 60: source_routes.pop(key, None)
+            if turn and cache_key in source_routes: return source_routes[cache_key][1]
         try:
             payload = {'mode':'voice_source_intent','question':question}
             if deadline_ms is not None: payload['retrieval_deadline_ms'] = deadline_ms
@@ -761,8 +767,9 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
             pass  # An uncertain/outage verdict stays on the authorized local evidence path.
         request.state.voice_source_route = (question, route)
         if turn:
-            if len(source_routes) >= 128: source_routes.pop(next(iter(source_routes)), None)
-            source_routes[cache_key] = (time.monotonic(), route)
+            with source_routes_lock:
+                if len(source_routes) >= 128: source_routes.pop(next(iter(source_routes)), None)
+                source_routes[cache_key] = (time.monotonic(), route)
         return route
 
     @app.post('/api/internal/meeting-voice/{meeting_id}/agent',include_in_schema=False)

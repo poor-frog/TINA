@@ -1,6 +1,21 @@
 import {createHash} from 'node:crypto';
 import {encodePcm16,type TranscriptionWindowRequest} from '@tina/transcribe-whisper';
 
+/** Extract raw PCM payload from a RIFF/WAVE buffer without assuming a fixed 44-byte header. */
+export function extractWavPcm(wav:Buffer):Buffer {
+  if(wav.length>=12&&wav.subarray(0,4).toString('ascii')==='RIFF'&&wav.subarray(8,12).toString('ascii')==='WAVE'){
+    let offset=12;
+    while(offset+8<=wav.length){
+      const chunkId=wav.subarray(offset,offset+4).toString('ascii');
+      const size=wav.readUInt32LE(offset+4);
+      const start=offset+8;
+      if(chunkId==='data')return wav.subarray(start,Math.min(wav.length,start+size));
+      offset=start+size+(size%2);
+    }
+  }
+  return wav.subarray(44);
+}
+
 /** Continuous per-turn audio; the existing client still owns quality filtering and HTTP fallback. */
 export class LiveKitStt {
   private socket?:WebSocket;
@@ -14,7 +29,8 @@ export class LiveKitStt {
   private timer?:ReturnType<typeof setTimeout>;
   private reported=new Set<string>();
   constructor(private base:string,private token:string,
-    private log:(event:string)=>void=event=>console.log(JSON.stringify({type:'asr_stream',event,at_ms:Date.now()}))){}
+    private log:(event:string)=>void=event=>console.log(JSON.stringify({type:'asr_stream',event,at_ms:Date.now()})),
+    private windowTimeoutMs=95_000){}
 
   private report(event:string){if(!this.reported.has(event)){this.reported.add(event);this.log(event);}}
   private fail(){
@@ -66,12 +82,20 @@ export class LiveKitStt {
     if(!await this.ready||signal.aborted)return undefined;
     const id=headers['X-ASR-Request-ID'];
     let abort:()=>void=()=>{};
+    let windowTimer:ReturnType<typeof setTimeout>|undefined;
     try{
       const reply=await new Promise<any>((resolve,reject)=>{
         abort=()=>{this.pending.delete(id);this.send({type:'cancel',id});reject(Object.assign(Error('ASR cancelled'),{name:'AbortError'}));};
         this.pending.set(id,{resolve,reject:()=>reject(Error('ASR stream disconnected'))});
         signal.addEventListener('abort',abort,{once:true});
-        const pcm=wav.subarray(44);
+        windowTimer=setTimeout(()=>{
+          if(this.pending.delete(id)){
+            this.send({type:'cancel',id});
+            reject(Error('ASR stream window timeout'));
+          }
+        },this.windowTimeoutMs);
+        windowTimer.unref();
+        const pcm=extractWavPcm(wav);
         if(!this.send({type:'window',id,stream:timing.stream!.id,start_ms:timing.stream!.start_ms,
           samples:pcm.length/2,sha256:createHash('sha256').update(pcm).digest('hex'),fields,capture_ms:timing.capture_ms})){
           this.pending.delete(id);reject(Error('ASR stream unavailable'));
@@ -87,7 +111,7 @@ export class LiveKitStt {
     }catch(error){
       if(signal.aborted)throw error;
       this.report('http_fallback');return undefined;
-    }finally{signal.removeEventListener('abort',abort);}
+    }finally{clearTimeout(windowTimer);signal.removeEventListener('abort',abort);}
   };
   close(){this.closed=true;this.fail();}
 }

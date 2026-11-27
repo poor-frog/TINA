@@ -155,9 +155,12 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             fake.transcribe.side_effect = AudioInputError('bad audio')
             self.assertEqual((await post()).status_code, 400)
             fake.transcribe.side_effect = RuntimeError('private exception')
-            response = await post()
+            with self.assertLogs('tina.asr', level='ERROR') as captured:
+                response = await post()
             self.assertEqual(response.status_code, 502)
             self.assertNotIn('private exception', response.text)
+            self.assertTrue(any('error=RuntimeError' in line for line in captured.output))
+            self.assertFalse(any('private exception' in line for line in captured.output))
             status = (await client.get('/status')).json()
             self.assertNotIn('xin chào', json.dumps(status, ensure_ascii=False))
             self.assertEqual((await client.get('/capabilities')).json()['languages'], ['vi', 'en'])

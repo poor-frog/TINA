@@ -21,6 +21,7 @@ from livekit.agents import stt
 from livekit.agents.types import APIConnectOptions
 
 MAX_BODY=4*1024*1024
+BODY_READ_TIMEOUT=15.0
 
 
 def denoiser():
@@ -41,6 +42,12 @@ def noise_ready():
             'sample_rate':16000,'delay_samples':384 if choice=='dtln' else 96}
 
 
+def _bearer_token(authorization):
+    if not isinstance(authorization,str) or not authorization.startswith('Bearer ') or len(authorization)<=7:
+        raise HTTPException(403,'Audio capability rejected')
+    return authorization[7:]
+
+
 def capability(token, mid, session):
     try:
         secret=os.environ.get('LIVEKIT_API_SECRET','')
@@ -49,9 +56,13 @@ def capability(token, mid, session):
         expected=hmac.new(secret.encode(),b'tina-audio.v1:'+payload.encode(),'sha256').hexdigest()
         if not hmac.compare_digest(signature,expected):raise ValueError()
         body=json.loads(base64.urlsafe_b64decode(payload+'='*(-len(payload)%4)))
+        if not isinstance(body,dict):raise ValueError()
         url=urlsplit(body['url'])
         if (body['meeting']!=mid or body['session']!=session or url.scheme not in ('http','https')
-                or not url.hostname or url.username or url.password or url.query or url.fragment):raise ValueError()
+                or not url.hostname or url.username or url.password or url.query or url.fragment
+                or 'token' not in body or 'model' not in body
+                or not isinstance(body['token'],str) or len(body['token'])>4096
+                or not isinstance(body['model'],str) or len(body['model'])>256):raise ValueError()
         return body
     except (ValueError,KeyError,TypeError,AttributeError):
         raise HTTPException(403,'Audio capability rejected') from None
@@ -166,7 +177,11 @@ class NoiseStreams:
             row['stream'].close()
         self.rows.clear();return output
     def close(self):
-        for row in self.rows.values():row['stream'].native.close()
+        for row in self.rows.values():
+            stream=row['stream']
+            if hasattr(stream,'emit'):stream.emit=lambda *_args:None
+            if hasattr(stream,'close'):stream.close()
+            elif hasattr(stream,'native'):stream.native.close()
         self.rows.clear()
 
 
@@ -196,7 +211,7 @@ def build_audio_router(http,core):
 
     @router.get('/audio/{mid}/{session}/health')
     async def health(mid:int,session:str,authorization:str=Header(default='')):
-        target,_=await authorize(mid,session,authorization.removeprefix('Bearer '))
+        target,_=await authorize(mid,session,_bearer_token(authorization))
         base=target['url'].rstrip('/').removesuffix('/audio/transcriptions').removesuffix('/v1')
         headers={'Authorization':'Bearer '+target['token']} if target['token'] else {}
         try:
@@ -207,17 +222,20 @@ def build_audio_router(http,core):
 
     @router.post('/audio/{mid}/{session}/v1/audio/transcriptions')
     async def transcribe(mid:int,session:str,request:Request,authorization:str=Header(default='')):
-        token=authorization.removeprefix('Bearer ')
+        token=_bearer_token(authorization)
         target,_=await authorize(mid,session,token)
+        raw=bytearray()
+        try:
+            async with asyncio.timeout(BODY_READ_TIMEOUT):
+                async for block in request.stream():
+                    raw.extend(block)
+                    if len(raw)>MAX_BODY:raise HTTPException(413,'Audio request exceeds bound')
+        except TimeoutError:raise HTTPException(408,'Audio upload timed out') from None
+        try:pcm,fields=parse_window(request.headers.get('content-type'),bytes(raw))
+        except (ValueError,UnicodeError,wave.Error,EOFError):raise HTTPException(422,'Expected bounded mono PCM16 16kHz WAV') from None
+        if target['model'] and fields.get('model')!=target['model']:raise HTTPException(403,'ASR model selection changed')
         if slots.locked():raise HTTPException(503,'STT bridge is busy')
         async with slots:
-            raw=bytearray()
-            async for block in request.stream():
-                raw.extend(block)
-                if len(raw)>MAX_BODY:raise HTTPException(413,'Audio request exceeds bound')
-            try:pcm,fields=parse_window(request.headers.get('content-type'),bytes(raw))
-            except (ValueError,UnicodeError,wave.Error,EOFError):raise HTTPException(422,'Expected bounded mono PCM16 16kHz WAV') from None
-            if target['model'] and fields.get('model')!=target['model']:raise HTTPException(403,'ASR model selection changed')
             headers={k:request.headers[k] for k in ('X-ASR-Request-ID','X-ASR-Source','X-ASR-Capture-Ms') if k in request.headers and len(request.headers[k])<256}
             task=asyncio.create_task(recognize(target,pcm,fields,headers))
             try:
@@ -266,7 +284,9 @@ def build_audio_router(http,core):
         except (WebSocketDisconnect,TimeoutError,HTTPException,ValueError,KeyError,TypeError,RuntimeError,OSError):
             pass
         finally:
-            states.close();noise_connections.discard(slot)
+            try:await native(states.close)
+            except Exception:pass
+            noise_connections.discard(slot)
             try:await socket.close()
             except RuntimeError:pass
     return router

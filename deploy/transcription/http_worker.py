@@ -64,7 +64,7 @@ async def infer(request, content, silence_ms):
                 except Exception:
                     break
             if not worker.cancelled() and worker.exception() is not None:
-                logger.error('Inference failed after request cancellation')
+                logger.error('Inference failed after request cancellation error=%s', type(worker.exception()).__name__)
         raise
     finally:
         if inference_start is not None:
@@ -233,8 +233,8 @@ def create_app(*, model_id, name, prefix, default_directory, load_engine, device
             raise HTTPException(400, 'Unsupported or malformed audio')
         except HTTPException:
             raise
-        except Exception:
-            logger.error('%s/FSMN inference failed', name)
+        except Exception as exc:
+            logger.error('%s/FSMN inference failed error=%s', name, type(exc).__name__)
             raise HTTPException(502, f'{name}/FSMN inference failed')
         if response_format == 'text':
             return PlainTextResponse(result['text'])

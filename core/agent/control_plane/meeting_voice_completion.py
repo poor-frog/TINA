@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -13,7 +14,35 @@ from fastapi import HTTPException
 from shared.voice_trace import log as voice_trace_log
 
 log = logging.getLogger(__name__)
-_slots = BoundedSemaphore(2)
+_DEFAULT_SLOTS = 4
+_SLOT_WAIT_SECONDS = 2.0
+
+
+def _configured_slots() -> int:
+    raw = os.environ.get("TINA_VOICE_COMPLETION_SLOTS", "").strip()
+    if raw:
+        try:
+            value = int(raw)
+            if 1 <= value <= 16:
+                return value
+        except ValueError:
+            pass
+    return _DEFAULT_SLOTS
+
+
+_slots = BoundedSemaphore(_configured_slots())
+_SAFE_ERROR_RE = re.compile(r"^([A-Z][A-Za-z0-9_]*(?:Error|Exception))\b")
+
+
+def _stderr_error_kind(stderr: str | bytes | None) -> str:
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    found = "unknown"
+    for line in (stderr or "").splitlines():
+        match = _SAFE_ERROR_RE.match(line.strip())
+        if match:
+            found = match.group(1)
+    return found
 
 
 def _log_worker_timings(stderr: str | bytes | None) -> None:
@@ -116,7 +145,10 @@ def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,
         deadline = min(deadline, source["retrieval_deadline_ms"] / 1000)
     if deadline <= time.time():
         raise HTTPException(504, "Voice retrieval timed out")
-    if not _slots.acquire(blocking=False):
+    remaining_wait = min(_SLOT_WAIT_SECONDS, max(0.0, deadline - time.time()))
+    if not _slots.acquire(timeout=remaining_wait):
+        if deadline <= time.time():
+            raise HTTPException(504, "Voice retrieval timed out")
         raise HTTPException(429, "Voice completion is busy")
     env = {key: os.environ[key] for key in (
         "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_DEFAULT_REGION", "AWS_REGION",
@@ -169,7 +201,12 @@ def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,
         _store_provider_issue(redis_url, payload["voice_turn"], "reconnect_required")
         raise HTTPException(503, "Reconnect ChatGPT for the staging voice pilot")
     if result.returncode or not result.stdout or len(result.stdout) > 50_000:
-        log.warning("Voice completion returned no usable text")
+        log.warning(
+            "Voice completion returned no usable text returncode=%s stdout_len=%d error=%s",
+            result.returncode,
+            len(result.stdout or ""),
+            _stderr_error_kind(result.stderr),
+        )
         raise HTTPException(502, "Voice completion is unavailable")
     if chatgpt_plan:
         _store_provider_issue(redis_url, payload["voice_turn"], None)

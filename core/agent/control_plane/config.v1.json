@@ -94,6 +94,13 @@
       "description": "Use the local completion process in Agent API for meeting voice when set to 1."
     },
     {
+      "key": "TINA_VOICE_COMPLETION_SLOTS",
+      "class": "defaulted",
+      "default": "4",
+      "targets": [],
+      "description": "Maximum concurrent local voice completion subprocesses in Agent API (clamped 1-16)."
+    },
+    {
       "key": "TINA_LOCAL_COMPLETION_POOL",
       "class": "defaulted",
       "default": "0",

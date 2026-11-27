@@ -193,6 +193,39 @@ def test_timeout_kills_descendants_after_the_group_leader_exits(monkeypatch,tmp_
             process.communicate(timeout=2)
 
 
+def test_finally_cleanup_timeout_does_not_mask_original_error(monkeypatch):
+    import subprocess as sp
+    monkeypatch.setenv('TINA_MOUNTS', '[]')
+    closed = []
+
+    class FakePipe:
+        def __init__(self, name): self.name = name
+        def close(self): closed.append(self.name)
+
+    class StuckProcess:
+        pid = 999999
+        returncode = None
+        stdin = FakePipe('stdin')
+        stdout = FakePipe('stdout')
+        stderr = None
+
+        def communicate(self, input=None, timeout=None):
+            raise sp.TimeoutExpired(cmd='python', timeout=timeout or 1)
+
+        def wait(self, timeout=None):
+            raise sp.TimeoutExpired(cmd='python', timeout=timeout or 1)
+
+    monkeypatch.setattr(voice_sandbox.subprocess, 'Popen', lambda *a, **kw: StuckProcess())
+    monkeypatch.setattr(voice_sandbox.os, 'killpg', lambda *a, **kw: None)
+    checks = []
+    def current():
+        checks.append(True)
+        return len(checks) == 1
+    with pytest.raises(RuntimeError, match='Voice sandbox turn cancelled'):
+        voice_sandbox.complete('input', 'system', {}, timeout=1, current=current)
+    assert 'stdin' in closed and 'stdout' in closed
+
+
 @pytest.mark.parametrize('stop_at',['candidate','verify'])
 def test_stop_prevents_later_model_calls_and_worker_publication(monkeypatch,stop_at):
     from worker import engine

@@ -1640,7 +1640,7 @@ export function createSpeakController(
     async stop(): Promise<void> {
       if (!enabled) return;
       speechGeneration++;
-      tts.stop();                                             // barge-in: kill playback + re-mute tts_sink
+      await tts.stop();                                       // barge-in: kill playback + re-mute tts_sink
       if (!micTouched) return; // A pre-admission failure has no meeting microphone to manipulate.
       if (!await setMic(false)) throw new Error('Meeting microphone mute could not be verified');
       console.log('[bot] speak_stop');

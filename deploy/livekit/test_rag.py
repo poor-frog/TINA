@@ -343,7 +343,7 @@ async def test_revoked_source_is_fatal_even_with_successful_sibling():
         if lookup['name'] == 'search_meeting': success.set(); return {'source_count': 1}
         await success.wait(); raise SourceAccessChanged('Source revoked')
     async def answer(request): pytest.fail('Revocation must block final answer')
-    with pytest.raises(RuntimeError, match='parallel lookup failed'):
+    with pytest.raises(SourceAccessChanged, match='parallel lookup failed'):
         await run_rag({}, agent, answer, lambda: True)
 
 

@@ -48,7 +48,15 @@ def complete(prompt, system, schema, *, timeout, current, meeting_assistant=Fals
             # Descendants may still hold pipes after the group leader has exited.
             try: os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError: pass
-            process.communicate(timeout=5)
+            try:
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None:
+                        try: stream.close()
+                        except OSError: pass
+                try: process.wait(timeout=1)
+                except subprocess.TimeoutExpired: pass
 
 
 def run(payload, work, harness):

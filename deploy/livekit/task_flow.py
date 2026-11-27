@@ -1,5 +1,6 @@
 """Actual Pipecat Flows text-only transitions over TINA's authorized model/tool API."""
 import asyncio
+from contextlib import suppress
 from uuid import uuid4
 
 from loguru import logger
@@ -19,6 +20,7 @@ from pipecat.turns.user_stop import ExternalUserTurnStopStrategy
 from pipecat.services.llm_service import LLMService
 
 NODES = {'title', 'assignee', 'due', 'review', 'decision_status', 'decision_evidence'}
+TEARDOWN_TIMEOUT = 5.0
 
 
 class TinaTaskLLM(LLMService):
@@ -85,5 +87,12 @@ async def run_task_flow(node, agent, request, kind='task'):
         await worker.queue_frames([LLMMessagesAppendFrame(messages=[{'role':'user','content':request['body']['question']}]),LLMRunFrame()])
         return await asyncio.wait_for(result,90 if kind=='decision' else 40)
     finally:
-        await worker.cancel()
-        await running
+        with suppress(Exception):
+            await asyncio.wait_for(worker.cancel(), TEARDOWN_TIMEOUT)
+        if not running.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(running), TEARDOWN_TIMEOUT)
+            except Exception:
+                running.cancel()
+                with suppress(BaseException):
+                    await asyncio.wait_for(running, 1.0)

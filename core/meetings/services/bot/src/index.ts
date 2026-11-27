@@ -258,7 +258,7 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
     const reporter = createSpeechReporter(inv);
     const remoteNoise=env.TINA_AUDIO_BRIDGE_URL&&env.TINA_AUDIO_BRIDGE_TOKEN
       ?new NoiseSuppressor(livekitNoiseFactory(env.TINA_AUDIO_BRIDGE_URL,env.TINA_AUDIO_BRIDGE_TOKEN)):undefined;
-    remoteNoise?.setEnabled(true);
+    if(!inv.voiceAgentEnabled)remoteNoise?.setEnabled(true);
     const sttStream=env.TINA_AUDIO_BRIDGE_URL&&env.TINA_AUDIO_BRIDGE_TOKEN
       ?new LiveKitStt(env.TINA_AUDIO_BRIDGE_URL,env.TINA_AUDIO_BRIDGE_TOKEN):undefined;
     const transcribe=createTranscribe(inv,{windowRequest:sttStream?.requestWindow});

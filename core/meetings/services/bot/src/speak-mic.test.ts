@@ -43,14 +43,14 @@ test('a stalled renderer bounds Stop and fences late unmute until mute is verifi
   assert.equal(played,1);
 });
 
-test('stopping TTS mutes its sink but keeps the system microphone available to Meet', () => {
+test('stopping TTS mutes its sink but keeps the system microphone available to Meet', async () => {
   const dir=mkdtempSync(join(tmpdir(),'tina-mic-gate-')),before=process.env.PATH;
   const log=join(dir,'calls');
   writeFileSync(join(dir,'pactl'),'#!/bin/sh\nprintf "%s\\n" "$*" >> "$TINA_TEST_PACTL_LOG"\n',{mode:0o700});
   const previousLog=process.env.TINA_TEST_PACTL_LOG;
   try {
     process.env.PATH=dir+':'+before;process.env.TINA_TEST_PACTL_LOG=log;
-    createTtsPlayback().stop();
+    await createTtsPlayback().stop();
     assert.deepEqual(readFileSync(log,'utf8').trim().split('\n'),['set-sink-mute tts_sink 1','set-source-mute virtual_mic 0']);
   } finally {
     process.env.PATH=before;

@@ -29,6 +29,20 @@ test('native cancellation waits for core acknowledgment and rejects an invalid s
   const invalid=voiceApi('http://core.test','synthetic',async()=>Response.json({ready:true}));
   await assert.rejects(async()=>{await invalid.cancelTurn!('old');});
 });
+
+test('voiceApi deduplicates LiveKit DELETE /turn after cancelTurn',async()=>{
+  const requests:Array<{url:string;method:string}>=[];
+  const api=voiceApi('http://core.test/bots/voice/1/session','synthetic',async(url,init)=>{
+    requests.push({url:String(url),method:init?.method||'GET'});
+    if(String(url).endsWith('/config'))return Response.json({enabled:true,ready:true,revision:1,engine:'livekit',agent_url:'http://agent.test/bots/1/session'});
+    if(String(url).endsWith('/turn'))return Response.json({stopped:true});
+    return Response.json({accepted:true});
+  });
+  await api.config();
+  await api.cancelTurn!('turn-1');
+  await api.state('QUIET','turn-1');
+  assert.equal(requests.filter(r=>r.method==='DELETE'&&r.url.endsWith('/turn')).length,1);
+});
 function fixture(answer: () => Promise<{text: string; clarification?: boolean; evidence_available?: boolean}> = async () => ({ text: 'Lan phụ trách demo. Hạn là thứ Sáu.' }), player?: SpeakController, shadowFactory?: WorkerFactory, turnFactory?: WorkerFactory,vadFactory?:WorkerFactory) {
   const diagnostics: VoiceDiagnostic[] = [], logs: string[] = [];
   const audio: AudioSnapshot[] = [];

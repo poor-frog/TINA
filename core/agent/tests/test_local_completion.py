@@ -333,3 +333,47 @@ def test_meeting_assistant_runs_via_local_completion_pool_with_strict_citations(
     parsed = json.loads(result["text"])
     assert parsed["claims"][0]["source_ids"] == ["s0"]
     assert seen and seen[0]["schema"]["required"] == ["claims"]
+
+
+def test_voice_completion_waits_for_slot_and_logs_safe_stderr_error_kind(monkeypatch, caplog):
+    import logging
+    import threading
+    import time
+
+    single_slot = threading.BoundedSemaphore(1)
+    single_slot.acquire()
+    monkeypatch.setattr(meeting_voice_completion, "_slots", single_slot)
+    monkeypatch.setattr(meeting_voice_completion, "_SLOT_WAIT_SECONDS", 1.0)
+    monkeypatch.setattr(
+        meeting_voice_completion.subprocess,
+        "run",
+        lambda *_, **__: SimpleNamespace(returncode=0, stdout='{"ok":true}', stderr=""),
+    )
+    payload = {"request_id": "req-slot", "voice_turn": {"meeting_id": 1, "holder": "s:req-slot"}}
+
+    def release_soon():
+        time.sleep(0.05)
+        single_slot.release()
+
+    releaser = threading.Thread(target=release_soon, daemon=True)
+    releaser.start()
+    out = meeting_voice_completion.complete(payload, {"mode": "voice"}, "redis://fixture")
+    releaser.join(timeout=1.0)
+    assert out == '{"ok":true}'
+
+    # Failure logs exit code + safe Python exception class name, never raw stderr message/PII.
+    monkeypatch.setattr(
+        meeting_voice_completion.subprocess,
+        "run",
+        lambda *_, **__: SimpleNamespace(
+            returncode=2,
+            stdout="",
+            stderr="Traceback (most recent call last):\nRuntimeError: PRIVATE_MEETING_TRANSCRIPT\n",
+        ),
+    )
+    with caplog.at_level(logging.WARNING, logger="control_plane.meeting_voice_completion"):
+        with pytest.raises(HTTPException) as err:
+            meeting_voice_completion.complete(payload, {"mode": "voice"}, "redis://fixture")
+    assert err.value.status_code == 502
+    assert "returncode=2" in caplog.text and "error=RuntimeError" in caplog.text
+    assert "PRIVATE_MEETING_TRANSCRIPT" not in caplog.text

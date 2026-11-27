@@ -61,14 +61,26 @@ export function nativeVoiceWorker(event: (value: Record<string, unknown>) => voi
       : ['-m', 'tina_meeting_voice.bot', mode === 'vad' ? directory : directory + '/livekit-tina-v1',
           mode === 'vad' ? '--vad-only' : '--kws'],
     { stdio: ['pipe', 'pipe', 'pipe'], env: { PATH: env.PATH, PYTHONUNBUFFERED: '1' } });
-  let buffer = '', closed = false;
+  let buffer = '', closed = false, lastErrClass: string | undefined, stderrBytes = 0;
   const readyTimeout = setTimeout(() => fail('startup_timeout'), 20_000); readyTimeout.unref();
-  const fail = (reason: VoiceWorkerFailure) => { if (!closed) { closed = true; clearTimeout(readyTimeout); child.kill('SIGKILL'); failed(reason); } };
-  child.on('error', () => fail('spawn_error'));
-  child.on('exit', () => fail('child_exit'));
+  const fail = (reason: VoiceWorkerFailure, detail?: string) => {
+    if (!closed) {
+      closed = true; clearTimeout(readyTimeout); child.kill('SIGKILL');
+      console.error(JSON.stringify({ type: 'voice_worker_failed', mode, reason, detail, error_class: lastErrClass, stderr_bytes: stderrBytes, at_ms: Date.now() }));
+      failed(reason);
+    }
+  };
+  child.on('error', err => fail('spawn_error', (err as NodeJS.ErrnoException).code));
+  child.on('exit', (code, sig) => fail('child_exit', `${code ?? 'null'}:${sig ?? 'none'}`));
   child.stdin.on('error', () => fail('stdin_error'));
-  // Native diagnostics may contain audio-dependent values; only a fixed error reaches logs.
-  child.stderr.on('data', () => {});
+  // Native diagnostics may contain audio-dependent values; extract only safe Python exception class names + byte count.
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderrBytes += chunk.length;
+    for (const line of chunk.toString('utf8').split('\n')) {
+      const m = /^([A-Z][A-Za-z0-9_]*(?:Error|Exception))\b/.exec(line.trim());
+      if (m) lastErrClass = m[1];
+    }
+  });
   child.stdout.on('data', (chunk: Buffer) => {
     if (closed) return;
     buffer += chunk.toString('utf8');
@@ -157,8 +169,11 @@ export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetc
     if (text.length > 200_000) throw new VoiceApiError('Voice response exceeds bound', 'response_too_large');
     return JSON.parse(text);
   }
+  const cancelledIds = new Set<string>();
   const cancelTurn = async (requestId:string) => {
     if(currentId===requestId)currentId=undefined;
+    cancelledIds.add(requestId);
+    if(cancelledIds.size>64) cancelledIds.delete(cancelledIds.values().next().value!);
     const target=agent;
     const result=target
       ?await call('/turn','DELETE',{request_id:requestId},AbortSignal.timeout(15_000),undefined,target.baseUrl)
@@ -188,8 +203,8 @@ export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetc
       return call('/answer','POST',{question,request_id:requestId,revision},signal,speakerKey,agent?.baseUrl);
     },
     state: async (state, requestId, diagnostic, audio, kws) => {
-      if(requestId && ['CAPTURING','THINKING','SPEAKING'].includes(state)) currentId=requestId;
-      if(agent && requestId && ['QUIET','OFF'].includes(state)) {
+      if(requestId && ['CAPTURING','THINKING','SPEAKING'].includes(state)) { currentId=requestId; cancelledIds.delete(requestId); }
+      if(agent && requestId && ['QUIET','OFF'].includes(state) && !cancelledIds.has(requestId)) {
         void cancelTurn(requestId).catch(()=>{});
       }
       await call('/state','POST',{state,request_id:requestId,
@@ -467,8 +482,12 @@ export class MeetingVoice {
   }
   private publishState(state: VoiceState, id?: string) {
     // Cancellation cannot be coalesced away by a later LISTENING heartbeat.
-    if ((state === 'QUIET' || state === 'OFF') && id) void this.api.state(state, id).catch(() => {});
-    this.pendingState = { state, id, diagnostic: this.diagnostic?.event_id !== this.sentDiagnosticId ? this.diagnostic : undefined };
+    if ((state === 'QUIET' || state === 'OFF') && id) {
+      void this.api.state(state, id).catch(() => {});
+      this.pendingState = { state, diagnostic: this.diagnostic?.event_id !== this.sentDiagnosticId ? this.diagnostic : undefined };
+    } else {
+      this.pendingState = { state, id, diagnostic: this.diagnostic?.event_id !== this.sentDiagnosticId ? this.diagnostic : undefined };
+    }
     if (!this.sendingState) void this.flushState();
   }
   private async flushState() {
@@ -524,6 +543,8 @@ export class MeetingVoice {
     this.playedText='';this.speakingText='';this.playbackStarted=false;
     if (dispose) { this.workerSerial++; this.worker?.close(); this.worker = undefined; this.closeKws(); }
     else workerReady = this.control(stopped && released && receipt ? 'QUIET' : 'ERROR');
+    // When cancelTurn already released the reservation on the server, clear requestId before setState to avoid redundant cancel calls.
+    if (requestId && this.api.cancelTurn && released) this.requestId = undefined;
     this.setState(stopped && released && receipt && workerReady ? (dispose ? 'OFF' : 'QUIET') : 'ERROR');
     this.requestId = undefined;
     this.diagnose(!stopped ? 'playback_failed' : !released || !receipt ? 'services_unavailable' : !workerReady ? 'worker_failed' : reason);
@@ -598,7 +619,7 @@ export class MeetingVoice {
       }
       this.activePollFailures = 0;
       const recoverable = probing && (this.state !== 'ERROR' || this.probeRecovery || this.kwsRetryAt !== undefined) && !this.externalSpeaking;
-      this.ns.setEnabled(false);
+      if (!recoverable) this.ns.setEnabled(false);
       if (!this.closed && this.state === 'ERROR' && !this.worker && !this.requestId && !this.externalSpeaking) {
         this.probeRecovery = recoverable;
         this.diagnose('services_unavailable');
@@ -892,9 +913,11 @@ export class MeetingVoice {
         const prefetched = !!pending;
         prepared = pending; pending = undefined;
         for (let attempt = 0; attempt < (prefetched ? 2 : 1); attempt++) {
+          let configCheckedAt = 0;
           if (!prepared) {
             const current = await this.api.config(this.abort.signal);
             if (!live() || !current.enabled || !current.ready || current.revision !== this.revision) { if (live()) this.diagnose('policy_changed'); return; }
+            configCheckedAt = Date.now();
             prepared = this.speak.prepare?.(sentence, 'auto');
           }
           let buffered = true;
@@ -902,8 +925,10 @@ export class MeetingVoice {
             buffered = await prepared.ready;
             if (!live()) return;
             if (index === 0) this.markSpeechTiming('answer',prepared.timing);
-            const fresh = await this.api.config(this.abort.signal);
-            if (!live() || !fresh.enabled || !fresh.ready || fresh.revision !== this.revision) { if (live()) this.diagnose('policy_changed'); return; }
+            if (!configCheckedAt || Date.now() - configCheckedAt >= 200) {
+              const fresh = await this.api.config(this.abort.signal);
+              if (!live() || !fresh.enabled || !fresh.ready || fresh.revision !== this.revision) { if (live()) this.diagnose('policy_changed'); return; }
+            }
           }
           let sentenceStarted = false;
           const onStarted = (timing?: Readonly<SpeechTiming>) => {

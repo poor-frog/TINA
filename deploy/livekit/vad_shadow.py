@@ -80,7 +80,7 @@ def add_vad_route(router,authorize,native):
     connections=set()
     @router.websocket('/audio/{mid}/{session}/vad')
     async def observe(socket:WebSocket,mid:int,session:str):
-        token=next((p[4:] for p in socket.scope.get('subprotocols',[]) if p.startswith('cap.')),'')
+        token=next((p.strip()[4:] for p in socket.scope.get('subprotocols',[]) if p.strip().startswith('cap.')),'')
         observer=None;slot=object()
         async def permit():
             _,policy=await authorize(mid,session,token)

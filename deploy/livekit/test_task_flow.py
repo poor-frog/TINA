@@ -48,3 +48,19 @@ async def test_decision_nodes_use_the_same_real_pipecat_manager(node):
     assert await run_task_flow(node,agent,{'body':{'question':'Ghi quyết định dùng PostgreSQL'}},kind='decision')==expected
     assert calls==['flow_plan','flow_apply']
     with pytest.raises(ValueError):await run_task_flow('assignee',agent,{},kind='decision')
+
+
+async def test_task_flow_teardown_is_bounded_when_worker_cancel_hangs(monkeypatch):
+    import task_flow
+    monkeypatch.setattr(task_flow, 'TEARDOWN_TIMEOUT', 0.05)
+    async def stuck_cancel(self):
+        await asyncio.Event().wait()
+    monkeypatch.setattr(task_flow.PipelineWorker, 'cancel', stuck_cancel)
+    expected = proposal()
+    async def agent(request, operation):
+        return expected
+    value = await asyncio.wait_for(
+        run_task_flow('title', agent, {'body': {'question': 'Tạo task demo'}}),
+        timeout=2.0,
+    )
+    assert value == expected

@@ -357,3 +357,91 @@ test('buffered stream failure is observable before playback even though ready re
     assert.equal(await pending.play(), 'failed'); assert.equal(spawned, 0);
   } finally { playback.stop(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
+
+test('prebufferMs above 500ms does not deadlock on PassThrough backpressure', async () => {
+  const previous = process.env.TTS_SERVICE_URL;
+  let response: import('node:http').ServerResponse | undefined;
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      response = res;
+      res.writeHead(200, { 'X-Audio-Sample-Rate': '24000', 'X-Audio-Channels': '1' });
+      // 800ms prebuffer = 38400 bytes (> default 24000 PassThrough highWaterMark); write 42000 bytes without ending stream.
+      for (let i = 0; i < 10; i++) res.write(Buffer.alloc(4200));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  process.env.TTS_SERVICE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const playback = createTtsPlayback(() => {}, {
+    prebufferMs: 800,
+    requestTimeoutMs: 2000,
+    setMute() {},
+    spawnProcess() {
+      const child = new EventEmitter() as unknown as ChildProcess;
+      Object.assign(child, { stdin: new PassThrough(), stderr: new PassThrough(),
+        kill() { child.emit('exit', null); return true; } });
+      child.stdin!.on('finish', () => setImmediate(() => child.emit('exit', 0)));
+      setImmediate(() => child.emit('spawn'));
+      return child;
+    },
+  });
+  try {
+    const prepared = playback.prepare!('long prebuffer test');
+    assert.equal(await prepared.ready, true, '800ms prebuffer must become ready before stream ends');
+    const playing = prepared.play();
+    response!.end(Buffer.alloc(4800));
+    assert.equal(await playing, 'completed');
+  } finally {
+    await playback.stop();
+    response?.destroy();
+    if (previous === undefined) delete process.env.TTS_SERVICE_URL; else process.env.TTS_SERVICE_URL = previous;
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('async setMute keeps event loop responsive and stop during in-flight unmute fences playback', async () => {
+  const previous = process.env.TTS_SERVICE_URL;
+  const server = createServer((req, res) => { req.resume(); req.on('end', () => res.end(Buffer.alloc(8000))); });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  process.env.TTS_SERVICE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const mutes: boolean[] = [];
+  let releaseUnmute!: () => void;
+  let unmuteEntered!: () => void;
+  const unmuteStarted = new Promise<void>(resolve => { unmuteEntered = resolve; });
+  let spawned = 0;
+  const playback = createTtsPlayback(() => {}, {
+    async setMute(muted) {
+      mutes.push(muted);
+      if (!muted) {
+        unmuteEntered();
+        await new Promise<void>(resolve => { releaseUnmute = resolve; });
+      }
+    },
+    spawnProcess() {
+      spawned++;
+      throw new Error('must not spawn player after stop during async unmute');
+    },
+  });
+  try {
+    const prepared = playback.prepare!('async mute fence');
+    assert.equal(await prepared.ready, true);
+    const playing = prepared.play();
+    await unmuteStarted;
+    // Event loop remains responsive while unmute is in flight.
+    let timerFired = false;
+    await new Promise<void>(resolve => setTimeout(() => { timerFired = true; resolve(); }, 10));
+    assert.equal(timerFired, true);
+    // Stop while unmute is still pending: mute(true) must serialize behind mute(false) and fence spawnProcess.
+    const stopping = playback.stop();
+    assert.deepEqual(mutes, [false], 're-mute must stay serialized behind pending unmute');
+    releaseUnmute();
+    await stopping;
+    assert.equal(await playing, 'stopped');
+    assert.equal(spawned, 0);
+    assert.deepEqual(mutes, [false, true]);
+  } finally {
+    await playback.stop();
+    if (previous === undefined) delete process.env.TTS_SERVICE_URL; else process.env.TTS_SERVICE_URL = previous;
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});

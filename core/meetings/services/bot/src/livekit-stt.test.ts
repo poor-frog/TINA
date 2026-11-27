@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {TranscriptionClient} from '@tina/transcribe-whisper';
-import {LiveKitStt} from './livekit-stt.js';
+import {LiveKitStt,extractWavPcm} from './livekit-stt.js';
 import {createBotPipeline} from './pipeline.js';
 
 test('continuous frames are sent once; overlapping ASR windows carry references and retain quality filters',async()=>{
@@ -80,4 +80,38 @@ test('stream callbacks precede recognition and final LocalAgreement keeps origin
   assert.equal(feeds.length,1);assert.equal(feeds[0].pcm.length,777);
   assert(published.some(row=>row.completed&&row.speaker==='Lan'&&row.text==='Lan làm demo.'));
   assert.equal(closed.at(-1),'all');
+});
+
+test('extractWavPcm locates data chunk past extra RIFF metadata chunks',()=>{
+  const pcm=Buffer.from([1,2,3,4,5,6,7,8]);
+  const fmt=Buffer.alloc(24);fmt.write('fmt ',0,'ascii');fmt.writeUInt32LE(16,4);fmt.writeUInt16LE(1,8);fmt.writeUInt16LE(1,10);fmt.writeUInt32LE(16000,12);fmt.writeUInt32LE(32000,16);fmt.writeUInt16LE(2,20);fmt.writeUInt16LE(16,22);
+  const list=Buffer.alloc(16);list.write('LIST',0,'ascii');list.writeUInt32LE(8,4);list.write('INFOtest',8,'ascii');
+  const data=Buffer.alloc(8+pcm.length);data.write('data',0,'ascii');data.writeUInt32LE(pcm.length,4);pcm.copy(data,8);
+  const riff=Buffer.alloc(12);riff.write('RIFF',0,'ascii');riff.writeUInt32LE(4+fmt.length+list.length+data.length,4);riff.write('WAVE',8,'ascii');
+  const wav=Buffer.concat([riff,fmt,list,data]);
+  assert.deepEqual(extractWavPcm(wav),pcm);
+});
+
+test('window request times out internally on a silent open socket and falls back to HTTP',async()=>{
+  const original=globalThis.WebSocket,fetch=globalThis.fetch;let socket:any;const sent:any[]=[];let httpCalls=0;
+  class SilentSocket {
+    static OPEN=1;readyState=1;bufferedAmount=0;events=new Map<string,Function>();
+    constructor(){socket=this;}
+    addEventListener(name:string,fn:Function){this.events.set(name,fn);}
+    send(line:string){sent.push(JSON.parse(line));}
+    close(){this.events.get('close')?.();}
+  }
+  try{
+    globalThis.WebSocket=SilentSocket as any;
+    globalThis.fetch=async()=>{httpCalls++;return new Response(JSON.stringify({text:'fallback ok',segments:[],language:'vi'}));};
+    const stream=new LiveKitStt('http://agents/audio/1/session','cap',()=>{},40);
+    const pcm=new Float32Array(1024).fill(.1);
+    const client=new TranscriptionClient({serviceUrl:'http://fallback',windowRequest:stream.requestWindow,maxRetries:0});
+    stream.feed('ch-0:1',pcm,1000);socket.events.get('message')({data:'{"ready":true}'});
+    const res=await client.transcribe(pcm,'vi',undefined,{stream:{id:'ch-0:1',start_ms:1000}});
+    assert.equal(res.text,'fallback ok');
+    assert.equal(httpCalls,1);
+    assert(sent.some(m=>m.type==='cancel'),'timeout must cancel the stuck window request on the server');
+    stream.close();
+  }finally{globalThis.WebSocket=original;globalThis.fetch=fetch;}
 });

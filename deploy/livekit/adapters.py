@@ -8,7 +8,7 @@ from livekit.agents import llm, tts
 from livekit.agents import APIConnectionError
 from livekit.agents.voice import io
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
-from rag import run_rag
+from rag import run_rag, SourceAccessChanged
 
 SAMPLE_RATE = 24000
 MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 120
@@ -21,6 +21,7 @@ class TinaLLM(llm.LLM):
         self.agent = agent
         self.request = None
         self.result = None
+        self.access_changed = False
 
     @property
     def model(self): return 'tina-selected-backend'
@@ -39,8 +40,12 @@ class TinaStream(llm.LLMStream):
         super().__init__(model, chat_ctx=chat_ctx, tools=tools, conn_options=conn_options)
 
     async def _run(self):
-        result = await run_rag(self.request, self.model.agent, self.model.answer,
-                               lambda: self.model.request is self.request)
+        try:
+            result = await run_rag(self.request, self.model.agent, self.model.answer,
+                                   lambda: self.model.request is self.request)
+        except SourceAccessChanged:
+            self.model.access_changed = True
+            raise
         self.model.result = result
         self._event_ch.send_nowait(llm.ChatChunk(id=str(uuid4()), delta=llm.ChoiceDelta(role='assistant', content=result['text'])))
 
@@ -60,6 +65,7 @@ class VieNeuTTS(tts.TTS):
     def __init__(self, synthesize):
         super().__init__(capabilities=tts.TTSCapabilities(streaming=False), sample_rate=SAMPLE_RATE, num_channels=1)
         self.speech = synthesize
+        self.base_speech = synthesize
         self.synthesis = SynthesisStatus()
 
     @property

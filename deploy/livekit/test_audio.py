@@ -244,3 +244,101 @@ def test_continuous_cancel_does_not_block_audio_or_publish_old_draft(monkeypatch
             ws.send_json({'type':'close_turn','stream':'ch-0:1'})
             ws.send_json(command|{'id':'closed'})
             assert ws.receive_json()['status']==409
+
+
+def test_idle_stt_connection_revalidates_preserves_window_and_closes_when_revoked(monkeypatch):
+    import threading
+    from starlette.websockets import WebSocketDisconnect
+    current={'current':True,'noise_suppression':True};checks=[];revalidated=threading.Event();asr_calls=[]
+    async def upstream(request):
+        if request.url.host=='core':
+            checks.append(request)
+            if len(checks)>=2:revalidated.set()
+            return httpx.Response(200,json=current)
+        asr_calls.append(request)
+        return httpx.Response(200,json={'text':'Sau khoang lang.','segments':[]})
+    original=asyncio.wait_for
+    async def fast_idle(task,timeout):return await original(task,.05 if timeout==15 else timeout)
+    monkeypatch.setenv('LIVEKIT_API_SECRET','synthetic-livekit-secret')
+    monkeypatch.setattr(asyncio,'wait_for',fast_idle)
+    pcm=b'\x01\0'*1024
+    command={'type':'window','id':'after-idle','stream':'ch-0:1','start_ms':1000,'samples':1024,
+        'sha256':hashlib.sha256(pcm).hexdigest(),'fields':{'model':'viegem'}}
+    app=FastAPI();app.include_router(build_audio_router(httpx.AsyncClient(transport=httpx.MockTransport(upstream)),'http://core'))
+    with TestClient(app) as client:
+        with client.websocket_connect('/audio/1/session-a/stt',subprotocols=['tina-audio-v1','cap.'+token()]) as ws:
+            assert ws.receive_json()['ready'] is True
+            ws.send_json({'type':'audio','stream':'ch-0:1','stamp':1000,'audio':base64.b64encode(pcm).decode()})
+            assert revalidated.wait(2),'idle STT socket must revalidate permit without closing'
+            ws.send_json(command)
+            result=ws.receive_json()
+            assert result['type']=='draft' and result['id']=='after-idle'
+            assert result['result']['text']=='Sau khoang lang.' and len(asr_calls)==1
+            current['current']=False
+            with pytest.raises(WebSocketDisconnect):ws.receive_json()
+
+
+async def test_capability_rejects_missing_token_or_model_and_non_bearer_header(bridge):
+    client, state, calls = bridge
+    # Missing required 'token' or 'model' fields in signed payload must return 403, never 500 KeyError.
+    for omitted in ('token', 'model'):
+        body = {'meeting': 1, 'session': 'session-a', 'url': 'http://asr', 'token': 'tok', 'model': 'viegem'}
+        del body[omitted]
+        payload = base64.urlsafe_b64encode(json.dumps(body).encode()).decode().rstrip('=')
+        bad_cap = payload + '.' + hmac.new(b'synthetic-livekit-secret', b'tina-audio.v1:' + payload.encode(), 'sha256').hexdigest()
+        res = await recognize(client, cap=bad_cap)
+        assert res.status_code == 403
+    # Non-Bearer Authorization header must be rejected on both /health and /v1/audio/transcriptions.
+    no_bearer_health = await client.get('/audio/1/session-a/health', headers={'Authorization': token()})
+    assert no_bearer_health.status_code == 403
+    no_bearer_stt = await client.post('/audio/1/session-a/v1/audio/transcriptions',
+        headers={'Authorization': token()},
+        data={'model': 'viegem'}, files={'file': ('a.wav', wav(), 'audio/wav')})
+    assert no_bearer_stt.status_code == 403
+
+
+async def test_transcriptions_validates_payload_before_acquiring_shared_stt_slots(monkeypatch):
+    monkeypatch.setenv('LIVEKIT_API_SECRET', 'synthetic-livekit-secret')
+    gate = asyncio.Event()
+    entered = asyncio.Event()
+    async def upstream(request):
+        if request.url.host == 'core': return httpx.Response(200, json={'current': True})
+        entered.set()
+        await gate.wait()
+        return httpx.Response(200, json={'text': 'ok', 'segments': []})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as upstream_client:
+        app = FastAPI()
+        app.include_router(build_audio_router(upstream_client, 'http://core'))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://bridge') as client:
+            # Fill all 8 slots.
+            holders = [asyncio.create_task(recognize(client)) for _ in range(8)]
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                await asyncio.sleep(0.05)
+                # Malformed audio and wrong model must be rejected with 422/403 before hitting 503 busy.
+                bad_wav = await client.post('/audio/1/session-a/v1/audio/transcriptions',
+                    headers={'Authorization': 'Bearer ' + token()}, files={'file': ('a.wav', b'not-wav', 'audio/wav')})
+                assert bad_wav.status_code == 422
+                bad_model = await recognize(client, model='other-model')
+                assert bad_model.status_code == 403
+                # Valid request hits 503 while slots are full.
+                overflow = await recognize(client)
+                assert overflow.status_code == 503
+            finally:
+                gate.set()
+                await asyncio.gather(*holders, return_exceptions=True)
+
+
+def test_noise_streams_close_uses_stream_close_not_private_native(monkeypatch):
+    closed = []
+    class Stream:
+        def __init__(self, emit): self.emit = emit
+        def feed(self, seq, pcm): pass
+        def close(self): closed.append('stream.close')
+    monkeypatch.setitem(sys.modules, 'tina_ns', SimpleNamespace(NsStream=Stream))
+    states = NoiseStreams()
+    audio_b64 = base64.b64encode(np.zeros(1024, dtype='<f4').tobytes()).decode()
+    states.feed({'channel': 0, 'seq': 1, 'stamp': 1000, 'audio': audio_b64})
+    states.close()
+    assert closed == ['stream.close']
+    assert not states.rows

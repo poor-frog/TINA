@@ -61,3 +61,18 @@ def test_repeated_semantic_failure_cannot_retry_on_every_request(monkeypatch):
     clock[0] = retrieval._retry_at
     for _ in range(3): assert retrieval.semantic_rank('scope', 'demo', rows) == []
     assert len(attempts) == 2 and retrieval._retry_at > clock[0]
+
+
+def test_semantic_rank_logs_warning_when_lock_is_busy(monkeypatch, caplog):
+    import logging
+    busy_lock = threading.Lock()
+    busy_lock.acquire()
+    monkeypatch.setattr(retrieval, '_lock', busy_lock)
+    monkeypatch.setattr(retrieval, '_LOCK_TIMEOUT', 0.02)
+    rows = [{'key': 'a', 'fingerprint': 'a', 'quote': 'Demo.'}]
+    try:
+        with caplog.at_level(logging.WARNING, logger='control_plane.voice_retrieval'):
+            assert retrieval.semantic_rank('scope', 'demo', rows) == []
+        assert 'lock_busy=true' in caplog.text
+    finally:
+        busy_lock.release()

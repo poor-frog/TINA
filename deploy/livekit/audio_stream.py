@@ -43,7 +43,7 @@ class AudioWindows:
         for at,pcm in row['chunks']:
             if not started:
                 offset=round((stamp-at)*16)
-                if offset<0 or offset>=len(pcm)//2 or abs(at+offset/16-stamp)>.04:continue
+                if offset<0 or offset>=len(pcm)//2 or abs(at+offset/16-stamp)>.0625:continue
                 pcm=pcm[offset*2:];started=True
             take=min(remaining,len(pcm)//2)
             output.append(pcm[:take*2]);remaining-=take
@@ -59,10 +59,12 @@ def add_stream_route(router,authorize,recognize,slots):
     @router.websocket('/audio/{mid}/{session}/stt')
     async def continuous(socket:WebSocket,mid:int,session:str):
         protocols=socket.scope.get('subprotocols',[])
-        token=next((p[4:] for p in protocols if p.startswith('cap.')),'')
+        token=next((p.strip()[4:] for p in protocols if p.strip().startswith('cap.')),'')
         windows=AudioWindows();pending={};send_lock=asyncio.Lock();slot=object()
         async def send(value):
-            async with send_lock:await socket.send_json(value)
+            try:
+                async with send_lock:await socket.send_json(value)
+            except (WebSocketDisconnect,RuntimeError):pass
         async def request(value,pcm):
             identifier=value['id']
             try:
@@ -95,9 +97,11 @@ def add_stream_route(router,authorize,recognize,slots):
             while True:
                 try:line=await asyncio.wait_for(socket.receive_text(),15)
                 except TimeoutError:
-                    await authorize(mid,session,token)
-                    if any(not task.done() for task in pending.values()):continue
-                    break
+                    await authorize(mid,session,token);checked=time.monotonic()
+                    for key,task in list(pending.items()):
+                        if task.done():
+                            await asyncio.gather(task,return_exceptions=True);pending.pop(key)
+                    continue
                 if len(line)>100000:raise ValueError()
                 value=json.loads(line)
                 if not isinstance(value,dict):raise ValueError()

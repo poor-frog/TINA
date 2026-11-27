@@ -37,17 +37,37 @@ export function livekitNoiseFactory(base:string,token:string):NoiseFactory {
   };
 }
 
+function safeStderrErrorClass(chunk:string):string|undefined {
+  for(const line of chunk.split('\n')){
+    const m=/^([A-Z][A-Za-z0-9_]*(?:Error|Exception))\b/.exec(line.trim());
+    if(m)return m[1];
+  }
+  return undefined;
+}
+
 export const nativeNoiseWorker: NoiseFactory = (event, failed) => {
   const child=spawn(process.env.TINA_VOICE_PYTHON||'/opt/tina-voice/bin/python', ['-m','tina_meeting_voice.denoise_worker'],
     {stdio:['pipe','pipe','pipe'],env:{PATH:process.env.PATH,PYTHONUNBUFFERED:'1'}});
-  let closed=false,buffer='';
+  let closed=false,buffer='',lastErrClass:string|undefined,stderrBytes=0;
   const close=()=>{if(closed)return;closed=true;child.stdin.end();child.kill('SIGKILL');};
-  const fail=()=>{if(!closed){close();failed();}};
-  child.on('error',fail);child.on('exit',fail);child.stdin.on('error',fail);child.stderr.on('data',()=>{});
+  const fail=(reason?:string)=>{
+    if(!closed){
+      if(reason)console.error(JSON.stringify({type:'denoise_worker_failed',reason,error_class:lastErrClass,stderr_bytes:stderrBytes,at_ms:Date.now()}));
+      close();failed();
+    }
+  };
+  child.on('error',()=>fail('spawn_error'));
+  child.on('exit',(code,sig)=>fail(`exit:${code??'null'}:${sig??'none'}`));
+  child.stdin.on('error',()=>fail('stdin_error'));
+  child.stderr.on('data',(chunk:Buffer)=>{
+    stderrBytes+=chunk.length;
+    const cls=safeStderrErrorClass(chunk.toString('utf8'));
+    if(cls)lastErrClass=cls;
+  });
   child.stdout.on('data',(chunk:Buffer)=>{
-    buffer+=chunk.toString('utf8');if(buffer.length>1_000_000){fail();return;}
+    buffer+=chunk.toString('utf8');if(buffer.length>1_000_000){fail('output_overflow');return;}
     let index:number;while((index=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,index);buffer=buffer.slice(index+1);
-      try{event(JSON.parse(line));}catch{fail();return;}}
+      try{event(JSON.parse(line));}catch{fail('invalid_output');return;}}
   });
   return {close,send(value){if(closed||child.stdin.writableLength>128000)return false;
     child.stdin.write(JSON.stringify(value)+'\n');return true;}};
@@ -65,7 +85,8 @@ export class NoiseSuppressor {
   private finish?:()=>void;
   private pending=new Map<number,{frame:NoiseFrame;deliver:(pcm:Float32Array)=>void;at:number}>();
   constructor(private factory:NoiseFactory=nativeNoiseWorker,
-    private log:(state:NoiseState)=>void=state=>console.log(JSON.stringify({type:'noise_suppression',state,at_ms:Date.now()}))){}
+    private log:(state:NoiseState)=>void=state=>console.log(JSON.stringify({type:'noise_suppression',state,at_ms:Date.now()})),
+    private frameTimeoutMs=1500, private startupTimeoutMs=5000){}
   private mode(state:NoiseState){if(this.state!==state){this.state=state;try{this.log(state);}catch{ /* Metrics cannot block audio. */ }}}
   private drain(state:NoiseState){
     this.retryAt=state==='failed'?Date.now()+5000:0;
@@ -103,7 +124,8 @@ export class NoiseSuppressor {
       },()=>{if(generation===this.generation)this.drain('failed');}); }
       catch { this.drain('failed');deliver(frame.pcm);return; }
       this.timer=setInterval(()=>{
-        if([...this.pending.values()].some(item=>Date.now()-item.at>1500))this.drain('failed');
+        const limit=this.state==='starting'?this.startupTimeoutMs:this.frameTimeoutMs;
+        if([...this.pending.values()].some(item=>Date.now()-item.at>limit))this.drain('failed');
       },100);this.timer.unref();
     }
     if(this.pending.size>=64){this.drain('failed');deliver(frame.pcm);return;}

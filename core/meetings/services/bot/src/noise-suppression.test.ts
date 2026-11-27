@@ -84,3 +84,21 @@ test('transient failures retry after cooldown without duplicating raw frames or 
     assert.deepEqual(got,[1,2,3,4,5,6]);
   }finally{await ns.close();Date.now=originalNow;}
 });
+
+test('startup grace timeout tolerates cold-start longer than steady-state frame timeout',async()=>{
+  let emit!:(event:any)=>void;const sent:any[]=[];const got:number[]=[];
+  const ns=new NoiseSuppressor(e=>{emit=e;return{send(v:any){sent.push(v);return true;},close(){}};},()=>{},60,400);
+  try{
+    ns.setEnabled(true);
+    ns.feed(frame(1),()=>got.push(1));
+    await new Promise(r=>setTimeout(r,150));
+    assert.equal(ns.state,'starting','cold-start must survive past steady-state 60ms frame timeout');
+    emit({ready:true});
+    emit({seq:sent[0].seq,audio:sent[0].audio});
+    assert.equal(ns.state,'low');assert.deepEqual(got,[1]);
+    // Once steady-state ('low'), a stalled frame beyond 60ms drains and fails open.
+    ns.feed(frame(2),()=>got.push(2));
+    await new Promise(r=>setTimeout(r,200));
+    assert.equal(ns.state,'failed');assert.deepEqual(got,[1,2]);
+  }finally{await ns.close();}
+});

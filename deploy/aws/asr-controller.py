@@ -97,7 +97,12 @@ def main():
         grace=10, revision="aws-v3",
     )
     key = hmac.new(SECRET.encode(), b"tina-asr-control:v1", "sha256").hexdigest()
-    server = ThreadingHTTPServer(("0.0.0.0", 18007), handler(controller, key))
+    base_handler = handler(controller, key)
+
+    class BoundedHandler(base_handler):
+        timeout = 10
+
+    server = ThreadingHTTPServer(("0.0.0.0", 18007), BoundedHandler)
     server.daemon_threads = True
     print("ASR bridge running on private Compose network only", flush=True)
     server.serve_forever()
