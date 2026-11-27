@@ -4936,6 +4936,13 @@ html[data-theme="light"] .tina-web .tina-web-ask-form:focus-within {
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.11), 0 0 0 3px rgba(23, 107, 91, 0.12);
 }
 
+html[data-theme="light"] .tina-web .tina-web-ask-form.is-drag-over {
+  border-color: rgba(23, 107, 91, 0.72);
+  border-style: dashed;
+  background: rgba(23, 107, 91, 0.05);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.11), 0 0 0 3px rgba(23, 107, 91, 0.16);
+}
+
 html[data-theme="light"] .tina-web .tina-web-ask-bar {
   border-top-color: rgba(15, 23, 42, 0.07);
 }

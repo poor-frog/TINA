@@ -16,6 +16,7 @@ Ported micro-interaction primitives from the [Lucian UX/UI Prompt](https://lucia
 - `LucianVoiceInputButton.tsx` + `lucian-457.css` — `#457` Morphing voice dictation pill with live waveform, blinking recording indicator, and elapsed timer.
 - `LucianMentionPicker.tsx` + `lucian-451.css` — `#451` `@`-mention floating autocomplete picker with Vietnamese diacritic-insensitive search, `kind:query` filters, sliding selection pill, keyboard navigation, and backend context compilation for Meetings, Knowledge pages/files, Spaces, Tasks, People, and Schedule.
 - `LucianSlashPicker.tsx` — `/` slash command floating picker & prompt compiler (`/research`, `/routine`, `/recap`, `/prep`, `/tasks`, `/draft`, `/schedule`, `/save`, `/new`) shared across `AskTinaView`, `KnowledgeCopilotDrawer`, and `MeetingSidePanel`.
+- `useChatComposerPickers.ts` — Unified `@` & `/` composer controller hook (keyboard nav, Vietnamese IME composition guard, blur dismissal, atomic Backspace, chip ↔ textarea sync, non-destructive slash insertion).
 
 ### Package 2 — Meeting Workspace, Live Bot & Knowledge Hub
 - `LucianDynamicIsland.tsx` + `lucian-459.css` — `#459` Live Activity Dynamic Island pill on `TopBar` for active bot meetings with live elapsed timer, dancing equalizer, swipe-to-cycle, and spring expand drawer.

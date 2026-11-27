@@ -6,7 +6,7 @@
  *     Voice Agent TTS ("TINA Agent") replies from `/api/meetings/{id}/voice-assistant`
  *     (matching TINA Chrome Extension), with search, speaker/question/topic/TINA filters,
  *     bilingual VI/EN/Song ngữ translation, source citations, and audio sync. */
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
 import { AgentActivitySteps } from "./AgentActivitySteps";
 import { LucianThinkingText } from "./lucian/LucianThinkingText";
@@ -19,22 +19,16 @@ import {
   LucianMentionPopover,
   LucianMentionTriggerButton,
   compileMentionContext,
-  detectMentionAtCursor,
-  filterMentionTargets,
-  findMentionBeforeCursor,
-  type MentionMatch,
   type MentionTarget,
 } from "./lucian/LucianMentionPicker";
 import {
   LucianSlashPopover,
   LucianSlashTriggerButton,
   compileSlashPrompt,
-  detectSlashAtStart,
-  filterSlashCommands,
   type SlashCommandDef,
   type SlashCommandId,
-  type SlashMatch,
 } from "./lucian/LucianSlashPicker";
+import { useChatComposerPickers } from "./lucian/useChatComposerPickers";
 import { buildMentionCatalog, saveReplyToKnowledge } from "./chatComposerUtils";
 import { emitWebToast } from "./lucian/webToast";
 import { Markdown } from "../ui-kit/Markdown";
@@ -93,6 +87,7 @@ interface SideMessage {
   text: string;
   ops?: string[];
   error?: string;
+  mentions?: MentionTarget[];
 }
 
 const STARTERS = [
@@ -223,12 +218,9 @@ export function MeetingSidePanel({
   const [phase, setPhase] = useState<ChatPhase | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [savingIds, setSavingIds] = useState<Record<string, boolean>>({});
   const [workspaceDocs, setWorkspaceDocs] = useState<string[]>([]);
   const [mentionedItems, setMentionedItems] = useState<MentionTarget[]>([]);
-  const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
-  const [mentionActiveIdx, setMentionActiveIdx] = useState(0);
-  const [slashMatch, setSlashMatch] = useState<SlashMatch | null>(null);
-  const [slashActiveIdx, setSlashActiveIdx] = useState(0);
   const [includeSchedule, setIncludeSchedule] = useState(false);
 
   const [transcriptQuery, setTranscriptQuery] = useState("");
@@ -245,54 +237,13 @@ export function MeetingSidePanel({
   const draftInputRef = useRef<HTMLTextAreaElement>(null);
   const followingRef = useRef(true);
   const messagesRef = useRef<SideMessage[]>([]);
-  const mentionListboxId = useId();
-  const slashListboxId = useId();
+  const savingIdsRef = useRef<Record<string, boolean>>({});
+  const submitRef = useRef<() => void>(() => undefined);
+  const instantSlashRef = useRef<(cmd: SlashCommandDef) => void>(() => undefined);
 
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
-
-  useEffect(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    sessionRef.current = `meeting-${meetingId}-${Date.now().toString(36)}`;
-    setMessages([]);
-    setDraft("");
-    setMentionedItems([]);
-    setMentionMatch(null);
-    setSlashMatch(null);
-    setIncludeSchedule(false);
-    setBusy(false);
-    setPhase(null);
-    setTranscriptQuery("");
-    setShowProcessed(false);
-    setTinaOnly(false);
-    setOpenSourceReplyId(null);
-    setHighlightedKeys({});
-    setAskMode("chat");
-  }, [meetingId]);
-
-  useEffect(() => {
-    if (meetingsOnly || sideTab !== "ask") return;
-    let alive = true;
-    void listWorkspaceTree()
-      .then((files) => {
-        if (alive && Array.isArray(files)) setWorkspaceDocs(files);
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, [meetingsOnly, sideTab]);
-
-  useEffect(() => () => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
-  }, [messages, phase]);
 
   const mentionCatalog = useMemo(() => {
     const extraPeople: Array<{ name?: string | null; email?: string | null }> = [];
@@ -318,20 +269,77 @@ export function MeetingSidePanel({
     });
   }, [lines, meeting?.attendees, meeting?.participants, workspaceDocs]);
 
-  const filteredMentions = useMemo(
-    () => (mentionMatch ? filterMentionTargets(mentionCatalog, mentionMatch.query, 8) : []),
-    [mentionCatalog, mentionMatch],
-  );
-  const mentionOpen = mentionMatch !== null && filteredMentions.length > 0;
+  const handlePickMentionExtra = useCallback((item: MentionTarget) => {
+    if (item.kind === "schedule") setIncludeSchedule(true);
+  }, []);
 
-  const filteredSlashCommands = useMemo(
-    () => (slashMatch ? filterSlashCommands(slashMatch.query, MEETING_SLASH_IDS) : []),
-    [slashMatch],
-  );
-  const slashOpen = slashMatch !== null && filteredSlashCommands.length > 0 && !mentionOpen;
+  const handleRemoveMentionExtra = useCallback((item: MentionTarget) => {
+    if (item.kind === "schedule") setIncludeSchedule(false);
+  }, []);
+
+  const pickers = useChatComposerPickers({
+    value: draft,
+    setValue: setDraft,
+    textareaRef: draftInputRef,
+    mentionCatalog,
+    mentionLimit: 8,
+    allowedSlashIds: MEETING_SLASH_IDS,
+    mentionedTargets: mentionedItems,
+    setMentionedTargets: setMentionedItems,
+    onPickMentionExtra: handlePickMentionExtra,
+    onRemoveMentionExtra: handleRemoveMentionExtra,
+    onInstantSlash: (cmd) => instantSlashRef.current(cmd),
+    onSubmit: () => submitRef.current(),
+  });
+  const closePickers = pickers.closePickers;
+
+  useEffect(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    sessionRef.current = `meeting-${meetingId}-${Date.now().toString(36)}`;
+    setMessages([]);
+    setDraft("");
+    setMentionedItems([]);
+    closePickers();
+    setIncludeSchedule(false);
+    setBusy(false);
+    setPhase(null);
+    setTranscriptQuery("");
+    setShowProcessed(false);
+    setTinaOnly(false);
+    setOpenSourceReplyId(null);
+    setHighlightedKeys({});
+    setAskMode("chat");
+  }, [closePickers, meetingId]);
+
+  useEffect(() => {
+    if (meetingsOnly || sideTab !== "ask") return;
+    let alive = true;
+    void listWorkspaceTree()
+      .then((files) => {
+        if (alive && Array.isArray(files)) setWorkspaceDocs(files);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [meetingsOnly, sideTab]);
+
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
+  }, [messages, phase]);
 
   const saveSideReply = useCallback(
     async (replyText: string, msgId?: string) => {
+      const lockKey = msgId || "__slash_save__";
+      if (savingIdsRef.current[lockKey]) return;
+      savingIdsRef.current = { ...savingIdsRef.current, [lockKey]: true };
+      setSavingIds(savingIdsRef.current);
       try {
         const { path } = await saveReplyToKnowledge({
           replyText,
@@ -347,6 +355,11 @@ export function MeetingSidePanel({
           message: err instanceof Error ? err.message : "Could not save reply.",
           tone: "error",
         });
+      } finally {
+        const next = { ...savingIdsRef.current };
+        delete next[lockKey];
+        savingIdsRef.current = next;
+        setSavingIds(next);
       }
     },
     [meeting?.title, meeting?.title_custom],
@@ -368,12 +381,17 @@ export function MeetingSidePanel({
           setMessages([]);
           setDraft("");
           setMentionedItems([]);
+          setIncludeSchedule(false);
+          closePickers();
           setBusy(false);
           setPhase(null);
           emitWebToast({ message: "Đã mở cuộc trò chuyện mới", tone: "info" });
         } else if (compiled.commandId === "schedule") {
           setIncludeSchedule((cur) => {
             const next = !cur;
+            if (!next) {
+              setMentionedItems((prev) => prev.filter((m) => m.kind !== "schedule"));
+            }
             emitWebToast({
               message: next ? "Đã bật ngữ cảnh lịch họp hôm nay" : "Đã tắt ngữ cảnh lịch họp hôm nay",
               tone: "info",
@@ -404,13 +422,17 @@ export function MeetingSidePanel({
       const agentId = `a-${Date.now() + 1}`;
       setMessages((prev) => [
         ...prev,
-        { id: userId, role: "user", text: compiled.displayPrompt },
+        {
+          id: userId,
+          role: "user",
+          text: compiled.displayPrompt,
+          mentions: opts?.mentions?.length ? opts.mentions : undefined,
+        },
         { id: agentId, role: "agent", text: "", ops: [] },
       ]);
       setDraft("");
       setMentionedItems([]);
-      setMentionMatch(null);
-      setSlashMatch(null);
+      closePickers();
       setBusy(true);
       setPhase("connecting");
 
@@ -514,7 +536,7 @@ export function MeetingSidePanel({
         setPhase(null);
       }
     },
-    [includeSchedule, meeting, meetingId, meetingsOnly, onSideTabChange, saveSideReply],
+    [closePickers, includeSchedule, meeting, meetingId, meetingsOnly, onSideTabChange, saveSideReply],
   );
 
   useEffect(() => {
@@ -535,173 +557,37 @@ export function MeetingSidePanel({
     }
   };
 
-  const syncComposerTriggers = useCallback((value: string, cursor: number) => {
-    const mMatch = detectMentionAtCursor(value, cursor);
-    setMentionMatch(mMatch);
-    setMentionActiveIdx(0);
-    if (mMatch) {
-      setSlashMatch(null);
+  const submitSide = useCallback(() => {
+    const trimmed = draft.trim();
+    if (!trimmed || busy || meetingsOnly) return;
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const precheck = compileSlashPrompt(trimmed, {
+      tz,
+      meetingTitle: meeting?.title_custom || meeting?.title,
+    });
+    if (precheck.kind === "error") {
+      emitWebToast({ message: precheck.message, tone: "error" });
       return;
     }
-    const sMatch = detectSlashAtStart(value, cursor);
-    setSlashMatch(sMatch);
-    setSlashActiveIdx(0);
-  }, []);
-
-  const pickMention = useCallback(
-    (item: MentionTarget) => {
-      const el = draftInputRef.current;
-      const anchor = mentionMatch?.anchor ?? draft.length;
-      const cursor = el?.selectionStart ?? draft.length;
-      const before = draft.slice(0, anchor);
-      const after = draft.slice(cursor);
-      const inserted = `@${item.label} `;
-      const next = `${before}${inserted}${after}`;
-      setDraft(next);
-      setMentionMatch(null);
-      setMentionActiveIdx(0);
-      setMentionedItems((prev) => (prev.some((m) => m.id === item.id) ? prev : [...prev, item]));
-      if (item.kind === "schedule") setIncludeSchedule(true);
-      requestAnimationFrame(() => {
-        if (!el) return;
-        const pos = before.length + inserted.length;
-        el.focus();
-        el.setSelectionRange(pos, pos);
-      });
-    },
-    [draft, mentionMatch],
-  );
-
-  const pickSlashCommand = useCallback(
-    (cmd: SlashCommandDef) => {
-      setSlashMatch(null);
-      setSlashActiveIdx(0);
-      if (cmd.instant) {
-        setDraft("");
-        void sendPrompt(cmd.command);
-        return;
-      }
-      const next = cmd.insertTemplate;
-      setDraft(next);
-      requestAnimationFrame(() => {
-        const el = draftInputRef.current;
-        if (!el) return;
-        el.focus();
-        el.setSelectionRange(next.length, next.length);
-      });
-    },
-    [sendPrompt],
-  );
-
-  const triggerMentionMenu = () => {
-    const el = draftInputRef.current;
-    const pos = el?.selectionStart ?? draft.length;
-    const before = draft.slice(0, pos);
-    const after = draft.slice(pos);
-    const pad = before.length > 0 && !/\s$/.test(before) ? " " : "";
-    const next = `${before}${pad}@${after}`;
-    const nextPos = before.length + pad.length + 1;
-    setDraft(next);
-    setSlashMatch(null);
-    setMentionMatch({ anchor: nextPos - 1, query: "" });
-    setMentionActiveIdx(0);
-    requestAnimationFrame(() => {
-      el?.focus();
-      el?.setSelectionRange(nextPos, nextPos);
-    });
-  };
-
-  const triggerSlashMenu = () => {
-    const el = draftInputRef.current;
-    if (slashOpen) {
-      setSlashMatch(null);
+    const text = draft;
+    const activeMentions = mentionedItems;
+    if (precheck.kind === "instant") {
+      setDraft("");
+      closePickers();
+      void sendPrompt(text);
       return;
     }
-    const next = draft.trim().startsWith("/") ? draft : `/${draft.trimStart()}`;
-    setDraft(next);
-    setMentionMatch(null);
-    setSlashMatch({ anchor: 0, query: next.slice(1).split(/\s/)[0] ?? "" });
-    setSlashActiveIdx(0);
-    requestAnimationFrame(() => {
-      el?.focus();
-      const pos = Math.min(next.length, (next.split(/\s/)[0] ?? "/").length);
-      el?.setSelectionRange(pos, pos);
-    });
+    void sendPrompt(text, { mentions: activeMentions });
+  }, [busy, closePickers, draft, meeting?.title, meeting?.title_custom, meetingsOnly, mentionedItems, sendPrompt]);
+
+  submitRef.current = submitSide;
+  instantSlashRef.current = (cmd) => {
+    void sendPrompt(cmd.command);
   };
 
   const handleSubmit = (e?: FormEvent) => {
     e?.preventDefault();
-    void sendPrompt(draft, { mentions: mentionedItems });
-  };
-
-  const handleDraftKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (mentionOpen) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setMentionActiveIdx((cur) => (cur + 1) % filteredMentions.length);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setMentionActiveIdx((cur) => (cur - 1 + filteredMentions.length) % filteredMentions.length);
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        const picked = filteredMentions[Math.min(mentionActiveIdx, filteredMentions.length - 1)];
-        if (picked) pickMention(picked);
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setMentionMatch(null);
-        return;
-      }
-    }
-    if (slashOpen) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSlashActiveIdx((cur) => (cur + 1) % filteredSlashCommands.length);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setSlashActiveIdx((cur) => (cur - 1 + filteredSlashCommands.length) % filteredSlashCommands.length);
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        const picked = filteredSlashCommands[Math.min(slashActiveIdx, filteredSlashCommands.length - 1)];
-        if (picked) pickSlashCommand(picked);
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setSlashMatch(null);
-        return;
-      }
-    }
-    if (e.key === "Backspace" && mentionedItems.length > 0) {
-      const el = e.currentTarget;
-      const start = el.selectionStart ?? 0;
-      const end = el.selectionEnd ?? 0;
-      if (start === end && start > 0) {
-        const hit = findMentionBeforeCursor(draft, start, mentionedItems.map((m) => m.label));
-        if (hit) {
-          e.preventDefault();
-          const next = `${draft.slice(0, start - hit.length)}${draft.slice(start)}`;
-          const removedLabel = hit.slice(1);
-          setDraft(next);
-          setMentionedItems((prev) => prev.filter((m) => m.label !== removedLabel));
-          requestAnimationFrame(() => el.setSelectionRange(start - hit.length, start - hit.length));
-          return;
-        }
-      }
-    }
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void sendPrompt(draft, { mentions: mentionedItems });
-    }
+    submitSide();
   };
 
   const projectedLines = useMemo(() => {
@@ -954,8 +840,9 @@ export function MeetingSidePanel({
                     const retryPrevious = () => {
                       if (busy) return;
                       for (let i = idx - 1; i >= 0; i--) {
-                        if (messages[i]?.role === "user") {
-                          void sendPrompt(messages[i].text);
+                        const userMsg = messages[i];
+                        if (userMsg?.role === "user") {
+                          void sendPrompt(userMsg.text, { mentions: userMsg.mentions });
                           return;
                         }
                       }
@@ -1038,10 +925,13 @@ export function MeetingSidePanel({
                                 className={styles.bubbleActBtn}
                                 aria-label="Save response to Knowledge"
                                 title="Save response as a Knowledge page"
+                                disabled={Boolean(savingIds[msg.id])}
                                 onClick={() => void saveSideReply(msg.text, msg.id)}
                               >
                                 <WebIcon name={savedId === msg.id ? "check" : "fileText"} size={12} />
-                                <span>{savedId === msg.id ? "Saved" : "Save"}</span>
+                                <span>
+                                  {savingIds[msg.id] ? "Saving…" : savedId === msg.id ? "Saved" : "Save"}
+                                </span>
                               </button>
                               <button
                                 type="button"
@@ -1067,28 +957,25 @@ export function MeetingSidePanel({
             <div className={styles.sideFoot}>
               <form className={styles.composer} onSubmit={handleSubmit}>
                 <LucianMentionPopover
-                  open={mentionOpen}
-                  listboxId={mentionListboxId}
-                  query={mentionMatch?.query ?? ""}
-                  items={filteredMentions}
-                  activeIndex={mentionActiveIdx}
-                  onHoverIndex={setMentionActiveIdx}
-                  onPick={pickMention}
+                  open={pickers.mentionOpen}
+                  listboxId={pickers.mentionListboxId}
+                  query={pickers.mentionMatch?.query ?? ""}
+                  items={pickers.filteredMentions}
+                  activeIndex={pickers.mentionActiveIdx}
+                  onHoverIndex={pickers.setMentionActiveIdx}
+                  onPick={pickers.pickMention}
                 />
                 <LucianSlashPopover
-                  open={slashOpen}
-                  listboxId={slashListboxId}
-                  items={filteredSlashCommands}
-                  activeIndex={slashActiveIdx}
-                  onHoverIndex={setSlashActiveIdx}
-                  onPick={pickSlashCommand}
+                  open={pickers.slashOpen}
+                  listboxId={pickers.slashListboxId}
+                  items={pickers.filteredSlashCommands}
+                  activeIndex={pickers.slashActiveIdx}
+                  onHoverIndex={pickers.setSlashActiveIdx}
+                  onPick={pickers.pickSlashCommand}
                 />
                 <LucianMentionChips
                   mentions={mentionedItems}
-                  onRemove={(id) => {
-                    setMentionedItems((prev) => prev.filter((m) => m.id !== id));
-                    if (id === "schedule:today") setIncludeSchedule(false);
-                  }}
+                  onRemove={pickers.removeMentionChip}
                 />
                 <textarea
                   ref={draftInputRef}
@@ -1096,40 +983,52 @@ export function MeetingSidePanel({
                   onChange={(e) => {
                     const next = e.target.value;
                     setDraft(next);
-                    syncComposerTriggers(next, e.target.selectionStart ?? next.length);
+                    pickers.syncPickers(next, e.target.selectionStart ?? next.length);
                   }}
-                  onClick={(e) => syncComposerTriggers(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)}
+                  onClick={(e) => pickers.syncPickers(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)}
                   onKeyUp={(e) => {
-                    if (["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) return;
-                    syncComposerTriggers(e.currentTarget.value, e.currentTarget.selectionStart ?? 0);
+                    if (/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) {
+                      pickers.syncPickers(e.currentTarget.value, e.currentTarget.selectionStart ?? 0);
+                    }
                   }}
+                  onBlur={pickers.handleBlur}
                   placeholder="Ask about this meeting… (@ mention, / commands)"
                   role="combobox"
                   aria-label="Ask Tina about this meeting"
                   aria-autocomplete="list"
-                  aria-expanded={mentionOpen || slashOpen}
-                  aria-controls={mentionOpen ? mentionListboxId : slashOpen ? slashListboxId : undefined}
+                  aria-expanded={pickers.mentionOpen || pickers.slashOpen}
+                  aria-controls={
+                    pickers.mentionOpen
+                      ? pickers.mentionListboxId
+                      : pickers.slashOpen
+                        ? pickers.slashListboxId
+                        : undefined
+                  }
+                  aria-activedescendant={pickers.activeDescendantId}
                   disabled={busy}
-                  onKeyDown={handleDraftKeyDown}
+                  onKeyDown={pickers.handleKeyDown}
                 />
                 <div className={styles.composerBar}>
                   <div className={styles.composerTools}>
                     <LucianMentionTriggerButton
-                      onClick={triggerMentionMenu}
+                      onClick={pickers.triggerMention}
                       disabled={busy}
-                      expanded={mentionOpen}
+                      expanded={pickers.mentionOpen}
                     />
                     <LucianSlashTriggerButton
-                      onClick={triggerSlashMenu}
+                      onClick={pickers.triggerSlash}
                       disabled={busy}
-                      expanded={slashOpen}
+                      expanded={pickers.slashOpen}
                     />
-                    {includeSchedule && (
+                    {includeSchedule && !mentionedItems.some((m) => m.kind === "schedule") && (
                       <button
                         type="button"
                         className={styles.composerSchedBadge}
                         title="Today's schedule attached (click to remove)"
-                        onClick={() => setIncludeSchedule(false)}
+                        onClick={() => {
+                          setIncludeSchedule(false);
+                          setMentionedItems((prev) => prev.filter((m) => m.kind !== "schedule"));
+                        }}
                       >
                         <span>Today</span>
                         <span aria-hidden="true">×</span>

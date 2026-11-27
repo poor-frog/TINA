@@ -240,6 +240,82 @@ export function formatAttachmentsPrompt(files: UploadedWorkspaceFile[]): string 
   return ["Attached files:", ...files.map((f) => `- @file:${f.path}`)].join("\n");
 }
 
+/** Parse leading `[Context: ...]` headers and trailing `Referenced context:` / `Attached files:`
+ *  blocks (appended on the wire for backend grounding and reloaded via session history) into
+ *  compact UI badges + clean user body text. */
+export function parsePromptContextBlocks(raw: string): { badges: string[]; body: string } {
+  const badges: string[] = [];
+  let text = raw.trim();
+
+  // 1. Leading `[Context: ...]` header from Knowledge/Meeting deep links
+  const headerMatch = text.match(/^\s*\[Context:\s*([^\r\n]+)\]\s*(?:\r?\n)+([\s\S]*)$/);
+  if (headerMatch) {
+    const meta = headerMatch[1].trim();
+    const rest = headerMatch[2].trim();
+    if (rest) {
+      const spaceMatch = meta.match(/Space\s+"([^"]+)"/i);
+      if (spaceMatch) badges.push(`Space · ${spaceMatch[1]}`);
+      const pageMatch = meta.match(/open page\s+"([^"]+)"/i);
+      if (pageMatch) {
+        badges.push(pageMatch[1].split("/").pop() || pageMatch[1]);
+      }
+      if (badges.length === 0) {
+        badges.push(meta.replace(/\s*\(slug:[^)]*\)/gi, "").trim());
+      }
+      text = rest;
+    }
+  }
+
+  // 2. Trailing `Attached files:\n- @file:...` and/or `Referenced context:\n- ...` blocks
+  const parseTrailingBlock = (heading: "Attached files:" | "Referenced context:") => {
+    const re = new RegExp(`(?:^|\\r?\\n\\r?\\n)${heading}\\r?\\n((?:- [^\\r\\n]+(?:\\r?\\n|$))+)$`);
+    const m = text.match(re);
+    if (!m) return false;
+    const lines = m[1]
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^- /, "").trim())
+      .filter(Boolean);
+    for (const line of lines) {
+      if (heading === "Attached files:") {
+        const path = line.replace(/^@file:/, "").trim();
+        const name = (path.split("/").pop() || path).replace(/^[0-9a-f]{16}-/i, "");
+        badges.push(`File · ${name}`);
+      } else if (line.startsWith("@file:")) {
+        const paren = line.match(/\(([^)]+)\)\s*$/);
+        const path = line.replace(/^@file:/, "").replace(/\s*\([^)]+\)\s*$/, "").trim();
+        badges.push(paren?.[1] || friendlyMentionFileLabel(path));
+      } else if (/^Meeting:/i.test(line)) {
+        const mt = line.match(/^Meeting:\s*"([^"]+)"/i);
+        badges.push(`Meeting · ${mt?.[1] || line.replace(/^Meeting:\s*/i, "")}`);
+      } else if (/^Space:/i.test(line)) {
+        const sp = line.match(/^Space:\s*"([^"]+)"/i);
+        badges.push(`Space · ${sp?.[1] || line.replace(/^Space:\s*/i, "")}`);
+      } else if (/^Schedule:/i.test(line)) {
+        badges.push("Schedule · Today");
+      } else if (/^Tasks:/i.test(line)) {
+        badges.push("Open Tasks");
+      } else if (/^Person:/i.test(line)) {
+        const name = line.replace(/^Person:\s*/i, "").replace(/\s*\([^)]+\)\s*$/, "").trim();
+        badges.push(name);
+      }
+    }
+    const stripped = text.slice(0, m.index ?? text.length).trim();
+    text = stripped || (heading === "Attached files:" ? "Attached files" : text);
+    return true;
+  };
+
+  // Strip in either order (Attached files typically follows Referenced context)
+  for (let i = 0; i < 2; i++) {
+    const a = parseTrailingBlock("Attached files:");
+    const b = parseTrailingBlock("Referenced context:");
+    if (!a && !b) break;
+  }
+
+  // Deduplicate badges while preserving order
+  const uniqueBadges = Array.from(new Set(badges));
+  return { badges: uniqueBadges, body: text || raw };
+}
+
 export async function uploadComposerFiles(files: File[]): Promise<UploadedWorkspaceFile[]> {
   if (files.length === 0) return [];
   const form = new FormData();

@@ -2923,9 +2923,11 @@
 }
 
 :global(html[data-theme="light"]) .copilotCommit,
-:global(html[data-theme="light"]) .copilotLiveBadge {
+:global(html[data-theme="light"]) .copilotLiveBadge,
+:global(html[data-theme="light"]) .copilotSchedBadge {
   background: rgba(23, 107, 91, 0.11);
-  border-color: rgba(23, 107, 91, 0.24);
+  border-color: rgba(23, 107, 91, 0.28);
+  color: #0f4c41;
 }
 
 :global(html[data-theme="light"]) .copilotIconBtn:hover:not(:disabled),

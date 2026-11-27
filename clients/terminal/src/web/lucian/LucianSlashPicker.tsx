@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useRef } from "react";
 /** LucianSlashPicker — Keyboard-navigable `/` slash command popover & prompt compiler
  *  shared across AskTinaView, KnowledgeCopilotDrawer, and MeetingSidePanel. */
 import "./lucian-451.css";
@@ -292,9 +293,28 @@ export function LucianSlashPopover({
   onPick: (cmd: SlashCommandDef) => void;
 }) {
   const safeIdx = items.length > 0 ? Math.min(Math.max(activeIndex, 0), items.length - 1) : 0;
+  const popRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open || items.length === 0) return;
+    const box = popRef.current;
+    if (!box) return;
+    const rowTop = safeIdx * SLASH_ROW_H + 5;
+    const rowBottom = rowTop + SLASH_ROW_H;
+    const viewTop = box.scrollTop;
+    const viewBottom = viewTop + box.clientHeight;
+    if (box.clientHeight > 0) {
+      if (rowTop < viewTop) {
+        box.scrollTop = Math.max(0, rowTop - 5);
+      } else if (rowBottom > viewBottom) {
+        box.scrollTop = rowBottom - box.clientHeight + 5;
+      }
+    }
+  }, [open, safeIdx, items.length]);
 
   return (
     <div
+      ref={popRef}
       className={`ux u451-pop u451-slash-pop ${open && items.length > 0 ? "is-open" : ""}`}
       data-testid="lucian-slash-popover"
       onPointerDown={(e) => e.preventDefault()}

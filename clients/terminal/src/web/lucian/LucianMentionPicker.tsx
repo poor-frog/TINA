@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useRef } from "react";
 // Lucian UX/UI Prompt #451 · MIT License (c) 2026 Seokwoooo · https://lucianlabs.dev/uxui-prompt/#451
 import "./lucian-451.css";
 import type { FocusPayload } from "../../surfaces/chatContext";
@@ -193,34 +194,52 @@ export function compileMentionContext(targets: MentionTarget[]): CompiledMention
   return { contextBlock, includeSchedule, primaryMeetingId, fallbackFocus };
 }
 
-function renderHighlighted(text: string, query: string) {
+export function renderHighlighted(text: string, query: string) {
   const colonIdx = query.indexOf(":");
   const effective = colonIdx > 0 && PREFIX_TO_KINDS[normalizeSearchText(query.slice(0, colonIdx))]
     ? query.slice(colonIdx + 1)
     : query;
   const q = normalizeSearchText(effective);
   if (!q) return text;
-  const rawIdx = text.toLowerCase().indexOf(effective.trim().toLowerCase());
-  if (rawIdx >= 0 && effective.trim().length > 0) {
-    const len = effective.trim().length;
-    return (
-      <>
-        {text.slice(0, rawIdx)}
-        <mark>{text.slice(rawIdx, rawIdx + len)}</mark>
-        {text.slice(rawIdx + len)}
-      </>
-    );
+
+  // Map every normalized base character back to its exact UTF-16 [start, end) span in `text`
+  // so Vietnamese diacritics (NFC or NFD), `đ`/`Đ`, and emoji surrogate pairs highlight accurately.
+  let normalized = "";
+  const normToStart: number[] = [];
+  const normToEnd: number[] = [];
+  let offset = 0;
+  for (const ch of text) {
+    const start = offset;
+    const end = offset + ch.length;
+    offset = end;
+    const folded = ch
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[đĐ]/g, "d")
+      .toLowerCase();
+    if (!folded) {
+      // Combining mark attached to previous base character: extend previous char's end offset.
+      if (normToEnd.length > 0) normToEnd[normToEnd.length - 1] = end;
+      continue;
+    }
+    for (let u = 0; u < folded.length; u++) {
+      normalized += folded[u];
+      normToStart.push(start);
+      normToEnd.push(end);
+    }
   }
-  // Diacritic-insensitive fallback match highlight
-  const normChars = [...text].map((ch) => normalizeSearchText(ch) || ch.toLowerCase());
-  const joined = normChars.join("");
-  const matchIdx = joined.indexOf(q);
+
+  const matchIdx = normalized.indexOf(q);
   if (matchIdx < 0) return text;
+  const startUnit = normToStart[matchIdx];
+  const endUnit = normToEnd[matchIdx + q.length - 1];
+  if (startUnit === undefined || endUnit === undefined) return text;
+
   return (
     <>
-      {text.slice(0, matchIdx)}
-      <mark>{text.slice(matchIdx, matchIdx + q.length)}</mark>
-      {text.slice(matchIdx + q.length)}
+      {text.slice(0, startUnit)}
+      <mark>{text.slice(startUnit, endUnit)}</mark>
+      {text.slice(endUnit)}
     </>
   );
 }
@@ -243,9 +262,28 @@ export function LucianMentionPopover({
   onPick: (item: MentionTarget) => void;
 }) {
   const safeIdx = items.length > 0 ? Math.min(Math.max(activeIndex, 0), items.length - 1) : 0;
+  const popRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open || items.length === 0) return;
+    const box = popRef.current;
+    if (!box) return;
+    const rowTop = safeIdx * ROW_H + 5;
+    const rowBottom = rowTop + ROW_H;
+    const viewTop = box.scrollTop;
+    const viewBottom = viewTop + box.clientHeight;
+    if (box.clientHeight > 0) {
+      if (rowTop < viewTop) {
+        box.scrollTop = Math.max(0, rowTop - 5);
+      } else if (rowBottom > viewBottom) {
+        box.scrollTop = rowBottom - box.clientHeight + 5;
+      }
+    }
+  }, [open, safeIdx, items.length]);
 
   return (
     <div
+      ref={popRef}
       className={`ux u451-pop ${open && items.length > 0 ? "is-open" : ""}`}
       data-testid="lucian-mention-popover"
       onPointerDown={(e) => e.preventDefault()}

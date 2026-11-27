@@ -3,17 +3,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import {
+  LucianMentionPopover,
   compileMentionContext,
   detectMentionAtCursor,
   filterMentionTargets,
   normalizeSearchText,
+  renderHighlighted,
 } from "../lucian/LucianMentionPicker";
 import {
   compileSlashPrompt,
   detectSlashAtStart,
   filterSlashCommands,
 } from "../lucian/LucianSlashPicker";
-import { buildMentionCatalog, formatAttachmentsPrompt } from "../chatComposerUtils";
+import {
+  buildMentionCatalog,
+  formatAttachmentsPrompt,
+  parsePromptContextBlocks,
+} from "../chatComposerUtils";
 import type { MeetingMock } from "../../surfaces/meetingModel";
 import type { ChatStreamCallbacks } from "../../surfaces/chatStream";
 
@@ -367,5 +373,236 @@ describe("chatComposerPickers — component integration", () => {
     const payload = mockStreamChatTurn.mock.calls[0]?.[0] as { prompt: string };
     expect(payload.prompt).toContain("Họp dự án Định kỳ");
     expect(payload.prompt).toContain("Person: Huy Phạm");
+  });
+
+  it("validates slash commands before uploading files or clearing draft, and preserves attachments on /schedule", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ files: [{ name: "spec.pdf", path: "uploads/spec.pdf" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    render(
+      <AskTinaView
+        meetings={SAMPLE_MEETINGS}
+        initialPrompt={null}
+        onConsumeInitialPrompt={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(mockListWorkspaceTree).toHaveBeenCalled());
+
+    const textarea = screen.getByLabelText("Message Ask Tina") as HTMLTextAreaElement;
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const pdfFile = new File(["%PDF-1.4"], "spec.pdf", { type: "application/pdf" });
+    fireEvent.change(fileInput, { target: { files: [pdfFile] } });
+    expect(await screen.findByText("spec.pdf")).toBeTruthy();
+
+    // Invalid `/research` (empty topic) must NOT upload files and must preserve draft + attachment
+    fireEvent.change(textarea, { target: { value: "/research", selectionStart: 9 } });
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    fireEvent.submit(textarea.closest("form")!);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("/research");
+    expect(screen.getByText("spec.pdf")).toBeTruthy();
+
+    // Instant `/schedule` must NOT upload files and must keep `spec.pdf` attached
+    fireEvent.change(textarea, { target: { value: "/schedule", selectionStart: 9 } });
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    fireEvent.submit(textarea.closest("form")!);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Schedule: today/i)).toBeTruthy();
+    expect(screen.getByText("spec.pdf")).toBeTruthy();
+  });
+
+  it("guards Vietnamese IME composition Enter, preserves trailing text on /, syncs @Today, replays mentions/files on Retry, and prevents Save double-click", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ files: [{ name: "spec.pdf", path: "uploads/spec.pdf" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    let resolveSave!: () => void;
+    mockSaveWorkspaceDocument.mockImplementation(
+      () => new Promise<void>((res) => { resolveSave = res; }),
+    );
+
+    render(
+      <AskTinaView
+        meetings={SAMPLE_MEETINGS}
+        initialPrompt={null}
+        onConsumeInitialPrompt={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(mockListWorkspaceTree).toHaveBeenCalled());
+
+    const textarea = screen.getByLabelText("Message Ask Tina") as HTMLTextAreaElement;
+
+    // 1. IME composition Enter (`keyCode: 229`) must NOT submit
+    fireEvent.change(textarea, { target: { value: "đang gõ tiếng việt", selectionStart: 18 } });
+    fireEvent.keyDown(textarea, { key: "Enter", keyCode: 229 });
+    expect(mockStreamChatTurn).not.toHaveBeenCalled();
+
+    // 2. Clicking `/` trigger with existing text + picking `/research` preserves trailing text
+    const slashBtn = screen.getByRole("button", { name: "Slash commands" });
+    fireEvent.click(slashBtn);
+    const slashPop = await screen.findByTestId("lucian-slash-popover");
+    expect(slashPop.className).toContain("is-open");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(textarea.value).toBe("/research đang gõ tiếng việt");
+
+    // 3. Picking `@Today` avoids duplicate `Schedule: today` chip, and Backspace clears schedule state
+    fireEvent.change(textarea, { target: { value: "@lich:", selectionStart: 6 } });
+    await screen.findByTestId("lucian-mention-popover");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(textarea.value).toBe("@Today ");
+    expect(screen.queryByText(/Schedule: today/i)).toBeNull();
+    // Atomic Backspace on `@Today` clears includeSchedule
+    fireEvent.change(textarea, { target: { value: "@Today", selectionStart: 6 } });
+    textarea.setSelectionRange(6, 6);
+    fireEvent.keyDown(textarea, { key: "Backspace" });
+    expect(textarea.value).toBe("");
+
+    // 4. Send turn with @page + file, then Retry replays BOTH @file grounding and uploaded file
+    fireEvent.change(textarea, { target: { value: "Check @page:arch", selectionStart: 16 } });
+    await screen.findByTestId("lucian-mention-popover");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [new File(["pdf"], "spec.pdf", { type: "application/pdf" })] } });
+    fireEvent.submit(textarea.closest("form")!);
+
+    await waitFor(() => expect(mockStreamChatTurn).toHaveBeenCalledTimes(1));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const retryBtn = await screen.findByRole("button", { name: "Retry response" });
+    fireEvent.click(retryBtn);
+    await waitFor(() => expect(mockStreamChatTurn).toHaveBeenCalledTimes(2));
+    const retriedCall = mockStreamChatTurn.mock.calls[1]?.[0] as { prompt: string };
+    expect(retriedCall.prompt).toContain("@file:notes/architecture.md");
+    expect(retriedCall.prompt).toContain("- @file:uploads/spec.pdf");
+
+    // 5. Double-clicking Save only writes once while in-flight
+    const saveBtns = screen.getAllByRole("button", { name: "Save response to Knowledge" });
+    const saveBtn = saveBtns[saveBtns.length - 1] as HTMLButtonElement;
+    fireEvent.click(saveBtn);
+    fireEvent.click(saveBtn);
+    expect(mockSaveWorkspaceDocument).toHaveBeenCalledTimes(1);
+    expect(saveBtn.disabled).toBe(true);
+    resolveSave();
+    await waitFor(() => expect(saveBtn.disabled).toBe(false));
+  });
+
+  it("Drawer and SidePanel close popovers on blur, toggle @ without duplicating, sync chip removal, and keep draft on invalid slash", async () => {
+    render(
+      <KnowledgeCopilotDrawer
+        open
+        workspaceName="Product Ops"
+        slug="product-ops"
+        docPath="notes/architecture.md"
+        docTitle="Architecture"
+        isReadOnly={false}
+        onClose={() => undefined}
+        onWorkspaceMutated={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(mockListWorkspaceTree).toHaveBeenCalled());
+
+    const textarea = screen.getByRole("combobox", { name: /ask tina a question/i }) as HTMLTextAreaElement;
+    const mentionBtn = screen.getByRole("button", { name: "Mention meeting or knowledge" });
+
+    // Toggle @ twice without duplicating `@ @`
+    fireEvent.click(mentionBtn);
+    expect(mentionBtn.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(mentionBtn);
+    expect(mentionBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(textarea.value).toBe("@");
+
+    // Re-open and blur outside closes popover
+    fireEvent.click(mentionBtn);
+    expect(mentionBtn.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.blur(textarea, { relatedTarget: null });
+    expect(mentionBtn.getAttribute("aria-expanded")).toBe("false");
+
+    // Pick mention then click chip × strips `@Label` from textarea
+    fireEvent.change(textarea, { target: { value: "@page:arch", selectionStart: 10 } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(textarea.value).toContain("@Architecture");
+    fireEvent.click(screen.getByRole("button", { name: "Remove mention Architecture" }));
+    expect(textarea.value).toBe("");
+
+    // Empty `/research` keeps draft instead of wiping it
+    fireEvent.change(textarea, { target: { value: "/research", selectionStart: 9 } });
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    fireEvent.submit(textarea.closest("form")!);
+    expect(textarea.value).toBe("/research");
+    expect(mockStreamChatTurn).not.toHaveBeenCalled();
+  });
+
+  it("parses reloaded Referenced context / Attached files blocks cleanly, highlights emoji+Vietnamese accurately, and auto-scrolls popover", () => {
+    const rawWire = [
+      `[Context: Space "Product Ops" (slug: product-ops), open page "notes/architecture.md"]`,
+      "",
+      "So sánh phương án triển khai mới",
+      "",
+      "Referenced context:",
+      "- @file:notes/spec.md (Spec)",
+      `- Meeting: "Weekly Sync" (meeting_id: 42)`,
+      "- Schedule: include today's and upcoming meetings",
+      "",
+      "Attached files:",
+      "- @file:uploads/0123456789abcdef-roadmap.pdf",
+    ].join("\n");
+
+    const parsed = parsePromptContextBlocks(rawWire);
+    expect(parsed.body).toBe("So sánh phương án triển khai mới");
+    expect(parsed.badges).toEqual([
+      "Space · Product Ops",
+      "architecture.md",
+      "File · roadmap.pdf",
+      "Spec",
+      "Meeting · Weekly Sync",
+      "Schedule · Today",
+    ]);
+
+    // Emoji + Vietnamese highlight accuracy (UTF-16 surrogate pair safety)
+    const { container } = render(<div>{renderHighlighted("🚀 Họp dự án Định kỳ", "dinh ky")}</div>);
+    expect(container.querySelector("mark")?.textContent).toBe("Định kỳ");
+
+    // Popover scrolls active row into viewport when activeIndex moves past clientHeight
+    const manyItems = Array.from({ length: 10 }, (_, idx) => ({
+      id: `item-${idx}`,
+      kind: "page" as const,
+      label: `Page ${idx}`,
+      role: "Page",
+      gradientA: "#8EE3BE",
+      gradientB: "#139A72",
+    }));
+    const { rerender } = render(
+      <LucianMentionPopover
+        open
+        listboxId="scroll-test"
+        query=""
+        items={manyItems}
+        activeIndex={0}
+        onHoverIndex={() => undefined}
+        onPick={() => undefined}
+      />,
+    );
+    const pop = screen.getByTestId("lucian-mention-popover");
+    Object.defineProperty(pop, "clientHeight", { value: 160, configurable: true });
+    pop.scrollTop = 0;
+
+    rerender(
+      <LucianMentionPopover
+        open
+        listboxId="scroll-test"
+        query=""
+        items={manyItems}
+        activeIndex={8}
+        onHoverIndex={() => undefined}
+        onPick={() => undefined}
+      />,
+    );
+    expect(pop.scrollTop).toBeGreaterThan(0);
   });
 });

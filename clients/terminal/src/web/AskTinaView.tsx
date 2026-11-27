@@ -14,27 +14,22 @@ import {
   LucianMentionPopover,
   LucianMentionTriggerButton,
   compileMentionContext,
-  detectMentionAtCursor,
-  filterMentionTargets,
-  findMentionBeforeCursor,
-  type MentionMatch,
   type MentionTarget,
 } from "./lucian/LucianMentionPicker";
 import {
   LucianSlashPopover,
   LucianSlashTriggerButton,
   compileSlashPrompt,
-  detectSlashAtStart,
-  filterSlashCommands,
   type SlashCommandDef,
-  type SlashMatch,
 } from "./lucian/LucianSlashPicker";
+import { useChatComposerPickers } from "./lucian/useChatComposerPickers";
 import {
   COMPOSER_ATTACHMENT_ACCEPT,
   MAX_COMPOSER_FILES,
   MAX_COMPOSER_FILE_BYTES,
   buildMentionCatalog,
   formatAttachmentsPrompt,
+  parsePromptContextBlocks,
   saveReplyToKnowledge,
   uploadComposerFiles,
   type PendingAttachment,
@@ -60,6 +55,8 @@ interface ChatMessage {
   approvals?: ToolApprovalState[];
   commit?: string;
   error?: string;
+  mentions?: MentionTarget[];
+  uploadedFiles?: UploadedWorkspaceFile[];
 }
 
 export type AskTinaPrompt = {
@@ -117,33 +114,10 @@ function conversationTitle(title?: string | null): string {
   // Older servers saved a flattened prefix, sometimes with the whole question truncated.
   const prefix = /^\s*\[Context: Space "/;
   if (!prefix.test(title)) return title;
-  const body = parseUserContext(title).body;
+  const body = parsePromptContextBlocks(title).body;
   if (body !== title) return body;
   const question = title.match(/^\s*\[Context: Space ".*?\]\s+(.+)$/)?.[1];
   return question && question !== "…" ? question : "Untitled conversation";
-}
-
-/** Extract leading `[Context: ...]` metadata prepended by Knowledge/Meeting deep-links
- *  into human-friendly chips so raw bracket headers never clutter user chat bubbles. */
-function parseUserContext(raw: string): { badges: string[]; body: string } {
-  const match = raw.match(/^\s*\[Context:\s*([^\r\n]+)\]\s*(?:\r?\n)+([\s\S]*)$/);
-  if (!match) return { badges: [], body: raw };
-  const meta = match[1].trim();
-  const body = match[2].trim();
-  if (!body) return { badges: [], body: raw };
-
-  const badges: string[] = [];
-  const spaceMatch = meta.match(/Space\s+"([^"]+)"/i);
-  if (spaceMatch) badges.push(`Space · ${spaceMatch[1]}`);
-  const pageMatch = meta.match(/open page\s+"([^"]+)"/i);
-  if (pageMatch) {
-    const file = pageMatch[1].split("/").pop() || pageMatch[1];
-    badges.push(file);
-  }
-  if (badges.length === 0) {
-    badges.push(meta.replace(/\s*\(slug:[^)]*\)/gi, "").trim());
-  }
-  return { badges, body };
 }
 
 function agentPhaseLabel(phase: ChatPhase | null, hasText: boolean, lastOp?: string): string {
@@ -165,8 +139,6 @@ export function AskTinaView({
   initialPrompt: AskTinaPrompt | null;
   onConsumeInitialPrompt: () => void;
 }) {
-  const mentionListboxId = useId();
-  const slashListboxId = useId();
   const starterId = useId();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionQuery, setSessionQuery] = useState("");
@@ -186,6 +158,7 @@ export function AskTinaView({
   const [sessionListError, setSessionListError] = useState<string | null>(null);
   const [sessionListLoading, setSessionListLoading] = useState(true);
   const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({});
+  const [savingMsgIds, setSavingMsgIds] = useState<Record<string, boolean>>({});
   const [confirmDeleteSession, setConfirmDeleteSession] = useState<string | null>(null);
   const [deletingSessions, setDeletingSessions] = useState<Record<string, boolean>>({});
   const [confirmClearAll, setConfirmClearAll] = useState(false);
@@ -195,13 +168,7 @@ export function AskTinaView({
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [workspaceDocs, setWorkspaceDocs] = useState<string[]>([]);
   const [activeSpaces, setActiveSpaces] = useState<Array<{ slug: string; name?: string | null }>>([]);
-  const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
-  const [mentionActiveIdx, setMentionActiveIdx] = useState(0);
-  const [mentionDismissedAnchor, setMentionDismissedAnchor] = useState(-1);
   const [mentionedTargets, setMentionedTargets] = useState<MentionTarget[]>([]);
-  const [slashMatch, setSlashMatch] = useState<SlashMatch | null>(null);
-  const [slashActiveIdx, setSlashActiveIdx] = useState(0);
-  const [slashDismissed, setSlashDismissed] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const historyRef = useRef<AbortController | null>(null);
@@ -216,6 +183,9 @@ export function AskTinaView({
   attachmentsRef.current = attachments;
   const messagesRef = useRef<ChatMessage[]>(messages);
   messagesRef.current = messages;
+  const savingMsgIdsRef = useRef<Record<string, boolean>>({});
+  const submitComposerRef = useRef<() => void>(() => undefined);
+  const sendInstantSlashRef = useRef<(cmd: SlashCommandDef) => void>(() => undefined);
 
   const loadSessionList = useCallback(() => {
     setSessionListLoading(true);
@@ -355,146 +325,38 @@ export function AskTinaView({
     [meetings, activeSpaces, workspaceDocs],
   );
 
-  const filteredMentions = useMemo(() => {
-    if (!mentionMatch) return [];
-    return filterMentionTargets(allMentionTargets, mentionMatch.query, 10);
-  }, [allMentionTargets, mentionMatch]);
+  const handlePickMentionExtra = useCallback((target: MentionTarget) => {
+    if (target.kind === "meeting" && target.meetingId) {
+      setSelectedMeetingId(target.meetingId);
+    } else if (target.kind === "schedule") {
+      setIncludeSchedule(true);
+    }
+  }, []);
 
-  const filteredSlashCommands = useMemo(() => {
-    if (!slashMatch) return [];
-    return filterSlashCommands(slashMatch.query);
-  }, [slashMatch]);
-
-  const mentionOpen = Boolean(mentionMatch && filteredMentions.length > 0);
-  const slashOpen = Boolean(!mentionOpen && slashMatch && filteredSlashCommands.length > 0);
-
-  const syncComposerPickers = useCallback(
-    (nextValue: string, cursorPos: number) => {
-      const sMatch = detectSlashAtStart(nextValue, cursorPos);
-      if (!sMatch) {
-        setSlashDismissed(false);
-        setSlashMatch(null);
-      } else if (!slashDismissed) {
-        setSlashMatch((prev) => {
-          if (!prev || prev.query !== sMatch.query) setSlashActiveIdx(0);
-          return sMatch;
-        });
-      }
-
-      const mMatch = detectMentionAtCursor(nextValue, cursorPos);
-      if (!mMatch) {
-        setMentionDismissedAnchor(-1);
-        setMentionMatch(null);
-        return;
-      }
-      if (mMatch.anchor === mentionDismissedAnchor) return;
-      setMentionMatch((prev) => {
-        if (!prev || prev.anchor !== mMatch.anchor) setMentionActiveIdx(0);
-        return mMatch;
-      });
-    },
-    [mentionDismissedAnchor, slashDismissed],
-  );
-
-  const pickMention = useCallback(
+  const handleRemoveMentionExtra = useCallback(
     (target: MentionTarget) => {
-      const el = composerRef.current;
-      const cursor = el?.selectionStart ?? draft.length;
-      const anchor = mentionMatch?.anchor ?? cursor;
-      const insertion = `@${target.label} `;
-      const nextValue = draft.slice(0, anchor) + insertion + draft.slice(cursor);
-      const nextPos = anchor + insertion.length;
-
-      setDraft(nextValue);
-      setMentionMatch(null);
-      setMentionDismissedAnchor(-1);
-      setMentionedTargets((prev) => (prev.some((x) => x.id === target.id) ? prev : [...prev, target]));
-      if (target.kind === "meeting" && target.meetingId) {
-        setSelectedMeetingId(target.meetingId);
-      } else if (target.kind === "schedule") {
-        setIncludeSchedule(true);
-      }
-      window.requestAnimationFrame(() => {
-        if (!composerRef.current) return;
-        composerRef.current.focus();
-        composerRef.current.setSelectionRange(nextPos, nextPos);
-      });
-    },
-    [draft, mentionMatch],
-  );
-
-  const insertAtMentionTrigger = useCallback(() => {
-    const el = composerRef.current;
-    setSlashMatch(null);
-    if (mentionOpen && mentionMatch && mentionMatch.query === "") {
-      setMentionDismissedAnchor(mentionMatch.anchor);
-      setMentionMatch(null);
-      el?.focus({ preventScroll: true });
-      return;
-    }
-    const focused = el && document.activeElement === el;
-    const start = focused ? (el.selectionStart ?? draft.length) : draft.length;
-    const end = focused ? (el.selectionEnd ?? draft.length) : draft.length;
-    const existing = start === end ? detectMentionAtCursor(draft, start) : null;
-    if (existing && existing.query === "") {
-      setMentionDismissedAnchor(-1);
-      setMentionActiveIdx(0);
-      setMentionMatch(existing);
-      el?.focus({ preventScroll: true });
-      return;
-    }
-    const before = draft.slice(0, start);
-    const ins = (before && !/\s$/.test(before) ? " " : "") + "@";
-    const nextValue = before + ins + draft.slice(end);
-    const nextPos = start + ins.length;
-    setDraft(nextValue);
-    setMentionDismissedAnchor(-1);
-    setMentionActiveIdx(0);
-    setMentionMatch({ anchor: nextPos - 1, query: "" });
-    el?.focus({ preventScroll: true });
-    window.requestAnimationFrame(() => {
-      if (!composerRef.current) return;
-      composerRef.current.focus({ preventScroll: true });
-      composerRef.current.setSelectionRange(nextPos, nextPos);
-    });
-  }, [draft, mentionMatch, mentionOpen]);
-
-  const insertSlashTrigger = useCallback(() => {
-    const el = composerRef.current;
-    setMentionMatch(null);
-    if (slashOpen && slashMatch && slashMatch.query === "") {
-      setSlashDismissed(true);
-      setSlashMatch(null);
-      el?.focus({ preventScroll: true });
-      return;
-    }
-    const nextValue = draft.trimStart().startsWith("/") ? draft : `/${draft}`;
-    setDraft(nextValue);
-    setSlashDismissed(false);
-    setSlashActiveIdx(0);
-    setSlashMatch({ anchor: 0, query: "" });
-    el?.focus({ preventScroll: true });
-    window.requestAnimationFrame(() => {
-      if (!composerRef.current) return;
-      composerRef.current.focus({ preventScroll: true });
-      composerRef.current.setSelectionRange(1, 1);
-    });
-  }, [draft, slashMatch, slashOpen]);
-
-  const removeMentionChip = useCallback((id: string) => {
-    setMentionedTargets((prev) => {
-      const target = prev.find((x) => x.id === id);
-      if (target?.kind === "meeting" && target.meetingId && target.meetingId === selectedMeetingId) {
+      if (target.kind === "meeting" && target.meetingId && target.meetingId === selectedMeetingId) {
         setSelectedMeetingId("");
-      } else if (target?.kind === "schedule") {
+      } else if (target.kind === "schedule") {
         setIncludeSchedule(false);
       }
-      if (target) {
-        setDraft((cur) => cur.replace(new RegExp(`@${target.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s?`, "g"), "").trimStart());
-      }
-      return prev.filter((x) => x.id !== id);
-    });
-  }, [selectedMeetingId]);
+    },
+    [selectedMeetingId],
+  );
+
+  const pickers = useChatComposerPickers({
+    value: draft,
+    setValue: setDraft,
+    textareaRef: composerRef,
+    mentionCatalog: allMentionTargets,
+    mentionLimit: 10,
+    mentionedTargets,
+    setMentionedTargets,
+    onPickMentionExtra: handlePickMentionExtra,
+    onRemoveMentionExtra: handleRemoveMentionExtra,
+    onInstantSlash: (cmd) => sendInstantSlashRef.current(cmd),
+    onSubmit: () => submitComposerRef.current(),
+  });
 
   const addPendingFiles = useCallback((incoming: File[]) => {
     if (incoming.length === 0) return;
@@ -555,7 +417,7 @@ export function AskTinaView({
     const title = conversationTitle(match.title);
     if (title !== "Untitled conversation") return title;
     const question = messages.find((message) => message.role === "user");
-    return question ? parseUserContext(question.text).body.slice(0, 60) : "New conversation";
+    return question ? parsePromptContextBlocks(question.text).body.slice(0, 60) : "New conversation";
   }, [sessions, activeSession, messages]);
 
   const setTransientFeedback = useCallback((msgId: string, label: string) => {
@@ -572,6 +434,10 @@ export function AskTinaView({
 
   const saveMessageToKnowledge = useCallback(
     async (replyText: string, msgId?: string) => {
+      const lockKey = msgId || "__slash_save__";
+      if (savingMsgIdsRef.current[lockKey]) return;
+      savingMsgIdsRef.current = { ...savingMsgIdsRef.current, [lockKey]: true };
+      setSavingMsgIds(savingMsgIdsRef.current);
       try {
         const titleHint =
           activeConversationTitle !== "New conversation" && activeConversationTitle !== "Ask Tina"
@@ -589,6 +455,11 @@ export function AskTinaView({
         const msg = err instanceof Error ? err.message : "Could not save reply to Knowledge.";
         if (msgId) setTransientFeedback(msgId, "Save failed");
         emitWebToast({ message: msg, tone: "error" });
+      } finally {
+        const next = { ...savingMsgIdsRef.current };
+        delete next[lockKey];
+        savingMsgIdsRef.current = next;
+        setSavingMsgIds(next);
       }
     },
     [activeConversationTitle, setTransientFeedback],
@@ -625,10 +496,16 @@ export function AskTinaView({
           setBusy(false);
           setPhase(null);
           setHistoryLoading(false);
+          clearAttachments();
+          setMentionedTargets([]);
+          setIncludeSchedule(false);
           emitWebToast({ message: "Đã mở cuộc trò chuyện mới", tone: "info" });
         } else if (compiled.commandId === "schedule") {
           setIncludeSchedule((cur) => {
             const next = !cur;
+            if (!next) {
+              setMentionedTargets((prev) => prev.filter((m) => m.kind !== "schedule"));
+            }
             emitWebToast({
               message: next ? "Đã bật ngữ cảnh lịch họp hôm nay" : "Đã tắt ngữ cảnh lịch họp hôm nay",
               tone: "info",
@@ -666,7 +543,13 @@ export function AskTinaView({
       const agentId = `a-${Date.now() + 1}`;
       setMessages((prev) => [
         ...prev,
-        { id: userId, role: "user", text: displayPrompt },
+        {
+          id: userId,
+          role: "user",
+          text: displayPrompt,
+          mentions: opts?.mentions?.length ? opts.mentions : undefined,
+          uploadedFiles: uploadedFiles.length ? uploadedFiles : undefined,
+        },
         { id: agentId, role: "agent", text: "", ops: [], approvals: [] },
       ]);
       setBusy(true);
@@ -823,7 +706,7 @@ export function AskTinaView({
         }
       }
     },
-    [activeSession, includeSchedule, loadSessionList, meetings, saveMessageToKnowledge, selectedMeetingId],
+    [activeSession, clearAttachments, includeSchedule, loadSessionList, meetings, saveMessageToKnowledge, selectedMeetingId],
   );
 
   const respondToApproval = async (approvalId: string, decision: ToolApprovalDecision) => {
@@ -1069,8 +952,12 @@ export function AskTinaView({
     (agentIndex: number) => {
       if (busy || historyLoading) return;
       for (let i = agentIndex - 1; i >= 0; i--) {
-        if (messages[i]?.role === "user") {
-          void sendMessage(messages[i].text);
+        const userMsg = messages[i];
+        if (userMsg?.role === "user") {
+          void sendMessage(userMsg.text, undefined, undefined, {
+            mentions: userMsg.mentions,
+            uploadedFiles: userMsg.uploadedFiles,
+          });
           return;
         }
       }
@@ -1079,30 +966,10 @@ export function AskTinaView({
   );
 
   const editUserMessage = useCallback((rawText: string) => {
-    const clean = parseUserContext(rawText).body;
+    const clean = parsePromptContextBlocks(rawText).body;
     setDraft(clean);
     composerRef.current?.focus();
   }, []);
-
-  const pickSlashCommand = useCallback(
-    (cmd: SlashCommandDef) => {
-      setSlashMatch(null);
-      setSlashDismissed(false);
-      if (cmd.instant) {
-        setDraft("");
-        void sendMessage(cmd.command);
-        return;
-      }
-      const nextValue = cmd.insertTemplate;
-      setDraft(nextValue);
-      window.requestAnimationFrame(() => {
-        if (!composerRef.current) return;
-        composerRef.current.focus();
-        composerRef.current.setSelectionRange(nextValue.length, nextValue.length);
-      });
-    },
-    [sendMessage],
-  );
 
   const onComposerPaste = useCallback(
     (e: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -1127,11 +994,30 @@ export function AskTinaView({
     [addPendingFiles],
   );
 
-  const onSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    const hasText = Boolean(draft.trim());
+  const submitComposer = useCallback(async () => {
+    const trimmed = draft.trim();
     const hasFiles = attachments.length > 0;
-    if ((!hasText && !hasFiles) || busy || uploading || historyLoading) return;
+    if ((!trimmed && !hasFiles) || busy || uploading || historyLoading) return;
+
+    // Validate & handle slash commands BEFORE uploading files or clearing draft/attachments.
+    if (trimmed) {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      const precheck = compileSlashPrompt(trimmed, {
+        tz,
+        meetingTitle: selectedMeeting ? selectedMeeting.title_custom || selectedMeeting.title : undefined,
+      });
+      if (precheck.kind === "error") {
+        setSessionError(precheck.message);
+        emitWebToast({ message: precheck.message, tone: "error" });
+        return;
+      }
+      if (precheck.kind === "instant") {
+        setDraft("");
+        pickers.closePickers();
+        void sendMessage(trimmed);
+        return;
+      }
+    }
 
     const text = draft;
     const mentionsSnapshot = mentionedTargets;
@@ -1160,18 +1046,38 @@ export function AskTinaView({
     }
 
     setDraft("");
-    setMentionMatch(null);
-    setSlashMatch(null);
-    setSlashDismissed(false);
+    pickers.closePickers();
     setMentionedTargets([]);
     void sendMessage(text, undefined, undefined, { mentions: mentionsSnapshot, uploadedFiles });
+  }, [
+    attachments,
+    busy,
+    clearAttachments,
+    draft,
+    historyLoading,
+    mentionedTargets,
+    pickers,
+    selectedMeeting,
+    sendMessage,
+    uploading,
+  ]);
+
+  submitComposerRef.current = () => {
+    void submitComposer();
+  };
+  sendInstantSlashRef.current = (cmd) => {
+    void sendMessage(cmd.command);
+  };
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    void submitComposer();
   };
 
   const emptyConversation = !historyLoading && messages.length === 0;
   const draftStarter = (text: string) => {
     setDraft(text);
-    setMentionMatch(null);
-    setSlashMatch(null);
+    pickers.closePickers();
     setMentionedTargets([]);
     composerRef.current?.focus();
   };
@@ -1488,7 +1394,7 @@ export function AskTinaView({
             ) : (
               messages.map((msg, msgIndex) => {
                 if (msg.role === "user") {
-                  const parsed = parseUserContext(msg.text);
+                  const parsed = parsePromptContextBlocks(msg.text);
                   return (
                     <div key={msg.id} className="tina-web-msg user">
                       {parsed.badges.length > 0 && (
@@ -1636,10 +1542,17 @@ export function AskTinaView({
                             className="tina-web-msg-action-btn"
                             aria-label="Save response to Knowledge"
                             title="Save response to Knowledge (/save)"
+                            disabled={Boolean(savingMsgIds[msg.id])}
                             onClick={() => void saveMessageToKnowledge(msg.text, msg.id)}
                           >
                             <WebIcon name={actionFeedback[msg.id] === "Saved" ? "check" : "bookOpen"} size={13} />
-                            <span>{actionFeedback[msg.id] === "Saved" ? "Saved" : "Save"}</span>
+                            <span>
+                              {savingMsgIds[msg.id]
+                                ? "Saving…"
+                                : actionFeedback[msg.id] === "Saved"
+                                  ? "Saved"
+                                  : "Save"}
+                            </span>
                           </button>
                           <button
                             type="button"
@@ -1682,7 +1595,7 @@ export function AskTinaView({
         <div className="tina-web-ask-footer">
           <form
             className={`tina-web-ask-form ${dragOver ? "is-drag-over" : ""}`}
-            onSubmit={(e) => void onSubmit(e)}
+            onSubmit={onSubmit}
             onDragOver={(e) => {
               e.preventDefault();
               if (!dragOver) setDragOver(true);
@@ -1706,23 +1619,23 @@ export function AskTinaView({
               }}
             />
             <LucianMentionPopover
-              open={mentionOpen}
-              listboxId={mentionListboxId}
-              query={mentionMatch?.query ?? ""}
-              items={filteredMentions}
-              activeIndex={mentionActiveIdx}
-              onHoverIndex={setMentionActiveIdx}
-              onPick={pickMention}
+              open={pickers.mentionOpen}
+              listboxId={pickers.mentionListboxId}
+              query={pickers.mentionMatch?.query ?? ""}
+              items={pickers.filteredMentions}
+              activeIndex={pickers.mentionActiveIdx}
+              onHoverIndex={pickers.setMentionActiveIdx}
+              onPick={pickers.pickMention}
             />
             <LucianSlashPopover
-              open={slashOpen}
-              listboxId={slashListboxId}
-              items={filteredSlashCommands}
-              activeIndex={slashActiveIdx}
-              onHoverIndex={setSlashActiveIdx}
-              onPick={pickSlashCommand}
+              open={pickers.slashOpen}
+              listboxId={pickers.slashListboxId}
+              items={pickers.filteredSlashCommands}
+              activeIndex={pickers.slashActiveIdx}
+              onHoverIndex={pickers.setSlashActiveIdx}
+              onPick={pickers.pickSlashCommand}
             />
-            <LucianMentionChips mentions={mentionedTargets} onRemove={removeMentionChip} />
+            <LucianMentionChips mentions={mentionedTargets} onRemove={pickers.removeMentionChip} />
             {attachments.length > 0 && (
               <div className="ux u451-att-strip" aria-label="Pending attachments">
                 {attachments.map((att) => (
@@ -1751,105 +1664,27 @@ export function AskTinaView({
               value={draft}
               role="combobox"
               aria-autocomplete="list"
-              aria-expanded={mentionOpen || slashOpen}
-              aria-controls={slashOpen ? slashListboxId : mentionListboxId}
-              aria-activedescendant={
-                mentionOpen
-                  ? `${mentionListboxId}-opt-${Math.min(mentionActiveIdx, Math.max(0, filteredMentions.length - 1))}`
-                  : slashOpen
-                    ? `${slashListboxId}-opt-${Math.min(slashActiveIdx, Math.max(0, filteredSlashCommands.length - 1))}`
-                    : undefined
-              }
+              aria-expanded={pickers.mentionOpen || pickers.slashOpen}
+              aria-controls={pickers.slashOpen ? pickers.slashListboxId : pickers.mentionListboxId}
+              aria-activedescendant={pickers.activeDescendantId}
               onPaste={onComposerPaste}
               onChange={(e) => {
                 const next = e.target.value;
                 setDraft(next);
-                syncComposerPickers(next, e.target.selectionStart ?? next.length);
+                pickers.syncPickers(next, e.target.selectionStart ?? next.length);
               }}
               onClick={(e) => {
                 const target = e.currentTarget;
-                syncComposerPickers(target.value, target.selectionStart ?? target.value.length);
+                pickers.syncPickers(target.value, target.selectionStart ?? target.value.length);
               }}
               onKeyUp={(e) => {
                 if (/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) {
                   const target = e.currentTarget;
-                  syncComposerPickers(target.value, target.selectionStart ?? target.value.length);
+                  pickers.syncPickers(target.value, target.selectionStart ?? target.value.length);
                 }
               }}
-              onBlur={(e) => {
-                const next = e.relatedTarget as HTMLElement | null;
-                if (next?.closest?.(".u451-pop, .u451-at")) return;
-                setMentionMatch(null);
-                setSlashMatch(null);
-              }}
-              onKeyDown={(e) => {
-                if (mentionOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-                  e.preventDefault();
-                  setMentionActiveIdx((cur) => (cur + (e.key === "ArrowDown" ? 1 : -1) + filteredMentions.length) % filteredMentions.length);
-                  return;
-                }
-                if (mentionOpen && (e.key === "Enter" || e.key === "Tab")) {
-                  e.preventDefault();
-                  const chosen = filteredMentions[Math.min(mentionActiveIdx, filteredMentions.length - 1)];
-                  if (chosen) pickMention(chosen);
-                  return;
-                }
-                if (mentionOpen && e.key === "Escape") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (mentionMatch) setMentionDismissedAnchor(mentionMatch.anchor);
-                  setMentionMatch(null);
-                  return;
-                }
-                if (slashOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-                  e.preventDefault();
-                  setSlashActiveIdx((cur) => (cur + (e.key === "ArrowDown" ? 1 : -1) + filteredSlashCommands.length) % filteredSlashCommands.length);
-                  return;
-                }
-                if (slashOpen && (e.key === "Enter" || e.key === "Tab")) {
-                  e.preventDefault();
-                  const chosen = filteredSlashCommands[Math.min(slashActiveIdx, filteredSlashCommands.length - 1)];
-                  if (chosen) pickSlashCommand(chosen);
-                  return;
-                }
-                if (slashOpen && e.key === "Escape") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setSlashDismissed(true);
-                  setSlashMatch(null);
-                  return;
-                }
-                if (e.key === "Backspace") {
-                  const el = e.currentTarget;
-                  const selStart = el.selectionStart ?? 0;
-                  const selEnd = el.selectionEnd ?? 0;
-                  if (selStart === selEnd && selStart > 0) {
-                    const token = findMentionBeforeCursor(
-                      draft,
-                      selStart,
-                      allMentionTargets.map((t) => t.label),
-                    );
-                    if (token) {
-                      e.preventDefault();
-                      const nextValue = draft.slice(0, selStart - token.length) + draft.slice(selStart);
-                      const nextPos = selStart - token.length;
-                      setDraft(nextValue);
-                      const strippedLabel = token.slice(1);
-                      setMentionedTargets((prev) => prev.filter((t) => t.label !== strippedLabel));
-                      window.requestAnimationFrame(() => {
-                        if (!composerRef.current) return;
-                        composerRef.current.setSelectionRange(nextPos, nextPos);
-                        syncComposerPickers(nextValue, nextPos);
-                      });
-                      return;
-                    }
-                  }
-                }
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void onSubmit(e);
-                }
-              }}
+              onBlur={pickers.handleBlur}
+              onKeyDown={pickers.handleKeyDown}
               placeholder={
                 selectedMeeting
                   ? "Ask about this meeting, type @ for context or / for commands…"
@@ -1860,14 +1695,14 @@ export function AskTinaView({
             <div className="tina-web-ask-bar">
               <div className="tina-web-ask-bar-left">
                 <LucianMentionTriggerButton
-                  onClick={insertAtMentionTrigger}
+                  onClick={pickers.triggerMention}
                   disabled={busy || uploading || historyLoading}
-                  expanded={mentionOpen}
+                  expanded={pickers.mentionOpen}
                 />
                 <LucianSlashTriggerButton
-                  onClick={insertSlashTrigger}
+                  onClick={pickers.triggerSlash}
                   disabled={busy || uploading || historyLoading}
-                  expanded={slashOpen}
+                  expanded={pickers.slashOpen}
                 />
                 <button
                   type="button"
@@ -1879,7 +1714,7 @@ export function AskTinaView({
                 >
                   <WebIcon name="upload" size={15} />
                 </button>
-                {includeSchedule && (
+                {includeSchedule && !mentionedTargets.some((m) => m.kind === "schedule") && (
                   <span className="ux u451-m" title="Today's and upcoming schedule is included in this chat">
                     <WebIcon name="calendar" size={11} />
                     <span>Schedule: today</span>
@@ -1887,7 +1722,10 @@ export function AskTinaView({
                       type="button"
                       className="u451-m-rm"
                       aria-label="Disable today's schedule context"
-                      onClick={() => setIncludeSchedule(false)}
+                      onClick={() => {
+                        setIncludeSchedule(false);
+                        setMentionedTargets((prev) => prev.filter((m) => m.kind !== "schedule"));
+                      }}
                     >
                       ×
                     </button>
