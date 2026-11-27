@@ -43,6 +43,15 @@ interface SectionDef {
 const SECTIONS: readonly SectionDef[] = [
   // Personal workspace — ordered for everyday users first, developer tools neatly at the bottom
   {
+    id: "account",
+    workspace: "personal",
+    group: "Profile",
+    label: "Account",
+    description: "View your profile, access, and sign-in options.",
+    icon: "user",
+    keywords: "account profile user email sign out logout terminal admin",
+  },
+  {
     id: "calendar",
     workspace: "personal",
     group: "Meetings",
@@ -78,15 +87,6 @@ const SECTIONS: readonly SectionDef[] = [
     description: "Switch between Obsidian Dark and Paper Light themes across your workspace.",
     icon: "sun",
     keywords: "appearance theme dark light mode color interface display",
-  },
-  {
-    id: "account",
-    workspace: "personal",
-    group: "Preferences",
-    label: "Account",
-    description: "Review your profile, role, and active session controls.",
-    icon: "user",
-    keywords: "account profile user email sign out logout terminal admin",
   },
   {
     id: "github",
@@ -147,7 +147,7 @@ const DEFAULT_USER: WebUser = {
 };
 
 function defaultSectionFor(workspace: SettingsWorkspace): SettingsSectionId {
-  return workspace === "team" ? "workspaces" : "calendar";
+  return workspace === "team" ? "workspaces" : "account";
 }
 
 function isSectionAvailable(s: SectionDef, isAdmin: boolean, hideModels: boolean): boolean {
@@ -161,7 +161,7 @@ function readSettingsRouteFromUrl(
   hideModels: boolean,
 ): { workspace: SettingsWorkspace; section: SettingsSectionId } {
   if (typeof window === "undefined") {
-    return { workspace: "personal", section: "calendar" };
+    return { workspace: "personal", section: defaultSectionFor("personal") };
   }
   const params = new URLSearchParams(window.location.search);
   const rawWs = params.get("settingsWorkspace");
@@ -421,39 +421,59 @@ export function SettingsView({
       case "account":
         return (
           <div className="tina-web-settings-stack">
-            <section className="tina-web-settings-card">
-              <div className="tina-web-account-row">
-                <WebAvatar name={user.name} image={user.image} size={52} />
-                <div className="tina-web-account-copy">
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <h3>{user.name}</h3>
+            <section className="tina-web-settings-card tina-web-account-profile" aria-label="Profile">
+              <div className="tina-web-account-identity">
+                <WebAvatar name={user.name} image={user.image} size={64} />
+                <h2>{user.name}</h2>
+              </div>
+              <dl className="tina-web-account-details">
+                <div>
+                  <dt>Email address</dt>
+                  <dd>{user.email || "Unavailable"}</dd>
+                </div>
+                <div>
+                  <dt>Workspace role</dt>
+                  <dd>
                     <span className={`tina-web-status-pill ${isAdmin ? "live" : "completed"}`}>
                       {isAdmin ? "Administrator" : "Member"}
                     </span>
-                  </div>
-                  <p>{user.email || "Signed-in session"}</p>
+                  </dd>
                 </div>
-              </div>
-              <div className="tina-web-account-actions">
+              </dl>
+            </section>
+            {(canOpenTerminal || onSignOut) && (
+              <section className="tina-web-settings-card tina-web-account-session" aria-labelledby="account-session-heading">
+                <h2 id="account-session-heading">Access and session</h2>
                 {canOpenTerminal && (
-                  <a href={terminalHref} className="tina-web-btn-ghost">
-                    <WebIcon name="terminal" size={14} />
-                    <span>Open TINA Terminal</span>
-                  </a>
+                  <div className="tina-web-account-action">
+                    <div>
+                      <h3>TINA Terminal</h3>
+                      <p>Open the workbench to manage your meetings and workspace.</p>
+                    </div>
+                    <a href={terminalHref} className="tina-web-btn-ghost">
+                      <WebIcon name="terminal" size={14} />
+                      <span>Open TINA Terminal</span>
+                    </a>
+                  </div>
                 )}
                 {onSignOut && (
-                  <button
-                    type="button"
-                    className="tina-web-btn-ghost"
-                    onClick={onSignOut}
-                    style={{ color: "var(--tw-danger)" }}
-                  >
-                    <WebIcon name="logout" size={14} />
-                    <span>Log out</span>
-                  </button>
+                  <div className="tina-web-account-action">
+                    <div>
+                      <h3>Browser session</h3>
+                      <p>Sign out of TINA in this browser.</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="tina-web-btn-ghost tina-web-account-logout"
+                      onClick={onSignOut}
+                    >
+                      <WebIcon name="logout" size={14} />
+                      <span>Log out</span>
+                    </button>
+                  </div>
                 )}
-              </div>
-            </section>
+              </section>
+            )}
           </div>
         );
       case "workspaces":

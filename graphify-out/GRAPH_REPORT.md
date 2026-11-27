@@ -1,55 +1,55 @@
 # Graph Report - TINA-s3-ephemeral  (2026-11-27)
 
 ## Corpus Check
-- 3556 files · ~2,665,175 words
+- 3559 files · ~2,672,413 words
 - Verdict: corpus is large enough that graph structure adds value.
-- Unclassified: 211 file(s) not represented in the graph (top: (none) 67, .css 65, .lock 22)
+- Unclassified: 212 file(s) not represented in the graph (top: (none) 67, .css 66, .lock 22)
 
 ## Summary
-- 38190 nodes · 83023 edges · 1878 communities (1175 shown, 703 thin omitted)
-- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 6269 edges (avg confidence: 0.88)
+- 38244 nodes · 83220 edges · 1864 communities (1161 shown, 703 thin omitted)
+- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 6265 edges (avg confidence: 0.88)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `aa4cba97`
+- Built from commit: `58d4286b`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - ref_node_fs
-- test_unit_foundation.py
-- Json
+- voice_knowledge.py
+- httpx
 - startDesktop
 - CompletionResult
 - test_workspace_membership.py
 - re
 - create_app
 - subject_of
-- viewer/server.mjs
+- worker/engine.py
 - test_room.py
 - InMemoryMeetingRepo
 - orchestrator.test.ts
 - session-lifecycle.test.mjs
 - control_plane/api.py
 - test_link_loop.py
-- routines.tsx
+- test_lane_a_shared_mounts.py
 - TranscriptStore
-- telemetry.ts
-- scrubbed_git_env
-- test_isolation.py
-- ref_vitest
-- control_plane/api.py
-- FakeRedisBus
 - bot/src/index.ts
+- chat.tsx
+- test_voice_decision_flow.py
+- ref_vitest
+- control_plane/live_assist.py
+- FakeRedisBus
+- control_plane/meeting_knowledge.py
 - SqliteDB
-- ref_node_module
-- collector/fakes.py
+- lifecycle/retry.py
+- select
 - runtime_kernel/__main__.py
 - SpeakerStreamManager
-- time
+- numpy
 - pytest
 - test_bridge.py
-- test_meeting_knowledge.py
+- workspace_write_lock
 - workspace.tsx
 - test_google_calendar_sync.py
 - ref_next
@@ -58,10 +58,10 @@
 - tests/test_worker.py
 - tokens.py
 - dashboard/package.json
-- .seed_meeting
+- test_transcript_share.py
 - ref_react
 - desktop.ts
-- bot/src/pipeline.ts
+- copy
 - lifecycle/__init__.py
 - InMemoryTranscriptStore
 - bot/src/index.ts
@@ -72,7 +72,7 @@
 - settings.tsx
 - os
 - Resources
-- test_mail_body_cap.py
+- collector/fakes.py
 - test_join_evidence.py
 - admit
 - CompletionResult
@@ -83,7 +83,7 @@
 - send-magic-link/route.ts
 - test_email_lookup_plan.py
 - gates.mjs
-- _handle
+- test_transcription_watcher.py
 - today.tsx
 - meetings-client.tsx
 - test_recordings.py
@@ -96,11 +96,11 @@
 - test_transcript_search.py
 - test_proxy.py
 - parse
-- capture-bridge.ts
+- memory.py
 - googlemeet/join.ts
-- SettingsView.tsx
+- WebApp.tsx
 - Parameters
-- gatewayWS.ts
+- liveMeetings.ts
 - test_single_flight.py
 - run_multiplex
 - src-tauri/src/main.rs
@@ -120,15 +120,15 @@
 - pyannote-segmenter.ts
 - bot/package.json
 - jsonschema
-- AskTinaView.tsx
+- MeetingDetailView.tsx
 - shared/config.py
 - FakeClock
-- today.tsx
+- bot-transcript.ts
 - msteams/join.ts
 - test_bot_spawn.py
 - echo_cancel.rs
-- Workbench.tsx
-- mock.test.ts
+- surfaces/meeting.tsx
+- webhook.py
 - _admin
 - meetingPrep.tsx
 - join/src/index.ts
@@ -142,9 +142,9 @@
 - mailbox.py
 - teams-csrc-live-replay-server.ts
 - test_multi_session.py
-- test_turn_shadow.py
+- hashlib
 - agent/tests/test_live_assist.py
-- re
+- register
 - storage_init.py
 - sidepanel.ts
 - teams-capture/src/index.ts
@@ -155,7 +155,7 @@
 - recordings/__init__.py
 - agent/tests/test_meeting_voice.py
 - MetricTransformations
-- typing
+- discover.py
 - MailpitInbox
 - humanized.test.ts
 - capture.rs
@@ -175,13 +175,13 @@
 - chatgptPlanAuth.ts
 - getAuthCookieName
 - join/package.json
-- parse_ics
+- pyannote-segmenter.ts
 - to_c_ptr
 - EntryPointTest
 - chunked-transcriber.ts
 - tts/test_streaming.py
 - WorkloadSpec
-- AuthUnavailable
+- gateway/adapters.py
 - app/main.py
 - useMeeting.ts
 - run_models_test
@@ -189,14 +189,14 @@
 - Parameters
 - test_tool_error_shape.py
 - discord/src/config.ts
-- profiles.py
-- test_chat_model_refresh.py
+- runtime_kernel/__main__.py
+- dispatch.py
 - InMemoryStorage
 - merge-card-gate.mjs
 - test_admin_panel.py
 - Resources
 - env_flag
-- select
+- SqlAlchemyRecordingRepo
 - gmeet-capture/package.json
 - tina_asr.py
 - Resource
@@ -215,8 +215,8 @@
 - Resource
 - AgentApi
 - test_meeting_knowledge.py
-- test_discover.py
-- verify_voice_reply
+- groq_responses_proxy
+- test_voice_knowledge.py
 - test_meeting_annotate.py
 - test_readopt.py
 - test_security_routes.test.ts
@@ -227,7 +227,7 @@
 - viewer.ts
 - Parameters
 - session.ts
-- capture-bridge.boundary.test.ts
+- CsrcTurnSource
 - test_meeting_postprocess_offline.py
 - contribution-rights-gate.mjs
 - MdxDoc.tsx
@@ -253,7 +253,6 @@
 - meeting_api/app.py
 - offscreen.ts
 - run_multiplex
-- mcp/tests/test_app.py
 - tina_asr.py
 - run_single_flight
 - test_schema_sync_fail_closed.py
@@ -276,29 +275,29 @@
 - capture-codec/src/index.ts
 - WorkloadHandle
 - FakeGateway
-- test_service_authority.py
-- test_service_denial_passthrough.py
+- test_meeting_knowledge.py
+- collector/processed_notes.py
 - teams-speaker-indicators.test.ts
 - stack_test.py
-- runtime.tsx
+- asrStatus.tsx
 - test_route_manifests.py
 - meeting.rs
 - panel-state.test.mjs
-- create_app
-- notes.ts
+- default_registry
+- test_onboarding_event.py
 - test_bot_teardown.py
 - meeting-api/tests/test_live_assist.py
 - Path
-- gateway/__init__.py
+- gateway/app.py
 - merge-card.yml
-- uuid
-- upstream
+- time
+- ref_path
 - engine
 - LucianCursorGlowGrid.tsx
 - lifecycle/voice_handoff.py
 - meeting_api/events.py
 - meet-panel.ts
-- stop_router.py
+- track-namer.ts
 - OnlineStream
 - main
 - app/events.py
@@ -314,12 +313,12 @@
 - jitsi-capture/src/index.ts
 - mixed-pipeline/src/index.ts
 - person
-- run_harness_turn
+- agent/tests/test_s3_workspace.py
 - captions.rs
 - test_context_grounding.py
 - admin.tsx
 - Json
-- noise-suppression.ts
+- FakeSocket
 - funasr/server.py
 - test_gateway_seam.py
 - test_mail_body_cap.py
@@ -333,7 +332,7 @@
 - mcp/tests/test_identity_vocabulary.py
 - test_carrier_census.py
 - ClusterNameBinder
-- _authorize
+- ._merge_live_segments
 - model.rs
 - teams-capture.test.ts
 - teams-name-unresolved.test.ts
@@ -345,9 +344,9 @@
 - test_admin_and_keys.test.ts
 - notices.py
 - admin_api/__main__.py
-- admin-store.ts
+- BotRefiner
 - PlaybackStore
-- test_pg_advisory_lock_issues_single_arg_bigint_sql
+- Any
 - zoom-capture.test.ts
 - test_system_webhook.py
 - AsrTest
@@ -358,8 +357,8 @@
 - adminApi.ts
 - api/[...path]/route.ts
 - desktop/package.json
-- conformance/tests/test_contract_conformance.py
-- admin.tsx
+- urllib_error
+- shared/s3_workspace.py
 - zoom-capture/src/index.ts
 - Parameters
 - OfflineSpeakerDiarizationConfig
@@ -370,7 +369,7 @@
 - steps
 - authOptions.ts
 - analyze.mjs
-- test_mcp_surface.py
+- test_cookbook_l0.py
 - test_critical_paths.py
 - zoom/selectors.ts
 - asrStatus.tsx
@@ -389,8 +388,8 @@
 - Resources
 - OnlineModelConfig
 - OfflineSpeechDenoiserModelConfig
-- test_tool_auth.py
-- MeetingCanvasView.tsx
+- devDependencies
+- BotAligner
 - context
 - runtime
 - Rules
@@ -409,16 +408,16 @@
 - tina.py
 - Resources
 - createTeamsSpeakers
-- VadProbeTests
+- funasr_vad_probe.py
 - gmeet-speakers.test.ts
 - Parameters
 - viegem
 - ContainerDefinitions
-- LayoutService
+- test_cookbook_l1.py
 - Properties
-- test_kws_shadow.py
+- conformance/tests/test_contract_conformance.py
 - VpcId
-- language-picker.tsx
+- meetings/[id]/page.tsx
 - online_asr.rs
 - admin-api
 - interval
@@ -427,7 +426,7 @@
 - test_person_settings.py
 - manifest.json
 - organization
-- worker
+- test_voice_eval_report.py
 - Base
 - test_person_settings_doors.py
 - DistributionConfig
@@ -438,7 +437,7 @@
 - Properties
 - OfflineStream
 - CliTest
-- gateway/adapters.py
+- read_purpose
 - ast
 - compilerOptions
 - runtime_kernel/__init__.py
@@ -448,15 +447,15 @@
 - test_secrets_broker.py
 - test_redis_degraded_startup.py
 - test_meeting_db_id_addressing.py
-- model.rs
+- S3WorkspaceStore
 - SecurityGroupIngress
 - runtime
 - mixed-pipeline/src/index.ts
 - check-isolation-py.mjs
-- _deliver_signed
-- analyze.mjs
+- workspace_publish.py
+- test_api_surface.py
 - Pcm48kStereoTo16kMono
-- RedisBus
+- tokens.py
 - test_schedule_digest.py
 - RouteTableId
 - test_config_declaration.py
@@ -466,17 +465,17 @@
 - cn
 - test_assembled_call_path.py
 - Calendar Sync Guide
-- test_coordinator.py
+- mint_token
 - distill.mjs
 - arch-dsl.mjs
 - AssumeRolePolicyDocument
-- aws/README.md
+- Parameters
 - Resources
 - project_response_data
 - values.yaml
 - rerun
 - steps
-- test_dtln.py
+- test_readiness_requires_authenticated_tts_without_synthesizing
 - Statement
 - compilerOptions
 - time
@@ -485,7 +484,7 @@
 - test_flows_api_service.py
 - format.ts
 - Slim
-- run_service_authority_sweep
+- test_service_authority.py
 - live-walk.sh
 - jitsi-capture/package.json
 - remote-browser/package.json
@@ -495,7 +494,7 @@
 - zoom-capture/package.json
 - ContainerDefinitions
 - mint_token
-- test_meeting_followup.py
+- workspaceGraph.tsx
 - test_tool_auth.py
 - teams-capture/package.json
 - ContainerDefinitions
@@ -509,26 +508,26 @@
 - components.json
 - Resources
 - compilerOptions
-- worker/engine.py
+- worker/meeting.py
 - SecurityGroupEgress
 - test_storage_init.py
 - Outputs
 - "Concepts"
 - recording/package.json
 - whisper/package.json
-- test_email_design.py
+- test_events.py
 - services
 - authority-fixture
 - meetingApi
-- test_google_calendar_regressions.py
+- register
 - ServerTests
-- Stack
-- buffer/src/audio-ring.test.ts
+- shutil
+- session-store.test.ts
 - src-tauri/src/resampler.rs
 - terminal/server.mjs
 - Properties
 - test_voice_retrieval_eval.py
-- test_meeting_intent.py
+- test_capture_transcription_settings.py
 - ref_node_http
 - identity
 - Runtime
@@ -539,7 +538,7 @@
 - Resources
 - Properties
 - Resources
-- desktop.ts
+- access.test.ts
 - AudioTaggingOfflineStream
 - TuiAndInstallTest
 - SetupTest
@@ -551,7 +550,7 @@
 - test_calendar_config.py
 - schema.sql
 - Properties
-- test_api_agility.py
+- test_workspace_git_sync.py
 - register.py
 - compilerOptions
 - webrtc-dedup.test.ts
@@ -565,7 +564,7 @@
 - Statement
 - viegem
 - adminApi
-- meeting_steering.py
+- calendar/page.tsx
 - Properties
 - test_speech_status.py
 - Rules
@@ -573,11 +572,11 @@
 - Outputs
 - Statement
 - admin
-- BaseModel
+- build_gateway
 - Conditions
 - terminal
 - ContainerDefinitions
-- RecordingRepo
+- test_signal_tapes.py
 - SpeakerEmbeddingManager
 - buffer/package.json
 - tts
@@ -589,9 +588,9 @@
 - harvest-hallucinations.ts
 - Parameters
 - meet-ask.ts
-- streamable_http.py
+- BotDiarizer
 - test_auto_join_recording_parity.py
-- test_bind.py
+- test_lifecycle_diagnostics.py
 - secrets
 - values-staging.yaml
 - Parameters
@@ -600,7 +599,7 @@
 - Properties
 - ref_node_assert
 - code-generator.ts
-- transcription/main.py
+- tina_mcp/app.py
 - subtitles.js
 - ref_node_child_process
 - admin_api/__main__.py
@@ -612,13 +611,13 @@
 - meet-content.ts
 - guard
 - core/agent — the execution domain (transcript → governed action)
-- serve
+- identity_core/__init__.py
 - AudioCaptureSource
-- render_citations
+- workspace_store.py
 - redis
 - compilerOptions
 - format.ts
-- AppGates.tsx
+- Outputs
 - runtime.v1 — the workload lifecycle contract
 - tape-replay.ts
 - Properties
@@ -632,23 +631,23 @@
 - Outputs
 - with
 - meetings/modules — the bricks
-- test_llm_claude_cli.py
+- .run_turn
 - viegem
 - test_main_auto_join_wiring.py
 - assert_422
 - body
 - compilerOptions
-- sidebar.tsx
+- version-chip.tsx
 - Properties
 - Configuration Reference
 - desktop-native/package.json
 - stt/route.ts
-- InMemoryRecordingRepo
+- staging-egress.yml
 - Properties
 - test_contracts_consumer.py
 - eval/package.json
 - mock_scenarios_test.py
-- attendance.py
+- Outputs
 - createTeamsCaptions
 - meeting-api/tests/test_contract_conformance.py
 - entities
@@ -663,7 +662,7 @@
 - test_speech_status.py
 - release-value-gate.mjs
 - journey.sh
-- replay.test.ts
+- test_stale_reaper_cannot_close_a_replacement_runtime_or_delete_its_room
 - inpage.ts
 - parametrize
 - stream/route.ts
@@ -673,7 +672,7 @@
 - canvasSource.ts
 - FakeDownstream
 - build
-- counting_fixture.py
+- argparse
 - _intake_fields
 - _compose
 - Morgan Stanley
@@ -685,20 +684,20 @@
 - livekit
 - Chart.yaml
 - agentApi
-- test_transcription_watcher.py
+- test_security_routes.test.ts
 - global
 - RuntimeEnvTests
-- ws-event-log.tsx
+- PassthroughSecretsBroker
 - createDictationStateMachine
-- callbacks.py
-- cleanTranscriptText
+- RedisPendingStore
+- BrokeredSecret
 - gmeet-capture/tsconfig.json
 - jitsi-capture/tsconfig.json
 - mixed-capture-core/tsconfig.json
 - record-chunker/tsconfig.json
 - teams-capture/tsconfig.json
 - zoom-capture/tsconfig.json
-- voice_prices.py
+- test_voice_shared_meetings.py
 - changelog-collect.mjs
 - OfflinePunctuation
 - OnlinePunctuation
@@ -720,7 +719,7 @@
 - gmeet-pipeline/tsconfig.json
 - s3
 - Properties
-- capture-codec/src/contracts/golden/generate.mjs
+- Properties
 - LinearResampler
 - utils.rs
 - Wave
@@ -728,7 +727,7 @@
 - discord-connector
 - flows-api
 - flows-mailbox
-- asr-checkpoint.test.ts
+- dashboard/src/app/layout.tsx
 - postgres
 - services
 - entities
@@ -742,7 +741,7 @@
 - tasks
 - "Workspaces & live collaboration"
 - Third-party licenses — baked artifacts outside the dependency gate
-- test_recordings_range.py
+- InMemoryRecordingRepo
 - buffer/tsconfig.json
 - capture-codec/tsconfig.json
 - mixed-pipeline/tsconfig.json
@@ -763,10 +762,10 @@
 - tts-models
 - _context_grounding
 - ingress
-- createHttpLifecycleSink
+- observe.mjs
 - runtime/tests/test_redis_client_hardening.py
-- .fetch
-- S3Storage
+- _generate
+- calendar/oauth/complete/route.ts
 - Statement
 - Statement
 - Outputs
@@ -825,7 +824,7 @@
 - promote
 - Jane Liu
 - Resources
-- voice_retrieval.py
+- semantic_rank
 - Your workspace
 - desktop — the meetings all-in-one capture host (Node/TS)
 - Juan Estrella
@@ -896,9 +895,9 @@
 - test_the_api_key_header_carries_a_bearer_too
 - recordings — chunk upload + finalize → `meeting.data` JSONB
 - engines
-- FakeMediaRecorder
+- test_bedrock_settings.py
 - TINA native ASR
-- feed.mjs
+- _ConformanceAuthorizer
 - runtime_kernel — the kernel
 - TINA speech client
 - Resources
@@ -928,7 +927,7 @@
 - Flow Step Vocabulary
 - "Architecture — the governing reference"
 - Interactive bots
-- asr-status/route.ts
+- calendar/oauth/start/route.ts
 - scripts/probe — the standing full-journey smoke probe (`make probe`)
 - createZoomSpeakers
 - Dashboard Test Findings
@@ -950,7 +949,7 @@
 - ContainerDefinitions
 - Your workspace — knowledge agent conventions
 - agent/tests/conftest.py
-- test_plan_timeout_uses_completion_api_shared_sources_and_still_requires_verification
+- tina/[...path]/route.ts
 - processed-notes.v1 — the per-meeting cleaned-transcript stream + its terminal marker
 - G-Research
 - Sources & data provenance
@@ -1083,8 +1082,8 @@
 - eval.sh
 - namer-corpus/run.sh
 - verify.sh
-- tina_style.py
-- test_parse_meeting_link.py
+- WorkspaceStream
+- TestTeamsEnterpriseLong
 - EgressProxyDiscovery
 - Resources
 - Properties
@@ -1489,7 +1488,7 @@
 - ADR 0033 — The two loops: debug ≠ deliver, flake is earned, the human appears twice (D-L cluster)
 - ADR-0034 — Contributor rights are declared at intake and corporate evidence is head-bound
 - ADR 0035 — Interactive meeting capabilities live behind one act endpoint; the agent is an ordinary client
-- RedisDeliveryLedger
+- InMemoryDeliveryLedger
 - 1794-discord-voice-connector
 - `docs/changelog.d/` — per-PR changelog fragments (the towncrier pattern)
 - "Local change workflow"
@@ -1550,7 +1549,7 @@
 - tina-storage-tools
 - tina-transcription
 - tina-transcription-mlx
-- _FakeRedis
+- test_foundation_proxy.py
 - Properties
 - Account-Scoped ASR Worker Lifecycle
 - Conditions
@@ -1570,10 +1569,10 @@
 - tools — dev tooling — fixture-capture · generators (not shipped)
 - Parameters
 - Properties
-- test_main_ensure_fts_index_wiring.py
+- sys
 - workspace-release.buildspec.yml
 - eval-ui/server.mjs
-- teams-caption-wiring.test.ts
+- El
 - TINA on AWS
 - truth.py
 - cursor
@@ -1581,23 +1580,23 @@
 - terminal
 - bedrock_workspace.py
 - .do_GET
-- transcribe_audio
+- gateway/tests/test_health.py
 - register
 - .last_json
 - Properties
 - Properties
-- RuntimeHttpClient
+- _FakeS3
 - Properties
 - SecurityGroupEgress
 - Statement
 - Properties
 - VoiceHandoffs
-- test_stack_redis.py
+- _validator_for
 - threading
 - ContainerDefinitions
 - PrivateInfraIso.tsx
 - sync.py
-- test_stress_spawn_cap_holds_at_scale
+- _find_processed_view
 - engine
 - test_note_date.py
 - replay.ts
@@ -1605,14 +1604,14 @@
 - extension/README.md
 - connect-extension/README.md
 - Ask TINA trong Google Meet
-- test_recording_golden.py
+- Properties
 - staging-edge.yml
 - audio-pipeline.ts
 - test_lifecycle_http.py
 - Properties
 - Properties
 - Properties
-- guard
+- notification-banner.tsx
 - Properties
 - tests/test_task_flow.py
 - Statement
@@ -1625,11 +1624,11 @@
 - Properties
 - Properties
 - WorkspaceFileSystem
-- liveMeetings.store.test.tsx
-- CollectorAuthorizer
+- parametrize
+- _decode_claimed
 - DistributionConfig
 - msteams/removal.ts
-- InMemoryCommandPublisher
+- meeting_api/__init__.py
 - staging-terminal.yml
 - DeploymentConfiguration
 - _RetractRedis
@@ -1640,7 +1639,7 @@
 - Properties
 - WorkspaceDataKey
 - inputs
-- w
+- _upsert_doc
 - analytics.ts
 - HeroMeetingScene.tsx
 - extension-api/[...path]/route.ts
@@ -1654,15 +1653,15 @@
 - Properties
 - HarnessActions
 - generate-release-version.js
-- ControlError
+- HealthCheck
 - Properties
 - pending-stability.test.ts
-- Workers
+- test_disconnect_before_pcm_headers_releases_reserved_audio_slot
 - attribute.mjs
 - GlobalQuota
 - DraftWorkerImage
 - TestGoogleMeet
-- default_preactive_grace
+- overrides
 - docs-current-gate.mjs
 - WorkspaceIdleTimeoutSec
 - SecurityGroupEgress
@@ -1672,9 +1671,9 @@
 - Properties
 - SecurityGroupIngress
 - SecurityGroupIngress
-- ChatGPTVoiceOwner
-- .run_once
-- EnableDurableWorkspace
+- handler_for
+- .handle
+- _transcript_route
 - test_s3_middleware_hydrates_meeting_voice_reads_and_pushes_draft_writes
 - provision-bot-google-session.sh
 - Properties
@@ -1682,90 +1681,83 @@
 - EnableLegacyEfs
 - Outputs
 - Outputs
-- Runnable
+- Json
 - ChatGPTVoiceRoom
 - staging-workspace-s3.yml
-- EnableVoiceCompletion
+- ConnErr
 - DraftPilotUserIds
 - WorkspaceStorage
 - WorkspaceBedrockOwner
 - MigrateFromEfs
-- WorkspacePilotRoleB
+- SecurityGroupIngress
 - landing/README.md
-- WorkspacePilotUserIds
-- test_manifest_files.py
+- DesiredCount
+- email.ts
 - assert-release-version.js
-- anthropic_tools
+- VcsPort
 - Properties
 - CustomDomainName
-- test_native_probe_rejects_incomplete_tool_followup
-- truth.py
-- FakeMediaRecorder
+- no_subprocess
+- api_core_paths
+- TestTeamsPersonal
 - teams-chat.ts
-- test_packaging.py
-- _ConflictThenCreateSession
-- DateTimePicker.tsx
+- CrashTransport
+- VoicePilotUserIds
+- _local_push_targets_allowed
 - FakeBrokeredSecret
-- WorkspaceSharedRoleC
+- admin_old_name
 - Properties
 - WorkspaceStorage
-- InvocationBucket
-- WorkspaceWikiRoleB
-- staging-agent-api.yml
+- _drive_bots_status
+- test_golden_top_level_fields_present_in_real_response
+- test_owner_voice_and_glossary_are_pinned_privately_per_session
 - ValkeySubnets
-- HealthCheck
+- WorkspaceRuntimeSecurityGroupId
 - WorkspacePilotUserIds
 - staging-flows.yml
 - viegem-models
 - WorkspaceMaxLifetimeSec
-- PCMResponse
+- DefaultBotName
 - ContainerDefinitions
 - privacy/page.tsx
 - SharedWorkspace
-- WorkspaceChatGPTOwner
-- meeting_api/__main__.py
+- FlowsApiKeyArn
+- build_production_app
 - recording_codec.py
-- CircularBuffer
-- WorkspacePilotRoleA
+- GatewayExtensionOrigins
+- GoogleSecretArn
 - jobs
 - schema_digest.py
 - test_admit_batch_error_shape.py
-- WorkspaceS3Users
+- LiveKitAgentUrl
 - csrc-spine.smoke.test.ts
 - Two-model live meeting state
-- WorkspaceWikiRoleA
-- CoreLogs
-- LoadBalancers
+- LiveKitSecretArn
+- McpOriginSecurityGroupId
+- TranscriptionTokenArn
 - _MemWriter
 - NovaWorkspaceOwnerIds
 - WorkspaceAccessPoint
 - GenerateSecretString
-- flows/tests/test_health.py
+- TranscriptionUrl
 - WorkspaceWorkerImage
-- BoundedBody
+- TtsProfileKeyArn
 - format_event
-- _http_meeting_owner_lookup
-- AgentApiImage
-- AgentReachClientSecurityGroupId
+- TtsTokenArn
+- _gh
+- TtsUrl
+- dockview
 - TranscriptionModel
 - TranscriptionUrl
-- validate_webhook_url
+- webhooks/__init__.py
 - build
-- fastapi_testclient
+- test_workspace_manage_routes.py
 - Contents
 - VoiceActivityDetector
-- AgentReachUrl
-- _FakeWS
-- parametrize
-- handler
-- DotenvxEnvTest
-- ChatGPTVoiceModel
-- ChatGPTVoiceSecretArn
-- WorkspaceBedrockModel
-- WorkspaceChatGPTSecretArn
-- WorkspaceS3DataKeyArn
+- ws@^8.21.0
+- test_a_stamped_user_id_does_not_beat_an_authenticated_person
+- test_transcript_accepts_canonical_and_legacy_identity
 - SyncCoordinator
-- WorkspaceS3SecretsKeyArn
 - BotSpeakerIdleTimeoutSec
 - ValkeyAuth
 - BotSpeakerMaxBufferSec
@@ -1778,7 +1770,6 @@
 - DraftValkeySecurityGroupId
 - DynamicWorkspaceTaskRoleArn
 - public/README.md
-- _resolve_native
 - WorkspaceS3DataKeyArn
 - EphemeralWorkspaceExecutionRoleArn
 - Docker
@@ -1789,24 +1780,17 @@
 - WorkspaceRoleArns
 - WorkspaceS3Bucket
 - WorkspaceTasks
-- test_proc_flag_get_never_hits_the_processed_stream
 - OwnerQuota
 - privacy/README.md
 - test_health_states_each_capability
-- test_report_issue_without_native_meeting_id_still_authenticates_the_caller
-- test_report_issue_unowned_native_meeting_id_files_without_an_entity
 - test_ticket_path_touches_no_database
-- _handle
 - staging-workspace-s3-monitoring.yml
 - test_replace_is_refused_outright_not_silently_ignored
 - test_list_meetings_rejects_a_malformed_metadata_filter
 - test_annotate_returns_only_what_was_written
-- make_log_event
 - test_probe_sends_real_audio_so_a_metered_backend_can_price_it
 - deploy-core.sh
 - HideModelSettings
-- .test_redirect_does_not_forward_auth_and_oversize_body_is_rejected
-- ProbeResponseMiddleware
 - health/route.ts
 - _model_creds_configured
 - deploy-speech.sh
@@ -1816,7 +1800,6 @@
 - [...path]/README.md
 - extension-api/README.md
 - extension-api/__tests__/README.md
-- _no_key
 - bootstrap-docker.sh
 - setup-nat-on-core.sh
 - test_inflight_response_rechecks_owner_access_before_saving
@@ -1843,7 +1826,7 @@
 6. `cn()` - 173 edges
 7. `Dispatcher` - 161 edges
 8. `load_settings()` - 157 edges
-9. `WorkspaceReader` - 117 edges
+9. `WorkspaceReader` - 119 edges
 10. `create_app()` - 114 edges
 
 ## Surprising Connections (you probably didn't know these)
@@ -1853,16 +1836,16 @@
   docs/aws-s3-ephemeral-and-hardening.md → core/runtime/src/runtime_kernel/enforcement.py
 - `Read-only MCP on staging` --references--> `get_meeting_transcript()`  [INFERRED]
   deploy/aws/README.md → core/meetings/services/mcp/src/tina_mcp/app.py
+- `test_ensure_schema_creates_expected_tables()` --calls--> `inspect()`  [INFERRED]
+  core/identity/services/admin-api/tests/test_stack_postgres.py → deploy/compose/bin/tina_asr.py
 - `Offline concurrency and batching experiments` --references--> `classify()`  [INFERRED]
   docs/discussion-review.md → core/agent/worker/discussion_review.py
-- `Operator profiling` --references--> `failure_code()`  [INFERRED]
-  docs/live-assist.md → core/agent/control_plane/meeting_translation.py
 
 ## Import Cycles
 - 1-file cycle: `clients/desktop-native/src-tauri/src/echo_cancel.rs -> clients/desktop-native/src-tauri/src/echo_cancel.rs`
 - 1-file cycle: `clients/desktop-native/src-tauri/src/capture.rs -> clients/desktop-native/src-tauri/src/capture.rs`
-- 1-file cycle: `clients/desktop-native/src-tauri/src/main.rs -> clients/desktop-native/src-tauri/src/main.rs`
 - 1-file cycle: `core/meetings/services/native-asr/src/model.rs -> core/meetings/services/native-asr/src/model.rs`
+- 1-file cycle: `clients/desktop-native/src-tauri/src/main.rs -> clients/desktop-native/src-tauri/src/main.rs`
 - 1-file cycle: `clients/desktop-native/src-tauri/src/ingest_auth.rs -> clients/desktop-native/src-tauri/src/ingest_auth.rs`
 - 1-file cycle: `clients/desktop-native/src-tauri/src/local_ws.rs -> clients/desktop-native/src-tauri/src/local_ws.rs`
 - 2-file cycle: `core/gateway/services/gateway/src/gateway/__init__.py -> core/gateway/services/gateway/src/gateway/app.py -> core/gateway/services/gateway/src/gateway/__init__.py`
@@ -1870,235 +1853,235 @@
 - 2-file cycle: `core/meetings/services/meeting-api/src/meeting_api/__init__.py -> core/meetings/services/meeting-api/src/meeting_api/app.py -> core/meetings/services/meeting-api/src/meeting_api/__init__.py`
 - 2-file cycle: `clients/desktop-native/src-tauri/src/capture.rs -> clients/desktop-native/src-tauri/src/echo_cancel.rs -> clients/desktop-native/src-tauri/src/capture.rs`
 
-## Communities (1878 total, 703 thin omitted)
+## Communities (1864 total, 703 thin omitted)
 
 ### Community 0 - "ref_node_fs"
 Cohesion: 0.01
-Nodes (240): dynamic, GET(), OPS_STATUS_DEFAULT_FILE, OpsStatus, readOpsStatus(), fixture(), HEX_ALLOWLIST, SCAN_DIRS (+232 more)
+Nodes (329): builtins, deps, pending, pkg, root, scanned, violations, @vitejs/plugin-react@^6.0.3 (+321 more)
 
-### Community 1 - "test_unit_foundation.py"
-Cohesion: 0.05
-Nodes (42): worker_cwd(), LocalIdentityMinter, _b64u_decode(), _FakeIdentity, _FakeModelConfig, _FakeRuntime, _in_topic_msgs(), _meeting_transcription_invocation() (+34 more)
+### Community 1 - "voice_knowledge.py"
+Cohesion: 0.06
+Nodes (53): complete(), evidence_pack(), filtered_sources(), window_indices(), lookup_voice_sources(), normalize_empty_voice_answer(), voice_sources(), voice_tool_calls() (+45 more)
 
-### Community 2 - "Json"
-Cohesion: 0.01
-Nodes (171): valid_wav(), Advance, tail_fingerprint(), upstream(), upstream(), _stream_response(), _b64u(), _b64u_decode() (+163 more)
+### Community 2 - "httpx"
+Cohesion: 0.02
+Nodes (107): test_real_adapter_stream_leg_survives_a_silent_sse_upstream(), _answers(), _refused(), test_a_5xx_is_silence_too_because_the_domain_did_not_author_it(), test_a_configured_domain_that_never_answers_fails_the_boot_and_names_it(), handler(), test_a_deployed_domain_s_tools_are_assembled(), test_a_domain_that_is_slow_to_come_up_is_waited_for_rather_than_dropped() (+99 more)
 
 ### Community 3 - "startDesktop"
-Cohesion: 0.03
-Nodes (93): AEC_RAW_MIC_CHANNEL, TranscriptSegment, DesktopAligner, AlignedPhrase, AlignedWord, alignmentHash(), AlignmentItem, AlignmentJob (+85 more)
+Cohesion: 0.02
+Nodes (159): AEC_RAW_MIC_CHANNEL, TranscriptSegment, ChunkSegment, TranscriptionClient, AlignmentConfig, DesktopAligner, AlignedPhrase, AlignedWord (+151 more)
 
 ### Community 4 - "CompletionResult"
-Cohesion: 0.04
-Nodes (68): complete(), _log_worker_timings(), _store_provider_issue(), AnthropicCompletion, _max_tokens(), _bedrock_structured_unsupported(), BedrockConverseCompletion, LLMAuthError (+60 more)
+Cohesion: 0.03
+Nodes (86): complete(), _log_worker_timings(), _store_provider_issue(), AnthropicCompletion, _max_tokens(), _bedrock_structured_unsupported(), BedrockConverseCompletion, build_argv() (+78 more)
 
 ### Community 5 - "test_workspace_membership.py"
 Cohesion: 0.04
-Nodes (92): _member_error(), _pc(), _s3_workspace_sync_middleware(), ws_invite_accept(), ws_invite_create(), ws_invite_preview(), ws_invite_revoke(), ws_invites_list() (+84 more)
+Nodes (89): _member_error(), _pc(), ws_invite_accept(), ws_invite_create(), ws_invite_preview(), ws_invite_revoke(), ws_invites_list(), ws_member_leave() (+81 more)
 
 ### Community 6 - "re"
-Cohesion: 0.02
-Nodes (77): build_production_router(), HttpRuntimeClient, _reason(), auto_join_tick(), _stamp_error(), _calendar_bot_name(), due_rows(), live_keys() (+69 more)
+Cohesion: 0.01
+Nodes (92): build_production_router(), HttpRuntimeClient, _iso_utc(), _reason(), auto_join_tick(), _stamp_error(), _calendar_bot_name(), due_rows() (+84 more)
 
 ### Community 7 - "create_app"
 Cohesion: 0.02
-Nodes (123): create_app(), global_system_workspace_file(), health(), meeting_state_policy(), meeting_state_retry(), meeting_state_roster(), Dispatcher, watch() (+115 more)
+Nodes (138): Dispatcher, WorkspaceReader, load_settings(), test_admin_overview_types_workload_fetch_failure(), test_probe_endpoint_gate_and_shape(), _clear_model_creds(), _client(), _CursorReader (+130 more)
 
 ### Community 8 - "subject_of"
-Cohesion: 0.05
-Nodes (52): chat_approval(), chat_reset(), create_routine(), delete_routine(), _document_write_target(), edit_routine(), list_routines(), list_sessions() (+44 more)
+Cohesion: 0.04
+Nodes (75): fetch_workloads(), create_app(), admin_overview(), admin_probe(), chat_approval(), chat_reset(), create_routine(), delete_routine() (+67 more)
 
-### Community 9 - "viewer/server.mjs"
-Cohesion: 0.26
-Nodes (11): broadcast(), clients, HERE, INDEX, json(), PORT, readBody(), segmentOf() (+3 more)
+### Community 9 - "worker/engine.py"
+Cohesion: 0.04
+Nodes (41): ws_init(), _direct_translate_completion(), _pooled_translate_http_client(), completion_failure_code(), model_request_failure(), list_templates(), resolve_seed_dir(), seed_workspace() (+33 more)
 
 ### Community 10 - "test_room.py"
 Cohesion: 0.03
-Nodes (75): Client, event(), test_capture_keeps_immediate_question_pre_roll_and_ends_on_vad(), test_capture_no_speech_and_duration_are_bounded(), test_pause_after_wake_does_not_upload_the_wake_without_its_question(), test_question_already_endpointed_in_pre_roll_waits_for_possible_continuation(), test_question_entirely_in_pre_roll_is_not_lost_when_kws_reports_late(), test_session_stop_during_pending_grant_never_uploads() (+67 more)
+Nodes (81): Client, event(), test_capture_keeps_immediate_question_pre_roll_and_ends_on_vad(), test_capture_no_speech_and_duration_are_bounded(), test_pause_after_wake_does_not_upload_the_wake_without_its_question(), test_question_already_endpointed_in_pre_roll_waits_for_possible_continuation(), test_question_entirely_in_pre_roll_is_not_lost_when_kws_reports_late(), test_session_stop_during_pending_grant_never_uploads() (+73 more)
 
 ### Community 11 - "InMemoryMeetingRepo"
 Cohesion: 0.02
-Nodes (103): create_app(), InMemoryMeetingRepo, test_full_meeting_lifecycle_cascade(), _RecordingRedis, _seed_active_meeting(), test_genuinely_illegal_transition_still_409_after_reconcile(), test_idempotent_same_status_replay_is_200(), test_idempotent_terminal_redelivery_is_200() (+95 more)
+Nodes (123): create_app(), InMemoryMeetingRepo, InMemoryCommandPublisher, test_full_meeting_lifecycle_cascade(), _RecordingRedis, _seed_active_meeting(), test_genuinely_illegal_transition_still_409_after_reconcile(), test_idempotent_same_status_replay_is_200() (+115 more)
 
 ### Community 12 - "orchestrator.test.ts"
-Cohesion: 0.03
-Nodes (111): Expect, PipelineOpts, Scenario, HttpLifecycleSinkOptions, Act, ACT_ACTIONS, ActAction, BotStatus (+103 more)
+Cohesion: 0.02
+Nodes (165): canonicalWav(), consoleLifecycleSink(), main(), meetingChannelId(), teeSpeak(), uploadMockChunk(), check(), drive() (+157 more)
 
 ### Community 13 - "session-lifecycle.test.mjs"
 Cohesion: 0.02
-Nodes (142): build(), ack_by_email(), attend_live(), _attendees(), _completion_seen(), _conversation(), _drive(), _open() (+134 more)
+Nodes (131): build(), ack_by_email(), attend_live(), _attendees(), _completion_seen(), _conversation(), _drive(), _open() (+123 more)
 
 ### Community 14 - "control_plane/api.py"
 Cohesion: 0.03
-Nodes (96): activate_workspace(), active_workspaces(), ActiveMount, ActiveResult, attached_workspaces(), _authenticated_url(), _backup_default(), _build_attached() (+88 more)
+Nodes (102): ArchiveBody, _chat_turn_head(), _chat_turn_head_key(), ChatApprovalBody, DictationPolishBody, DictationTranslateBody, GitTokenBody, InviteAcceptBody (+94 more)
 
 ### Community 15 - "test_link_loop.py"
 Cohesion: 0.02
-Nodes (97): channel(), compose(), NotifyPort, ResendNotifier, SmtpNotifier, use(), scaffolds(), _ctx() (+89 more)
+Nodes (104): prompt_for(), channel(), compose(), NotifyPort, ResendNotifier, SmtpNotifier, use(), scaffolds() (+96 more)
 
-### Community 16 - "routines.tsx"
-Cohesion: 0.12
-Nodes (24): baseName(), ConnectedDocChip(), ConnectedDocsPanel(), ConnectedPanel(), docSlug(), docTabFor(), MeetingDocChip(), WikiLinkChip() (+16 more)
+### Community 16 - "test_lane_a_shared_mounts.py"
+Cohesion: 0.06
+Nodes (42): build_active_set(), build_mount_set(), ensure_global_workspace(), ensure_system_workspace(), global_mount(), system_mount(), _system_store(), system_store_path() (+34 more)
 
 ### Community 17 - "TranscriptStore"
-Cohesion: 0.04
-Nodes (55): after_close_document(), latency(), main(), memory_trend(), main(), trace(), report(), run() (+47 more)
-
-### Community 18 - "telemetry.ts"
 Cohesion: 0.03
-Nodes (75): CaptionCapableSink, CsrcCapableSink, CsrcRecord, ObservationCapableSink, ObservationRecord, TeamsCaptionRecord, addFormats, AutomaticLeave (+67 more)
+Nodes (73): _aws_event(), after_close_document(), latency(), main(), memory_trend(), main(), trace(), report() (+65 more)
 
-### Community 19 - "scrubbed_git_env"
-Cohesion: 0.04
-Nodes (90): ONBOARDING_KICKOFF_MARK, activeContextPrompt(), ActiveReference, activeReference(), AgentTurn, appendReferenceToken(), ATTACHMENT_ACCEPT, AttachmentChips() (+82 more)
+### Community 18 - "bot/src/index.ts"
+Cohesion: 0.01
+Nodes (235): RemoteAudioActivityTap, BOT_DIR, BUNDLE, check(), HERE, main(), sleep(), verifyTtsStopBehavior() (+227 more)
 
-### Community 20 - "test_isolation.py"
-Cohesion: 0.13
-Nodes (13): plan_process_isolation(), preexec_for(), ProcessIsolation, _unavailable(), _env(), test_apply_chowns_private_trees_and_groups_shared(), test_apply_default_denies_never_dispatched_tenants(), test_plan_does_not_grant_a_shared_write_group_to_a_viewer() (+5 more)
+### Community 19 - "chat.tsx"
+Cohesion: 0.02
+Nodes (157): ActionsContext, AskChatDetail, CanvasActionState, emit(), initialSections, ONBOARDING_GREETING, ONBOARDING_GROUNDING, ONBOARDING_KICKOFF_MARK (+149 more)
+
+### Community 20 - "test_voice_decision_flow.py"
+Cohesion: 0.06
+Nodes (41): apply_decision_patch(), checked_evidence(), DecisionPatch, DecisionSource, DecisionState, EvidenceVerdict, ambiguous_field(), apply_task_patch() (+33 more)
 
 ### Community 21 - "ref_vitest"
 Cohesion: 0.02
-Nodes (114): revision(), Clock, container, ActionsContext, ASK_CHAT_EVENT, AskChatDetail, CanvasActionState, emit() (+106 more)
+Nodes (112): Clock, container, ASK_CHAT_EVENT, requestChat(), EngineEntity, segments, durableState, LINE (+104 more)
 
-### Community 22 - "control_plane/api.py"
-Cohesion: 0.02
-Nodes (85): ArchiveBody, ChatApprovalBody, meeting_state_sources(), DictationPolishBody, DictationTranslateBody, GitTokenBody, InviteAcceptBody, InviteCreateBody (+77 more)
+### Community 22 - "control_plane/live_assist.py"
+Cohesion: 0.10
+Nodes (24): meeting_state_sources(), dispatch_request(), document_file(), read_document(), register(), browser_metric(), research(), retrieve() (+16 more)
 
 ### Community 23 - "FakeRedisBus"
-Cohesion: 0.07
-Nodes (15): prune_idle_consumers(), _consumer_names(), _consumer_with_acked_read(), _crashed_consumer_pel(), _pending_count(), test_consumer_name_is_pod_derived(), test_ghost_consumer_pruned_after_ttl(), test_list_consumers_degrades_when_xinfo_unsupported() (+7 more)
+Cohesion: 0.05
+Nodes (25): _trim_segments_stream(), FakeRedisBus, prune_idle_consumers(), _consumer_names(), _consumer_with_acked_read(), _crashed_consumer_pel(), _pending_count(), test_consumer_name_is_pod_derived() (+17 more)
 
-### Community 24 - "bot/src/index.ts"
-Cohesion: 0.04
-Nodes (65): AsrDiagnostic, AudioChannel, AudioDiagnostics, AudioSnapshot, duration(), Row, restartMixedCapture(), shouldPersistAuthSession() (+57 more)
+### Community 24 - "control_plane/meeting_knowledge.py"
+Cohesion: 0.06
+Nodes (37): catch_up_sources(), DecisionFlowQuestion, FactReview, meeting_time_ms(), Question, TaskFlowQuestion, VoiceAgentQuery, VoiceHistoryTurn (+29 more)
 
 ### Community 25 - "SqliteDB"
 Cohesion: 0.03
-Nodes (73): preflight(), _actor(), admit_batch(), admit_event(), _as_me(), auth(), _bearer(), bind_host() (+65 more)
+Nodes (67): _actor(), admit_batch(), admit_event(), _as_me(), auth(), _bearer(), bind_host(), contract_preflight() (+59 more)
 
-### Community 26 - "ref_node_module"
-Cohesion: 0.02
-Nodes (88): builtins, deps, pending, pkg, root, scanned, violations, @vitejs/plugin-react@^6.0.3 (+80 more)
+### Community 26 - "lifecycle/retry.py"
+Cohesion: 0.06
+Nodes (22): classify_retry(), _extract_reason_detail(), is_retryable_join_refusal(), is_transient(), JoinRetryController, next_retry_state(), persist_retry_transition(), RetryClass (+14 more)
 
-### Community 27 - "collector/fakes.py"
-Cohesion: 0.02
-Nodes (170): build_production_app(), _build_share_grant(), _decode_claimed(), _expired(), _fill_absolute_times(), _find_processed_view(), _iso_utc(), _merge_notes_by_id() (+162 more)
+### Community 27 - "select"
+Cohesion: 0.03
+Nodes (19): select(), _row_to_dict(), SqlAlchemyMeetingRepo, SqlAlchemyTranscriptStore, _branch(), fresh(), purge(), purge_queued() (+11 more)
 
 ### Community 28 - "runtime_kernel/__main__.py"
 Cohesion: 0.03
-Nodes (118): status(), CallbackState, ZoomCallbackContent(), run(), ZoomCallbackPage(), CalendarPage(), PlatformIcon(), SyncStatus() (+110 more)
+Nodes (123): FakeAdminApi, zustand, CallbackState, ZoomCallbackContent(), run(), ZoomCallbackPage(), MeetingsClientProps, JoinFormProps (+115 more)
 
 ### Community 29 - "SpeakerStreamManager"
-Cohesion: 0.02
-Nodes (98): AudioFrame, AudioRange, AudioTimelineEvent, AudioTimelinePool, TimedAudio, SpeakerBuffer, ADR-0010, WhisperSegment (+90 more)
-
-### Community 30 - "time"
 Cohesion: 0.01
-Nodes (131): main(), _http_health(), download(), Reranker, verify(), main(), parse_meeting(), _req() (+123 more)
+Nodes (114): AudioFrame, AudioRange, AudioRing, AudioTimelineEvent, AudioTimelinePool, context, delayed, duplicate (+106 more)
+
+### Community 30 - "numpy"
+Cohesion: 0.02
+Nodes (79): delivery_signals(), latency_report(), stage_markdown(), stage_report(), write_markdown(), main(), run_once(), fixture() (+71 more)
 
 ### Community 31 - "pytest"
-Cohesion: 0.03
-Nodes (49): research_instructions(), test_research_refuses_symlinked_destination_outside_workspace(), test_research_requires_private_write_mount(), test_research_uses_private_destination_and_distinguishes_evidence(), test_tool_approval_event_contract_accepts_valid_messages(), test_tool_approval_event_contract_rejects_invalid_messages(), test_authoring_never_accepts_a_step_the_image_does_not_have(), test_a_door_has_no_default() (+41 more)
+Cohesion: 0.02
+Nodes (89): research_instructions(), test_research_refuses_symlinked_destination_outside_workspace(), test_research_requires_private_write_mount(), test_research_uses_private_destination_and_distinguishes_evidence(), test_tool_approval_event_contract_accepts_valid_messages(), test_tool_approval_event_contract_rejects_invalid_messages(), _clear(), test_it_reads_the_canonical_name() (+81 more)
 
 ### Community 32 - "test_bridge.py"
-Cohesion: 0.09
-Nodes (14): _invocation_for(), TranscriptBridge, FakeBus, FakeRuntime, _bridge(), _invoke_golden(), _repo_root(), test_invoke_v1_goldens_conform() (+6 more)
+Cohesion: 0.12
+Nodes (13): TranscriptBridge, FakeBus, FakeRuntime, _bridge(), _invoke_golden(), _repo_root(), test_invoke_v1_goldens_conform(), test_mixed_stream_spawns_only_on_trigger() (+5 more)
 
-### Community 33 - "test_meeting_knowledge.py"
-Cohesion: 0.03
-Nodes (47): DocumentChange, DocumentMove, DocumentWrite, editable(), register(), delete(), move(), move_plan() (+39 more)
+### Community 33 - "workspace_write_lock"
+Cohesion: 0.08
+Nodes (27): editable(), register(), delete(), move(), move_plan(), preview_move(), read(), search() (+19 more)
 
 ### Community 34 - "workspace.tsx"
 Cohesion: 0.02
-Nodes (228): endpointLabel(), gaReady(), track(), Window, registerTab(), TabProps, getJson(), isProse() (+220 more)
+Nodes (227): AppGates(), InviteConsent(), InviteGate(), roleLabel(), getJson(), MeetingWikiSourceStatus(), ancestorDirs(), AskAboutDoc() (+219 more)
 
 ### Community 35 - "test_google_calendar_sync.py"
-Cohesion: 0.11
-Nodes (23): fetch_google_events(), parse_google_events(), event(), sync(), test_a_fallback_link_collision_cannot_leave_the_revoked_room_armed(), test_a_revoked_identity_is_not_reused_for_a_new_event_on_the_old_link(), test_all_day_dates_are_retained_without_a_scheduled_instant_including_today(), test_all_day_import_never_overrides_a_manual_schedule_or_its_link() (+15 more)
+Cohesion: 0.19
+Nodes (22): parse_google_events(), event(), sync(), test_a_fallback_link_collision_cannot_leave_the_revoked_room_armed(), test_a_revoked_identity_is_not_reused_for_a_new_event_on_the_old_link(), test_all_day_dates_are_retained_without_a_scheduled_instant_including_today(), test_all_day_import_never_overrides_a_manual_schedule_or_its_link(), test_all_day_import_stays_idle_and_timed_transitions_keep_the_same_row() (+14 more)
 
 ### Community 36 - "ref_next"
 Cohesion: 0.06
-Nodes (71): dynamic, AdminLayout(), CalendarCallbackContent(), CalendarCallbackLoading(), CallbackState, GoogleCalendarCallbackPage(), VerifyContent(), VerifyLoading() (+63 more)
+Nodes (75): dynamic, AdminLayout(), CalendarCallbackContent(), CalendarCallbackLoading(), CallbackState, GoogleCalendarCallbackPage(), errorConfig, VerifyContent() (+67 more)
 
 ### Community 37 - "test_claude_cli_wire.py"
-Cohesion: 0.20
-Nodes (11): _post(), decode_anthropic_stream(), _stream(), test_default_http_probe_decodes_aws_frames_before_grading_tools(), read(), test_http_200_with_a_disconnected_stream_is_not_success(), test_invalid_stream_crc_or_frame_length_is_not_success(), test_stream_decoder_reads_final_text_and_stop_reason() (+3 more)
+Cohesion: 0.31
+Nodes (10): _post(), decode_anthropic_stream(), _stream(), test_default_http_probe_decodes_aws_frames_before_grading_tools(), read(), test_http_200_with_a_disconnected_stream_is_not_success(), test_invalid_stream_crc_or_frame_length_is_not_success(), test_stream_decoder_reads_final_text_and_stop_reason() (+2 more)
 
 ### Community 38 - "storage_init.py"
-Cohesion: 0.06
-Nodes (64): CDP_DEBUG_ARGS, getAuthenticatedBrowserArgs(), getBrowserSessionArgs(), authArgs, check(), Cookie, decisionMatrix(), fails (+56 more)
+Cohesion: 0.08
+Nodes (51): CDP_DEBUG_ARGS, getAuthenticatedBrowserArgs(), getBrowserSessionArgs(), authArgs, check(), Cookie, decisionMatrix(), fails (+43 more)
 
 ### Community 39 - "tests/test_worker.py"
-Cohesion: 0.03
-Nodes (61): _card_turn(), CursorMeetingStream, CursorStream, FakeStream, _fold_events(), MeetingStream, _msg(), _notes_card_turn() (+53 more)
+Cohesion: 0.04
+Nodes (48): _card_turn(), CursorMeetingStream, MeetingStream, _notes_card_turn(), _proc_markers(), ProcMeetingStream, _seg(), StepMeetingStream (+40 more)
 
 ### Community 40 - "tokens.py"
-Cohesion: 0.07
-Nodes (26): _git_out(), _github_create_repo(), publish_workspace(), published_remote_url(), PublishError, PublishResult, _redacted(), RepoExistsError (+18 more)
+Cohesion: 0.10
+Nodes (19): _git_out(), publish_workspace(), published_remote_url(), PublishError, _bare(), _run(), test_attached_workspace_is_refused(), test_bad_inputs_are_value_errors() (+11 more)
 
 ### Community 41 - "dashboard/package.json"
 Cohesion: 0.02
-Nodes (139): ai, @ai-sdk/anthropic, @ai-sdk/openai, @ai-sdk/react, @auth/core, babel-plugin-react-compiler, class-variance-authority, eslint (+131 more)
+Nodes (138): ai, @ai-sdk/anthropic, @ai-sdk/openai, @ai-sdk/react, @auth/core, babel-plugin-react-compiler, eslint, eslint-config-next (+130 more)
 
-### Community 42 - ".seed_meeting"
-Cohesion: 0.05
-Nodes (40): build_collector_store(), create_app(), test_unified_app_mounts_every_module_route(), _SharedStore, setup(), test_invalid_payload_does_not_create_revision(), test_owner_only_and_completed_only(), test_raw_revision_restore_and_existing_read_overlay() (+32 more)
+### Community 42 - "test_transcript_share.py"
+Cohesion: 0.14
+Nodes (15): _authorized(), _client(), _client_and_row(), _mint(), test_a_non_numeric_ttl_is_a_422_not_a_500(), test_a_restricted_share_still_admits_only_the_allow_list_after_validation(), test_allowed_emails_is_a_bounded_list(), test_an_unknown_mode_is_refused_rather_than_minting_an_open_share() (+7 more)
 
 ### Community 43 - "ref_react"
-Cohesion: 0.05
-Nodes (80): AdminUsersPage(), APIKeyDisplay, formatExpiry(), GitWorkspaceCard(), handleClear(), handleSave(), inferScope(), KeyScope (+72 more)
+Cohesion: 0.04
+Nodes (101): AdminUsersPage(), LoginPage(), APIKeyDisplay, formatExpiry(), GitWorkspaceCard(), handleClear(), handleSave(), inferScope() (+93 more)
 
 ### Community 44 - "desktop.ts"
 Cohesion: 0.01
-Nodes (128): saved(), malformed, rust, view, aecRaw, files, GOLDEN, HERE (+120 more)
+Nodes (143): saved(), malformed, rust, view, aecRaw, files, GOLDEN, HERE (+135 more)
 
-### Community 45 - "bot/src/pipeline.ts"
-Cohesion: 0.07
-Nodes (50): makeSpeakerHintSink(), isPerTrackLanePlatform(), check(), fakeEngine(), main(), okThunk(), Spy, throwThunk() (+42 more)
+### Community 45 - "copy"
+Cohesion: 0.12
+Nodes (43): accept(), acknowledge_plan_only(), apply_policy(), audience_stamp(), canonical_evidence(), claim(), close_proposal(), compact_job() (+35 more)
 
 ### Community 46 - "lifecycle/__init__.py"
-Cohesion: 0.02
-Nodes (72): bot_status_from_persisted(), BotStatus, can_transition(), _capture_join_evidence(), CompletionReason, FailureStage, IllegalTransition, LifecycleSink (+64 more)
+Cohesion: 0.04
+Nodes (37): bot_status_from_persisted(), BotStatus, can_transition(), _capture_join_evidence(), CompletionReason, FailureStage, IllegalTransition, LifecycleSink (+29 more)
 
 ### Community 47 - "InMemoryTranscriptStore"
-Cohesion: 0.04
-Nodes (27): _doc_ref(), _remove_doc(), _upsert_doc(), InMemoryTranscriptStore, _segment_to_api(), _client(), _seed_heavy(), _seed_history() (+19 more)
+Cohesion: 0.02
+Nodes (49): build_collector_store(), CollectorAuthorizer, _remove_doc(), create_app(), InMemoryTranscriptStore, test_unified_app_mounts_every_module_route(), list_scheduled_meetings(), _SharedStore (+41 more)
 
 ### Community 48 - "bot/src/index.ts"
 Cohesion: 0.04
-Nodes (64): routine_card_from_job(), _as_bool(), _cancel_job(), _compile_workspace_job(), _cron_value(), _file_identity(), _job_fingerprint(), load_routine_file() (+56 more)
+Nodes (65): _as_bool(), _cancel_job(), _compile_workspace_job(), _cron_value(), _file_identity(), _job_fingerprint(), load_routine_file(), mutate_routine_file() (+57 more)
 
 ### Community 49 - "test_calendar_sync.py"
 Cohesion: 0.06
-Nodes (71): fetch_ics(), run_user_sync(), parse_ics(), sync_user(), Cell, test_cell_dispatch_through_the_live_seam(), test_cell_disposition(), test_cell_never_suppresses_the_next_occurrence() (+63 more)
+Nodes (70): parse_ics(), sync_user(), Cell, test_cell_dispatch_through_the_live_seam(), test_cell_disposition(), test_cell_never_suppresses_the_next_occurrence(), test_known_reasons_covers_the_sealed_enum(), test_matrix_covers_every_reason_the_codebase_can_emit() (+62 more)
 
 ### Community 50 - "Parameters"
 Cohesion: 0.04
 Nodes (57): Type, Default, Type, Default, Type, Type, Default, Type (+49 more)
 
 ### Community 51 - "TranscriptReview.tsx"
-Cohesion: 0.03
-Nodes (88): ChatGPTPlanIssue, ChatGPTPlanNotice(), clock(), Decision, DiscussionReview(), generate(), refresh(), labels (+80 more)
+Cohesion: 0.04
+Nodes (67): clock(), Decision, DiscussionReview(), generate(), refresh(), labels, Report, ReviewState (+59 more)
 
 ### Community 52 - "test_db_writer.py"
-Cohesion: 0.05
-Nodes (54): db_writer_tick(), finalize_meeting(), flush_meeting_processed(), flush_meeting_segments(), _parse_updated_at(), proc_stream_key(), _processed_complete(), _s() (+46 more)
+Cohesion: 0.04
+Nodes (57): db_writer_tick(), finalize_meeting(), flush_meeting_processed(), flush_meeting_segments(), _group_last_delivered_id(), _parse_stream_id(), _parse_updated_at(), _pending_min_id() (+49 more)
 
 ### Community 53 - "settings.tsx"
 Cohesion: 0.04
-Nodes (92): Badge(), field, Foot(), ModelsStep(), Phase, primaryBtn, quietBtn, Radio() (+84 more)
+Nodes (110): workspacePilotMode(), Badge(), field, Foot(), ModelsStep(), Phase, primaryBtn, quietBtn (+102 more)
 
 ### Community 54 - "os"
 Cohesion: 0.01
-Nodes (156): _allowlisted(), _apply_workspace_bedrock_defaults(), _has_workspace_byo_model(), overlay_model_config(), start(), _build_subprocess_env(), complete(), dispatch_background_meeting_job() (+148 more)
+Nodes (98): _build_subprocess_env(), complete(), dispatch_background_meeting_job(), _run(), _stderr_tail(), _exec_subprocess(), _run_subprocess(), _exec_subprocess() (+90 more)
 
 ### Community 55 - "Resources"
 Cohesion: 0.07
-Nodes (90): _dispatch(), run_processor(), Properties, Type, Properties, Type, Properties, Type (+82 more)
+Nodes (92): _dispatch(), run_processor(), Properties, Type, Type, Properties, Type, Properties (+84 more)
 
-### Community 56 - "test_mail_body_cap.py"
-Cohesion: 0.11
-Nodes (7): test_a_value_that_is_not_a_number_is_the_default_never_a_crash(), test_an_elided_body_says_so_and_says_by_how_much(), test_an_unset_key_is_the_declared_default_and_not_the_old_literal(), test_the_admitted_reply_carries_the_capped_text(), test_the_cut_is_read_per_call_not_bound_at_import(), test_the_operator_value_is_what_actually_cuts(), test_the_quotes_come_off_before_the_cut()
+### Community 56 - "collector/fakes.py"
+Cohesion: 0.07
+Nodes (24): resolve(), rewrite(), _segment_to_api(), export_bot(), fingerprint(), identity(), replicate(), validate() (+16 more)
 
 ### Community 57 - "test_join_evidence.py"
 Cohesion: 0.05
@@ -2106,7 +2089,7 @@ Nodes (50): attribute_join_failure(), build_join_evidence(), classify_join_failu
 
 ### Community 58 - "admit"
 Cohesion: 0.11
-Nodes (13): _canon(), DispatchClaims, DispatchTokenError, _key(), mint_dispatch_token(), verify_dispatch_token(), WorkspaceGrant, test_expired_rejected() (+5 more)
+Nodes (15): _b64u(), _b64u_decode(), _canon(), DispatchClaims, DispatchTokenError, _key(), mint_dispatch_token(), verify_dispatch_token() (+7 more)
 
 ### Community 59 - "CompletionResult"
 Cohesion: 0.09
@@ -2114,71 +2097,71 @@ Nodes (9): ClusterNameBinder, b, r, b, far, near, driveOpenTurn(), Hint (+1 more
 
 ### Community 60 - "test_robustness_seam.py"
 Cohesion: 0.02
-Nodes (66): dominant_completion_reason(), _escalate_untracked_zombie(), _log_orphan_kill_failed(), _log_untracked_escalated(), _log_workload_untracked(), _pre_active_completion_reason(), _probe_bot_workload(), _reconcile_join_evidence() (+58 more)
+Nodes (47): _admin_token(), _assert_concurrent_dedup(), _assert_ingest_isolates_publish_failure(), _cc5_log(), _ContainerRepo, ExplodingRedis, FlakyOnceRedis, _run_concurrent_dedup() (+39 more)
 
 ### Community 61 - "test_mounts.py"
 Cohesion: 0.07
-Nodes (31): pod_overrides(), _scheduling_json(), k8s_volume_mounts(), mount_set(), MountBind, _parse_mounts(), _under(), workspace_binds() (+23 more)
+Nodes (32): pod_overrides(), _runtime_scheduling_env(), _scheduling_json(), k8s_volume_mounts(), mount_set(), MountBind, _parse_mounts(), _under() (+24 more)
 
 ### Community 62 - "test_config_preflight_boot.py"
-Cohesion: 0.08
-Nodes (23): _decl(), test_every_capability_key_names_a_declared_capability(), test_the_boot_refuses_a_deployment_that_named_no_credential_and_no_door(), test_the_declaration_is_this_service_and_loads(), test_the_no_agents_profile_is_configured_not_broken(), test_the_placeholder_list_is_the_same_list_the_use_sites_refuse(), test_the_published_placeholders_are_refused_by_name_never_by_value(), test_the_two_declarations_agree_on_every_class_and_default() (+15 more)
+Cohesion: 0.05
+Nodes (30): _decl(), test_every_capability_key_names_a_declared_capability(), test_the_boot_refuses_a_deployment_that_named_no_credential_and_no_door(), test_the_declaration_is_this_service_and_loads(), test_the_no_agents_profile_is_configured_not_broken(), test_the_placeholder_list_is_the_same_list_the_use_sites_refuse(), test_the_published_placeholders_are_refused_by_name_never_by_value(), test_the_two_declarations_agree_on_every_class_and_default() (+22 more)
 
 ### Community 63 - "fixture"
-Cohesion: 0.05
-Nodes (52): body(), BotAligner, _now(), attribution(), asr_failure(), backend_hash(), BotRefiner, test_alignment_commit_checks_revision_under_lock_and_raw_ingest_cannot_relink_edited_audio() (+44 more)
+Cohesion: 0.08
+Nodes (43): _storage_language(), drain_results(), audio(), fixture(), request_audio(), test_audio_preparation_validation_does_not_submit_asr(), test_bot_recording_review_apply_restore_and_owner_boundaries(), test_cancel_during_proposal_check_does_not_publish_a_ready_suggestion() (+35 more)
 
 ### Community 64 - "send-magic-link/route.ts"
-Cohesion: 0.08
-Nodes (39): RFC-5321, jsonwebtoken, authOptions, buildAppPath(), getAppBasePath(), handler, checkUserExists(), handleDirectLogin() (+31 more)
+Cohesion: 0.09
+Nodes (34): RFC-5321, jsonwebtoken, jsonwebtoken@^9.0.3, buildAppPath(), getAppBasePath(), handler, checkUserExists(), handleDirectLogin() (+26 more)
 
 ### Community 65 - "test_email_lookup_plan.py"
-Cohesion: 0.16
-Nodes (30): checked_prices(), gold_followup(), gold_request(), price_answer(), raw(), row(), test_future_or_invalid_date_cannot_be_authorized(), test_generic_gold_followup_keeps_only_public_structured_slots() (+22 more)
+Cohesion: 0.11
+Nodes (37): _digits(), _integer(), numeric_facts(), _small(), _words(), _amount(), _as_of(), checked_prices() (+29 more)
 
 ### Community 66 - "gates.mjs"
 Cohesion: 0.05
 Nodes (88): ADR-0020, ADR-0026, ARCH_FILE, ARCH_SEAL, archHash(), CARRIER_CENSUS, carrierOwners(), classifyLicense() (+80 more)
 
-### Community 67 - "_handle"
-Cohesion: 0.16
-Nodes (12): _FakeDispatcher, _FakeLive, _fresh_state(), _payload(), test_arm_carries_numeric_meeting_id_for_durable_proc_doc(), test_arm_omits_numeric_meeting_id_when_key_is_not_numeric(), test_arm_refreshes_the_flag_rolling_ttl(), test_arm_resumes_from_the_frozen_cursor() (+4 more)
+### Community 67 - "test_transcription_watcher.py"
+Cohesion: 0.06
+Nodes (35): meeting_relay_health(), _authorized_owner(), _handle(), relay_health(), _resume_cursor(), _title(), _FakeDispatcher, _FakeLive (+27 more)
 
 ### Community 68 - "today.tsx"
 Cohesion: 0.03
-Nodes (91): terminalMeetingPath(), MeetingPage(), hideModelSettings(), meetingsOnly(), Page(), EntityList(), EntityRow(), initials() (+83 more)
+Nodes (104): groupMeetings(), MeetingGroup, meetingGroupKey(), PHASE_RANK, pickCurrent(), runStamp(), check(), Attendee (+96 more)
 
 ### Community 69 - "meetings-client.tsx"
 Cohesion: 0.10
-Nodes (34): formatDate(), formatDuration(), MeetingRow(), MeetingsClient(), handleStartBrowserSession(), StatusDot(), dynamic, MeetingsPage() (+26 more)
+Nodes (33): formatDate(), formatDuration(), MeetingRow(), MeetingsClient(), handleStartBrowserSession(), StatusDot(), dynamic, MeetingsPage() (+25 more)
 
 ### Community 70 - "test_recordings.py"
-Cohesion: 0.13
-Nodes (26): build_recording_master(), upload_chunk(), _client(), _client_for(), _counting_wav(), _first_audio(), _seeded(), test_concurrent_chunk_uploads_do_not_lose_updates() (+18 more)
+Cohesion: 0.11
+Nodes (29): build_recording_master(), upload_chunk(), _client(), _client_for(), _counting_wav(), _first_audio(), _seeded(), test_concurrent_chunk_uploads_do_not_lose_updates() (+21 more)
 
 ### Community 71 - "withBasePath"
 Cohesion: 0.03
-Nodes (110): react-markdown, AgentPage(), run(), errorConfig, VerifyError, VerifyPage(), VerifyState, HealthStatus (+102 more)
+Nodes (87): AgentPage(), run(), fetchConfig(), fetchConfigs(), fetchTranscription(), WorkspacePage(), AgentChat(), Chat() (+79 more)
 
 ### Community 72 - "log"
 Cohesion: 0.08
 Nodes (54): CAPTCHA_SOLVE_GRACE_MS, captchaSuppressionSince, checkForGoogleAdmissionIndicators(), checkForGoogleAdmissionSilent(), checkForGoogleRejection(), checkForWaitingRoomIndicators(), classifyGoogleRejection(), countRealParticipantTiles() (+46 more)
 
 ### Community 73 - "meetingLive.ts"
-Cohesion: 0.09
-Nodes (14): GitHubVcs, RealGitWorkspace, SecretsBrokerProtocol, WorkspaceWrite, FakeSecretsBroker, origin_repo(), remote_repo(), test_push_uses_brokered_token_and_lands() (+6 more)
+Cohesion: 0.10
+Nodes (15): GitHubVcs, RealGitWorkspace, render_entity(), SecretsBrokerProtocol, WorkspaceWrite, FakeSecretsBroker, origin_repo(), remote_repo() (+7 more)
 
 ### Community 74 - "profiles.py"
 Cohesion: 0.04
-Nodes (29): DockerBackend, _in_stack_network(), _is_ephemeral_oneshot_worker(), _shm_bytes(), _socket_url(), _stack_network(), _stop_grace_sec(), _worker_naming() (+21 more)
+Nodes (32): DockerBackend, _in_stack_network(), _is_ephemeral_oneshot_worker(), _shm_bytes(), _socket_url(), _stack_network(), _stop_grace_sec(), _worker_naming() (+24 more)
 
 ### Community 75 - "dependencies"
-Cohesion: 0.03
-Nodes (82): dependencies, acorn@^8.17.0, acorn-walk@^8.3.5, allotment@^1.20.5, clsx@^2.1.1, cmdk@^1.1.1, dockview@^7.0.2, dockview-react@^7.0.2 (+74 more)
+Cohesion: 0.06
+Nodes (47): dependencies, acorn@^8.17.0, acorn-walk@^8.3.5, allotment@^1.20.5, clsx@^2.1.1, cmdk@^1.1.1, dockview-react@^7.0.2, geist@^1.3.1 (+39 more)
 
 ### Community 76 - "create_app"
 Cohesion: 0.06
-Nodes (89): create_app(), accept_transcript_share(), _admin(), _agent(), agent_chat(), agent_meeting_stream(), agent_proxy(), annotate_meeting() (+81 more)
+Nodes (96): create_app(), accept_transcript_share(), _admin(), _agent(), agent_chat(), agent_meeting_stream(), agent_proxy(), annotate_meeting() (+88 more)
 
 ### Community 77 - "test_transcript_search.py"
 Cohesion: 0.18
@@ -2186,43 +2169,43 @@ Nodes (17): _client(), _NullRedis, _search(), _seg(), test_a_hit_carries_the_ide
 
 ### Community 78 - "test_proxy.py"
 Cohesion: 0.04
-Nodes (46): _client(), test_alignment_routes_forward_identity_and_guard_actions(), test_auth_infra_failure_is_503(), test_auth_me_unavailable_is_503_not_401(), test_authed_request_passes_body_and_status_verbatim(), test_calendar_id_dot_segments_cannot_walk_up_the_downstream_path(), test_calendar_id_is_re_encoded_into_one_downstream_segment(), test_calendar_id_with_control_character_is_4xx_not_500() (+38 more)
+Nodes (44): _client(), test_alignment_routes_forward_identity_and_guard_actions(), test_auth_infra_failure_is_503(), test_authed_request_passes_body_and_status_verbatim(), test_calendar_id_dot_segments_cannot_walk_up_the_downstream_path(), test_calendar_id_is_re_encoded_into_one_downstream_segment(), test_calendar_id_with_control_character_is_4xx_not_500(), test_downstream_target_url_matches_route_table() (+36 more)
 
 ### Community 79 - "parse"
 Cohesion: 0.14
 Nodes (3): parse(), TestTeamsEnterpriseShort, TestZoom
 
-### Community 80 - "capture-bridge.ts"
-Cohesion: 0.03
-Nodes (52): decodeAudioFrame(), RemoteAudioActivitySource, RemoteAudioActivityTap, BrowserSession, BrowserSessionCloseOptions, enableTeamsLiveCaptions(), HINT_MAX_SKEW_MS, makeCsrcSink() (+44 more)
+### Community 80 - "memory.py"
+Cohesion: 0.10
+Nodes (27): attribute_alignment(), _phrases(), apply_assignments(), register(), canonical(), conversation_memory(), project(), _event() (+19 more)
 
 ### Community 81 - "googlemeet/join.ts"
 Cohesion: 0.03
 Nodes (83): getJoinBrowserArgs(), getLocaleBrowserArgs(), JOIN_BROWSER_ARGS, resolveBotUiLocale(), AuthSessionError, EN, EN_LABELLED_CTA, EN_PLAIN_CTA (+75 more)
 
-### Community 82 - "SettingsView.tsx"
-Cohesion: 0.04
-Nodes (52): applyTheme(), getTheme(), Theme, THEME_CHANGED_EVENT, useTheme(), BrowserAsrTiming, browserAsrTimings(), empty (+44 more)
+### Community 82 - "WebApp.tsx"
+Cohesion: 0.03
+Nodes (66): MeetingPage(), hideModelSettings(), OnboardingGate(), isOnboarded(), KEY(), setOnboarded(), Page(), applyTheme() (+58 more)
 
 ### Community 83 - "Parameters"
-Cohesion: 0.05
-Nodes (31): CAPTION_LAG_MS, CAPTION_WINDOW_MS, HINT_GRACE_MS, HINT_LAG_MS, IDENTITY_QUALIFIERS, Interval, isAsciiDigits(), NameEvidenceKind (+23 more)
+Cohesion: 0.09
+Nodes (3): namer(), speakerLabel(), TrackNamer
 
-### Community 84 - "gatewayWS.ts"
-Cohesion: 0.16
-Nodes (13): clearReconnect(), connect(), ConnListener, connListeners, Listener, listeners, MeetingStatusFrame, onGatewayWSConnected() (+5 more)
+### Community 84 - "liveMeetings.ts"
+Cohesion: 0.05
+Nodes (43): defaultProcessingView(), deriveProcessingView(), completed, trace, clearReconnect(), connect(), ConnListener, connListeners (+35 more)
 
 ### Community 85 - "test_single_flight.py"
-Cohesion: 0.03
-Nodes (91): handler(), admit(), FakeClock, EventType, drain(), rig(), _sqlite_schema(), SqliteDB (+83 more)
+Cohesion: 0.02
+Nodes (104): admit(), FakeClock, register_flows(), EventType, clock(), drain(), rig(), drain_with_world() (+96 more)
 
 ### Community 86 - "run_multiplex"
-Cohesion: 0.07
-Nodes (12): websocket_multiplex(), run_multiplex(), fan_in(), subscribe_meeting(), reset_ws_guard(), _enforcing_config(), _FakeClient, FakeWS (+4 more)
+Cohesion: 0.05
+Nodes (12): _app_with_both_layers(), create_app_with_guard(), _enforcing_config(), _FakeClient, FakeWS, _guard_middleware(), _make_app(), _root_handler() (+4 more)
 
 ### Community 87 - "src-tauri/src/main.rs"
 Cohesion: 0.05
-Nodes (61): supports_translation_language(), AudioProcessingStatus, authorization_status(), AVMediaTypeAudio, AXIsProcessTrusted(), captions_snapshot(), capture_app_bundle_path(), capture_app_path() (+53 more)
+Nodes (58): supports_translation_language(), AudioProcessingStatus, authorization_status(), AVMediaTypeAudio, AXIsProcessTrusted(), captions_snapshot(), capture_app_bundle_path(), capture_app_path() (+50 more)
 
 ### Community 88 - "with"
 Cohesion: 0.05
@@ -2230,31 +2213,31 @@ Nodes (46): permissions, uses, with, cancel-in-progress, group, BUILD_SHA, GH_TO
 
 ### Community 89 - "build_router"
 Cohesion: 0.06
-Nodes (73): build_router(), accept_transcript_share(), alignment_audio(), alignment_cancel(), alignment_start(), alignment_status(), annotate_meeting_by_id(), annotate_native_meeting() (+65 more)
+Nodes (74): build_router(), accept_transcript_share(), alignment_audio(), alignment_cancel(), alignment_start(), alignment_status(), annotate_meeting_by_id(), annotate_native_meeting() (+66 more)
 
 ### Community 90 - "test_llm_claude_code.py"
-Cohesion: 0.04
-Nodes (48): ClaudeCodeHarness, _link_chat_into_workspace(), _link_skills_into_workspace(), parse_stream_json(), _short(), test_claude_attaches_public_bridge_config_for_duration_of_turn(), ClaudeCliWireTest, do_POST() (+40 more)
+Cohesion: 0.03
+Nodes (59): ClaudeCodeHarness, _link_chat_into_workspace(), _link_skills_into_workspace(), parse_stream_json(), _short(), _commit_mount(), _current_policy_entries(), _discard_unvalidated_turn_commits() (+51 more)
 
 ### Community 91 - "transcript-rendering/src/index.ts"
 Cohesion: 0.11
 Nodes (31): deduplicateByIdentity(), deduplicateSegments(), normalizeText(), preferSeg(), sortByStartTime(), sortSegments(), upsertSegments(), groupSegments() (+23 more)
 
 ### Community 92 - "create_app"
-Cohesion: 0.06
-Nodes (47): create_app(), _admin_exists(), bootstrap_admin(), _check_internal(), _check_internal_no_dev_bypass(), get_bot_context(), get_internal_user_transcription(), get_model_config() (+39 more)
+Cohesion: 0.05
+Nodes (51): encrypt_google_refresh_token(), create_app(), _admin_exists(), bootstrap_admin(), _check_internal(), _check_internal_no_dev_bypass(), get_bot_context(), get_internal_user_transcription() (+43 more)
 
 ### Community 93 - "test_multi_session.py"
-Cohesion: 0.11
-Nodes (27): _ahead_behind(), _current_branch(), _git(), home_remote(), pull_origin(), PullResult, push_origin(), PushResult (+19 more)
+Cohesion: 0.14
+Nodes (15): _ahead_behind(), _current_branch(), _git(), home_remote(), pull_origin(), PullResult, push_origin(), PushResult (+7 more)
 
 ### Community 95 - "test_webhook_seam.py"
-Cohesion: 0.05
-Nodes (48): build_envelope(), WebhookSink, _dead_letter(), _deliver_one(), drain_retry_queue(), _reclaim_stale_processing(), RetryQueue, _transport_error_category() (+40 more)
+Cohesion: 0.07
+Nodes (45): build_envelope(), WebhookSink, _dead_letter(), drain_retry_queue(), _reclaim_stale_processing(), RetryQueue, delete(), test_200_is_delivered() (+37 more)
 
 ### Community 96 - "livekit/server.py"
-Cohesion: 0.05
-Nodes (15): HttpAudioOutput, TinaLLM, TinaStream, VieNeuStream, VieNeuTTS, RagState, connect_room(), HeardTurn (+7 more)
+Cohesion: 0.03
+Nodes (45): HttpAudioOutput, SynthesisStatus, TinaLLM, TinaStream, VieNeuStream, VieNeuTTS, RagState, BoundedBody (+37 more)
 
 ### Community 97 - "teams-contested-word-detector.mjs"
 Cohesion: 0.06
@@ -2266,87 +2249,87 @@ Nodes (36): CodexHarness, receive_until(), send(), GroqCliWireTest, _FakeCodexPr
 
 ### Community 99 - "transcript-redis.test.ts"
 Cohesion: 0.07
-Nodes (27): GmeetPipeline, ConnectorTranscriptSegment, ConnectorTranscriptSink, createRedisTranscriptSink(), createSessionEgress(), FetchLike, HttpLifecycleOptions, laneSinkAdapter() (+19 more)
+Nodes (38): redisSubscriberFrom(), createDiscordVoicePort(), ConnectorTranscriptSegment, ConnectorTranscriptSink, consoleLifecycleSink(), createHttpLifecycleSink(), createRedisTranscriptSink(), createSessionEgress() (+30 more)
 
 ### Community 100 - "kit.tsx"
-Cohesion: 0.09
-Nodes (66): Align, asAlign(), asSize(), asTone(), Avatar(), Badge(), Button(), Card() (+58 more)
+Cohesion: 0.05
+Nodes (87): clock(), latency(), PipelineRow, TeamsPipelineWitness(), byLabelLengthDesc(), escapeRe(), SpanEntity, splitTextIntoSpans() (+79 more)
 
 ### Community 101 - "pyannote-segmenter.ts"
-Cohesion: 0.06
-Nodes (32): check(), run(), isLowConfidenceSegment(), copy, short, check(), faultOf(), run() (+24 more)
+Cohesion: 0.04
+Nodes (59): check(), numsIn(), pcmFor(), run(), runScenario(), transcribe(), check(), run() (+51 more)
 
 ### Community 102 - "bot/package.json"
 Cohesion: 0.06
 Nodes (45): dependencies, ajv@^8.17.0, ajv-formats@^3.0.1, redis@^4.7.0, @tina/gmeet-pipeline@workspace:*, @tina/join@workspace:*, @tina/mixed-pipeline@workspace:*, @tina/record-chunker@workspace:* (+37 more)
 
 ### Community 103 - "jsonschema"
-Cohesion: 0.07
-Nodes (14): FakeClock, SystemClock, compile_scheduled_bot(), conforms(), ScheduledBot, Scheduler, CapturingDispatch, test_cancel_removes_job_so_it_never_fires() (+6 more)
+Cohesion: 0.06
+Nodes (15): Clock, FakeClock, SystemClock, compile_scheduled_bot(), conforms(), ScheduledBot, Scheduler, CapturingDispatch (+7 more)
 
-### Community 104 - "AskTinaView.tsx"
-Cohesion: 0.03
-Nodes (106): stripContextBlocks(), ChatPhase, ChatStreamCallbacks, ChatStreamEvent, ChatStreamOptions, ChatStreamRequest, ChatStreamResult, mintTurnId() (+98 more)
+### Community 104 - "MeetingDetailView.tsx"
+Cohesion: 0.02
+Nodes (137): formatTime(), MeetingAudioFragment, MeetingAudioPlayer, MeetingAudioPlayerHandle, MeetingAudioPosition, ADR-0027, pinSubscriptionUid(), ChatGPTPlanIssue (+129 more)
 
 ### Community 105 - "shared/config.py"
-Cohesion: 0.05
-Nodes (28): _reset_probe_cache(), build_active_set(), build_mount_set(), global_mount(), system_mount(), Settings, build_worker_env(), _FakeIdentity (+20 more)
+Cohesion: 0.04
+Nodes (34): health(), _model_creds_error_message(), capability_health(), capability_state(), capability_states(), ConfigError, _is_set(), load_declaration() (+26 more)
 
 ### Community 106 - "FakeClock"
 Cohesion: 0.08
 Nodes (23): FakeClock, DispatchError, _s(), Scheduler, _client(), test_schedule_503_when_not_wired(), test_schedule_bad_spec_is_400(), test_schedule_register_list_and_fire() (+15 more)
 
-### Community 107 - "today.tsx"
-Cohesion: 0.08
-Nodes (42): BriefMeeting, briefNotePath(), findBriefNote(), isExampleNote(), tokenize(), tokensMatch(), groupMeetings(), MeetingGroup (+34 more)
+### Community 107 - "bot-transcript.ts"
+Cohesion: 0.09
+Nodes (39): apiBase(), botFetch(), botSegments(), DesktopConnection, epoch(), hasOwnedBotInRoom(), listBotMeetings(), listDesktopMeetings() (+31 more)
 
 ### Community 108 - "msteams/join.ts"
 Cohesion: 0.06
 Nodes (47): authRedirectError(), classifyNonMeetingUrl(), hostOf(), isMicrosoftLoginUrl(), isTeamsMeetingUrl(), meetingOriginHost(), MICROSOFT_LOGIN_HOSTS, offMeetingOriginError() (+39 more)
 
 ### Community 109 - "test_bot_spawn.py"
-Cohesion: 0.02
-Nodes (81): build_invocation(), build_workload_spec(), conforms_invocation(), conforms_workload_spec(), test_build_invocation_carries_auth_block(), _client(), _spawn_env(), _spawned_invocation() (+73 more)
+Cohesion: 0.03
+Nodes (62): build_invocation(), build_workload_spec(), conforms_invocation(), conforms_workload_spec(), mint_meeting_token(), test_build_invocation_carries_auth_block(), _client(), _spawn_env() (+54 more)
 
 ### Community 110 - "echo_cancel.rs"
 Cohesion: 0.07
 Nodes (26): CapturePcm, abs_sample(), aligned_reference_produces_same_length_sample_indexed_mic_frame(), Block, cleanup_preserves_delayed_echo_cancellation(), cleanup_preserves_timeline_raw_input_and_fallback_across_pause(), cleanup_reduces_stationary_noise_and_retains_quiet_voiced_signal(), cleanup_retains_near_end_voice_during_synthetic_double_talk() (+18 more)
 
-### Community 111 - "Workbench.tsx"
-Cohesion: 0.05
-Nodes (82): isMeetingRouteId(), isOwnedPath(), isTerminalOwnedPath(), MEETING_ROUTE_PREFIX, meetingIdFromPath(), meetingPath(), TERMINAL_MEETING_PREFIX, TERMINAL_ROUTE_PREFIX (+74 more)
+### Community 111 - "surfaces/meeting.tsx"
+Cohesion: 0.02
+Nodes (157): isMeetingRouteId(), isOwnedPath(), isTerminalOwnedPath(), MEETING_ROUTE_PREFIX, meetingIdFromPath(), meetingPath(), TERMINAL_MEETING_PREFIX, TERMINAL_ROUTE_PREFIX (+149 more)
 
-### Community 112 - "mock.test.ts"
-Cohesion: 0.06
-Nodes (47): canonicalWav(), consoleLifecycleSink(), main(), meetingChannelId(), teeSpeak(), uploadMockChunk(), check(), drive() (+39 more)
+### Community 112 - "webhook.py"
+Cohesion: 0.09
+Nodes (17): StatusChange, create_app(), lifecycle_callback(), build_status_change_envelope(), build_typed_envelope(), _conforms(), derive_event_id(), _minimal_meeting_projection() (+9 more)
 
 ### Community 113 - "_admin"
-Cohesion: 0.03
-Nodes (56): client(), _internal(), _mk_user(), test_bootstrap_unknown_user_404(), test_first_claim_wins_then_idempotent(), test_setup_settings_key(), test_validate_surfaces_is_admin(), client() (+48 more)
+Cohesion: 0.05
+Nodes (34): _internal(), _mk_user(), test_bootstrap_unknown_user_404(), test_first_claim_wins_then_idempotent(), test_setup_settings_key(), test_validate_surfaces_is_admin(), test_a_mixed_case_signup_resolves_through_the_admin_lookup(), test_a_new_address_is_stored_folded() (+26 more)
 
 ### Community 114 - "meetingPrep.tsx"
-Cohesion: 0.02
-Nodes (225): calendarSettingsCallbackUrl(), startGoogleCalendarLink(), ApiError, readApiFailure(), AddCalendarForm(), btn, CalendarConnectionsPanel(), CalendarRow() (+217 more)
+Cohesion: 0.03
+Nodes (133): endpointLabel(), gaReady(), track(), Window, ApiError, PresentedError, readApiFailure(), BriefMeeting (+125 more)
 
 ### Community 115 - "join/src/index.ts"
 Cohesion: 0.07
 Nodes (45): leaveGoogleMeet(), prepareForRecording(), checkForGoogleRemoval(), startGoogleRemovalMonitor(), googleLeaveButtonMatchers, googleRemovalIndicators, BotConfig, callLeaveCallback() (+37 more)
 
 ### Community 116 - "test_stop_is_stop.py"
-Cohesion: 0.07
-Nodes (18): _app(), _at(), _client(), _seed_scheduled(), _seed_terminal(), _StopRacingRepo, _StopRacingRuntime, _sweep() (+10 more)
+Cohesion: 0.05
+Nodes (23): Disposition, disposition(), may_dispatch_again(), _app(), _at(), _client(), _seed_scheduled(), _seed_terminal() (+15 more)
 
 ### Community 117 - "_ProbeServer"
 Cohesion: 0.11
 Nodes (9): _ProbeServer, _stt_probe_spec(), test_probe_400_and_401_verdicts_unchanged(), test_probe_402_is_exhausted_config_fault(), test_probe_404_demotes_the_health_row(), test_probe_404_is_misconfigured_not_ok(), test_probe_accepts_a_full_path_url_without_double_pathing(), test_probe_declares_a_long_ttl_because_the_round_trip_is_metered() (+1 more)
 
 ### Community 118 - "schema/models.py"
-Cohesion: 0.06
-Nodes (31): Base, EffectReceipt, FlowVersion, MailCursor, MailOutboxSent, MailQuarantine, MailSeen, MailThread (+23 more)
+Cohesion: 0.05
+Nodes (36): Base, EffectReceipt, FlowVersion, MailCursor, MailOutboxSent, MailQuarantine, MailSeen, MailThread (+28 more)
 
 ### Community 119 - "background.ts"
-Cohesion: 0.04
-Nodes (64): SourceSampleClock, clock, broadcastStatus(), captureFailure(), connectIngest(), controlWaiters, ensureOffscreen(), flushAudio() (+56 more)
+Cohesion: 0.05
+Nodes (59): SourceSampleClock, clock, broadcastStatus(), captureFailure(), connectIngest(), controlWaiters, ensureOffscreen(), flushAudio() (+51 more)
 
 ### Community 120 - "test_response_secret_projection.py"
 Cohesion: 0.07
@@ -2361,28 +2344,28 @@ Cohesion: 0.03
 Nodes (74): notices(), _one_absence_per_flow(), parse(), pending(), _roots(), _rows(), Say, say() (+66 more)
 
 ### Community 123 - "mailbox.py"
-Cohesion: 0.06
-Nodes (39): allow_domains(), already_answered(), in_allow_list(), body_max(), _fixed_reply(), handle(), invite_source_id(), route() (+31 more)
+Cohesion: 0.04
+Nodes (63): allow_domains(), already_answered(), in_allow_list(), body_max(), _fixed_reply(), handle(), invite_source_id(), _meeting_url() (+55 more)
 
 ### Community 124 - "teams-csrc-live-replay-server.ts"
-Cohesion: 0.06
-Nodes (28): Invocation, StopReason, DISCORD_PROFILE, Harness, harness(), invocation(), Reply, workload() (+20 more)
+Cohesion: 0.05
+Nodes (29): Invocation, StopReason, FailureStage, DISCORD_PROFILE, Harness, harness(), invocation(), Reply (+21 more)
 
 ### Community 125 - "test_multi_session.py"
-Cohesion: 0.07
-Nodes (22): _Sessions, _truncate_title(), _without_chat_session(), chat_session(), dispatch_id(), _chat_inv(), _FakeRedis, _index_cases() (+14 more)
+Cohesion: 0.08
+Nodes (14): _Sessions, _truncate_title(), _without_chat_session(), _chat_inv(), _FakeRedis, _index_cases(), test_chat_session_helper_and_strip(), test_dispatch_id_defaults_to_main() (+6 more)
 
-### Community 126 - "test_turn_shadow.py"
-Cohesion: 0.12
-Nodes (12): test_atomic_hash_pinned_install_and_cache_reuse(), __init__(), test_bad_download_does_not_replace_existing_asset(), test_predict_uses_audio_front_padding_and_class_one_probability(), test_shadow_request_validation_never_dispatches_invalid_audio(), check(), install(), manifest() (+4 more)
+### Community 126 - "hashlib"
+Cohesion: 0.02
+Nodes (76): parser(), download(), Reranker, verify(), answer_report(), evaluate(), load_cases(), main() (+68 more)
 
 ### Community 127 - "agent/tests/test_live_assist.py"
-Cohesion: 0.02
-Nodes (94): _chat_turn_head(), _chat_turn_head_key(), chat(), invocations(), meeting_start(), meeting_state_profile(), models(), polish_dictation() (+86 more)
+Cohesion: 0.04
+Nodes (67): meeting_state_profile(), register(), generate(), load(), review_state(), state(), traces(), classification_schema() (+59 more)
 
-### Community 128 - "re"
-Cohesion: 0.01
-Nodes (288): post_meeting_report(), read_sources(), register(), generate(), load(), review_state(), state(), ReviewRequest (+280 more)
+### Community 128 - "register"
+Cohesion: 0.07
+Nodes (77): post_meeting_report(), read_sources(), meeting_get(), register(), answer_state(), apply(), ask(), authorized_voice() (+69 more)
 
 ### Community 129 - "storage_init.py"
 Cohesion: 0.10
@@ -2390,47 +2373,47 @@ Nodes (24): client(), code_of(), env(), listing(), main(), say(), sha_of(), sour
 
 ### Community 130 - "sidepanel.ts"
 Cohesion: 0.07
-Nodes (57): shipTelemetry(), botBase, dashboardOverride(), DEFAULT_DEPLOYMENT, Deployment, DEPLOYMENT_PRESETS, DeploymentPreset, EndpointConfig (+49 more)
+Nodes (55): botBase, dashboardOverride(), DEFAULT_DEPLOYMENT, Deployment, DEPLOYMENT_PRESETS, DeploymentPreset, EndpointConfig, normalizeDeployment() (+47 more)
 
 ### Community 131 - "teams-capture/src/index.ts"
 Cohesion: 0.06
 Nodes (46): asRecord(), assertHeader(), assertKeys(), assertTileState(), canonicalHeader(), canonicalTileState(), fail(), FORBIDDEN_DOM_KEYS (+38 more)
 
 ### Community 132 - "ProcessBackend"
-Cohesion: 0.09
-Nodes (23): _log_dir(), ProcessBackend, _tail(), _alive(), _py(), _read_pids(), _sh(), _start_and_wait() (+15 more)
+Cohesion: 0.07
+Nodes (26): WorkloadHandle, _log_dir(), ProcessBackend, _signal_group(), _tail(), _FakeBackend, _alive(), _py() (+18 more)
 
 ### Community 133 - "Draft"
-Cohesion: 0.10
-Nodes (9): Stop, Decoder, __call__(), Draft, partial_text(), TokenStreamer, FakeValue, TokenTests (+1 more)
+Cohesion: 0.07
+Nodes (11): Decoder, __call__(), Draft, partial_text(), TokenStreamer, GuardTests, FakeValue, TokenTests (+3 more)
 
 ### Community 134 - "test_mcp_proxy.py"
 Cohesion: 0.06
 Nodes (21): _app(), AsgiDrive, _client(), _FakeStreamedResponse, StreamingDownstream, test_agent_sse_still_uses_the_byte_relay_stream_port(), test_client_disconnect_closes_the_downstream_stream(), test_get_mcp_is_streamed_and_holds_open_on_a_silent_upstream() (+13 more)
 
 ### Community 135 - "test_standing_notices.py"
-Cohesion: 0.08
-Nodes (29): agent(), session(), call(), _app(), upstream(), _refusing(), gateway(), test_a_notice_appears_once_per_result() (+21 more)
+Cohesion: 0.09
+Nodes (27): agent(), session(), call(), _app(), upstream(), _refusing(), gateway(), test_a_notice_appears_once_per_result() (+19 more)
 
 ### Community 136 - "recordings/__init__.py"
-Cohesion: 0.11
-Nodes (11): apply_chunk_to_recording(), chunk_storage_key(), master_storage_key(), new_recording_numeric_id(), _now_iso(), signal_tape_key(), signal_tape_prefix(), _fold() (+3 more)
+Cohesion: 0.08
+Nodes (15): apply_chunk_to_recording(), chunk_storage_key(), master_storage_key(), new_recording_numeric_id(), _now_iso(), signal_tape_key(), signal_tape_prefix(), _stamp() (+7 more)
 
 ### Community 137 - "agent/tests/test_meeting_voice.py"
-Cohesion: 0.04
-Nodes (25): test_agents_context_removes_history_after_document_revocation(), test_automatic_public_source_routing_never_receives_private_context(), respond(), test_bad_optional_dictionary_keeps_voice_routes_available(), test_clear_public_gold_price_starts_web_topic_despite_pending_wiki_clarification(), test_final_voice_prompt_cannot_restore_sources_outside_lookup_filters(), test_heard_topic_note_reaches_both_livekit_plan_and_final_and_disappears_when_revoked(), test_optional_discovery_failures_do_not_hide_an_independently_verified_selected_link() (+17 more)
+Cohesion: 0.03
+Nodes (37): test_agents_context_removes_history_after_document_revocation(), test_automatic_public_source_routing_never_receives_private_context(), respond(), test_bad_optional_dictionary_keeps_voice_routes_available(), test_clarification_is_spoken_but_rechecks_all_context_sources(), test_clear_public_gold_price_starts_web_topic_despite_pending_wiki_clarification(), test_final_voice_prompt_cannot_restore_sources_outside_lookup_filters(), test_heard_topic_note_reaches_both_livekit_plan_and_final_and_disappears_when_revoked() (+29 more)
 
 ### Community 138 - "MetricTransformations"
-Cohesion: 0.07
-Nodes (41): Properties, Type, Properties, Type, Properties, Type, Condition, Properties (+33 more)
+Cohesion: 0.08
+Nodes (39): Properties, Properties, Type, Properties, Type, Condition, Properties, Type (+31 more)
 
-### Community 139 - "typing"
-Cohesion: 0.02
-Nodes (69): StreamReader, _env_bool(), env_truthy(), _caller_fingerprint(), report_issue(), _description_of(), _fingerprint(), get_api_key() (+61 more)
+### Community 139 - "discover.py"
+Cohesion: 0.09
+Nodes (19): _describe(), _operation(), tool_arguments(), verify(), deployed_domains(), discover(), DomainSilent, fetch() (+11 more)
 
 ### Community 140 - "MailpitInbox"
 Cohesion: 0.06
-Nodes (22): from_rfc822(), ImapInbox, InboundMessage, Inbox, iso_epoch(), iso_norm(), MailpitInbox, drive() (+14 more)
+Nodes (23): from_rfc822(), get_inbox(), ImapInbox, InboundMessage, Inbox, iso_epoch(), iso_norm(), MailpitInbox (+15 more)
 
 ### Community 141 - "humanized.test.ts"
 Cohesion: 0.09
@@ -2438,43 +2421,43 @@ Nodes (18): attrMatch(), El, matchesSelector(), HumanizedInteractor, HumanizedOp
 
 ### Community 142 - "capture.rs"
 Cohesion: 0.08
-Nodes (32): AEC_RAW_MIC_CHANNEL, audio_capture_configuration(), audio_capture_configuration_throttles_unused_screen_output(), audio_frame(), buffered_websocket_send_retries_would_block_without_duplicate_frames(), can_dispatch_event(), CaptureEvent, CaptureFrame (+24 more)
+Nodes (31): AEC_RAW_MIC_CHANNEL, audio_capture_configuration(), audio_capture_configuration_throttles_unused_screen_output(), audio_frame(), buffered_websocket_send_retries_would_block_without_duplicate_frames(), can_dispatch_event(), CaptureEvent, CaptureFrame (+23 more)
 
 ### Community 143 - "test_voice_sandbox.py"
 Cohesion: 0.36
 Nodes (8): _client(), test_connect_doc_appears_in_meeting_docs(), test_connect_doc_owner_scoped_404(), test_connect_doc_requires_path_and_workspace(), test_connect_doc_requires_user_identity(), test_connect_same_path_twice_no_dup(), test_meeting_docs_absent_treated_as_empty(), test_multiple_docs_then_delete_one()
 
 ### Community 144 - "test_discussion_review_experiments.py"
-Cohesion: 0.09
-Nodes (31): RecordingTransport, factory(), prediction(), prepared(), test_batch_cannot_hide_extra_top_level_properties(), complete(), test_batch_progress_can_cite_prior_batches_without_future_evidence(), complete() (+23 more)
+Cohesion: 0.06
+Nodes (44): CompletionPort, CompletionResult, RecordingTransport, factory(), window_classification_schema(), test_worker_calls_completion_with_canonical_text_and_produces_no_public_notes(), complete(), prediction() (+36 more)
 
 ### Community 145 - "test_no_agents.py"
-Cohesion: 0.07
-Nodes (25): _admit_and_tick(), _blind_to_the_prompt_tree(), _gone(), _read(), _one_step_rig(), touch_the_agent(), _production_registry(), _StubDB (+17 more)
+Cohesion: 0.05
+Nodes (29): _prompt(), PromptAbsent, _repo_root(), _showcase(), _admit_and_tick(), _blind_to_the_prompt_tree(), _gone(), _read() (+21 more)
 
 ### Community 146 - "test_friction.py"
 Cohesion: 0.07
 Nodes (34): api(), _clear(), _friction_op(), _friction_row(), _headers(), _identity(), _param(), _post() (+26 more)
 
 ### Community 147 - "tests/fakes.py"
-Cohesion: 0.10
-Nodes (15): run(), AgentAction, AgentRunRequest, AgentDecisionPort, FakeLLM, FakeWorkspace, _request(), test_llm_non_conformant_frontmatter_is_rejected_at_the_seam() (+7 more)
+Cohesion: 0.12
+Nodes (8): AgentAction, AgentDecisionPort, FakeLLM, FakeWorkspace, _request(), test_llm_non_conformant_frontmatter_is_rejected_at_the_seam(), test_llm_noop_commits_nothing(), test_llm_valid_decision_commits_exactly_one_entity()
 
 ### Community 148 - "lite/entrypoint.sh"
 Cohesion: 0.04
 Nodes (54): ADMIN_API_TOKEN, AGENT_WORKER_COMMAND, ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, ANTHROPIC_DEFAULT_HAIKU_MODEL, ANTHROPIC_DEFAULT_OPUS_MODEL, ANTHROPIC_DEFAULT_SONNET_MODEL (+46 more)
 
 ### Community 149 - "meetingLive.ts"
-Cohesion: 0.06
-Nodes (38): ageLabel(), hms(), RawEvent, TranscriptDebug(), useQueryId(), useRawWire(), Diagnostics, formatElapsed() (+30 more)
+Cohesion: 0.10
+Nodes (22): ageLabel(), hms(), RawEvent, TranscriptDebug(), useQueryId(), useRawWire(), clearWatchdog(), connect() (+14 more)
 
 ### Community 150 - "overlay.rs"
 Cohesion: 0.09
-Nodes (26): Sources, DetectedApp, a_meeting_release_becomes_a_reminder_after_the_sustain(), app(), apply(), decide(), DETECT_AUTO_HIDE, detection_hides_when_dismissed() (+18 more)
+Nodes (29): stop_capture(), stop_session(), DetectedApp, snapshot(), a_meeting_release_becomes_a_reminder_after_the_sustain(), action(), app(), apply() (+21 more)
 
 ### Community 151 - "create_app"
 Cohesion: 0.09
-Nodes (24): create_app(), annotate_meeting(), get_bot_status(), get_headers(), get_meeting_chat(), get_meeting_transcript(), get_recording(), health() (+16 more)
+Nodes (26): create_app(), annotate_meeting(), get_bot_status(), get_headers(), get_meeting_chat(), get_meeting_transcript(), get_recording(), health() (+18 more)
 
 ### Community 152 - "services"
 Cohesion: 0.05
@@ -2485,28 +2468,28 @@ Cohesion: 0.07
 Nodes (30): AntigravityHarness, build_argv(), _mounts(), parse_stream_json(), _short(), _tool_name(), normalized_effort(), GeminiCliWireTest (+22 more)
 
 ### Community 154 - "_attach_background_loops"
-Cohesion: 0.09
-Nodes (38): _docker_ok(), pg_async_url(), pg_url(), redis_client(), reclaim_segments(), drain_results(), publish_request(), _attach_background_loops() (+30 more)
+Cohesion: 0.10
+Nodes (31): _docker_ok(), pg_async_url(), pg_url(), redis_client(), reclaim_segments(), publish_projection(), publish_request(), dispatch_revisions() (+23 more)
 
 ### Community 155 - "smoke_turns.mjs"
-Cohesion: 0.07
-Nodes (10): _has_passcode_param(), _host_is(), parse_meeting_url(), TestConfiguredJitsiHosts, TestHostnameSpoofing, TestParseExistingPlatformsUnchanged, TestParseJitsi, TestParseZoomHostedDomain (+2 more)
+Cohesion: 0.06
+Nodes (11): _configured_jitsi_hosts(), _has_passcode_param(), _host_is(), parse_meeting_url(), TestConfiguredJitsiHosts, TestHostnameSpoofing, TestParseExistingPlatformsUnchanged, TestParseJitsi (+3 more)
 
 ### Community 156 - "chatgptPlanAuth.ts"
-Cohesion: 0.09
-Nodes (44): callbackPage(), dynamic, GET(), htmlEscape(), dynamic, headers, POST(), dynamic (+36 more)
+Cohesion: 0.08
+Nodes (46): callbackPage(), dynamic, GET(), htmlEscape(), dynamic, headers, POST(), dynamic (+38 more)
 
 ### Community 157 - "getAuthCookieName"
-Cohesion: 0.09
-Nodes (34): GET(), CalendarOAuthStatePayload, getGoogleClientId(), getStateSecret(), POST(), resolveRedirectUri(), signStatePayload(), toBase64Url() (+26 more)
+Cohesion: 0.17
+Nodes (16): GET(), DELETE(), GET(), getAdminConfig(), POST(), GET(), getAdminConfig(), PUT() (+8 more)
 
 ### Community 158 - "join/package.json"
 Cohesion: 0.09
 Nodes (28): dependencies, playwright@1.56.0, playwright-extra@^4.3.6, puppeteer-extra-plugin-stealth@^2.11.2, description, devDependencies, jsdom@^29.1.1, tsx@^4.19.0 (+20 more)
 
-### Community 159 - "parse_ics"
-Cohesion: 0.11
-Nodes (21): _meeting_url(), parse_ics(), _unfold(), _ics(), _rows(), _stamp(), _start_epoch(), test_a_description_mentioning_the_organizer_is_ignored_too() (+13 more)
+### Community 159 - "pyannote-segmenter.ts"
+Cohesion: 0.06
+Nodes (18): arg(), main(), readWav16kMono(), WAV, halfSecond, lastEnd, published, submittedSamples (+10 more)
 
 ### Community 160 - "to_c_ptr"
 Cohesion: 0.07
@@ -2517,56 +2500,56 @@ Cohesion: 0.05
 Nodes (3): docker_available(), stack(), EntryPointTest
 
 ### Community 162 - "chunked-transcriber.ts"
-Cohesion: 0.04
-Nodes (46): ChunkedTranscriberCallbacks, CLAIM_MIN_SHARE, CONTESTED_HINT_TOLERANCE_MS, CONTESTED_MIN_TILE_EVIDENCE, GAP_RECLAIM_MAX_MS, LaneClock, ORPHAN_ADJACENT_MS, PROVISIONAL_CUT_MS (+38 more)
+Cohesion: 0.03
+Nodes (48): ChunkedTranscriberCallbacks, CLAIM_MIN_SHARE, CONTESTED_HINT_TOLERANCE_MS, CONTESTED_MIN_TILE_EVIDENCE, GAP_RECLAIM_MAX_MS, LaneClock, ORPHAN_ADJACENT_MS, PROVISIONAL_CUT_MS (+40 more)
 
 ### Community 163 - "tts/test_streaming.py"
-Cohesion: 0.06
-Nodes (15): Engine, pcm24(), preset_voices(), selected_voice(), verify_assets(), default_pronunciations(), Pronunciations, spoken_text() (+7 more)
+Cohesion: 0.05
+Nodes (18): Engine, pcm24(), preset_voices(), selected_voice(), verify_assets(), default_pronunciations(), normalizer(), numeric_text() (+10 more)
 
 ### Community 164 - "WorkloadSpec"
-Cohesion: 0.06
-Nodes (22): Runtime, WorkloadSpec, _runtime(), test_idle_timeout_stops_workload(), test_max_lifetime_stops_workload_regardless_of_activity(), test_profile_idle_timeout_zero_disables_idle_limit(), test_quota_rejects_n_plus_first(), spec() (+14 more)
+Cohesion: 0.05
+Nodes (24): Runtime, WorkloadSpec, test_unknown_profile_is_400_and_unknown_workload_404(), _runtime(), test_idle_timeout_stops_workload(), test_max_lifetime_stops_workload_regardless_of_activity(), test_profile_idle_timeout_zero_disables_idle_limit(), test_quota_rejects_n_plus_first() (+16 more)
 
-### Community 165 - "AuthUnavailable"
-Cohesion: 0.09
-Nodes (12): HttpxDownstreamClient, _authorizer(), _raise(), test_auth_isolated_from_slow_downstream(), test_downstream_client_defaults_to_one_client_when_no_stream_client_given(), test_resolve_200_returns_user(), test_resolve_client_error_is_invalid_key_none(), test_resolve_redirect_is_no_verdict_unavailable() (+4 more)
+### Community 165 - "gateway/adapters.py"
+Cohesion: 0.05
+Nodes (21): AdminApiAuthorizer, build_auth_and_downstream(), build_production_app(), __getattr__(), HttpxDownstreamClient, get_trace_id(), AuthUnavailable, _authorizer() (+13 more)
 
 ### Community 166 - "app/main.py"
 Cohesion: 0.05
-Nodes (31): _admin_token(), _apply_config_update(), CalendarCreate, CalendarPatch, CalendarUpdate, create_token_for_user(), get_current_user(), get_current_user_for_update() (+23 more)
+Nodes (27): _admin_token(), _apply_config_update(), CalendarCreate, CalendarPatch, CalendarUpdate, global_setup_state(), GoogleCalendarAccountLink, GoogleCalendarInfo (+19 more)
 
 ### Community 167 - "useMeeting.ts"
-Cohesion: 0.07
-Nodes (49): useCanvasActionState(), fetchDurableTranscript, EMPTY_DURABLE, fetchDurableTranscript, ADR-0027, useLiveMeetings, useMeetingLive, wrapper() (+41 more)
+Cohesion: 0.03
+Nodes (161): CanvasActionsProvider(), makeActions(), useActions(), useCanvasActionState(), ui, LiveTranscriptEngine(), filterSegments(), MEETING_CANVAS_CONTENT_INSET (+153 more)
 
 ### Community 168 - "run_models_test"
-Cohesion: 0.13
-Nodes (16): models_test(), _reason(), _result(), run_models_test(), test_bedrock(), streaming_request(), test_deepseek(), test_gemini() (+8 more)
+Cohesion: 0.10
+Nodes (16): _reason(), _result(), test_bedrock(), streaming_request(), test_deepseek(), test_gemini(), test_groq(), probe() (+8 more)
 
 ### Community 169 - "inpage.ts"
 Cohesion: 0.06
 Nodes (26): CaptureV1Sink, createGmeetCapture(), connectElement(), GmeetCapture, GmeetCaptureOptions, b, b2, Context (+18 more)
 
 ### Community 170 - "Parameters"
-Cohesion: 0.02
-Nodes (98): Type, Default, Type, Type, Type, AllowedValues, Default, Type (+90 more)
+Cohesion: 0.03
+Nodes (58): Type, Default, Type, Type, Type, AllowedValues, Default, Type (+50 more)
 
 ### Community 171 - "test_tool_error_shape.py"
-Cohesion: 0.06
-Nodes (32): _bounded(), install_structured_tool_errors(), _request(), render_tool_error(), require_library_seam(), _text(), unwrap_detail(), test_render_error_leaves_a_block_with_no_json_body_shaped_exactly_as_it_was() (+24 more)
+Cohesion: 0.05
+Nodes (34): _bounded(), install_structured_tool_errors(), _request(), render_tool_error(), require_library_seam(), _text(), unwrap_detail(), test_render_error_leaves_a_block_with_no_json_body_shaped_exactly_as_it_was() (+26 more)
 
 ### Community 172 - "discord/src/config.ts"
 Cohesion: 0.08
 Nodes (41): addFormats, AutomaticLeave, Backend, ConnectorConfig, ContractError, describe(), DISCORD_HOSTS, DiscordTarget (+33 more)
 
-### Community 173 - "profiles.py"
-Cohesion: 0.04
-Nodes (39): preflight(), _build_backend(), build_production_app(), _build_scheduler(), _http_dispatch(), _kernel_grace_sec(), main(), _optional_positive_int() (+31 more)
+### Community 173 - "runtime_kernel/__main__.py"
+Cohesion: 0.09
+Nodes (16): preflight(), _build_backend(), build_production_app(), _build_scheduler(), _http_dispatch(), _kernel_grace_sec(), main(), _optional_positive_int() (+8 more)
 
-### Community 174 - "test_chat_model_refresh.py"
-Cohesion: 0.06
-Nodes (22): ModelConfigRefreshError, input_topic(), output_topic(), test_processing_uses_authenticated_owner_and_only_sets_flags_after_durable_configure(), complete(), Config, Identity, stack() (+14 more)
+### Community 174 - "dispatch.py"
+Cohesion: 0.02
+Nodes (77): chat(), invocations(), models(), session_history(), _has_custom_model_endpoint(), _sse(), _stream_tail_id(), _allowlisted() (+69 more)
 
 ### Community 175 - "InMemoryStorage"
 Cohesion: 0.31
@@ -2577,20 +2560,16 @@ Cohesion: 0.07
 Nodes (39): acceptanceFromIssues(), acceptanceSection(), authorIsMaintainer(), card(), CARD_MARKER, cardOk(), COMMENT_PAGES, diffAccepted() (+31 more)
 
 ### Community 177 - "test_admin_panel.py"
-Cohesion: 0.06
-Nodes (29): classify_workload(), fetch_workloads(), _health_stage(), pipeline_snapshot(), run_probe(), _stage(), _stream_stat(), admin_overview() (+21 more)
+Cohesion: 0.07
+Nodes (23): classify_workload(), pipeline_snapshot(), _stream_stat(), _client(), _FakeRedis, _ok_http(), _probe(), test_admin_overview_403_when_secret_unconfigured() (+15 more)
 
 ### Community 178 - "Resources"
 Cohesion: 0.06
-Nodes (22): build_pod(), resource_requirements(), _RecordingBackend, _runtime(), test_default_registry_emits_no_resources_when_unset(), test_default_registry_sizes_the_two_profiles_independently(), test_explicit_spec_resources_override_the_profile_default(), test_gpu_maps_to_the_limits_side_only() (+14 more)
+Nodes (30): ECSBackend, _encode_dotenv(), build_pod(), resource_requirements(), Resources, Runnable, backend(), test_draft_uses_separate_task_and_never_accepts_mounts() (+22 more)
 
 ### Community 179 - "env_flag"
 Cohesion: 0.09
 Nodes (27): transcription_test(), run_transcription_test(), test_subscription_credentials(), _balance(), test_subscription_expired_carries_remedy(), test_subscription_garbage_file(), test_subscription_missing_file(), test_subscription_valid_reports_hours_left() (+19 more)
-
-### Community 180 - "select"
-Cohesion: 0.03
-Nodes (12): select(), get_user_by_email(), list_tokens_for_user(), list_users(), patch_user_by_id(), _iso_utc(), _row_to_dict(), SqlAlchemyMeetingRepo (+4 more)
 
 ### Community 181 - "gmeet-capture/package.json"
 Cohesion: 0.10
@@ -2606,19 +2585,19 @@ Nodes (52): attachMembersOnlyWatch(), checkForJitsiAdmissionSilent(), getAppJoin
 
 ### Community 184 - "app.js"
 Cohesion: 0.09
-Nodes (45): action(), cancelDictation(), checkInitialPermissions(), detectedText(), dictationCard, dictationMachine, drainLiveTranslations(), escapeHtml() (+37 more)
+Nodes (46): action(), cancelDictation(), checkInitialPermissions(), detectedText(), dictationCard, dictationMachine, drainLiveTranslations(), escapeHtml() (+38 more)
 
 ### Community 185 - "meeting-api/tests/test_meeting_voice.py"
-Cohesion: 0.07
-Nodes (46): meeting_post(), diagnostic(), headers(), question(), test_agents_cannot_finalize_before_tools_complete_or_exceed_budget(), test_agents_stop_during_lookup_prevents_late_tools_and_final_answer(), test_agents_tool_protocol_is_reserved_bound_and_cannot_forge_context(), test_agents_turn_permit_is_bound_to_capability_revision_and_live_redis_lease() (+38 more)
+Cohesion: 0.04
+Nodes (75): meeting_post(), test_binding_exchange_rotation_and_revocation(), exchange(), validate(), voice_token(), diagnostic(), headers(), question() (+67 more)
 
 ### Community 186 - "values-test.yaml"
 Cohesion: 0.04
 Nodes (46): adminApi, enabled, replicaCount, agentApi, enabled, replicaCount, workspaces, gateway (+38 more)
 
 ### Community 187 - "calendars.py"
-Cohesion: 0.12
-Nodes (28): connections_from_data(), google_account_id(), google_accounts_from_data(), internal_connections(), legacy_connection_id(), _legacy_id(), masked_connection(), new_connection() (+20 more)
+Cohesion: 0.08
+Nodes (36): connections_from_data(), google_account_id(), google_accounts_from_data(), internal_connections(), legacy_connection_id(), _legacy_id(), masked_connection(), new_connection() (+28 more)
 
 ### Community 188 - "test_attendee_drop.py"
 Cohesion: 0.10
@@ -2633,12 +2612,12 @@ Cohesion: 0.06
 Nodes (16): BoxedProgressCallback, GeneratedAudio, GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsKittenModelConfig, OfflineTtsKokoroModelConfig, OfflineTtsMatchaModelConfig (+8 more)
 
 ### Community 191 - "meeting-voice.ts"
-Cohesion: 0.07
-Nodes (16): MeetingVoice, VoiceWorker, SpeechReporter, fixture(), TurnShadow, VadShadow, isVoiceRefinement(), mergeVoiceRefinement() (+8 more)
+Cohesion: 0.04
+Nodes (56): AsrDiagnostic, AudioChannel, AudioDiagnostics, AudioSnapshot, duration(), Row, KWS_MODELS, KwsStatus (+48 more)
 
 ### Community 192 - "DiscordVoiceSession"
 Cohesion: 0.12
-Nodes (6): CompletionReason, FailureStage, VoiceSessionHandle, bounded(), DiscordVoiceSession, errorText()
+Nodes (5): CompletionReason, VoiceSessionHandle, bounded(), DiscordVoiceSession, errorText()
 
 ### Community 193 - "mixed-capture-core/src/index.ts"
 Cohesion: 0.07
@@ -2653,24 +2632,24 @@ Cohesion: 0.05
 Nodes (45): concurrency, cancel-in-progress, group, BROWSER_IMAGE, COMPOSE_DYNAMIC_PORTS, COMPOSE_EXTRA_FILES, ENV_FILE, MOCK_BOT (+37 more)
 
 ### Community 196 - "Resource"
-Cohesion: 0.04
-Nodes (30): AccessDecision, AccessPolicy, can_access(), OwnerOnlyPolicy, deny(), Resource, _aware(), _iso() (+22 more)
+Cohesion: 0.15
+Nodes (9): can_access(), Resource, test_default_policy_is_owner_only(), test_empty_subject_default_denies(), test_other_user_denied_on_each_read_path(), test_owner_allowed_on_each_read_path(), test_unknown_resource_kind_rejected(), test_unowned_resource_default_denies() (+1 more)
 
 ### Community 197 - "AgentApi"
 Cohesion: 0.07
 Nodes (4): AgentApi, _Domain, MeetingsApi, read_sse_events()
 
 ### Community 198 - "test_meeting_knowledge.py"
-Cohesion: 0.12
-Nodes (23): _as_bool(), _as_cadence(), _as_card_kinds(), _as_model(), _as_rules(), default_meeting_model(), load_meeting_config(), model_allowlist() (+15 more)
-
-### Community 199 - "test_discover.py"
 Cohesion: 0.10
-Nodes (20): _answers(), _refused(), test_a_5xx_is_silence_too_because_the_domain_did_not_author_it(), test_a_configured_domain_that_never_answers_fails_the_boot_and_names_it(), handler(), test_a_deployed_domain_s_tools_are_assembled(), test_a_domain_that_is_slow_to_come_up_is_waited_for_rather_than_dropped(), handler() (+12 more)
+Nodes (27): _as_bool(), _as_cadence(), _as_card_kinds(), _as_model(), _as_rules(), default_meeting_model(), load_meeting_config(), MeetingConfig (+19 more)
 
-### Community 200 - "verify_voice_reply"
+### Community 199 - "groq_responses_proxy"
 Cohesion: 0.09
-Nodes (24): verify_voice_reply(), output(), complete(), test_conversational_reply_keeps_citations_and_missing_detail_through_verification(), test_failed_review_skips_repair_and_forged_repair_sources_are_rejected(), test_rejected_detail_can_leave_a_separately_verified_supported_claim(), review(), test_repair_keeps_supported_part_and_asks_for_missing_detail_after_reverification() (+16 more)
+Nodes (24): groq_responses_proxy(), do_GET(), do_POST(), _json_error(), setup(), _LoopbackServer, _reach_call(), restore_reach_event() (+16 more)
+
+### Community 200 - "test_voice_knowledge.py"
+Cohesion: 0.04
+Nodes (59): map_part(), recap(), job(), assistant_intent(), assistant_reply(), current_history(), semantic_assistant_intent(), validate_voice_answer() (+51 more)
 
 ### Community 201 - "test_meeting_annotate.py"
 Cohesion: 0.09
@@ -2681,8 +2660,8 @@ Cohesion: 0.07
 Nodes (24): _backend(), FakeDockerSession, _Resp, _restarted_runtime(), test_adopt_exited_container_reports_stopped_with_evidence(), test_adopt_is_idempotent(), test_adopt_makes_get_truthful_after_restart(), test_adopt_noop_on_backends_without_discovery() (+16 more)
 
 ### Community 203 - "test_security_routes.test.ts"
-Cohesion: 0.07
-Nodes (46): CalendarOAuthStatePayload, exchangeCodeForGoogleTokens(), getGoogleClientId(), getGoogleClientSecret(), getStateSecret(), parseAndVerifyState(), POST(), resolveRedirectUri() (+38 more)
+Cohesion: 0.13
+Nodes (28): exchangeCodeForZoomTokens(), getStateSecret(), getZoomClientId(), getZoomClientSecret(), isHttpsRequest(), parseAndVerifyState(), POST(), resolveRedirectUri() (+20 more)
 
 ### Community 204 - "gmeet-pipeline/package.json"
 Cohesion: 0.08
@@ -2693,12 +2672,12 @@ Cohesion: 0.04
 Nodes (44): depends_on, RUNTIME_DEPS, args, ollama, ollama-model, NODE_ENV, OLLAMA_CONTEXT_LENGTH, OLLAMA_HOST (+36 more)
 
 ### Community 206 - "voice.py"
-Cohesion: 0.11
-Nodes (19): active_configs(), _CaptureRedis, _cfg(), _client(), test_active_configs_empty_when_every_connection_is_deleted(), test_active_configs_excludes_tombstones_and_other_users(), test_active_configs_scopes_to_one_connection(), test_connection_scoped_sync_routes_forward_calendar_id() (+11 more)
+Cohesion: 0.12
+Nodes (18): active_configs(), _CaptureRedis, _cfg(), _client(), test_active_configs_empty_when_every_connection_is_deleted(), test_active_configs_excludes_tombstones_and_other_users(), test_active_configs_scopes_to_one_connection(), test_connection_scoped_sync_routes_forward_calendar_id() (+10 more)
 
 ### Community 207 - "discord-voice.ts"
-Cohesion: 0.07
-Nodes (14): OpusDecoderLike, opusPacketDecoder(), DiscordVoiceHandle, DiscordVoicePortOptions, displayNameFor(), errorText(), HandleOptions, makeDecoder() (+6 more)
+Cohesion: 0.08
+Nodes (11): DiscordVoiceHandle, DiscordVoicePortOptions, displayNameFor(), errorText(), HandleOptions, OpusDecoderHandle, resolveGuild(), resolveVoiceChannel() (+3 more)
 
 ### Community 208 - "viewer.ts"
 Cohesion: 0.12
@@ -2710,35 +2689,35 @@ Nodes (34): AllowedValues, Default, Type, Default, Type, Parameters, EnableWorks
 
 ### Community 210 - "session.ts"
 Cohesion: 0.07
-Nodes (25): LanePort, LifecycleEvent, LifecyclePort, LifecycleStatus, realScheduler, Scheduler, VoicePort, VoiceTarget (+17 more)
+Nodes (23): LanePort, LifecycleEvent, realScheduler, Scheduler, VoicePort, VoiceTarget, DEFAULT_DISCONNECT_GRACE_MS, DEFAULT_EVERYONE_LEFT_MS (+15 more)
 
-### Community 211 - "capture-bridge.boundary.test.ts"
-Cohesion: 0.06
-Nodes (22): BOT_DIR, BUNDLE, check(), HERE, main(), sleep(), verifyTtsStopBehavior(), createSpeakController() (+14 more)
+### Community 211 - "CsrcTurnSource"
+Cohesion: 0.07
+Nodes (5): CsrcTurnSource, PyannoteTurnSource, rms(), TurnSource, TurnSourceCallbacks
 
 ### Community 212 - "test_meeting_postprocess_offline.py"
-Cohesion: 0.07
-Nodes (18): _fold_like_cookbook(), _repo_root(), test_worker_offline_output_folds_into_cookbook_harvest(), _fake_completion(), complete(), _load_fixture_segments(), test_card_turn_resolves_completion_factory_seam(), test_meeting_summary_preserves_user_edits_before_and_during_generation() (+10 more)
+Cohesion: 0.08
+Nodes (16): _fold_like_cookbook(), test_worker_offline_output_folds_into_cookbook_harvest(), _fake_completion(), _load_fixture_segments(), test_card_turn_resolves_completion_factory_seam(), test_meeting_summary_preserves_user_edits_before_and_during_generation(), complete(), test_offline_card_turn_emits_auth_error_on_401_done_reply() (+8 more)
 
 ### Community 213 - "contribution-rights-gate.mjs"
 Cohesion: 0.10
 Nodes (36): bodyEditedOnlyByAuthor(), commentsForPullRequest(), commitAuthorLogins(), createCheck(), decisionState(), declarationVerdict(), describeStanding(), earlierDeclaration() (+28 more)
 
 ### Community 214 - "MdxDoc.tsx"
-Cohesion: 0.04
-Nodes (75): MdxDemo(), Pane(), FactItem, MeetingFactReviews(), Review(), Answer, button, clock() (+67 more)
+Cohesion: 0.03
+Nodes (89): revision(), MdxDemo(), Pane(), OPEN_ENTITY_EVENT, Harness(), mocks, visible(), activeRoom() (+81 more)
 
 ### Community 215 - "calendar_sync/service.py"
-Cohesion: 0.07
-Nodes (23): _as_utc(), _attach_live_source(), _attendees(), _auto_join_user_set(), _calendar_sources(), _component_metadata(), _event_text(), _finished_row() (+15 more)
+Cohesion: 0.09
+Nodes (19): _as_utc(), _attach_live_source(), _attendees(), _auto_join_user_set(), _calendar_sources(), _component_metadata(), _event_text(), _finished_row() (+11 more)
 
 ### Community 216 - "test_onboarding_flow.py"
 Cohesion: 0.09
 Nodes (22): _admit(), _ctx(), _row(), _seed_completion(), test_a_completion_with_no_transcript_does_not_activate(), test_a_fact_with_no_subject_is_refused_loudly(), test_a_pending_onboarding_row_becomes_one_spoken_item(), test_a_private_tree_overrides_the_words() (+14 more)
 
 ### Community 217 - "openai_auth.py"
-Cohesion: 0.07
-Nodes (31): _configured_chat_toolbelt(), openai_model_catalog(), openai_workspace_status(), _LiveMeetings, access_token(), _access_token(), _read_profile(), _secret_client() (+23 more)
+Cohesion: 0.08
+Nodes (29): _configured_chat_toolbelt(), openai_model_catalog(), _LiveMeetings, access_token(), _access_token(), _read_profile(), _secret_client(), workspace_access_token() (+21 more)
 
 ### Community 218 - "AuthGate.tsx"
 Cohesion: 0.24
@@ -2758,7 +2737,7 @@ Nodes (15): _blip(), _compose(), _container_id(), _inspect(), _redis_network(), 
 
 ### Community 222 - "meeting_api/config_preflight.py"
 Cohesion: 0.09
-Nodes (16): _production_transcribe_gate(), audio_probe_body(), _cached_probe(), capability_state(), capability_states(), ConfigError, _file_probe(), _http_probe() (+8 more)
+Nodes (19): _production_transcribe_gate(), audio_probe_body(), _cached_probe(), cached_probe_verdict(), capability_health(), capability_state(), capability_states(), ConfigError (+11 more)
 
 ### Community 223 - "env"
 Cohesion: 0.07
@@ -2786,71 +2765,67 @@ Nodes (50): buildText(), CACHE, CACHE_DIR, CLIPS_PER, dgTTS(), FILLER, gauss(), 
 
 ### Community 229 - "teams-csrc-live-replay-server.ts"
 Cohesion: 0.07
-Nodes (32): argument(), AudioSignal, audioWav, cacheDir, cadenceMs, cadenceReceipt(), CadenceSignal, capturedPath (+24 more)
+Nodes (34): argument(), AudioSignal, audioWav, cacheDir, cadenceMs, cadenceReceipt(), CadenceSignal, capturedPath (+26 more)
 
 ### Community 230 - "edge_guard.py"
-Cohesion: 0.06
-Nodes (12): apply_guard(), build_guard_config(), check_ws(), _env_int(), _guard_csv(), _ip_matches(), resolve_ws_client_ip(), ws_guard_check() (+4 more)
+Cohesion: 0.09
+Nodes (12): apply_guard(), build_guard_config(), check_ws(), _env_bool(), _env_int(), _guard_csv(), _ip_matches(), reset_ws_guard() (+4 more)
 
 ### Community 231 - "test_agent_reach.py"
-Cohesion: 0.03
-Nodes (79): answer_public(), checked(), read_pages(), remaining(), result_for(), retrieve(), public_request(), query() (+71 more)
+Cohesion: 0.05
+Nodes (48): answer_public(), checked(), read_pages(), remaining(), result_for(), retrieve(), public_request(), query() (+40 more)
 
 ### Community 232 - "test_meeting_translation.py"
 Cohesion: 0.09
 Nodes (12): complete(), test_batch_capable_provider_translates_multiple_ready_phrases_in_one_dispatch(), test_concurrent_web_and_extension_requests_share_one_inflight_completion(), test_context_capable_provider_receives_speaker_and_recent_translations(), test_invalid_phrase_reaches_a_bounded_manual_retry_state(), test_phrase_backoff_is_revision_bound_and_resumes_after_process_recreation(), test_phrase_failure_does_not_block_new_phrases_and_retries_only_the_missing_one(), test_service_failure_pauses_other_phrases_and_same_owner_meetings() (+4 more)
 
 ### Community 233 - "test_s3_copy.py"
-Cohesion: 0.08
-Nodes (10): copy_run(), assert_report(), summary(), FakeS3, test_both_sides_changed(), test_changed_etag_is_checked_against_verified_bytes(), test_existing_untracked_target_is_adopted_or_reported(), test_source_changed_target_untouched() (+2 more)
+Cohesion: 0.07
+Nodes (12): test_every_stage_shares_one_waiting_deadline_instead_of_returning_after_map_window(), test_timeout_never_publishes_partial_facts_or_promises_automatic_later_playback(), copy_run(), assert_report(), summary(), FakeS3, test_both_sides_changed(), test_changed_etag_is_checked_against_verified_bytes() (+4 more)
 
 ### Community 234 - "meeting_api/app.py"
-Cohesion: 0.03
-Nodes (69): _bot_spawn_fakes(), _build_webhooks_router(), _collector_fakes(), create_app(), _delete_recording_objects(), health(), _mount_lifecycle(), _apply_lifecycle_event() (+61 more)
+Cohesion: 0.06
+Nodes (31): _bot_spawn_fakes(), _build_webhooks_router(), _collector_fakes(), create_app(), _delete_recording_objects(), health(), _mount_lifecycle(), _apply_lifecycle_event() (+23 more)
 
 ### Community 235 - "offscreen.ts"
-Cohesion: 0.09
-Nodes (22): decode(), eqBytes(), main(), blog(), buildCombinedStream(), CreateRecordingTapOptions, EBML_MAGIC, findMediaElements() (+14 more)
+Cohesion: 0.06
+Nodes (18): decode(), eqBytes(), FakeBlob, FakeMediaRecorder, main(), isWebmHeader(), MediaRecorderChunker, RecordingChunk (+10 more)
 
 ### Community 236 - "run_multiplex"
-Cohesion: 0.05
-Nodes (34): nextConfig, allowedPkgs, fs, NODE_BUILTINS, path, pkg, PKG_ROOT, SRC (+26 more)
-
-### Community 237 - "mcp/tests/test_app.py"
-Cohesion: 0.05
-Nodes (5): test_transcript_accepts_canonical_and_legacy_identity(), test_transcript_cursor_past_the_end_is_empty_not_an_error(), test_transcript_since_index_returns_only_new_segments(), test_transcript_without_cursor_returns_everything(), _transcript_route()
+Cohesion: 0.08
+Nodes (25): encodeRecordingChunk(), fails, FMT, LIFE, CLUSTER, EBML, headerChunk, createRecordingAssembler() (+17 more)
 
 ### Community 238 - "tina_asr.py"
-Cohesion: 0.16
-Nodes (22): account_key(), api(), AsrError, choose(), clean_url(), configure(), headers(), principal() (+14 more)
+Cohesion: 0.14
+Nodes (25): test_recordings_table_is_dead(), json_rows(), account_key(), api(), AsrError, choose(), clean_url(), configure() (+17 more)
 
 ### Community 239 - "run_single_flight"
-Cohesion: 0.10
-Nodes (9): AdvisoryLock, run_single_flight(), FakeAdvisoryLock, test_body_exception_releases_lock(), test_loser_body_does_not_run_under_contention(), body(), guarded(), test_loser_runs_on_a_later_uncontended_tick() (+1 more)
+Cohesion: 0.05
+Nodes (15): AdvisoryLock, PgAdvisoryLock, run_single_flight(), sweep_lock_key(), FakeAdvisoryLock, test_body_exception_releases_lock(), test_loser_body_does_not_run_under_contention(), body() (+7 more)
 
 ### Community 240 - "test_schema_sync_fail_closed.py"
 Cohesion: 0.09
 Nodes (15): SchemaInvariantError, _FakeBase, _FakeConn, _FakeIndex, _FakeInspector, _FakeTable, patched_inspect(), _apply() (+7 more)
 
 ### Community 241 - "test_tool_approval_flow.py"
-Cohesion: 0.14
-Nodes (16): _request(), _Stream, test_approval_wait_preserves_fifo_order_for_queued_chat_messages(), test_chat_worker_serves_an_approval_before_completing_the_turn(), turn(), test_gate_approval_denial_is_terminal_for_that_call(), test_gate_approval_publishes_request_and_uses_matching_response(), test_gate_approval_timeout_fails_closed_without_waiting() (+8 more)
+Cohesion: 0.08
+Nodes (25): _request(), _Stream, test_approval_wait_preserves_fifo_order_for_queued_chat_messages(), test_chat_worker_serves_an_approval_before_completing_the_turn(), turn(), test_gate_approval_denial_is_terminal_for_that_call(), test_gate_approval_publishes_request_and_uses_matching_response(), test_gate_approval_timeout_fails_closed_without_waiting() (+17 more)
 
 ### Community 242 - "test_webhook_signing.py"
-Cohesion: 0.14
-Nodes (16): build_headers(), sign_payload(), verify_signature(), test_no_signature_without_secret(), test_signature_signs_ts_dot_body_exactly(), _conforms(), test_built_envelope_conforms(), test_built_headers_conform() (+8 more)
+Cohesion: 0.10
+Nodes (18): build_headers(), sign_payload(), verify_signature(), _deliver_one(), _transport_error_category(), test_no_signature_without_secret(), test_signature_signs_ts_dot_body_exactly(), _conforms() (+10 more)
 
 ### Community 243 - "contracts/__init__.py"
 Cohesion: 0.11
 Nodes (17): iter_segments(), _load(), _repo_root(), validate_entity_frontmatter(), validate_event(), validate_invocation(), validate_meeting_state_job(), validate_meeting_state_output() (+9 more)
 
 ### Community 244 - "_build_production_app"
-Cohesion: 0.07
-Nodes (8): _build_production_app(), __getattr__(), AdminApiMembershipIndex, AdminApiModelConfig, RedisStreamReader, SchedulerHttpClient, test_redis_stream_reader_yields_keepalive_ticks(), test_cancelable_reader_polls_voice_without_changing_chat_interval()
+Cohesion: 0.04
+Nodes (13): _build_production_app(), __getattr__(), AdminApiMembershipIndex, AdminApiModelConfig, LocalIdentityMinter, RedisStreamReader, RuntimeHttpClient, SchedulerHttpClient (+5 more)
 
 ### Community 245 - "Registry"
-Cohesion: 0.06
-Nodes (15): register_flows(), Flow, Registry, register(), test_drop_to_attendees_runs_after_email_attendees_in_post_meeting(), pack_on_path(), test_a_flow_version_may_be_authored_from_existing_steps(), test_a_module_with_no_build_is_refused_by_name() (+7 more)
+Cohesion: 0.05
+Nodes (17): Flow, Registry, register(), _admin_key_present(), registry(), repo_root(), test_drop_to_attendees_runs_after_email_attendees_in_post_meeting(), pack_on_path() (+9 more)
 
 ### Community 246 - "ServerTests"
 Cohesion: 0.09
@@ -2865,20 +2840,20 @@ Cohesion: 0.12
 Nodes (19): description, devDependencies, tsx@^4.19.0, @types/node@^20.0.0, typescript@^5.6.0, exports, files, tsx (+11 more)
 
 ### Community 249 - "requireAdmin"
-Cohesion: 0.11
-Nodes (23): AdminIdentity, allowlist(), requireAdmin(), dynamic, GET(), dynamic, forward(), GET (+15 more)
+Cohesion: 0.08
+Nodes (32): cache, dynamic, GET(), AdminIdentity, allowlist(), requireAdmin(), dynamic, GET() (+24 more)
 
 ### Community 250 - "src/config_preflight.py"
 Cohesion: 0.09
-Nodes (17): audio_probe_body(), _cached_probe(), cached_probe_verdict(), capability_health(), capability_state(), capability_states(), ConfigError, _file_probe() (+9 more)
+Nodes (18): audio_probe_body(), _cached_probe(), cached_probe_verdict(), capability_health(), capability_state(), capability_states(), ConfigError, _file_probe() (+10 more)
 
 ### Community 251 - "test_friction_body.py"
-Cohesion: 0.10
-Nodes (19): api(), clean(), _headers(), _manifest(), _refs(), test_a_body_report_says_nothing_about_deprecation(), test_a_body_that_is_not_an_object_does_not_cost_the_report(), test_a_report_sent_as_a_json_body_is_filed() (+11 more)
+Cohesion: 0.09
+Nodes (20): api(), clean(), _headers(), _manifest(), _refs(), test_a_body_report_says_nothing_about_deprecation(), test_a_body_that_is_not_an_object_does_not_cost_the_report(), test_a_report_sent_as_a_json_body_is_filed() (+12 more)
 
 ### Community 252 - "test_subject_bearer.py"
-Cohesion: 0.10
-Nodes (23): admin_old_name(), bearer(), test_a_persons_bearer_does_not_open_an_admin_route(), test_a_persons_own_bearer_lists_their_own_reactions(), test_a_stamped_user_id_does_not_beat_an_authenticated_person(), test_a_subject_argument_naming_someone_else_is_refused(), test_another_persons_bearer_sees_none_of_the_first_persons_rows(), test_cancelling_a_reaction_that_is_not_yours_is_refused() (+15 more)
+Cohesion: 0.13
+Nodes (18): bearer(), test_a_persons_own_bearer_lists_their_own_reactions(), test_a_subject_argument_naming_someone_else_is_refused(), test_another_persons_bearer_sees_none_of_the_first_persons_rows(), test_cancelling_a_reaction_that_is_not_yours_is_refused(), test_cancelling_your_own_reaction_works(), test_identity_saying_the_token_is_unknown_is_401(), test_identity_unreachable_is_503_not_401() (+10 more)
 
 ### Community 253 - "Settings"
 Cohesion: 0.09
@@ -2889,8 +2864,8 @@ Cohesion: 0.09
 Nodes (18): audio_probe_body(), _cached_probe(), cached_probe_verdict(), capability_health(), capability_state(), capability_states(), ConfigError, _file_probe() (+10 more)
 
 ### Community 255 - "build_voice_router"
-Cohesion: 0.13
-Nodes (39): _resolve_user_id(), checked_proposal(), decision_sources_changed(), service_error(), build_voice_router(), agent(), agent_operation(), answer() (+31 more)
+Cohesion: 0.21
+Nodes (31): room_profile(), _resolve_user_id(), build_voice_router(), agent(), agent_operation(), answer(), claim_handoff(), claim_navigation() (+23 more)
 
 ### Community 256 - "preflight.py"
 Cohesion: 0.09
@@ -2901,20 +2876,20 @@ Cohesion: 0.03
 Nodes (50): __dirname, PACK, postBuild, RELEASE, RELEASE_HOSTS, WATCH, calls, context (+42 more)
 
 ### Community 258 - "WorkloadHandle"
-Cohesion: 0.09
-Nodes (11): WorkloadHandle, K8sBackend, _kubectl(), _runtime_scheduling_env(), _FakeBackend, _capture_submitted_pods(), test_k8s_pod_still_replaces_entrypoint_for_a_profile_that_has_a_command(), test_meeting_bot_k8s_pod_omits_command_uses_image_entrypoint() (+3 more)
+Cohesion: 0.12
+Nodes (7): K8sBackend, _kubectl(), _stop_grace_sec(), _capture_submitted_pods(), test_k8s_pod_still_replaces_entrypoint_for_a_profile_that_has_a_command(), test_meeting_bot_k8s_pod_omits_command_uses_image_entrypoint(), test_long_workload_id_can_spawn_and_be_rediscovered()
 
 ### Community 259 - "FakeGateway"
-Cohesion: 0.10
-Nodes (28): FakeGateway, _gh(), _sink_requests(), test_downstream_error_propagates(), test_github_body_calls_out_the_meeting_join_key(), test_github_body_states_when_no_meeting_was_supplied(), test_github_format_maps_the_ticket_onto_an_issue(), test_github_format_still_never_forwards_the_api_key() (+20 more)
+Cohesion: 0.09
+Nodes (23): FakeGateway, _sink_requests(), test_downstream_error_propagates(), test_raw_is_the_default_and_is_byte_unchanged(), test_report_issue_body_size_cap(), test_report_issue_caller_fingerprint_is_stable_per_key(), test_report_issue_caps_long_text_fields(), test_report_issue_files_a_ticket_that_names_no_meeting() (+15 more)
 
-### Community 260 - "test_service_authority.py"
-Cohesion: 0.15
-Nodes (22): ServiceAuthorityConfig, _decision(), RecordingAuthority, _spawn(), test_active_boundary_deny_tears_down_once_and_restart_replays_none(), test_active_boundary_unavailable_fails_closed_and_stops(), test_active_boundary_untracked_workload_stays_pending_then_recovers(), test_configured_unavailable_fails_before_effects() (+14 more)
+### Community 260 - "test_meeting_knowledge.py"
+Cohesion: 0.07
+Nodes (17): document_client(), target(), reviewed_move(), setup(), fetch(), test_apply_refreshes_page_locations_after_acquiring_the_move_lock(), test_catch_up_uses_only_confirmed_segments_inside_the_requested_minute(), test_edits_restore_rename_and_timing_invalidate_answer() (+9 more)
 
-### Community 261 - "test_service_denial_passthrough.py"
-Cohesion: 0.10
-Nodes (17): _denial(), DenyingAuthority, _refuse(), test_absent_fields_are_omitted_not_nulled(), test_an_unknown_optional_field_does_not_cost_the_customer_the_decision(), test_control_characters_cannot_forge_a_second_line(), test_non_https_action_url_is_dropped(), test_one_field_present_carries_alone() (+9 more)
+### Community 261 - "collector/processed_notes.py"
+Cohesion: 0.14
+Nodes (25): _merge_notes_by_id(), _upsert_processed_view(), persist(), accept(), admit(), claim(), configure(), notify() (+17 more)
 
 ### Community 262 - "teams-speaker-indicators.test.ts"
 Cohesion: 0.09
@@ -2924,77 +2899,77 @@ Nodes (13): TeamsProducerObservation, TeamsSpeakers, compile(), compound(), Cond
 Cohesion: 0.09
 Nodes (15): _admin_headers(), _canonical_wav(), _insert_meeting(), _mint_token(), _multipart(), test_02_auth_surface(), test_03_real_bot_spawn_joining(), test_04_transcript_dataflow() (+7 more)
 
-### Community 264 - "runtime.tsx"
-Cohesion: 0.09
-Nodes (24): ui, ActiveView, AnyNode, applyEdits(), cache, CanvasFailure, CanvasRuntime(), CompileResult (+16 more)
+### Community 264 - "asrStatus.tsx"
+Cohesion: 0.10
+Nodes (20): BrowserAsrTiming, browserAsrTimings(), empty, listeners, recent, recordAsrTiming(), serverAsrTimings(), subscribeAsrTimings() (+12 more)
 
 ### Community 265 - "test_route_manifests.py"
 Cohesion: 0.07
 Nodes (32): assemble(), Assembly, carried(), load(), load_carried(), manifest_paths(), ManifestError, read() (+24 more)
 
 ### Community 266 - "meeting.rs"
-Cohesion: 0.07
-Nodes (32): Address, address(), app_name(), APP_NAMES, AudioObjectGetPropertyData(), AudioObjectGetPropertyDataSize(), AudioObjectId, bundle_id() (+24 more)
+Cohesion: 0.12
+Nodes (29): Address, address(), app_name(), APP_NAMES, AudioObjectGetPropertyData(), AudioObjectGetPropertyDataSize(), AudioObjectId, bundle_id() (+21 more)
 
 ### Community 267 - "panel-state.test.mjs"
 Cohesion: 0.05
 Nodes (25): baseRows, context, draftTurn, Element, element(), elements, feed, grouped (+17 more)
 
-### Community 268 - "create_app"
-Cohesion: 0.13
-Nodes (25): SynthesisStatus, context_turns(), create_app(), admit(), answer(), cancel_turn(), config(), get_runtime() (+17 more)
+### Community 268 - "default_registry"
+Cohesion: 0.09
+Nodes (20): default_registry(), worker_image_for(), test_meeting_bot_command_conforms_under_a_bogus_override(), _conforms_invocation(), test_agent_env_matches_spec_agent_golden(), test_agent_profile_honors_worker_image_override(), test_agent_profile_uses_distinct_worker_image(), test_command_overrides_ignore_blank_env() (+12 more)
 
-### Community 269 - "notes.ts"
-Cohesion: 0.11
-Nodes (41): useActions(), ProcessedTranscript(), signalKind(), buildProcessedNotes(), condense(), escapeRe(), extractNoteTags(), findEntitySpan() (+33 more)
+### Community 269 - "test_onboarding_event.py"
+Cohesion: 0.09
+Nodes (15): client(), _create(), published(), test_a_publish_that_fails_never_fails_the_person(), test_a_returning_person_publishes_nothing(), test_a_second_create_for_the_same_person_publishes_nothing(), test_creating_a_person_publishes_onboarding_completed(), test_it_fires_with_no_flows_domain_and_no_agent_domain() (+7 more)
 
 ### Community 270 - "test_bot_teardown.py"
-Cohesion: 0.12
-Nodes (18): _ctx(), _past_the_window(), _statuses(), answer(), test_a_2xx_delete_is_a_stop_that_was_asked_for(), test_a_delete_that_cannot_be_sent_at_all_counts_the_same(), answer(), test_a_non_200_status_read_is_named_unreadable_not_an_unknown_state() (+10 more)
+Cohesion: 0.11
+Nodes (19): _ctx(), _no_key(), _past_the_window(), _statuses(), answer(), test_a_2xx_delete_is_a_stop_that_was_asked_for(), test_a_delete_that_cannot_be_sent_at_all_counts_the_same(), answer() (+11 more)
 
 ### Community 271 - "meeting-api/tests/test_live_assist.py"
 Cohesion: 0.14
 Nodes (43): execute(), call(), extracted(), reason_result(), research_doc(), result(), segment(), setup() (+35 more)
 
 ### Community 272 - "Path"
-Cohesion: 0.08
-Nodes (4): _block_text(), _codex_block_text(), _tool_op(), test_reader_reads_any_dir_under_root_and_guards_traversal()
-
-### Community 273 - "gateway/__init__.py"
 Cohesion: 0.07
-Nodes (6): Authorizer, DownstreamClient, DownstreamResponse, PubSub, RedisBus, StreamedResponse
+Nodes (6): _block_text(), _codex_block_text(), _tool_op(), flush_agent(), git(), test_reader_reads_any_dir_under_root_and_guards_traversal()
+
+### Community 273 - "gateway/app.py"
+Cohesion: 0.04
+Nodes (27): _auth_unavailable_response(), auth_me(), _authorize(), websocket_multiplex(), _insufficient_scope_response(), _is_authority_header(), _required_scopes(), run_multiplex() (+19 more)
 
 ### Community 274 - "merge-card.yml"
 Cohesion: 0.06
 Nodes (33): concurrency, cancel-in-progress, group, GH_TOKEN, GITHUB_REPOSITORY, HEAD_SHA, MERGE_GROUP_REF, PR_NUMBERS (+25 more)
 
-### Community 275 - "uuid"
-Cohesion: 0.03
-Nodes (55): capture(), make_trace_middleware(), dispatch(), new_trace_id(), set_trace_id(), set_user_id(), new_trace_id(), set_trace_id() (+47 more)
+### Community 275 - "time"
+Cohesion: 0.02
+Nodes (78): _health_stage(), _http_health(), run_probe(), _stage(), DraftSelection, dispatch_request(), lease_validator(), start() (+70 more)
 
-### Community 276 - "upstream"
-Cohesion: 0.10
-Nodes (19): setup(), factory(), upstream(), test_calculation_lookup_receives_only_handles_returned_by_this_reserved_turn(), factory(), op(), factory(), test_interrupted_history_keeps_only_monotonic_completed_sentences_and_session_source_scope() (+11 more)
+### Community 276 - "ref_path"
+Cohesion: 0.08
+Nodes (18): nextConfig, allowedPkgs, fs, NODE_BUILTINS, path, pkg, PKG_ROOT, SRC (+10 more)
 
 ### Community 277 - "engine"
-Cohesion: 0.06
-Nodes (37): BotMeeting, startTranslation(), latestMiniCaption(), MiniCaption, TERMINAL_BOT_STATUSES, createTranscriptFeed(), clearSources(), createTurn() (+29 more)
+Cohesion: 0.07
+Nodes (32): startTranslation(), latestMiniCaption(), MiniCaption, TERMINAL_BOT_STATUSES, createTranscriptFeed(), clearSources(), createTurn(), sourceDetails() (+24 more)
 
 ### Community 279 - "lifecycle/voice_handoff.py"
-Cohesion: 0.16
-Nodes (12): merge_reply(), public_replies(), VoiceLink, VoiceLookup, VoiceReply, VoiceSource, VoiceSourceRef, VoiceSources (+4 more)
+Cohesion: 0.11
+Nodes (18): HandoffDecision, HandoffTask, HandoffTurn, VoiceHandoff, VoiceHandoffHint, merge_reply(), public_replies(), VoiceLink (+10 more)
 
 ### Community 280 - "meeting_api/events.py"
-Cohesion: 0.07
-Nodes (37): continuesFrom(), normalizeForContinuation(), TeamsCaptionEvent, TeamsCaptionObservation, TeamsCaptions, TeamsCaptionsAbsentObservation, TeamsCaptionsActiveObservation, teamsCaptionSelectors (+29 more)
+Cohesion: 0.06
+Nodes (45): continuesFrom(), normalizeForContinuation(), TeamsCaptionEvent, TeamsCaptionObservation, TeamsCaptions, TeamsCaptionsAbsentObservation, TeamsCaptionsActiveObservation, teamsCaptionSelectors (+37 more)
 
 ### Community 281 - "meet-panel.ts"
 Cohesion: 0.05
-Nodes (87): BotProcessedNote, readBotProcessedNotes(), readBotSpeakerLinks(), stopBotMeeting(), NoteGroup, NotesPreview, notesPreview(), noteTime() (+79 more)
+Nodes (86): BotMeeting, BotProcessedNote, BotProcessedNotes, BotSpeakerLink, NoteGroup, NotesPreview, notesPreview(), noteTime() (+78 more)
 
-### Community 282 - "stop_router.py"
-Cohesion: 0.14
-Nodes (15): build_slim(), main(), parse_args(), api_key(), gateway_url(), load_env(), cmd_chat(), cmd_login() (+7 more)
+### Community 282 - "track-namer.ts"
+Cohesion: 0.07
+Nodes (28): CAPTION_LAG_MS, CAPTION_WINDOW_MS, HINT_GRACE_MS, HINT_LAG_MS, IDENTITY_QUALIFIERS, Interval, isAsciiDigits(), NameEvidenceKind (+20 more)
 
 ### Community 283 - "OnlineStream"
 Cohesion: 0.09
@@ -3005,12 +2980,12 @@ Cohesion: 0.29
 Nodes (4): authState, { chromium }, results, USER
 
 ### Community 285 - "app/events.py"
-Cohesion: 0.19
-Nodes (8): _flows_base(), _flows_key(), onboarding_refs(), onboarding_source_id(), publish(), create_user(), normalise_email(), test_new_addresses_are_folded_and_trimmed()
+Cohesion: 0.25
+Nodes (5): onboarding_refs(), onboarding_source_id(), create_user(), normalise_email(), test_new_addresses_are_folded_and_trimmed()
 
 ### Community 286 - "native-asr/src/main.rs"
-Cohesion: 0.11
-Nodes (16): AppState, bounded(), elapsed(), Job, main(), Metrics, now(), response() (+8 more)
+Cohesion: 0.07
+Nodes (19): AppState, bounded(), elapsed(), Job, main(), Metrics, now(), response() (+11 more)
 
 ### Community 287 - "test_tx_scope.py"
 Cohesion: 0.11
@@ -3022,7 +2997,7 @@ Nodes (18): audio_probe_body(), _cached_probe(), cached_probe_verdict(), capabil
 
 ### Community 289 - "GmeetCompatibleBuffer"
 Cohesion: 0.15
-Nodes (7): GmeetCompatibleBuffer, rms(), arg(), loadWav(), main(), required(), continuityPrompt()
+Nodes (7): GmeetCompatibleBuffer, rms(), HallucinationRule, arg(), loadWav(), main(), required()
 
 ### Community 290 - "transcript-redis.test.ts"
 Cohesion: 0.05
@@ -3033,8 +3008,8 @@ Cohesion: 0.08
 Nodes (24): coreDir, modules, playwrightPkgDir, { Selectors }, validator, dismissZoomPopups(), isZoomAudioInitUrl(), startZoomRemovalMonitor() (+16 more)
 
 ### Community 292 - "benchmark.mjs"
-Cohesion: 0.05
-Nodes (40): dynamic, enabled(), GET(), CHUNK_S, content(), decodeFrame(), float32ToWav(), GATEWAY (+32 more)
+Cohesion: 0.09
+Nodes (28): CHUNK_S, content(), decodeFrame(), float32ToWav(), GATEWAY, LOST_RECALL, lowConf(), main() (+20 more)
 
 ### Community 293 - "mixed-pipeline/package.json"
 Cohesion: 0.09
@@ -3049,48 +3024,44 @@ Cohesion: 0.13
 Nodes (24): check(), fakeState, main(), Participant, sent, sleep(), createJitsiChat(), JitsiChat (+16 more)
 
 ### Community 296 - "mixed-pipeline/src/index.ts"
-Cohesion: 0.08
-Nodes (40): GmeetCompatibleBufferConfig, GmeetCompatibleSubmissionTrigger, consensusWordTrace(), detectTeamsWordContest(), flattenedWords(), longestCommonContiguous(), markTeamsWordContests(), median() (+32 more)
+Cohesion: 0.11
+Nodes (26): consensusWordTrace(), detectTeamsWordContest(), flattenedWords(), longestCommonContiguous(), markTeamsWordContests(), median(), mergedIntervals(), normalize() (+18 more)
 
 ### Community 297 - "person"
 Cohesion: 0.06
 Nodes (36): Andrew Aitken, FINOS, Technical Oversight Committee, Brian Ingenito, FDC3, Morgan Stanley, Chris Twiner, FINOS (+28 more)
 
-### Community 298 - "run_harness_turn"
-Cohesion: 0.06
-Nodes (22): _run_subprocess(), _commit_env(), _commit_mount(), commit_workspace_paths(), CompletionPort, _current_policy_entries(), _discard_unvalidated_turn_commits(), _git() (+14 more)
+### Community 298 - "agent/tests/test_s3_workspace.py"
+Cohesion: 0.12
+Nodes (9): s3_prefix_for_mount(), SyncState, FakeS3, _FakeS3Error, _init_git_repo(), test_canonical_s3_prefix_mapping(), test_git_push_pull_preserves_token_free_remotes_and_3way_merges(), test_run_harness_turn_commits_system_mount_silently_without_workspace_updated_badge() (+1 more)
 
 ### Community 299 - "captions.rs"
 Cohesion: 0.11
 Nodes (14): a_revised_segment_replaces_the_earlier_text(), Captions, captions(), CaptionTranslation, confirmed_segments_are_deduplicated_and_pending_is_replaced(), GATEWAY, MAX_SEGMENTS, NEXT_SEGMENT_ID (+6 more)
 
 ### Community 300 - "test_context_grounding.py"
-Cohesion: 0.17
-Nodes (23): _ambient_gated(), ChatBody, ChatContextBody, _body(), _ground(), _sched_row(), _soon(), test_ambient_digest_prepended_when_gated() (+15 more)
+Cohesion: 0.15
+Nodes (24): _ambient_gated(), ChatBody, ChatContextBody, _body(), _ground(), _sched_row(), _soon(), test_ambient_digest_prepended_when_gated() (+16 more)
 
 ### Community 301 - "admin.tsx"
-Cohesion: 0.07
-Nodes (7): _AgentToApi, _FakeIdentity, _FakeReader, _FakeRuntime, _FakeScheduler, _model_creds_configured(), _repo_root()
+Cohesion: 0.09
+Nodes (8): _AgentToApi, ctx(), _FakeIdentity, _FakeReader, _FakeRuntime, _FakeScheduler, _model_creds_configured(), _repo_root()
 
 ### Community 302 - "Json"
-Cohesion: 0.07
-Nodes (27): _tick(), InMemoryStorage, _content_type(), upload_signal_tape(), sweep_signal_tapes(), _client_for(), _post_tape(), _seed_tape() (+19 more)
-
-### Community 303 - "noise-suppression.ts"
-Cohesion: 0.12
-Nodes (8): Event, nativeNoiseWorker(), NoiseFactory, NoiseFrame, NoiseState, NoiseSuppressor, FakeSocket, Worker
+Cohesion: 0.08
+Nodes (14): _tick(), InMemoryStorage, sweep_signal_tapes(), test_a_persisted_path_outside_the_owners_namespace_is_never_deleted(), _seed_tape(), test_janitor_evicts_a_tape_whole(), test_janitor_evicts_oldest_first_until_it_fits(), test_janitor_ignores_stray_objects_under_the_signal_prefix() (+6 more)
 
 ### Community 304 - "funasr/server.py"
-Cohesion: 0.12
-Nodes (13): continuous(), send(), AudioWindows, test_stream_cache_stays_bounded_during_long_audio_and_releases_closed_turns(), test_stream_windows_keep_channel_boundaries_and_exact_tail_across_capture_gaps(), AsrTimingMiddleware, timed_send(), health() (+5 more)
+Cohesion: 0.05
+Nodes (24): download(), Encoder, file_hash(), active_at(), active_intervals(), build(), correlate(), load() (+16 more)
 
 ### Community 305 - "test_gateway_seam.py"
-Cohesion: 0.01
-Nodes (88): api_component_validator(), api_core_paths(), api_schema(), assert_api_conforms(), assert_logevent_conforms(), assert_ws_conforms(), is_conformant_logevent(), _load() (+80 more)
+Cohesion: 0.02
+Nodes (49): assert_ws_conforms(), _NullRedis, FakePubSub, FakeRedis, FakeWebSocket, WSMultiplexHarness, _CapturingDownstream, _gateway_with_downstream() (+41 more)
 
 ### Community 306 - "test_mail_body_cap.py"
 Cohesion: 0.05
-Nodes (29): delete_owned_recording(), delete_recording_objects(), MeetingNotTerminal, _owner_prefix(), recording_object_keys(), _recording_prefix(), Storage, _bearer_token() (+21 more)
+Nodes (25): delete_owned_recording(), delete_recording_objects(), MeetingNotTerminal, _owner_prefix(), recording_object_keys(), _recording_prefix(), RecordingRepo, Storage (+17 more)
 
 ### Community 307 - "teams-captions.test.ts"
 Cohesion: 0.09
@@ -3098,7 +3069,7 @@ Nodes (15): captionRow(), compile(), compound(), Cond, e(), FakeEl, g, guestWrap
 
 ### Community 308 - "config_test.py"
 Cohesion: 0.09
-Nodes (18): health(), audio_probe_body(), _cached_probe(), cached_probe_verdict(), capability_health(), capability_state(), capability_states(), ConfigError (+10 more)
+Nodes (16): audio_probe_body(), _cached_probe(), cached_probe_verdict(), capability_state(), capability_states(), ConfigError, _file_probe(), _http_probe() (+8 more)
 
 ### Community 309 - "sbom.mjs"
 Cohesion: 0.08
@@ -3118,7 +3089,7 @@ Nodes (28): args, box(), byId, carrierPath(), cluster(), composed, connects, con
 
 ### Community 313 - "test_scope_matrix.py"
 Cohesion: 0.06
-Nodes (19): undeclared_routes(), _client(), _request(), test_a_bot_and_tx_key_reaches_every_route(), test_an_undeclared_route_cannot_be_built(), test_an_undeclared_route_is_denied_at_request_time(), test_app_is_a_fastapi_instance_after_the_build_guard(), test_bot_scope_still_runs_the_bot_lifecycle() (+11 more)
+Nodes (18): _client(), _request(), test_a_bot_and_tx_key_reaches_every_route(), test_an_undeclared_route_cannot_be_built(), test_an_undeclared_route_is_denied_at_request_time(), test_app_is_a_fastapi_instance_after_the_build_guard(), test_bot_scope_still_runs_the_bot_lifecycle(), test_browser_only_key_can_still_read_its_own_identity() (+10 more)
 
 ### Community 314 - "mcp/tests/test_identity_vocabulary.py"
 Cohesion: 0.09
@@ -3132,17 +3103,17 @@ Nodes (16): _census(), _contract_of(), _golden_name(), _owners(), _published_in_
 Cohesion: 0.17
 Nodes (17): _diag(), _seg_count(), _spawn(), test_mock_canaccess_deny(), test_mock_emit_segments(), test_mock_failure_attribution(), test_mock_immediate_stop(), test_mock_join_timeout_fails_with_reason() (+9 more)
 
-### Community 317 - "_authorize"
-Cohesion: 0.07
-Nodes (22): _auth_unavailable_response(), auth_me(), _authorize(), _forward_stream_verbatim(), _mcp(), _mcp_key(), mcp_message(), mcp_message_path() (+14 more)
+### Community 317 - "._merge_live_segments"
+Cohesion: 0.09
+Nodes (12): _fill_absolute_times(), _iso_utc(), _segment_to_api(), _row(), test_absolute_epoch_start_is_used_directly_not_added_to_base(), test_negative_control_relative_offset_still_anchors_to_base(), test_producer_supplied_absolute_time_is_left_untouched(), _pg_part() (+4 more)
 
 ### Community 318 - "model.rs"
-Cohesion: 0.12
-Nodes (6): decode_hex(), read_secret(), verifies_the_server_proof_for_the_current_challenge(), verify_proof(), bounds_a_peer_that_stalls_the_websocket_upgrade(), connect_local()
+Cohesion: 0.07
+Nodes (14): decode_hex(), read_secret(), verifies_the_server_proof_for_the_current_challenge(), verify_proof(), bounds_a_peer_that_stalls_the_websocket_upgrade(), connect_local(), main(), vad_ms() (+6 more)
 
 ### Community 319 - "teams-capture.test.ts"
-Cohesion: 0.10
-Nodes (16): teamsMeetingContainerSelectors, teamsNameSelectors, teamsParticipantIdSelectors, teamsParticipantSelectors, compile(), compound(), Cond, e() (+8 more)
+Cohesion: 0.15
+Nodes (7): compile(), compound(), e(), FakeEl, g, simple(), t()
 
 ### Community 320 - "teams-name-unresolved.test.ts"
 Cohesion: 0.07
@@ -3165,36 +3136,36 @@ Cohesion: 0.11
 Nodes (19): depends_on, environment, image, init, networks, ports, profiles, restart (+11 more)
 
 ### Community 325 - "livekit/test_server.py"
-Cohesion: 0.05
-Nodes (37): question(), delete(), start(), upstream(), test_actual_session_distinguishes_empty_temporary_and_revoked_lookups(), test_actual_session_parallel_lookup_waits_for_both_and_stop_drains_http_requests(), test_cancel_during_sdk_start_cleans_the_partial_room(), test_capability_policy_revision_and_payload_guard_before_runtime_creation() (+29 more)
+Cohesion: 0.11
+Nodes (21): question(), test_capability_policy_revision_and_payload_guard_before_runtime_creation(), test_context_loading_is_cancellable_before_a_speech_handle_exists(), test_decision_flow_uses_pipecat_without_running_normal_tool_planning(), test_disconnect_during_room_connect_cleans_admission_before_other_meeting(), test_policy_reaper_cancels_context_and_releases_turn_before_removal(), test_real_agents_answer_preserves_citations_and_speaker_scope(), test_real_agents_pcm_uses_existing_tts_and_stop_fences_only_its_turn() (+13 more)
 
 ### Community 326 - "test_admin_and_keys.test.ts"
-Cohesion: 0.13
-Nodes (22): DELETE(), GET(), PATCH(), POST(), proxyRequest(), PUT(), verifyAdminSession(), GET() (+14 more)
+Cohesion: 0.10
+Nodes (26): params(), files, GOLDEN, DELETE(), GET(), PATCH(), POST(), proxyRequest() (+18 more)
 
 ### Community 327 - "notices.py"
-Cohesion: 0.10
-Nodes (12): base_url(), caller_key(), clean(), fetch(), install(), _execute_api_tool(), _standing(), render() (+4 more)
+Cohesion: 0.12
+Nodes (10): base_url(), caller_key(), clean(), fetch(), install(), _execute_api_tool(), _standing(), render() (+2 more)
 
 ### Community 328 - "admin_api/__main__.py"
-Cohesion: 0.05
-Nodes (35): TeamsCsrcChannelizer, arg(), AudioRow, buildAcceptedSpans(), buildSpans(), CsrcRow, HintRow, loadWavSlice() (+27 more)
+Cohesion: 0.08
+Nodes (16): TeamsCsrcChannelizer, arg(), AudioRow, buildAcceptedSpans(), buildSpans(), CsrcRow, HintRow, loadWavSlice() (+8 more)
 
-### Community 329 - "admin-store.ts"
-Cohesion: 0.13
-Nodes (19): zustand, zustand@^5.0.9, adminAPI, AdminAPIError, handleResponse(), AdminState, AgentMessage, AgentSession (+11 more)
+### Community 329 - "BotRefiner"
+Cohesion: 0.10
+Nodes (12): asr_failure(), backend_hash(), BotRefiner, Correction, setup(), test_invalid_payload_does_not_create_revision(), test_owner_only_and_completed_only(), test_raw_revision_restore_and_existing_read_overlay() (+4 more)
 
 ### Community 330 - "PlaybackStore"
-Cohesion: 0.14
-Nodes (17): PlaybackStore, change(), change(), change(), SpeechConflict, test_completed_clarification_is_context_only_and_internal_refs_are_not_returned(), test_current_session_reclaims_only_retired_voice_and_playback_ownership(), test_receipt_retry_repairs_durable_history_after_the_redis_transition_commits() (+9 more)
+Cohesion: 0.15
+Nodes (15): PlaybackStore, change(), change(), change(), SpeechConflict, test_current_session_reclaims_only_retired_voice_and_playback_ownership(), test_interrupted_history_keeps_only_monotonic_completed_sentences_and_session_source_scope(), factory() (+7 more)
 
-### Community 331 - "test_pg_advisory_lock_issues_single_arg_bigint_sql"
-Cohesion: 0.11
-Nodes (6): PgAdvisoryLock, sweep_lock_key(), test_pg_advisory_lock_issues_single_arg_bigint_sql(), test_pg_advisory_lock_runs_on_real_postgres(), test_sweep_key_disjoint_from_user_locks(), test_sweep_lock_key_is_valid_positive_int8()
+### Community 331 - "Any"
+Cohesion: 0.10
+Nodes (14): api_component_validator(), api_schema(), assert_logevent_conforms(), is_conformant_logevent(), _load(), logevent_schema(), logevent_validator(), _validator_for() (+6 more)
 
 ### Community 332 - "zoom-capture.test.ts"
-Cohesion: 0.12
-Nodes (12): compile(), compound(), Cond, e(), FakeEl, firstChatMessage(), g, makeDocument() (+4 more)
+Cohesion: 0.11
+Nodes (13): compile(), compound(), Cond, e(), FakeEl, firstChatMessage(), g, makeDocument() (+5 more)
 
 ### Community 333 - "test_system_webhook.py"
 Cohesion: 0.11
@@ -3217,28 +3188,28 @@ Cohesion: 0.13
 Nodes (21): announce(), AXIsProcessTrusted(), CFMachPortCreateRunLoopSource(), CFRelease(), CFRunLoopAddSource(), CFRunLoopGetCurrent(), CFRunLoopRun(), CGEventGetFlags() (+13 more)
 
 ### Community 338 - "FakeAgent"
-Cohesion: 0.11
-Nodes (6): FakeAgent, FakeMeetings, FakeSlim, _Recorder, slim(), test_pinned_transport_revalidates_and_pins_at_connect()
+Cohesion: 0.12
+Nodes (5): FakeAgent, FakeMeetings, FakeSlim, _Recorder, slim()
 
 ### Community 339 - "adminApi.ts"
-Cohesion: 0.11
-Nodes (13): build_argv(), apply_tool_grant(), ToolGrant, ToolRegistry, test_build_argv_core_flags_and_session_model(), test_build_argv_ignores_legacy_effort_pin(), _registry(), test_apply_tool_grant_injects_mcp_json_under_dot_claude() (+5 more)
+Cohesion: 0.10
+Nodes (15): _permission_settings(), build_argv(), apply_tool_grant(), ToolGrant, ToolRegistry, test_build_argv_core_flags_and_session_model(), test_build_argv_ignores_legacy_effort_pin(), _registry() (+7 more)
 
 ### Community 340 - "api/[...path]/route.ts"
-Cohesion: 0.16
-Nodes (16): Ctx, DELETE(), dynamic, forward(), GATEWAY_URL, GET(), PATCH(), POST() (+8 more)
+Cohesion: 0.09
+Nodes (29): validateAuthToken(), canUseWorkspacePilot(), pilotRouteEnabled(), RESERVED_WORKSPACE_SLUGS, dynamic, GATEWAY_URL, NO_STORE, POST() (+21 more)
 
 ### Community 341 - "desktop/package.json"
 Cohesion: 0.06
 Nodes (41): dependencies, @tina/capture-codec@workspace:*, @tina/gmeet-pipeline@workspace:*, @tina/mixed-pipeline@workspace:*, @tina/recording@workspace:*, @tina/transcribe-buffer@workspace:*, @tina/transcribe-whisper@workspace:*, ws@^8.21.0 (+33 more)
 
-### Community 342 - "conformance/tests/test_contract_conformance.py"
+### Community 342 - "urllib_error"
 Cohesion: 0.05
-Nodes (26): _door(), test_a_2xx_answer_is_the_ordinary_path(), test_a_non_2xx_answer_raises_and_says_whether_it_is_worth_retrying(), test_a_refused_connection_is_not_a_running_turn(), test_a_stream_open_timeout_is_still_a_dispatched_turn(), test_a_swallow_names_who_swallowed_it_and_what_it_swallowed(), test_a_wrapped_timeout_is_recognised_too(), test_the_desk_probes_say_when_they_could_not_read() (+18 more)
+Nodes (29): audio_probe_body(), _cached_probe(), cached_probe_verdict(), _file_probe(), _http_probe(), _multipart(), probe_url(), _probe_wav() (+21 more)
 
-### Community 343 - "admin.tsx"
-Cohesion: 0.13
-Nodes (26): AdminLeft(), AdminPanel(), ago(), healthOf(), idMs(), isoAgo(), Overview, PANEL (+18 more)
+### Community 343 - "shared/s3_workspace.py"
+Cohesion: 0.19
+Nodes (19): _atomic_swap_dir(), _create_tar(), _current_branch(), _dir_content_digest(), _extract_remotes(), _git(), _has_routines(), _head_sha() (+11 more)
 
 ### Community 344 - "zoom-capture/src/index.ts"
 Cohesion: 0.11
@@ -3273,16 +3244,16 @@ Cohesion: 0.07
 Nodes (27): concurrency, cancel-in-progress, group, runs-on, steps, timeout-minutes, GH_TOKEN, GITHUB_REPOSITORY (+19 more)
 
 ### Community 352 - "authOptions.ts"
-Cohesion: 0.11
-Nodes (21): dynamic, expectedOrigin(), POST(), googleAvatarUrl(), createGoogleCalendarLinkIntent(), GOOGLE_CALENDAR_LINK_COOKIE, listGoogleCalendars(), signature() (+13 more)
+Cohesion: 0.09
+Nodes (25): linkGoogleCalendarAccount(), dynamic, expectedOrigin(), POST(), googleAvatarUrl(), createGoogleCalendarLinkIntent(), GOOGLE_CALENDAR_LINK_COOKIE, listGoogleCalendars() (+17 more)
 
 ### Community 353 - "analyze.mjs"
 Cohesion: 0.09
 Nodes (19): ALIAS, ARGV, by, canon(), dur, ex, FLAG_ISSUES, FLAG_MIN (+11 more)
 
-### Community 354 - "test_mcp_surface.py"
-Cohesion: 0.10
-Nodes (13): _get_prompt(), get_prompt_result(), t(), test_every_tool_schema_is_closed(), test_mcp_mounted_and_tools_match(), test_prompts_only_reference_ported_tools(), test_prompts_render(), test_server_ships_instructions() (+5 more)
+### Community 354 - "test_cookbook_l0.py"
+Cohesion: 0.14
+Nodes (17): test_agent_on_meeting_with_url_sends_bot_then_starts(), test_agent_on_meeting_without_url_skips_bot(), test_browse_workspace_returns_tree(), test_chat_passes_through_session_active_files(), test_connect_binds_key_and_verifies(), test_connect_requires_credentials(), test_init_workspace_calls_init(), test_list_routines_returns_cards() (+9 more)
 
 ### Community 355 - "test_critical_paths.py"
 Cohesion: 0.11
@@ -3293,8 +3264,8 @@ Cohesion: 0.15
 Nodes (13): build_fake_downstream(), bots_status(), create_bot(), list_bots(), meetings(), _proxy_to_meeting_api(), speak(), stop_bot() (+5 more)
 
 ### Community 357 - "asrStatus.tsx"
-Cohesion: 0.08
-Nodes (14): only_if_present(), _production_registry(), _StubDB, test_a_step_may_need_two_domains_and_four_of_these_do(), test_an_unnamed_meetings_door_does_not_stop_the_process_booting(), test_domain_present_reads_the_configuration_never_a_probe(), test_every_meetings_reaching_production_step_declares_it(), test_every_meetings_url_is_built_from_the_access_time_door() (+6 more)
+Cohesion: 0.05
+Nodes (22): render_followup(), only_if_present(), Markup, test_brand_text_and_buttons_meet_aa_contrast(), test_branded_email_has_accessible_structure_and_both_recipient_links(), test_copy_and_links_are_substituted_once_without_reinterpreting_template_syntax(), test_smtp_sends_html_with_the_existing_plain_text_fallback(), test_unsafe_artifact_urls_are_refused() (+14 more)
 
 ### Community 358 - "test_storage_init.py"
 Cohesion: 0.12
@@ -3333,12 +3304,12 @@ Cohesion: 0.09
 Nodes (15): forget_person_settings(), setting(), identity(), test_a_bot_name_is_not_something_this_module_reads_at_all(), test_a_failed_read_is_never_cached(), test_a_second_read_inside_the_window_does_not_ask_again(), test_a_setting_identity_simply_does_not_hold_is_still_the_default(), test_a_setting_is_read_from_identity() (+7 more)
 
 ### Community 367 - "PlaybackStore"
-Cohesion: 0.14
-Nodes (23): _CaptureRedis, _client(), test_create_after_terminal_row_is_allowed(), test_create_auto_join_opt_out(), test_create_duplicate_active_native_409(), test_create_linkless_and_timeless_is_idle_unknown(), test_create_requires_identity(), test_create_two_linkless_plans_allowed() (+15 more)
+Cohesion: 0.10
+Nodes (27): find_meeting_link(), test_parse_meeting_url_and_ics_scan_recognize_discord(), TestFindMeetingLinkJitsi, _CaptureRedis, _client(), test_create_after_terminal_row_is_allowed(), test_create_auto_join_opt_out(), test_create_duplicate_active_native_409() (+19 more)
 
 ### Community 368 - "test_webhook_wiring.py"
-Cohesion: 0.13
-Nodes (20): _CaptureSink, _delivery_logs(), _json_dumps(), _OutcomeSink, _post(), _run_advance(), _seed(), test_bot_failed_emitted_on_terminal_failure() (+12 more)
+Cohesion: 0.12
+Nodes (21): _CaptureSink, _delivery_logs(), _json_dumps(), _OutcomeSink, _post(), _run_advance(), _seed(), test_bot_failed_emitted_on_terminal_failure() (+13 more)
 
 ### Community 369 - "test_meeting_by_db_id.py"
 Cohesion: 0.12
@@ -3356,13 +3327,13 @@ Nodes (9): KeywordSpotterConfig, OnlineCtcFstDecoderConfig, OnlineModelConfig, O
 Cohesion: 0.10
 Nodes (8): DenoisedAudio, OfflineSpeechDenoiser, OfflineSpeechDenoiserConfig, OfflineSpeechDenoiserDpdfNetModelConfig, OfflineSpeechDenoiserGtcrnModelConfig, OfflineSpeechDenoiserModelConfig, OnlineSpeechDenoiser, OnlineSpeechDenoiserConfig
 
-### Community 373 - "test_tool_auth.py"
-Cohesion: 0.13
-Nodes (14): _manifest(), test_a_none_tool_sends_no_credential_at_all(), test_a_placeholder_is_not_holding_the_key(), test_a_subject_tool_forwards_the_callers_own_credential(), test_a_subject_tool_is_always_satisfiable(), test_a_tool_must_say_how_it_is_authenticated(), test_an_admin_tool_must_say_which_header_and_which_variable(), test_an_admin_tool_sends_the_deployments_key_and_not_the_callers() (+6 more)
+### Community 373 - "devDependencies"
+Cohesion: 0.08
+Nodes (24): devDependencies, jsdom@^29.1.1, tailwindcss@^4, @tailwindcss/postcss@^4, @testing-library/dom@^10.4.1, @testing-library/react@^16.3.2, @types/mdx@^2.0.14, @types/node@^22.10.0 (+16 more)
 
-### Community 374 - "MeetingCanvasView.tsx"
-Cohesion: 0.03
-Nodes (82): clock(), latency(), PipelineRow, TeamsPipelineWitness(), CanvasActionsProvider(), makeActions(), byLabelLengthDesc(), escapeRe() (+74 more)
+### Community 374 - "BotAligner"
+Cohesion: 0.18
+Nodes (12): body(), BotAligner, _now(), test_alignment_job_provenance_outbox_and_raw_preservation(), worker(), test_alignment_reports_total_and_partial_failures(), clip(), worker() (+4 more)
 
 ### Community 375 - "context"
 Cohesion: 0.15
@@ -3425,8 +3396,8 @@ Cohesion: 0.06
 Nodes (31): if, runs-on, steps, timeout-minutes, concurrency, cancel-in-progress, group, GH_TOKEN (+23 more)
 
 ### Community 390 - "tina.py"
-Cohesion: 0.15
-Nodes (14): json_rows(), CliError, command_output(), run(), confirm(), execute(), approve(), main() (+6 more)
+Cohesion: 0.08
+Nodes (27): CliError, command_output(), run(), confirm(), emit(), execute(), approve(), main() (+19 more)
 
 ### Community 391 - "Resources"
 Cohesion: 0.11
@@ -3436,13 +3407,17 @@ Nodes (20): Type, must, why, Metadata, Metadata, Type, Properties, Type (+12 mor
 Cohesion: 0.14
 Nodes (30): createTeamsSpeakers(), canonicalParticipantSurface(), checkAndEmit(), checkIndicatorSilence(), checkNameSources(), debounce(), deliver(), detectSpeakingState() (+22 more)
 
+### Community 393 - "funasr_vad_probe.py"
+Cohesion: 0.09
+Nodes (7): instrument_model(), generate_with_vad_mode(), ModePathMiddleware, probe_lifespan(), ProbeResponseMiddleware, VadProbeTests, ranges()
+
 ### Community 394 - "gmeet-speakers.test.ts"
 Cohesion: 0.14
 Nodes (11): compile(), compound(), Cond, e(), FakeEl, g, makeDocument(), setDoc() (+3 more)
 
 ### Community 395 - "Parameters"
-Cohesion: 0.06
-Nodes (34): Type, Type, Type, Type, Type, Type, Parameters, AppSecurityGroupId (+26 more)
+Cohesion: 0.02
+Nodes (105): AllowedPattern, Type, Default, Type, Default, Type, Type, Type (+97 more)
 
 ### Community 396 - "viegem"
 Cohesion: 0.07
@@ -3452,21 +3427,25 @@ Nodes (29): viegem-models, TINA_VIEGEM_DEVICE, TINA_VIEGEM_HOST, TINA_VIEGEM_MOD
 Cohesion: 0.09
 Nodes (22): Command, DependsOn, EntryPoint, Environment, Essential, HealthCheck, Image, LogConfiguration (+14 more)
 
+### Community 398 - "test_cookbook_l1.py"
+Cohesion: 0.12
+Nodes (13): slim(), test_agent_on_meeting_wire(), test_browse_workspace_wire(), test_init_workspace_wire(), test_list_routines_wire(), test_read_workspace_file_absent_returns_none(), test_read_workspace_file_wire(), test_schedule_routine_wire() (+5 more)
+
 ### Community 399 - "Properties"
 Cohesion: 0.13
 Nodes (12): _boot(), _schema_of(), test_a_deployment_with_flows_serves_the_flows_tools_beside_the_built_in_ones(), test_a_deployment_without_flows_serves_exactly_the_built_in_fourteen(), test_an_assembled_tool_carries_the_owning_route_s_description(), test_no_assembled_flows_tool_is_described_by_its_own_name_alone(), test_no_assembled_tool_publishes_an_enum_that_would_refuse_the_call(), test_no_assembled_tool_says_the_same_thing_twice() (+4 more)
 
-### Community 400 - "test_kws_shadow.py"
-Cohesion: 0.13
-Nodes (16): fixture(), factory(), Stream, test_64ms_packets_assemble_into_80ms_without_loss_and_isolate_speakers(), test_activation_threshold_is_point_four(), test_assets_must_match_trusted_hash_and_size(), test_channel_limit_and_invalid_frames_are_bounded(), test_identity_sample_gap_backwards_clock_and_idle_expiry_clear_history() (+8 more)
+### Community 400 - "conformance/tests/test_contract_conformance.py"
+Cohesion: 0.15
+Nodes (12): _api_v1_declared(), _implemented_union(), _is_owned_elsewhere(), _known_gap_set(), _load_ledger(), _owned_elsewhere_prefixes(), _repo_root(), _routes_of() (+4 more)
 
 ### Community 401 - "VpcId"
 Cohesion: 0.11
 Nodes (29): Properties, Type, Properties, Type, Properties, Type, Properties, Type (+21 more)
 
-### Community 402 - "language-picker.tsx"
-Cohesion: 0.17
-Nodes (14): DocsLayout(), docsNav, LanguagePicker(), LanguagePickerProps, PopoverContent, ScrollArea(), ScrollBar(), getLanguageDisplayName() (+6 more)
+### Community 402 - "meetings/[id]/page.tsx"
+Cohesion: 0.06
+Nodes (66): ADR-0002, date-fns, MeetingDetailPage(), MeetingDetailSkeleton(), SegmentAudioSeek, LanguagePicker(), LanguagePickerProps, Header() (+58 more)
 
 ### Community 404 - "admin-api"
 Cohesion: 0.09
@@ -3481,12 +3460,12 @@ Cohesion: 0.13
 Nodes (21): agentReach, enabled, resources, resources, mcp, enabled, resources, resources (+13 more)
 
 ### Community 407 - "test_model_settings.py"
-Cohesion: 0.21
-Nodes (20): client(), _internal(), test_antigravity_user_mode_requires_and_persists_terms_acknowledgment(), test_api_provider_default_ignores_unbound_personal_credential(), test_api_provider_mode_switch_does_not_retain_another_provider_credential(), test_api_provider_platform_models_apply_to_default_user(), test_api_provider_same_mode_partial_update_keeps_credential_and_explicit_switch_key(), test_api_provider_selection_does_not_inherit_other_provider_fields() (+12 more)
+Cohesion: 0.24
+Nodes (19): _internal(), test_antigravity_user_mode_requires_and_persists_terms_acknowledgment(), test_api_provider_default_ignores_unbound_personal_credential(), test_api_provider_mode_switch_does_not_retain_another_provider_credential(), test_api_provider_platform_models_apply_to_default_user(), test_api_provider_same_mode_partial_update_keeps_credential_and_explicit_switch_key(), test_api_provider_selection_does_not_inherit_other_provider_fields(), test_api_provider_user_models_mask_secret_and_resolve_meeting_model() (+11 more)
 
 ### Community 408 - "test_person_settings.py"
-Cohesion: 0.16
-Nodes (13): client(), _internal(), test_a_refused_value_changes_nothing_at_all(), test_an_unknown_user_is_a_404_not_a_silent_default(), test_an_unknown_user_is_a_404_on_the_write_door_too(), test_dev_mode_does_not_open_the_cross_user_settings_doors(), test_the_imported_bot_name_reaches_the_door_meetings_actually_reads(), test_the_importer_migrates_a_settings_json_and_is_re_runnable() (+5 more)
+Cohesion: 0.18
+Nodes (12): _internal(), test_a_refused_value_changes_nothing_at_all(), test_an_unknown_user_is_a_404_not_a_silent_default(), test_an_unknown_user_is_a_404_on_the_write_door_too(), test_dev_mode_does_not_open_the_cross_user_settings_doors(), test_the_imported_bot_name_reaches_the_door_meetings_actually_reads(), test_the_importer_migrates_a_settings_json_and_is_re_runnable(), test_the_internal_edge_is_closed_without_the_secret() (+4 more)
 
 ### Community 409 - "manifest.json"
 Cohesion: 0.07
@@ -3495,10 +3474,6 @@ Nodes (28): action, default_icon, default_popup, default_title, background, serv
 ### Community 410 - "organization"
 Cohesion: 0.07
 Nodes (30): a11y Theme Builder, Architecture as Code, FINOS Common Cloud Controls, Common Domain Model, DevOps Automation, Emerging Technologies SIG, FDC3, Fin-OCR (+22 more)
-
-### Community 411 - "worker"
-Cohesion: 0.05
-Nodes (12): test_latency_deduplicates_turns_separates_notices_and_does_not_copy_private_log_text(), test_live_runner_uses_real_synthetic_sources_without_mac_tmp_symlink_mismatch(), worker(), test_codex_turn_receives_server_owned_mcp_grants_and_scoped_identity_token(), test_meeting_doc_turn_writes_one_validated_entity_without_harness_tools(), complete(), test_read_only_turn_does_not_initialize_workspace_repo(), test_rotating_provider_threads_keep_the_display_history_index() (+4 more)
 
 ### Community 412 - "Base"
 Cohesion: 0.19
@@ -3517,16 +3492,16 @@ Cohesion: 0.20
 Nodes (12): cached_text(), retry_delay(), TranslationStore, source_fingerprint(), test_atomic_lease_deduplicates_api_processes_and_expires(), test_claim_rechecks_cache_after_a_stale_snapshot(), test_inflight_results_are_discarded_when_the_canonical_source_changes(), test_inline_reasoning_is_never_displayed_or_accepted_as_a_translation() (+4 more)
 
 ### Community 416 - "meeting-api/tests/conftest.py"
-Cohesion: 0.14
-Nodes (11): fake_redis(), FakeReceiver, FakeResponse, _golden_dir(), goldens(), load_golden(), load_ws_golden(), receiver() (+3 more)
+Cohesion: 0.08
+Nodes (24): fake_redis(), FakeReceiver, FakeResponse, _golden_dir(), goldens(), load_golden(), load_ws_golden(), receiver() (+16 more)
 
 ### Community 417 - "test_api_agility.py"
 Cohesion: 0.04
 Nodes (70): api_component_validator(), api_schema(), assert_api_conforms(), _find_api_schema(), _admin_token(), _assert_error_envelope(), _client(), _seeded_store() (+62 more)
 
 ### Community 418 - "voice.py"
-Cohesion: 0.06
-Nodes (32): AudioChannel, AudioSnapshot, HandoffDecision, HandoffTask, HandoffTurn, VoiceHandoff, VoiceHandoffHint, HeardTurn (+24 more)
+Cohesion: 0.07
+Nodes (25): checked_proposal(), decision_sources_changed(), service_error(), TaskFlowStore, AudioChannel, AudioSnapshot, HeardTurn, KwsStatus (+17 more)
 
 ### Community 419 - "Properties"
 Cohesion: 0.11
@@ -3536,9 +3511,9 @@ Nodes (19): AssignPublicIp, SecurityGroups, Subnets, Enable, Rollback, Deploymen
 Cohesion: 0.11
 Nodes (6): OfflineRecognizer, OfflineStream, SpokenLanguageIdentification, SpokenLanguageIdentificationConfig, SpokenLanguageIdentificationResult, SpokenLanguageIdentificationWhisperConfig
 
-### Community 422 - "gateway/adapters.py"
-Cohesion: 0.13
-Nodes (8): AdminApiAuthorizer, build_auth_and_downstream(), build_production_app(), __getattr__(), get_trace_id(), AuthUnavailable, test_build_wires_a_dedicated_unbounded_read_stream_client(), test_build_wires_separate_pools()
+### Community 422 - "read_purpose"
+Cohesion: 0.17
+Nodes (10): _fold_workspace_grounding(), _commit_purpose(), _normalize(), read_purpose(), write_purpose(), _git_ws(), test_clearing_removes_the_file(), test_read_empty_when_unset() (+2 more)
 
 ### Community 423 - "ast"
 Cohesion: 0.14
@@ -3549,12 +3524,12 @@ Cohesion: 0.09
 Nodes (21): compilerOptions, baseUrl, esModuleInterop, isolatedModules, lib, module, moduleResolution, noEmit (+13 more)
 
 ### Community 425 - "runtime_kernel/__init__.py"
-Cohesion: 0.04
-Nodes (22): Clock, SystemClock, Enforcer, _coerce_registry(), QuotaExceeded, StartFailed, BackendKind, Resources (+14 more)
+Cohesion: 0.05
+Nodes (23): Backend, Clock, SystemClock, Enforcer, _coerce_registry(), BackendKind, RuntimeEvent, RuntimeState (+15 more)
 
 ### Community 426 - "PerUserRateLimiter"
-Cohesion: 0.11
-Nodes (14): _Bucket, from_env(), PerUserRateLimiter, _app_with_both_layers(), TestBothLayers, test_rate_limit_returns_429_past_the_per_user_cap(), test_buckets_are_per_user(), test_from_env_builds_a_generous_limiter_by_default() (+6 more)
+Cohesion: 0.14
+Nodes (12): _Bucket, from_env(), PerUserRateLimiter, test_rate_limit_returns_429_past_the_per_user_cap(), test_buckets_are_per_user(), test_from_env_builds_a_generous_limiter_by_default(), test_from_env_disabled_returns_none(), test_invalid_config_raises() (+4 more)
 
 ### Community 427 - "Statement"
 Cohesion: 0.13
@@ -3565,20 +3540,20 @@ Cohesion: 0.09
 Nodes (23): Command, DependsOn, EntryPoint, Environment, Essential, HealthCheck, Image, LinuxParameters (+15 more)
 
 ### Community 429 - "test_secrets_broker.py"
-Cohesion: 0.05
-Nodes (11): AuditEvent, BrokeredSecret, PassthroughSecretsBroker, SecretsPort, broker(), test_audit_log_is_a_copy(), test_audit_trail_records_metadata_not_value(), test_broker_returns_scoped_credential() (+3 more)
+Cohesion: 0.13
+Nodes (6): test_audit_log_is_a_copy(), test_audit_trail_records_metadata_not_value(), test_broker_returns_scoped_credential(), test_denied_lookup_is_audited_without_value(), test_raw_value_never_in_repr_str_or_format(), test_raw_value_never_logged()
 
 ### Community 430 - "test_redis_degraded_startup.py"
-Cohesion: 0.07
-Nodes (8): test_foundation_routes_forward_with_resolved_owner_and_tx_scope(), test_speech_receipts_keep_owner_scope_and_stop_query(), _app_with_pipeline(), _DeadRedis, _LiveRedis, test_health_reports_redis_reachable_when_up(), test_health_stays_200_and_reports_redis_unreachable_honestly(), test_stop_route_fails_narrowly_503_when_command_bus_down()
+Cohesion: 0.10
+Nodes (6): _app_with_pipeline(), _DeadRedis, _LiveRedis, test_health_reports_redis_reachable_when_up(), test_health_stays_200_and_reports_redis_unreachable_honestly(), test_stop_route_fails_narrowly_503_when_command_bus_down()
 
 ### Community 431 - "test_meeting_db_id_addressing.py"
 Cohesion: 0.13
 Nodes (14): _hop(), test_a_non_integer_db_id_is_refused_by_the_tool(), test_annotate_by_db_id_takes_the_row_addressed_route(), test_annotate_by_db_id_wins_over_the_room_code(), test_annotate_by_room_code_is_unchanged(), test_search_can_still_filter_by_room_code(), test_search_forwards_the_db_id_under_the_rest_spelling(), test_search_sends_neither_when_neither_is_asked_for() (+6 more)
 
-### Community 432 - "model.rs"
-Cohesion: 0.13
-Nodes (8): main(), vad_ms(), AudioDiagnostics, Model, quiet_gain(), quiet_gain_is_bounded_and_never_attenuates_transients(), quiet_gain_preserves_silence_residue_and_normal_levels(), read_wav()
+### Community 432 - "S3WorkspaceStore"
+Cohesion: 0.12
+Nodes (6): _hydrate_owner(), S3WorkspaceStore, _kms_kwargs(), test_draft_job_persists_to_s3_and_recovers_after_container_restart(), build_app(), test_workspace_store_compaction_secrets_and_migration()
 
 ### Community 433 - "SecurityGroupIngress"
 Cohesion: 0.16
@@ -3590,27 +3565,31 @@ Nodes (22): cpu, memoryMb, cpu, memoryMb, runtime, agentImage, agentWorkerImage,
 
 ### Community 435 - "mixed-pipeline/src/index.ts"
 Cohesion: 0.05
-Nodes (25): Binding, correlateSourcesToNames(), CorrelationResult, CorrelatorOptions, DEFAULT_LAGS, Interval, overlap(), shift() (+17 more)
+Nodes (50): GmeetCompatibleBufferConfig, GmeetCompatibleSubmissionTrigger, Binding, correlateSourcesToNames(), CorrelationResult, CorrelatorOptions, DEFAULT_LAGS, Interval (+42 more)
 
 ### Community 436 - "check-isolation-py.mjs"
 Cohesion: 0.14
 Nodes (15): ALLOWED_EDGES, declaredDeps(), dfs(), discover(), edges, modulesOf(), pkgs, pyFiles() (+7 more)
 
-### Community 437 - "_deliver_signed"
-Cohesion: 0.13
-Nodes (6): _deliver_signed(), DeliveryResult, is_event_enabled(), _RetryableStatus, test_event_filter_defaults_to_completed_only(), test_typed_event_suppressed_by_real_event_filter()
+### Community 437 - "workspace_publish.py"
+Cohesion: 0.12
+Nodes (8): _github_create_repo(), PublishResult, _redacted(), RepoExistsError, GitPushError, push_with_token(), test_create_failure_errors_are_token_free(), exists()
 
-### Community 438 - "analyze.mjs"
+### Community 438 - "test_api_surface.py"
 Cohesion: 0.13
-Nodes (7): FakeWorld, drain_with_world(), loopback_rig(), LoopbackWorld, test_full_loopback_round_trip_from_one_fact(), test_loopback_with_faults_still_single_effects(), test_two_meetings_interleaved_loopbacks()
+Nodes (8): assert_api_conforms(), client(), _request(), test_authed_response_conforms(), test_goldens_conform_by_path(), test_invalid_api_key_is_rejected(), test_malformed_downstream_body_is_caught_by_conformance(), test_unauthenticated_request_is_rejected()
 
 ### Community 439 - "Pcm48kStereoTo16kMono"
-Cohesion: 0.14
-Nodes (6): LOWPASS, OpusPacketDecoder, Pcm48kStereoTo16kMono, s16ToFloat(), convert(), SpeakerState
+Cohesion: 0.12
+Nodes (9): LOWPASS, OpusDecoderLike, OpusPacketDecoder, opusPacketDecoder(), Pcm48kStereoTo16kMono, s16ToFloat(), convert(), makeDecoder() (+1 more)
+
+### Community 440 - "tokens.py"
+Cohesion: 0.17
+Nodes (5): _aware(), _iso(), ScopedToken, TokenError, validate_token()
 
 ### Community 441 - "test_schedule_digest.py"
-Cohesion: 0.22
-Nodes (15): build_schedule_digest(), _line(), _parse_dt(), _title(), _tzinfo(), _row(), test_digest_buckets_and_renders_in_tz(), test_digest_caps_sections() (+7 more)
+Cohesion: 0.20
+Nodes (15): build_schedule_digest(), _tzinfo(), _row(), test_digest_buckets_and_renders_in_tz(), test_digest_caps_sections(), test_digest_empty_rows_is_empty_string(), test_digest_failed_meeting_is_honest(), test_digest_full_day_includes_ended_today_and_past_row() (+7 more)
 
 ### Community 442 - "RouteTableId"
 Cohesion: 0.09
@@ -3634,7 +3613,7 @@ Nodes (23): meeting-api, redis, storage-init, depends_on, environment, image, in
 
 ### Community 447 - "cn"
 Cohesion: 0.04
-Nodes (135): ADR-0002, date-fns, AdminBotsPage(), STATUS_CONFIG, UserDetailPage(), UserDetailSkeleton(), MeetingDetailPage(), MeetingDetailSkeleton() (+127 more)
+Nodes (110): class-variance-authority, @radix-ui/react-slot, AdminBotsPage(), STATUS_CONFIG, UserDetailPage(), UserDetailSkeleton(), DocsLayout(), docsNav (+102 more)
 
 ### Community 448 - "test_assembled_call_path.py"
 Cohesion: 0.07
@@ -3644,9 +3623,9 @@ Nodes (11): test_bedrock_summary_model_is_tested_separately_and_no_foreign_key_f
 Cohesion: 0.10
 Nodes (22): Calendar Attendee Metadata, Per-Calendar Auto-Join Policy, Calendar API, Named Calendar Connection, Calendar Source Provenance, Calendar Sync Guide, Calendar Sync Troubleshooting, Google Calendar Read-Only OAuth (+14 more)
 
-### Community 450 - "test_coordinator.py"
-Cohesion: 0.07
-Nodes (30): answer(), FakeServices, pilot(), room(), test_bad_or_unapproved_sources_never_reach_speak(), test_cancel_during_llm_discards_late_result(), test_empty_claims_get_only_fixed_insufficient_information_reply(), test_empty_stt_never_reaches_llm_or_speak() (+22 more)
+### Community 450 - "mint_token"
+Cohesion: 0.14
+Nodes (9): mint_token(), test_expired_token_rejected(), test_in_scope_token_is_valid(), test_mint_rejects_empty_scopes(), test_mint_rejects_unknown_scope(), test_naive_expiry_treated_as_utc(), test_non_expiring_token_never_expires(), test_out_of_scope_token_rejected() (+1 more)
 
 ### Community 451 - "distill.mjs"
 Cohesion: 0.12
@@ -3660,17 +3639,17 @@ Nodes (14): boxTypes, byId, carriers, composed, conns, deployed, egressEdges, fi
 Cohesion: 0.12
 Nodes (20): Version, Condition, Properties, Type, Properties, Type, Metadata, Properties (+12 more)
 
-### Community 454 - "aws/README.md"
-Cohesion: 0.06
-Nodes (29): AWSTemplateFormatVersion, Conditions, ChromiumProbe, AllowedValues, Default, Type, Description, AllowedPattern (+21 more)
+### Community 454 - "Parameters"
+Cohesion: 0.12
+Nodes (16): AllowedValues, Default, Type, AllowedPattern, Type, Parameters, CpuArchitecture, Image (+8 more)
 
 ### Community 455 - "Resources"
 Cohesion: 0.12
 Nodes (18): DeletionPolicy, Properties, Type, UpdateReplacePolicy, Type, Properties, Type, ExcludePunctuation (+10 more)
 
 ### Community 456 - "project_response_data"
-Cohesion: 0.10
-Nodes (4): test_final_wiki_publication_is_shared_create_only_and_idempotent(), ControlTests, call(), Monitor
+Cohesion: 0.07
+Nodes (6): test_final_wiki_publication_is_shared_create_only_and_idempotent(), ControlTests, call(), Identity, Workers, Monitor
 
 ### Community 457 - "values.yaml"
 Cohesion: 0.09
@@ -3684,9 +3663,9 @@ Nodes (19): GH_TOKEN, PR, REPO, types, jobs, rerun, name, on (+11 more)
 Cohesion: 0.10
 Nodes (19): runs-on, steps, GH_TOKEN, jobs, attest, name, on, release (+11 more)
 
-### Community 460 - "test_dtln.py"
-Cohesion: 0.19
-Nodes (10): install(), valid(), verify(), Dtln, sessions(), Model, ns_stream(), test_asset_preparation_checks_size_hash_and_world_readability() (+2 more)
+### Community 460 - "test_readiness_requires_authenticated_tts_without_synthesizing"
+Cohesion: 0.12
+Nodes (8): upstream(), test_actual_session_distinguishes_empty_temporary_and_revoked_lookups(), test_actual_session_parallel_lookup_waits_for_both_and_stop_drains_http_requests(), test_config_distinguishes_permission_failures_from_service_outages(), test_partial_tts_failure_never_finishes_a_successful_pcm_response_and_next_turn_recovers(), test_readiness_checks_the_real_meeting_api_endpoint(), test_readiness_refuses_invalid_tts_credentials_without_forwarding_them(), test_readiness_requires_authenticated_tts_without_synthesizing()
 
 ### Community 461 - "Statement"
 Cohesion: 0.12
@@ -3697,8 +3676,8 @@ Cohesion: 0.11
 Nodes (18): compilerOptions, allowJs, esModuleInterop, incremental, isolatedModules, jsx, lib, module (+10 more)
 
 ### Community 463 - "time"
-Cohesion: 0.16
-Nodes (9): _as_flag(), _resolve_capture_signal(), client(), _internal(), test_bot_context_carries_capture_signal_and_honors_the_kill_switch(), test_capture_signal_defaults_on_when_nothing_is_configured(), test_capture_signal_platform_kill_switch(), test_capture_signal_unrecognized_value_falls_through_instead_of_guessing() (+1 more)
+Cohesion: 0.19
+Nodes (8): _as_flag(), _resolve_capture_signal(), _internal(), test_bot_context_carries_capture_signal_and_honors_the_kill_switch(), test_capture_signal_defaults_on_when_nothing_is_configured(), test_capture_signal_platform_kill_switch(), test_capture_signal_unrecognized_value_falls_through_instead_of_guessing(), test_capture_signal_user_beats_platform_in_both_directions()
 
 ### Community 464 - "Voice Sandbox Worker"
 Cohesion: 0.12
@@ -3717,12 +3696,12 @@ Cohesion: 0.21
 Nodes (5): _client(), test_refusal_body_is_byte_identical(), test_refusal_detail_reaches_the_caller_whole(), test_refusal_without_words_is_not_padded(), test_the_words_survive_specifically()
 
 ### Community 468 - "Slim"
-Cohesion: 0.04
-Nodes (49): run(), test_agent_on_meeting_with_url_sends_bot_then_starts(), test_agent_on_meeting_without_url_skips_bot(), test_browse_workspace_returns_tree(), test_chat_passes_through_session_active_files(), test_connect_binds_key_and_verifies(), test_connect_requires_credentials(), test_init_workspace_calls_init() (+41 more)
+Cohesion: 0.05
+Nodes (33): run(), build_slim(), main(), parse_args(), Slim, api_key(), gateway_url(), load_env() (+25 more)
 
-### Community 469 - "run_service_authority_sweep"
-Cohesion: 0.09
-Nodes (16): AllowAllServiceAuthority, HttpServiceAuthority, clean_action_url(), clean_message(), parse_time(), ServiceAuthorityDecision, ServiceAuthorityRequest, _utc() (+8 more)
+### Community 469 - "test_service_authority.py"
+Cohesion: 0.04
+Nodes (57): AllowAllServiceAuthority, build_service_authority_from_env(), HttpServiceAuthority, _safe_url(), ServiceAuthorityConfig, clean_action_url(), clean_message(), parse_time() (+49 more)
 
 ### Community 470 - "live-walk.sh"
 Cohesion: 0.31
@@ -3753,16 +3732,16 @@ Cohesion: 0.11
 Nodes (20): dependencies, description, devDependencies, tsx@^4.19.0, @types/node@^20.0.0, typescript@^5.6.0, exports, files (+12 more)
 
 ### Community 477 - "ContainerDefinitions"
-Cohesion: 0.17
-Nodes (12): Command, DependsOn, Environment, Essential, Image, LogConfiguration, Name, PortMappings (+4 more)
+Cohesion: 0.11
+Nodes (18): Command, DependsOn, Environment, Essential, HealthCheck, Image, LogConfiguration, Name (+10 more)
 
 ### Community 478 - "mint_token"
 Cohesion: 0.18
 Nodes (9): DEFAULT_SIGTERM_GRACE_MS, installSignalHandlers(), SignalOptions, SignalTarget, sigtermGraceMs(), check(), FakeProc, main() (+1 more)
 
-### Community 479 - "test_meeting_followup.py"
-Cohesion: 0.11
-Nodes (8): test_allowed_emails_get_thanks_and_two_working_meeting_links(), test_attendee_domain_policy_blocks_mail_and_share_minting(), test_meet_sends_verified_partial_roster_and_retries_without_duplicate_mail(), test_meeting_row_does_not_depend_on_the_first_meetings_page(), test_missing_meeting_row_never_falls_back_to_a_reused_meet_link(), test_retry_keeps_successes_and_minted_links_after_a_partial_failure(), world(), http()
+### Community 479 - "workspaceGraph.tsx"
+Cohesion: 0.20
+Nodes (14): documentTab(), edgePath(), nodeMatches(), Position, RelationshipList(), WorkspaceGraphTab(), buildWorkspaceGraph(), entityFromFile() (+6 more)
 
 ### Community 480 - "test_tool_auth.py"
 Cohesion: 0.20
@@ -3812,17 +3791,17 @@ Nodes (19): Type, Condition, Properties, Type, Condition, Type, Type, Properties
 Cohesion: 0.11
 Nodes (18): compilerOptions, allowJs, esModuleInterop, incremental, isolatedModules, jsx, lib, module (+10 more)
 
-### Community 493 - "worker/engine.py"
-Cohesion: 0.02
-Nodes (91): ws_init(), _direct_translate_completion(), dispatch_request(), lease_validator(), run(), complete(), auth_error_event(), completion_failure_code() (+83 more)
+### Community 493 - "worker/meeting.py"
+Cohesion: 0.05
+Nodes (41): model_error_event(), test_meeting_assistant_runs_via_local_completion_pool_with_strict_citations(), _fold_events(), test_build_card_prompt_composes_governed_polish_and_tag_rules(), test_build_card_prompt_includes_steering_only_when_present(), test_dual_source_determinism_persisted_equals_folded_stream(), test_incremental_meeting_writers_reject_symlinked_paths(), test_parse_cards_filters_to_allowed_kinds() (+33 more)
 
 ### Community 494 - "SecurityGroupEgress"
 Cohesion: 0.10
 Nodes (21): Condition, Properties, Type, GroupDescription, SecurityGroupEgress, SecurityGroupIngress, VpcId, DraftNetwork (+13 more)
 
 ### Community 495 - "test_storage_init.py"
-Cohesion: 0.10
-Nodes (18): test_custom_endpoint(), _groq_tool_response(), test_custom_endpoint_auth_failure(), test_custom_endpoint_falls_back_to_openai_dialect(), test_custom_endpoint_ok_anthropic_dialect(), post(), test_custom_endpoint_preserves_a_single_v1_prefix(), test_custom_endpoint_unreachable() (+10 more)
+Cohesion: 0.06
+Nodes (37): run_models_test(), test_custom_endpoint(), _anthropic_tool_response(), _gemini_tool_response(), _groq_tool_response(), test_anthropic_probe_preserves_thinking_signature_and_tool_id(), post(), test_api_provider_tests_require_own_keys_and_redact_errors() (+29 more)
 
 ### Community 496 - "Outputs"
 Cohesion: 0.18
@@ -3840,9 +3819,9 @@ Nodes (22): dependencies, playwright@1.56.0, description, devDependencies, tsx@^
 Cohesion: 0.12
 Nodes (19): description, devDependencies, tsx@^4.19.0, @types/node@^20.0.0, typescript@^5.6.0, exports, files, tsx (+11 more)
 
-### Community 500 - "test_email_design.py"
-Cohesion: 0.14
-Nodes (8): render_followup(), Markup, test_brand_text_and_buttons_meet_aa_contrast(), test_branded_email_has_accessible_structure_and_both_recipient_links(), test_copy_and_links_are_substituted_once_without_reinterpreting_template_syntax(), test_smtp_sends_html_with_the_existing_plain_text_fallback(), test_unsafe_artifact_urls_are_refused(), test_user_copy_is_text_and_preview_notice_is_explicit()
+### Community 500 - "test_events.py"
+Cohesion: 0.16
+Nodes (9): event_to_invocation(), _FakeIdentity, _FakeRuntime, test_bad_event_envelope_raises(), test_event_with_inline_plan_maps_to_conformant_unit_with_opaque_ref(), test_event_without_a_plan_raises(), test_events_endpoint_dispatches(), test_events_endpoint_rejects_a_different_subject() (+1 more)
 
 ### Community 501 - "services"
 Cohesion: 0.11
@@ -3856,45 +3835,41 @@ Nodes (17): condition, entrypoint, environment, healthcheck, image, networks, vo
 Cohesion: 0.11
 Nodes (18): meetingApi, botAuthenticated, botS3AccessKey, botS3Bucket, botS3Endpoint, botS3SecretKey, botUserdataS3Path, defaultBotName (+10 more)
 
-### Community 504 - "test_google_calendar_regressions.py"
-Cohesion: 0.16
-Nodes (11): decrypt_google_refresh_token(), encrypt_google_refresh_token(), _fernet(), calendar_client(), fill_ics(), google_data(), test_first_google_account_link_encrypts_token(), test_google_sync_receives_the_selected_calendars_timezone() (+3 more)
+### Community 504 - "register"
+Cohesion: 0.29
+Nodes (17): register(), authorize(), draft_write_lock(), get_draft(), load(), location(), public(), push_to_s3() (+9 more)
 
-### Community 505 - "ServerTests"
-Cohesion: 0.07
-Nodes (10): disconnect_headers(), failed_send(), _generate(), _segments(), transcribe(), AsrMetrics, connected_request(), FakeASR (+2 more)
+### Community 506 - "shutil"
+Cohesion: 0.04
+Nodes (41): _harness_git_commit_guard(), Identity, main(), RemoteWorkers, bootstrap_launchagent(), control_key(), ControlError, Controller (+33 more)
 
-### Community 506 - "Stack"
-Cohesion: 0.14
-Nodes (11): _dotenvx_env_source(), _dotenvx_key_file(), livekit_credentials(), main(), run(), select_viegem_device(), Stack, StackError (+3 more)
-
-### Community 507 - "buffer/src/audio-ring.test.ts"
+### Community 507 - "session-store.test.ts"
 Cohesion: 0.12
-Nodes (9): AudioRing, context, delayed, duplicate, gap, pool, ring, time (+1 more)
+Nodes (12): binDir, check(), config, envLogFile, fails, liveDir, logFile, noop (+4 more)
 
 ### Community 508 - "src-tauri/src/resampler.rs"
-Cohesion: 0.23
-Nodes (6): Resampler, resampling_is_continuous_across_packets_and_rejects_zero_rate(), speex_resampler_destroy(), speex_resampler_init(), speex_resampler_process_float(), speex_resampler_skip_zeros()
+Cohesion: 0.21
+Nodes (7): Lane, Resampler, resampling_is_continuous_across_packets_and_rejects_zero_rate(), speex_resampler_destroy(), speex_resampler_init(), speex_resampler_process_float(), speex_resampler_skip_zeros()
 
 ### Community 509 - "terminal/server.mjs"
-Cohesion: 0.21
-Nodes (16): app, attachSocketError(), endSocket(), GATEWAY_URL, handle, logError(), port, proxyToGateway() (+8 more)
+Cohesion: 0.18
+Nodes (18): @next/env@15.5.21, app, attachSocketError(), endSocket(), GATEWAY_URL, handle, logError(), port (+10 more)
 
 ### Community 510 - "Properties"
 Cohesion: 0.02
-Nodes (56): ConfigError, _decl(), domains(), get(), get_bool(), get_int(), missing_doors(), preflight() (+48 more)
+Nodes (65): ConfigError, _decl(), domains(), get(), get_bool(), get_int(), missing_doors(), preflight() (+57 more)
 
 ### Community 511 - "test_voice_retrieval_eval.py"
 Cohesion: 0.27
 Nodes (8): fixture(), test_answer_grades_require_approved_labels_and_service_failures_are_not_false_refusals(), test_changed_or_unscoped_gold_is_rejected(), test_evaluation_requires_all_labelled_quotes_and_preserves_draft_status(), test_explicit_llm_reranker_evaluation_records_applied_or_fallback_without_network(), test_rank_metrics_respect_k_and_grade_unique_source_segments_once(), test_reranker_full_recall_uses_same_depth_and_reports_candidate_coverage(), test_web_numeric_mismatch_is_a_refusal_and_empty_generation_is_a_service_failure()
 
-### Community 512 - "test_meeting_intent.py"
-Cohesion: 0.19
-Nodes (13): _CaptureRedis, _client(), test_intent_idempotent_noop_does_not_publish(), test_intent_idle_accepted_and_persisted(), test_intent_owner_scoped_404(), test_intent_publishes_user_channel_frame(), test_intent_rejects_fsm_owned_values(), test_intent_rejects_unknown_value() (+5 more)
+### Community 512 - "test_capture_transcription_settings.py"
+Cohesion: 0.12
+Nodes (5): token(), client(), database(), execute(), test_public_summary_is_safe_for_personal_custom_service_and_environment_fallback()
 
 ### Community 513 - "ref_node_http"
-Cohesion: 0.05
-Nodes (50): h(), aws(), main(), storeProfile(), client, plan, [planFile,output], result (+42 more)
+Cohesion: 0.04
+Nodes (58): h(), broadcast(), clients, HERE, INDEX, json(), PORT, readBody() (+50 more)
 
 ### Community 514 - "identity"
 Cohesion: 0.24
@@ -3902,7 +3877,7 @@ Nodes (7): fake_http(), identity(), answers(), down(), _validate(), set(), _vali
 
 ### Community 515 - "Runtime"
 Cohesion: 0.07
-Nodes (11): Backend, _now(), Runtime, WorkloadStatus, InMemoryStore, _is_active(), RedisStore, WorkloadRecord (+3 more)
+Nodes (10): _now(), Runtime, WorkloadStatus, InMemoryStore, _is_active(), RedisStore, WorkloadRecord, WorkloadStore (+2 more)
 
 ### Community 516 - "test_onboarding_publish_async.py"
 Cohesion: 0.14
@@ -3926,15 +3901,15 @@ Nodes (33): Properties, Type, Properties, Type, DnsRecords, NamespaceId, TTL, Ty
 
 ### Community 521 - "Properties"
 Cohesion: 0.05
-Nodes (48): adminConfig(), AdminMintedToken, adminRequest(), AdminResult, AdminTokenInfo, AdminUser, allowlistConfigured(), AUTH_COOKIE (+40 more)
+Nodes (51): adminConfig(), AdminMintedToken, adminRequest(), AdminResult, AdminTokenInfo, AdminUser, allowlistConfigured(), AUTH_COOKIE (+43 more)
 
 ### Community 522 - "Resources"
-Cohesion: 0.08
-Nodes (28): Statement, Version, Properties, Type, Properties, Type, Type, Properties (+20 more)
+Cohesion: 0.09
+Nodes (26): Statement, Version, Properties, Type, Properties, Type, Properties, Type (+18 more)
 
-### Community 523 - "desktop.ts"
-Cohesion: 0.03
-Nodes (65): CanAccess, ownerOnly(), check(), collectHealth(), main(), seed(), sleep(), ADR-0012 (+57 more)
+### Community 523 - "access.test.ts"
+Cohesion: 0.27
+Nodes (10): CanAccess, ownerOnly(), check(), collectHealth(), main(), seed(), sleep(), ADR-0012 (+2 more)
 
 ### Community 524 - "AudioTaggingOfflineStream"
 Cohesion: 0.14
@@ -3945,8 +3920,8 @@ Cohesion: 0.10
 Nodes (20): flows, apiKey, databaseName, enabled, image, imageRepository, imageTag, mail (+12 more)
 
 ### Community 528 - "test_calendar_config.py"
-Cohesion: 0.06
-Nodes (14): token(), client(), database(), execute(), test_public_summary_is_safe_for_personal_custom_service_and_environment_fallback(), test_boot_reads_db_pool_size_env(), _clear(), test_deprecated_flows_url_env_in_use_is_none_on_the_canonical_name() (+6 more)
+Cohesion: 0.10
+Nodes (9): test_boot_reads_db_pool_size_env(), _clear(), test_deprecated_flows_url_env_in_use_is_none_on_the_canonical_name(), test_deprecated_flows_url_env_in_use_is_none_when_unset(), test_deprecated_flows_url_env_in_use_names_the_legacy_var(), test_it_falls_back_to_the_deprecated_name(), test_it_reads_the_canonical_name(), test_the_canonical_name_wins_when_both_are_set() (+1 more)
 
 ### Community 529 - "overrides"
 Cohesion: 0.12
@@ -3961,8 +3936,8 @@ Cohesion: 0.14
 Nodes (14): Properties, AllocatedStorage, BackupRetentionPeriod, DBInstanceClass, DBName, DBSubnetGroupName, Engine, ManageMasterUserPassword (+6 more)
 
 ### Community 532 - "test_calendar_config.py"
-Cohesion: 0.19
-Nodes (12): client(), test_calendar_auto_join_defaults_true(), test_calendar_bot_name_is_user_visible_and_reaches_auto_join_context(), test_calendar_rejects_embed_page_url(), test_calendar_rejects_non_http_url(), test_calendar_set_read_masked_and_disconnect(), test_internal_bot_context(), test_internal_calendar_configs_secret_gated() (+4 more)
+Cohesion: 0.09
+Nodes (21): ensure_schema_sync(), client(), client(), test_calendar_auto_join_defaults_true(), test_calendar_bot_name_is_user_visible_and_reaches_auto_join_context(), test_calendar_rejects_embed_page_url(), test_calendar_rejects_non_http_url(), test_calendar_set_read_masked_and_disconnect() (+13 more)
 
 ### Community 533 - "schema.sql"
 Cohesion: 0.18
@@ -3972,9 +3947,9 @@ Nodes (15): effect_receipt, flow_version, mail_cursor, mail_outbox_sent, mail_qu
 Cohesion: 0.10
 Nodes (20): AssignPublicIp, SecurityGroups, Subnets, Enable, Rollback, DeploymentCircuitBreaker, ContainerName, ContainerPort (+12 more)
 
-### Community 535 - "test_api_agility.py"
-Cohesion: 0.20
-Nodes (10): _group_last_delivered_id(), _parse_stream_id(), _pending_min_id(), _trim_segments_stream(), _ids(), _seed(), test_acked_and_aged_entries_are_trimmed(), test_no_group_does_not_blind_trim() (+2 more)
+### Community 535 - "test_workspace_git_sync.py"
+Cohesion: 0.32
+Nodes (12): _bare(), _clone(), _commit(), _run(), test_home_remote_is_origin_for_a_clone(), test_pull_fast_forwards_from_the_home(), test_pull_refuses_a_divergence(), test_pull_with_no_new_commits_is_a_noop() (+4 more)
 
 ### Community 536 - "register.py"
 Cohesion: 0.19
@@ -3989,20 +3964,20 @@ Cohesion: 0.12
 Nodes (7): FakePC, get(), pc, stream, track, track2, win
 
 ### Community 539 - "build_service_provenance"
-Cohesion: 0.11
-Nodes (15): build_service_provenance(), _latest_session(), _producer_time(), _transition(), meeting(), test_admitted_legacy_session_without_producer_timestamps_stays_unresolved(), test_continued_meeting_never_admitted_does_not_reuse_prior_runtime(), test_continued_meeting_uses_latest_session_runtime_not_prior_cycle() (+7 more)
+Cohesion: 0.20
+Nodes (13): build_service_provenance(), _latest_session(), _producer_time(), _transition(), meeting(), test_admitted_legacy_session_without_producer_timestamps_stays_unresolved(), test_continued_meeting_never_admitted_does_not_reuse_prior_runtime(), test_continued_meeting_uses_latest_session_runtime_not_prior_cycle() (+5 more)
 
 ### Community 540 - "compilerOptions"
 Cohesion: 0.12
 Nodes (15): compilerOptions, declaration, esModuleInterop, forceConsistentCasingInFileNames, module, moduleResolution, outDir, resolveJsonModule (+7 more)
 
 ### Community 541 - "acts.ts"
-Cohesion: 0.10
-Nodes (16): actsChannel(), createLeaveActs(), LeaveActsOptions, LeaveActsSubscription, RedisSubscriber, redisSubscriberFrom(), FakeSubscriber, createDiscordVoicePort() (+8 more)
+Cohesion: 0.13
+Nodes (6): actsChannel(), createLeaveActs(), LeaveActsOptions, LeaveActsSubscription, RedisSubscriber, FakeSubscriber
 
 ### Community 542 - "FakeRuntimeClient"
-Cohesion: 0.04
-Nodes (67): FakeRuntimeClient, test_bridge_config_failure_never_inserts_or_spawns(), _seed(), test_a_bot_still_waiting_for_admission_blocks_a_second_dispatch(), test_attempt_stamp_survives_a_failed_spawn_and_holds_the_next_tick(), test_auto_join_absent_defaults_on(), test_auto_join_off_skipped(), test_calendar_join_uses_livekit_defaults_without_overriding_account_opt_out() (+59 more)
+Cohesion: 0.02
+Nodes (91): FakeRuntimeClient, apply_join_passcode(), _bot_name_from_context(), _capture_signal_from_context(), request_bot(), test_bridge_config_failure_never_inserts_or_spawns(), test_spawn_pins_backend_in_capability_and_routes_both_consumers(), _set_auth_env() (+83 more)
 
 ### Community 543 - "test_collector_health.py"
 Cohesion: 0.17
@@ -4017,8 +3992,8 @@ Cohesion: 0.12
 Nodes (16): CompliLedger, FINOS, Red Hat, AI Governance Framework, Common Domain Model, FINOS, Maranda Harris, Technical Oversight Committee (+8 more)
 
 ### Community 546 - "Statement"
-Cohesion: 0.05
-Nodes (37): RetrievalUnavailable, run_rag(), assess(), current(), final(), lookup(), execute(), plan() (+29 more)
+Cohesion: 0.04
+Nodes (45): trace_voice_request(), decorate(), traced(), voice_span(), test_nested_trace_records_only_allowlisted_metrics_and_restores_context(), test_rerank_empty_is_logged_separately_from_failure_without_untrusted_metadata(), test_round_and_cancelled_status_are_bounded_and_each_span_has_a_distinct_id(), test_untrusted_trace_header_is_replaced_with_a_uuid() (+37 more)
 
 ### Community 547 - "viegem"
 Cohesion: 0.13
@@ -4027,6 +4002,10 @@ Nodes (15): TORCH_VARIANT, args, resources, TINA_VIEGEM_DEVICE, devices, reserva
 ### Community 548 - "adminApi"
 Cohesion: 0.25
 Nodes (8): adminApi, enabled, extraEnv, logLevel, minAvailable, replicaCount, resources, adminApi
+
+### Community 549 - "calendar/page.tsx"
+Cohesion: 0.26
+Nodes (11): CalendarPage(), PlatformIcon(), SyncStatus(), calendarAPI, CalendarConnection, CalendarSyncStamp, request(), groupMeetingsByCalendar() (+3 more)
 
 ### Community 550 - "Properties"
 Cohesion: 0.11
@@ -4049,20 +4028,20 @@ Cohesion: 0.10
 Nodes (19): Value, AWSTemplateFormatVersion, Description, Value, Value, Value, Outputs, AgentUrl (+11 more)
 
 ### Community 555 - "Statement"
-Cohesion: 0.15
-Nodes (13): Statement, Version, Properties, PolicyDocument, PolicyName, Statement, Version, AssumeRolePolicyDocument (+5 more)
+Cohesion: 0.13
+Nodes (15): Statement, Version, Properties, Type, PolicyDocument, PolicyName, Statement, Version (+7 more)
 
 ### Community 556 - "admin"
-Cohesion: 0.12
-Nodes (10): admin(), test_an_operator_may_still_read_any_subject(), test_no_credential_at_all_is_refused(), test_the_answer_states_which_subject_it_is_about(), test_the_operator_key_reads_one_named_subject(), test_the_operator_key_still_opens_every_one_of_them(), test_the_operator_key_still_opens_the_admin_routes(), test_the_operator_key_travels_under_a_name_that_says_what_it_is() (+2 more)
+Cohesion: 0.17
+Nodes (7): admin(), test_an_operator_may_still_read_any_subject(), test_the_answer_states_which_subject_it_is_about(), test_the_operator_key_reads_one_named_subject(), test_the_operator_key_travels_under_a_name_that_says_what_it_is(), test_the_operator_key_with_no_subject_reads_nothing(), test_the_operator_read_still_honours_the_stamped_identity()
 
-### Community 557 - "BaseModel"
-Cohesion: 0.14
-Nodes (8): AnnotateMeeting, _clip(), ParseMeetingLinkRequest, ReportIssue, RequestMeetingBot, SpeakInMeeting, UpdateBotConfig, test_report_issue_has_no_url_shaped_field_and_fetches_nothing()
+### Community 557 - "build_gateway"
+Cohesion: 0.13
+Nodes (7): build_gateway(), test_insufficient_scope_is_rejected(), test_rest_empty_api_key_is_401(), test_rest_invalid_api_key_is_401_or_403(), test_rest_missing_api_key_is_401(), test_health_needs_no_api_key(), test_health_ok()
 
 ### Community 558 - "Conditions"
-Cohesion: 0.06
-Nodes (30): Value, Condition, Value, AWSTemplateFormatVersion, Value, Conditions, HasVoicePilotRoom, HasVoicePilotUsers (+22 more)
+Cohesion: 0.12
+Nodes (16): AWSTemplateFormatVersion, Conditions, HasVoicePilotRoom, HasVoicePilotUsers, WithAgentApi, WithAsrControl, WithAuthenticatedBot, WithExtensionOrigins (+8 more)
 
 ### Community 559 - "terminal"
 Cohesion: 0.11
@@ -4071,6 +4050,10 @@ Nodes (18): enabled, minAvailable, enabled, minAvailable, podDisruptionBudgets, 
 ### Community 560 - "ContainerDefinitions"
 Cohesion: 0.10
 Nodes (21): Command, DependsOn, EntryPoint, Environment, Essential, HealthCheck, Image, LinuxParameters (+13 more)
+
+### Community 561 - "test_signal_tapes.py"
+Cohesion: 0.13
+Nodes (15): _content_type(), upload_signal_tape(), _client_for(), _post_tape(), _seeded(), test_every_tape_part_shares_one_prefix(), test_signal_tape_for_unknown_session_is_refused(), test_signal_tape_lands_in_its_own_keyspace_and_is_not_a_recording() (+7 more)
 
 ### Community 563 - "buffer/package.json"
 Cohesion: 0.12
@@ -4089,8 +4072,8 @@ Cohesion: 0.13
 Nodes (15): drop, global, affinity, clusterDomain, imagePullPolicy, imagePullSecrets, imageTag, nodeSelector (+7 more)
 
 ### Community 567 - "[action]/route.ts"
-Cohesion: 0.18
-Nodes (14): internalRequest(), Context, cors(), extensionId(), noStore, OPTIONS(), POST(), serverOrigin() (+6 more)
+Cohesion: 0.20
+Nodes (13): internalRequest(), Context, cors(), extensionId(), noStore, OPTIONS(), POST(), serverOrigin() (+5 more)
 
 ### Community 568 - "docs.json"
 Cohesion: 0.13
@@ -4112,17 +4095,17 @@ Nodes (21): Default, Description, Type, AllowedValues, Default, Description, Typ
 Cohesion: 0.19
 Nodes (22): Answer, AskError, CatchUpWindow, confirmedThrough(), createMeetAsk(), answerCard(), canFollow(), clearResults() (+14 more)
 
-### Community 573 - "streamable_http.py"
-Cohesion: 0.12
-Nodes (4): _ASGIPassthroughResponse, handle_fastapi_request_streaming(), install_streaming_http_transport(), _handle()
+### Community 573 - "BotDiarizer"
+Cohesion: 0.20
+Nodes (4): attribution(), BotDiarizer, test_owner_job_analyze_apply_idempotency_restart_and_raw_preservation(), test_exclusive_coverage_does_not_double_count_or_guess_overlap()
 
 ### Community 574 - "test_auto_join_recording_parity.py"
 Cohesion: 0.18
 Nodes (8): _seed(), _sweep_bot_config(), test_sweep_and_route_resolve_recording_identically(), test_sweep_and_route_resolve_transcription_identically(), test_sweep_dispatched_bot_records_under_default_env(), test_sweep_dispatched_bot_records_when_env_set_but_empty(), test_sweep_respects_an_explicit_recording_opt_out(), test_sweep_transcribes_by_default_and_respects_the_opt_out()
 
-### Community 575 - "test_bind.py"
-Cohesion: 0.16
-Nodes (14): _assembly(), _bind_one(), test_a_bound_tool_takes_its_description_from_the_route(), test_a_domain_with_no_openapi_at_all_fails_rather_than_binding_blind(), test_a_path_parameter_is_an_argument_without_being_declared(), test_a_real_summary_is_kept_in_front_of_the_description_not_dropped(), test_a_route_the_domain_does_not_serve_fails_the_boot(), test_a_route_with_only_a_summary_is_still_described_by_it() (+6 more)
+### Community 575 - "test_lifecycle_diagnostics.py"
+Cohesion: 0.23
+Nodes (7): _client(), _drive(), test_bot_logs_trimmed_oldest_first(), test_degraded_meeting_persists_why_the_transcript_is_empty(), test_failure_stage_is_server_derived_not_payload(), test_healthy_meeting_carries_no_stt_fault(), test_terminal_cause_attribution()
 
 ### Community 576 - "secrets"
 Cohesion: 0.12
@@ -4156,17 +4139,17 @@ Nodes (4): _fixture_observations(), _meeting(), test_active_service_boundary_sto
 Cohesion: 0.36
 Nodes (13): APIRequest, buildUrl(), CodeExample, generateCodeExamples(), generateCurl(), generateGo(), generateJava(), generateJavaScript() (+5 more)
 
-### Community 584 - "transcription/main.py"
-Cohesion: 0.09
-Nodes (9): _default_max_concurrent(), _deferred_capacity_available(), health_check(), _is_cpu_unsafe_model_size(), _normalize_transcription_tier(), root(), startup_event(), transcribe_audio() (+1 more)
+### Community 584 - "tina_mcp/app.py"
+Cohesion: 0.02
+Nodes (50): AnnotateMeeting, _caller_fingerprint(), _clip(), _get_prompt(), _fingerprint(), get_api_key(), _github_issue_body(), ParseMeetingLinkRequest (+42 more)
 
 ### Community 585 - "subtitles.js"
 Cohesion: 0.19
 Nodes (8): fontSize, line(), loop(), opacity, opacityBtn, opacityPop, poll(), render()
 
 ### Community 586 - "ref_node_child_process"
-Cohesion: 0.02
-Nodes (73): args, child, environment, gpuPath, log, modes, name, output (+65 more)
+Cohesion: 0.03
+Nodes (71): args, child, environment, gpuPath, log, modes, name, output (+63 more)
 
 ### Community 587 - "admin_api/__main__.py"
 Cohesion: 0.09
@@ -4185,16 +4168,16 @@ Cohesion: 0.17
 Nodes (12): Statement, Version, Bucket, PolicyDocument, StagingRecordingsPolicy, Properties, Type, Action (+4 more)
 
 ### Community 591 - "test_voice_navigation.py"
-Cohesion: 0.29
-Nodes (10): ask(), complete(), navigation(), factory(), upstream(), test_a_source_removed_while_the_owner_claims_is_not_released(), test_ambiguous_sources_require_an_ordinal_and_never_choose_arbitrary_paths(), test_navigation_is_eligible_only_after_completed_readback_and_owner_can_claim_once() (+2 more)
+Cohesion: 0.14
+Nodes (16): navigation_reply(), open_source_intent(), select_open_source(), VoiceNavigation, VoiceNavigationHint, ask(), complete(), navigation() (+8 more)
 
 ### Community 592 - "pause-flush.test.ts"
 Cohesion: 0.17
 Nodes (6): automatic, chunker, chunks, Recorder, recorder, rejected
 
 ### Community 593 - "meet-content.ts"
-Cohesion: 0.16
-Nodes (32): ACCOUNT_KEY, applyLauncherTheme(), applyPanelBounds(), clampPanelBounds(), closePanel(), connectLauncherControls(), defaultLauncherPosition, destroyPanelFrame() (+24 more)
+Cohesion: 0.10
+Nodes (41): autoTimer, checkAutoStart(), checkTeamsMeeting(), control(), controls, isTeamsHost(), teamsTimer, meetAvatarUrl() (+33 more)
 
 ### Community 594 - "guard"
 Cohesion: 0.28
@@ -4204,13 +4187,13 @@ Nodes (13): guard, guard, autoBanDuration, autoBanThreshold, enabled, enableRedi
 Cohesion: 0.15
 Nodes (14): `meeting-translation.v1`, `meeting-translation.v2`, agent contracts, contracts — published by `agent`, Boundary (SoC), core/agent — the execution domain (transcript → governed action), Purpose, Seams (+6 more)
 
-### Community 597 - "AudioCaptureSource"
-Cohesion: 0.14
-Nodes (6): test_project_sources_reuse_explicit_documents_and_revoke_after_removal(), meeting_get(), voice(), meeting_get(), SpeechServer, prepare()
+### Community 596 - "identity_core/__init__.py"
+Cohesion: 0.19
+Nodes (4): AccessDecision, AccessPolicy, OwnerOnlyPolicy, deny()
 
-### Community 598 - "render_citations"
-Cohesion: 0.22
-Nodes (12): flush_agent(), render_citations(), link(), replace(), test_code_examples_and_existing_markdown_links_are_unchanged(), test_conflicting_explicit_refs_remain_unresolved_instead_of_guessing(), test_missing_refs_never_guess_at_single_opened_page(), test_only_explicit_refs_resolve_multiple_citations_and_urls_are_deduped() (+4 more)
+### Community 598 - "workspace_store.py"
+Cohesion: 0.23
+Nodes (5): _migrate_tree(), head_etag(), _is_not_found(), _is_precondition_failed(), _s3_error_code()
 
 ### Community 599 - "redis"
 Cohesion: 0.09
@@ -4224,9 +4207,9 @@ Nodes (12): compilerOptions, declaration, esModuleInterop, forceConsistentCasing
 Cohesion: 0.20
 Nodes (14): code(), decimal(), digits, FormattedTranscript, formatTranscript(), integer(), number(), pattern() (+6 more)
 
-### Community 602 - "AppGates.tsx"
-Cohesion: 0.24
-Nodes (13): AppGates(), InviteConsent(), InviteGate(), roleLabel(), OnboardingGate(), isOnboarded(), KEY(), setOnboarded() (+5 more)
+### Community 602 - "Outputs"
+Cohesion: 0.14
+Nodes (14): Value, Condition, Value, Value, Value, Value, Outputs, AdminTokenArn (+6 more)
 
 ### Community 603 - "runtime.v1 — the workload lifecycle contract"
 Cohesion: 0.14
@@ -4241,8 +4224,8 @@ Cohesion: 0.12
 Nodes (17): Properties, AssignPublicIp, SecurityGroups, Subnets, Enable, Rollback, DeploymentCircuitBreaker, AwsvpcConfiguration (+9 more)
 
 ### Community 606 - "build_speak_router"
-Cohesion: 0.44
-Nodes (8): build_speak_router(), active_voice_bot(), operation(), publish(), speak(), speech_callback(), speech_state(), stop_speaking()
+Cohesion: 0.18
+Nodes (11): build_speak_router(), active_voice_bot(), operation(), publish(), speak(), speech_callback(), speech_state(), stop_speaking() (+3 more)
 
 ### Community 607 - "Parameters"
 Cohesion: 0.12
@@ -4257,8 +4240,8 @@ Cohesion: 0.13
 Nodes (15): Statement, Version, Properties, Type, PolicyDocument, PolicyName, Statement, Version (+7 more)
 
 ### Community 611 - "Resources"
-Cohesion: 0.07
-Nodes (31): Properties, Type, Properties, Type, Type, Type, AWSTemplateFormatVersion, Description (+23 more)
+Cohesion: 0.12
+Nodes (19): Properties, Type, Properties, Type, Properties, Type, Properties, Type (+11 more)
 
 ### Community 612 - "Properties"
 Cohesion: 0.13
@@ -4276,9 +4259,9 @@ Nodes (17): with, build-args, cache-from, cache-to, context, file, labels, passw
 Cohesion: 0.15
 Nodes (13): @tina/transcribe-buffer — shared confirmation core and GMeet-compatible window, AudioTimelinePool, GmeetCompatibleBuffer, LocalAgreement, @tina/capture-codec — the shared capture wire codec, capture.v1, mixed-capture.v1, recording.v1 (+5 more)
 
-### Community 616 - "test_llm_claude_cli.py"
+### Community 616 - ".run_turn"
 Cohesion: 0.23
-Nodes (10): build_argv(), ClaudeCliCompletion, _fake_run(), test_argv_is_tool_less_json_with_optional_model_and_system(), test_auth_failure_raises_typed_auth_error(), test_completes_and_runs_from_neutral_cwd(), test_garbage_output_is_an_error_not_a_crash(), test_non_auth_failure_raises_llm_error() (+2 more)
+Nodes (6): BedrockWorkspaceHarness, _reach_tool_specs(), _tool_spec(), test_bedrock_workspace_delete_move_display_name_frontmatter_and_turn_recovery(), test_bedrock_workspace_isolates_user_message_from_english_preamble_and_preserves_grounding(), test_nova_bedrock_workspace_supports_agent_reach_and_readonly_global()
 
 ### Community 617 - "viegem"
 Cohesion: 0.17
@@ -4300,13 +4283,13 @@ Nodes (11): description, label, body, attributes, id, type, validations, descrip
 Cohesion: 0.17
 Nodes (11): compilerOptions, declaration, esModuleInterop, module, moduleResolution, outDir, rootDir, skipLibCheck (+3 more)
 
-### Community 622 - "sidebar.tsx"
-Cohesion: 0.05
-Nodes (38): BackendVersion, dynamic, revalidate, geistMono, metadata, RootLayout(), LoginLayout(), AppLayout() (+30 more)
+### Community 622 - "version-chip.tsx"
+Cohesion: 0.13
+Nodes (15): BackendVersion, dynamic, revalidate, Look, Variant, VersionChip(), DeploymentVersion, fetchDeploymentVersion() (+7 more)
 
 ### Community 623 - "Properties"
 Cohesion: 0.09
-Nodes (19): _row(), _event_ts(), is_sensitive_key(), list_order_key(), omitted_keys(), _owner_join_failure_summary(), project_calendar_sources(), project_list_data() (+11 more)
+Nodes (19): _meeting_response(), _row(), _event_ts(), is_sensitive_key(), list_order_key(), omitted_keys(), _owner_join_failure_summary(), project_calendar_sources() (+11 more)
 
 ### Community 624 - "Configuration Reference"
 Cohesion: 0.14
@@ -4317,12 +4300,12 @@ Cohesion: 0.20
 Nodes (10): devDependencies, @tauri-apps/cli@^2.0.0, name, private, scripts, build, dev, test (+2 more)
 
 ### Community 626 - "stt/route.ts"
-Cohesion: 0.09
-Nodes (27): listUserTokens(), mintUserToken(), revokeToken(), STT_PATH, sttEndpoint(), POST(), runtime, selectedTranscription() (+19 more)
+Cohesion: 0.10
+Nodes (26): listUserTokens(), mintUserToken(), STT_PATH, sttEndpoint(), POST(), runtime, selectedTranscription(), UpstreamSegment (+18 more)
 
-### Community 627 - "InMemoryRecordingRepo"
-Cohesion: 0.09
-Nodes (7): InMemoryRecordingRepo, _YieldingStorage, _ManyStaleRepo, test_stress_reconcile_kills_all_stale_workloads(), test_stress_recording_chunk_flood_no_lost_update(), _wav(), _YieldingStorage
+### Community 627 - "staging-egress.yml"
+Cohesion: 0.15
+Nodes (12): Type, Type, AWSTemplateFormatVersion, Description, Value, Outputs, NatGatewayId, Parameters (+4 more)
 
 ### Community 628 - "Properties"
 Cohesion: 0.23
@@ -4336,9 +4319,9 @@ Nodes (6): _load(), _root(), test_no_meetings_internals_imported(), test_segment
 Cohesion: 0.18
 Nodes (10): description, name, private, scripts, corpus, drive, judge, launch (+2 more)
 
-### Community 632 - "attendance.py"
-Cohesion: 0.23
-Nodes (10): _account_id(), _conference(), _email(), _get_json(), lookup_google_meet_attendees(), resolve(), _participants(), _person_email() (+2 more)
+### Community 632 - "Outputs"
+Cohesion: 0.15
+Nodes (13): Value, Outputs, LogGroupName, ServiceName, TaskDefinitionArn, WorkerSecurityGroupId, WorkerTokenArn, WorkerUrl (+5 more)
 
 ### Community 633 - "createTeamsCaptions"
 Cohesion: 0.37
@@ -4385,8 +4368,8 @@ Cohesion: 0.17
 Nodes (14): ADR-0029, batchPRs(), cmpVer(), ghj(), ghRaw(), hasReceipt(), parseVer(), PLATFORM (+6 more)
 
 ### Community 644 - "test_speech_status.py"
-Cohesion: 0.16
-Nodes (7): report(), speech(), active(), test_manual_playback_cannot_invent_voice_history_progress(), test_only_real_ordered_authenticated_receipts_can_complete(), test_owner_can_read_terminal_receipt_after_bot_leaves(), test_stop_before_publication_blocks_late_speak()
+Cohesion: 0.14
+Nodes (7): PlaybackReport, SpeakRequest, report(), test_manual_playback_cannot_invent_voice_history_progress(), test_only_real_ordered_authenticated_receipts_can_complete(), test_owner_can_read_terminal_receipt_after_bot_leaves(), test_stop_before_publication_blocks_late_speak()
 
 ### Community 645 - "release-value-gate.mjs"
 Cohesion: 0.27
@@ -4396,21 +4379,21 @@ Nodes (11): cmpVer(), enumerate(), ghj(), ghRaw(), parseVer(), previousReleaseTa
 Cohesion: 0.38
 Nodes (10): actual(), api(), expected(), green(), red(), row(), journey.sh script, skipped() (+2 more)
 
-### Community 647 - "replay.test.ts"
-Cohesion: 0.20
-Nodes (13): ajv, CapFrame, CapHeader, check(), framePcm(), GOLDEN, HERE, loadCapturedSignal() (+5 more)
+### Community 647 - "test_stale_reaper_cannot_close_a_replacement_runtime_or_delete_its_room"
+Cohesion: 0.15
+Nodes (7): delete(), start(), test_cancel_during_sdk_start_cleans_the_partial_room(), test_runtime_disposal_is_idempotent_and_releases_only_its_owned_turn(), test_slow_cleanup_does_not_block_another_ready_room(), close(), test_stale_reaper_cannot_close_a_replacement_runtime_or_delete_its_room()
 
 ### Community 648 - "inpage.ts"
 Cohesion: 0.18
 Nodes (14): isTeamsHost(), pageDiag(), post(), recordingChunk(), scrub(), start(), startMic(), startSpeakerAttribution() (+6 more)
 
 ### Community 649 - "parametrize"
-Cohesion: 0.12
-Nodes (11): _validation_error(), reject_unknown_arguments(), BoundTool, _add(), endpoint(), _caller_key(), _outbound(), register() (+3 more)
+Cohesion: 0.08
+Nodes (17): _handler(), test_both_case_folded_lookups_order_by_id(), test_lower_email_index_ddl_is_what_postgres_will_build(), test_lower_email_is_indexed(), test_the_create_path_folds_on_write_and_survives_the_losing_race(), test_the_email_index_is_not_unique_and_says_why(), test_the_migration_note_is_reachable_from_the_model(), reject_unknown_arguments() (+9 more)
 
 ### Community 650 - "stream/route.ts"
-Cohesion: 0.32
-Nodes (5): FakeStorage, _is_excluded(), test_roundtrip_down_then_up_is_stable(), test_sync_down_fetches_objects_and_honors_excludes(), test_sync_up_puts_local_tree_and_deletes_extraneous()
+Cohesion: 0.18
+Nodes (6): WorkspaceStoragePort, FakeStorage, _is_excluded(), test_roundtrip_down_then_up_is_stable(), test_sync_down_fetches_objects_and_honors_excludes(), test_sync_up_puts_local_tree_and_deletes_extraneous()
 
 ### Community 651 - ".fetch"
 Cohesion: 0.52
@@ -4432,17 +4415,17 @@ Nodes (9): FALLBACK_SOURCE, load(), SourceState, stampNow(), start(), state, sto
 Cohesion: 0.25
 Nodes (8): strategy, build_args, context, dockerfile, name, include, fail-fast, matrix
 
-### Community 657 - "counting_fixture.py"
-Cohesion: 0.36
-Nodes (7): _http(), main(), nums_in(), _say(), stt(), tts(), turn_plan()
+### Community 657 - "argparse"
+Cohesion: 0.04
+Nodes (37): main(), main(), parse_meeting(), _req(), main(), main(), parse_meeting(), _req() (+29 more)
 
 ### Community 658 - "_intake_fields"
 Cohesion: 0.33
 Nodes (3): _intake_fields(), _publisher_bodies(), test_every_publisher_names_the_refs_field_the_intake_actually_reads()
 
 ### Community 659 - "_compose"
-Cohesion: 0.17
-Nodes (7): _cleanup(), _compose(), _env_file_path(), _service_health(), Stack, _stack_env(), _wait_healthy()
+Cohesion: 0.23
+Nodes (5): _cleanup(), _compose(), _env_file_path(), Stack, _stack_env()
 
 ### Community 660 - "Morgan Stanley"
 Cohesion: 0.18
@@ -4453,8 +4436,8 @@ Cohesion: 0.26
 Nodes (14): image, image, image, image, image, image, repository, tag (+6 more)
 
 ### Community 662 - "resolveApiKey"
-Cohesion: 0.06
-Nodes (41): validateAuthToken(), canUseWorkspacePilot(), pilotRouteEnabled(), RESERVED_WORKSPACE_SLUGS, dynamic, GATEWAY_URL, POST(), proxyStream() (+33 more)
+Cohesion: 0.08
+Nodes (28): dynamic, GATEWAY_URL, POST(), proxyStream(), SSE_HEADERS, sseError(), dynamic, GATEWAY_URL (+20 more)
 
 ### Community 663 - "export.tsx"
 Cohesion: 0.09
@@ -4480,29 +4463,21 @@ Nodes (9): apiVersion, appVersion, description, keywords, maintainers, name, nam
 Cohesion: 0.20
 Nodes (10): agentApi, defaultSubject, extraEnv, logLevel, replicaCount, resources, workspaces, accessMode (+2 more)
 
-### Community 669 - "test_transcription_watcher.py"
-Cohesion: 0.17
-Nodes (7): meeting_relay_health(), relay_health(), _reset_module_caches(), _reset_relay_health(), test_native_resolve_401_fails_loud(), test_native_resolve_missing_key_fails_loud(), test_native_resolve_recovers_clears_fault()
+### Community 669 - "test_security_routes.test.ts"
+Cohesion: 0.15
+Nodes (8): cookieValues, ENV_KEYS, findUserByEmail, getAuthenticatedUser, getAuthenticatedUserId, getUserById, savedEnv, updateUser
 
 ### Community 670 - "global"
 Cohesion: 0.20
 Nodes (10): global, imagePullPolicy, imageTag, nodeSelector, tolerations, tina/pool, effect, key (+2 more)
 
-### Community 672 - "ws-event-log.tsx"
-Cohesion: 0.26
-Nodes (12): buildEvents(), CopyButton(), getStatusColor(), getTypeColor(), JsonValue(), maskToken(), RestRecordingsPreview(), RestRecordingsPreviewProps (+4 more)
+### Community 672 - "PassthroughSecretsBroker"
+Cohesion: 0.18
+Nodes (3): AuditEvent, PassthroughSecretsBroker, broker()
 
 ### Community 673 - "createDictationStateMachine"
 Cohesion: 0.36
 Nodes (7): createDictationStateMachine(), handleEscape(), handleKeyDown(), handleKeyUp(), handleToggleClick(), reset(), setState()
-
-### Community 674 - "callbacks.py"
-Cohesion: 0.10
-Nodes (3): InMemoryPendingStore, PendingStore, RedisPendingStore
-
-### Community 675 - "cleanTranscriptText"
-Cohesion: 0.27
-Nodes (11): addSignal(), cleanProcessedNoteText(), cleanTranscriptText(), contextFor(), DOMAIN_CORRECTIONS, extractNotableNumbers(), extractNotableNumberSpans(), NumberSignal (+3 more)
 
 ### Community 676 - "gmeet-capture/tsconfig.json"
 Cohesion: 0.20
@@ -4528,9 +4503,9 @@ Nodes (9): compilerOptions, lib, outDir, rootDir, types, exclude, extends, inclu
 Cohesion: 0.20
 Nodes (9): compilerOptions, lib, outDir, rootDir, types, exclude, extends, include (+1 more)
 
-### Community 682 - "voice_prices.py"
-Cohesion: 0.22
-Nodes (7): _digits(), _integer(), numeric_facts(), _small(), _words(), _amount(), _as_of()
+### Community 682 - "test_voice_shared_meetings.py"
+Cohesion: 0.11
+Nodes (17): calculate_source(), evaluate(), calculation_from_key(), calculation_request(), context_handle(), query(), test_calculation_sources_require_current_handles_and_bind_the_full_operand_fingerprint(), test_date_differences_are_calendar_days_with_explicit_dates_or_server_today() (+9 more)
 
 ### Community 683 - "changelog-collect.mjs"
 Cohesion: 0.13
@@ -4545,8 +4520,8 @@ Cohesion: 0.25
 Nodes (3): OnlinePunctuation, OnlinePunctuationConfig, OnlinePunctuationModelConfig
 
 ### Community 686 - "Properties"
-Cohesion: 0.12
-Nodes (17): AssignPublicIp, SecurityGroups, Subnets, Properties, Enable, Rollback, DeploymentCircuitBreaker, AwsvpcConfiguration (+9 more)
+Cohesion: 0.10
+Nodes (21): AssignPublicIp, SecurityGroups, Subnets, Properties, Enable, Rollback, DeploymentCircuitBreaker, ContainerName (+13 more)
 
 ### Community 687 - "storage-init"
 Cohesion: 0.22
@@ -4573,8 +4548,8 @@ Cohesion: 0.14
 Nodes (18): Properties, Type, OwnerGid, OwnerUid, Permissions, Properties, Gid, Uid (+10 more)
 
 ### Community 695 - "create_app"
-Cohesion: 0.04
-Nodes (30): dump(), create_app(), cancel_job(), create(), destroy(), get(), list_jobs(), list_workloads() (+22 more)
+Cohesion: 0.03
+Nodes (33): dump(), create_app(), cancel_job(), create(), destroy(), get(), health(), list_jobs() (+25 more)
 
 ### Community 696 - "Statement"
 Cohesion: 0.15
@@ -4608,9 +4583,9 @@ Nodes (13): configMapName, key, secretName, accessKeyIdKey, bucket, caBundle, en
 Cohesion: 0.11
 Nodes (19): GroupDescription, HealthCheckIntervalSeconds, HealthCheckPath, HealthyThresholdCount, Port, Protocol, SecurityGroupIngress, TargetType (+11 more)
 
-### Community 704 - "capture-codec/src/contracts/golden/generate.mjs"
-Cohesion: 0.28
-Nodes (12): audioVector(), b64(), buildVectors(), check(), DIR, eventVector(), pcm(), serialize() (+4 more)
+### Community 704 - "Properties"
+Cohesion: 0.17
+Nodes (12): Cpu, ExecutionRoleArn, Family, Memory, NetworkMode, RequiresCompatibilities, RuntimePlatform, TaskDefinition (+4 more)
 
 ### Community 706 - "utils.rs"
 Cohesion: 0.43
@@ -4632,9 +4607,9 @@ Nodes (8): command, environment, image, init, networks, ports, restart, flows-ap
 Cohesion: 0.25
 Nodes (8): command, environment, image, init, networks, profiles, restart, flows-mailbox
 
-### Community 712 - "asr-checkpoint.test.ts"
-Cohesion: 0.15
-Nodes (12): archiveOnly, atomic, control, {DatabaseSync}, directory, faults, file, journal (+4 more)
+### Community 712 - "dashboard/src/app/layout.tsx"
+Cohesion: 0.23
+Nodes (6): geistMono, metadata, RootLayout(), LoginLayout(), ThemeProvider(), Toaster()
 
 ### Community 713 - "postgres"
 Cohesion: 0.25
@@ -4657,8 +4632,8 @@ Cohesion: 0.22
 Nodes (9): meetings/eval/bin, Counting fixtures — the deterministic, offline, autonomous transcript-pipeline gate, Deepgram, gate:replay, transcript.v1, Deepgram, gate:replay, meetings/eval — the L4 live+eval gate (+1 more)
 
 ### Community 718 - "pyannote-segmenter.ts"
-Cohesion: 0.03
-Nodes (54): ChunkedTranscriber, rms(), check(), main(), runTurn(), sleep(), main(), published (+46 more)
+Cohesion: 0.05
+Nodes (36): ChunkedTranscriber, rms(), check(), main(), runTurn(), sleep(), main(), published (+28 more)
 
 ### Community 719 - "meeting-api/tests/test_redis_client_hardening.py"
 Cohesion: 0.27
@@ -4688,9 +4663,9 @@ Nodes (11): EntityFrontmatter, runtime.v1, workspace.v1 — the agent's git work
 Cohesion: 0.22
 Nodes (9): local patch notice, `licenses/aec-rs-sys-1.0.0.LICENSE.txt`, `licenses/onnx-community-pyannote-segmentation-3.0.LICENSE.txt`, `licenses/speexdsp-1.2.1.COPYING.txt`, `licenses/valkey-8.1.9.COPYING.txt`, Experimental bot noise suppression, Optional local wake-word client, Optional speech sidecar (+1 more)
 
-### Community 726 - "test_recordings_range.py"
-Cohesion: 0.31
-Nodes (8): _client(), test_end_past_eof_is_clamped(), test_mid_file_range_returns_correct_slice(), test_no_range_returns_full_body_with_accept_ranges(), test_open_ended_range_runs_to_eof(), test_prefix_range_returns_206_first_ten_bytes(), test_suffix_range_returns_last_n_bytes(), test_unsatisfiable_range_returns_416()
+### Community 726 - "InMemoryRecordingRepo"
+Cohesion: 0.11
+Nodes (10): recording_share_allows(), InMemoryRecordingRepo, _client(), test_end_past_eof_is_clamped(), test_mid_file_range_returns_correct_slice(), test_no_range_returns_full_body_with_accept_ranges(), test_open_ended_range_runs_to_eof(), test_prefix_range_returns_206_first_ten_bytes() (+2 more)
 
 ### Community 727 - "buffer/tsconfig.json"
 Cohesion: 0.25
@@ -4725,8 +4700,8 @@ Cohesion: 0.18
 Nodes (11): default, description, type, include_gipformer, on, workflow_dispatch, workflow_run, inputs (+3 more)
 
 ### Community 735 - "meeting_api/__init__.py"
-Cohesion: 0.05
-Nodes (28): CompositeRuntimeClient, parse_discord_channel_url(), test_create_app_health(), test_lifecycle_callback_on_unified_app(), test_post_bots_on_unified_app(), _admin_token(), _client(), test_composite_runtime_routes_by_profile_and_id_prefix() (+20 more)
+Cohesion: 0.10
+Nodes (17): CompositeRuntimeClient, _admin_token(), _client(), test_composite_runtime_routes_by_profile_and_id_prefix(), test_construct_meeting_url_builds_discord_from_the_native_id(), test_delete_bots_discord_is_a_supported_platform(), test_discord_native_id_and_url_roundtrip(), test_parse_discord_channel_url_accepts_the_real_hosts() (+9 more)
 
 ### Community 736 - "Version 5 Meeting Follow-Up Template"
 Cohesion: 0.25
@@ -4761,36 +4736,40 @@ Cohesion: 0.18
 Nodes (11): HF_HUB_DISABLE_XET, HF_HUB_OFFLINE, tts-models, command, environment, image, networks, profiles (+3 more)
 
 ### Community 746 - "_context_grounding"
-Cohesion: 0.12
-Nodes (11): _context_grounding(), _enriched_meeting_focus(), _fold_workspace_grounding(), _parse_sections(), render(), steering_templates(), find_row(), test_schedule_rows_failure_never_fails_the_turn() (+3 more)
+Cohesion: 0.14
+Nodes (9): _context_grounding(), _enriched_meeting_focus(), _parse_sections(), render(), steering_templates(), find_row(), test_global_override_replaces_a_section(), test_malformed_override_fails_loud_and_falls_back() (+1 more)
 
 ### Community 747 - "ingress"
 Cohesion: 0.18
 Nodes (11): ingress, annotations, className, enabled, host, paths, tls, path (+3 more)
 
-### Community 748 - "createHttpLifecycleSink"
-Cohesion: 0.27
-Nodes (10): createHttpLifecycleSink(), emit(), emitReachable(), post(), FetchLike, check(), EVENT, main() (+2 more)
+### Community 748 - "observe.mjs"
+Cohesion: 0.18
+Nodes (7): dynamic, enabled(), GET(), lastPend, seg, t0, ws
 
 ### Community 749 - "runtime/tests/test_redis_client_hardening.py"
 Cohesion: 0.31
 Nodes (5): _is_redis_construction(), _kwarg_names(), scan(), test_gate_detects_a_bare_client(), test_no_bare_redis_clients()
 
-### Community 750 - ".fetch"
-Cohesion: 0.29
-Nodes (4): FakeAdminApi, FakeTokenInfo, jsonRes(), Recorded
+### Community 750 - "_generate"
+Cohesion: 0.24
+Nodes (4): _generate(), _segments(), transcribe(), connected_request()
+
+### Community 751 - "calendar/oauth/complete/route.ts"
+Cohesion: 0.33
+Nodes (10): CalendarOAuthStatePayload, exchangeCodeForGoogleTokens(), getGoogleClientId(), getGoogleClientSecret(), getStateSecret(), parseAndVerifyState(), POST(), resolveRedirectUri() (+2 more)
 
 ### Community 752 - "Statement"
 Cohesion: 0.13
 Nodes (21): Statement, Condition, Properties, Type, Statement, PolicyDocument, Statement, Version (+13 more)
 
 ### Community 753 - "Statement"
-Cohesion: 0.13
-Nodes (15): Statement, Version, Properties, Type, PolicyDocument, PolicyName, Statement, Version (+7 more)
+Cohesion: 0.15
+Nodes (13): Statement, Version, Properties, PolicyDocument, PolicyName, Statement, Version, AssumeRolePolicyDocument (+5 more)
 
 ### Community 754 - "Outputs"
-Cohesion: 0.14
-Nodes (13): Value, Value, AWSTemplateFormatVersion, Description, Value, Value, Outputs, AgentReachClientSecurityGroupId (+5 more)
+Cohesion: 0.07
+Nodes (24): AWSTemplateFormatVersion, Conditions, ChromiumProbe, Description, Value, Outputs, LogGroupName, TaskDefinitionArn (+16 more)
 
 ### Community 756 - "Outputs"
 Cohesion: 0.18
@@ -4805,8 +4784,8 @@ Cohesion: 0.11
 Nodes (13): discussion-review.v1, Discussion Review Benchmark Scripts, Discussion Review Fixtures, Additional diagnostics, Discussion Review: concurrency and batching results, Eight windows, Future-context pair, Interpretation (+5 more)
 
 ### Community 761 - "CodexHarness"
-Cohesion: 0.22
-Nodes (7): digest_source(), _source(), _workspaces(), fetch_user_meetings(), test_digest_source_caches_and_never_raises(), fake_fetch(), test_digest_source_membership_workspaces_forwarded()
+Cohesion: 0.33
+Nodes (4): digest_source(), _source(), _workspaces(), fetch_user_meetings()
 
 ### Community 762 - "size"
 Cohesion: 0.40
@@ -4830,7 +4809,7 @@ Nodes (5): sherpa-onnx, tina-livekit-pilot, tina-meeting-voice, tina-native-asr,
 
 ### Community 768 - "tick"
 Cohesion: 0.05
-Nodes (48): Clock, SystemClock, DB, db_from_url(), dumps(), loads(), postgres_db(), _ensure_schema() (+40 more)
+Nodes (49): Clock, SystemClock, DB, db_from_url(), dumps(), loads(), postgres_db(), _ensure_schema() (+41 more)
 
 ### Community 769 - "validate.sh"
 Cohesion: 0.70
@@ -4861,8 +4840,8 @@ Cohesion: 0.03
 Nodes (52): setMute(), canonical, events, expected, inv, payload, pipeline, rows (+44 more)
 
 ### Community 776 - "Parameters"
-Cohesion: 0.10
-Nodes (21): Type, Type, Type, Default, MaxValue, MinValue, Type, Parameters (+13 more)
+Cohesion: 0.12
+Nodes (16): Type, Type, Type, Parameters, AppSecurityGroupId, AppSubnetIds, ClusterName, ServiceNamespaceId (+8 more)
 
 ### Community 780 - "test_flows_manifest_route.py"
 Cohesion: 0.18
@@ -4893,8 +4872,8 @@ Cohesion: 0.29
 Nodes (7): recording/src/contracts/golden, recording.v1, recording/src/contracts, recording.v1, recording.v1 — chunked media → master file, recording/src, recording.v1
 
 ### Community 789 - "test_google_meet_attendance.py"
-Cohesion: 0.23
-Nodes (9): _field(), _google(), dispatch(), test_attendance_preserves_refresh_retryability(), test_meet_preserves_verified_addresses_when_another_lookup_is_throttled(), provider(), test_meet_requires_one_ended_conference_covering_admission(), provider() (+1 more)
+Cohesion: 0.29
+Nodes (8): _field(), _google(), dispatch(), test_attendance_preserves_refresh_retryability(), test_meet_preserves_verified_addresses_when_another_lookup_is_throttled(), provider(), test_meet_requires_one_ended_conference_covering_admission(), provider()
 
 ### Community 794 - "forwardAgent"
 Cohesion: 0.26
@@ -4956,9 +4935,9 @@ Nodes (5): Acme Corp, Acme intro call, Jane Liu, Mentioned in, Notes
 Cohesion: 0.11
 Nodes (19): Properties, Type, Properties, Type, Properties, Type, Type, Properties (+11 more)
 
-### Community 820 - "voice_retrieval.py"
-Cohesion: 0.15
-Nodes (5): download(), Encoder, file_hash(), test_repeated_semantic_failure_cannot_retry_on_every_request(), test_semantic_failure_retries_after_cooldown_and_reuses_a_healthy_encoder()
+### Community 820 - "semantic_rank"
+Cohesion: 0.22
+Nodes (5): rank(), semantic_rank(), semantic(), test_repeated_semantic_failure_cannot_retry_on_every_request(), test_semantic_failure_retries_after_cooldown_and_reuses_a_healthy_encoder()
 
 ### Community 821 - "Your workspace"
 Cohesion: 0.40
@@ -5157,8 +5136,8 @@ Cohesion: 0.50
 Nodes (4): @tina/mixed-pipeline — platform-specific transcription over one mixed capture, Legacy Zoom/Jitsi path, Microsoft Teams production path, Surface
 
 ### Community 890 - "test_model_catalog.py"
-Cohesion: 0.05
-Nodes (39): models_catalog(), _bedrock_models(), CatalogError, _chat_model(), _gemini_entries(), list_models(), masked_or_blank(), _openai_entries() (+31 more)
+Cohesion: 0.06
+Nodes (34): _bedrock_models(), CatalogError, _chat_model(), _gemini_entries(), list_models(), masked_or_blank(), _openai_entries(), _provider_reason() (+26 more)
 
 ### Community 891 - "@tina/teams-capture — MS Teams' contribution to the mixed lane (browser)"
 Cohesion: 0.50
@@ -5176,13 +5155,13 @@ Nodes (4): createTrackNameResolver, createZoomSpeakers, TrackNamer, zoom-capture
 Cohesion: 0.50
 Nodes (4): Front door, P3 seams (NOT built here), recordings — chunk upload + finalize → `meeting.data` JSONB, The JSONB shape
 
+### Community 897 - "test_bedrock_settings.py"
+Cohesion: 0.22
+Nodes (5): test_bedrock_catalog_reads_later_pages_and_ranks_regional_suggestion(), test_bedrock_discovery_rejects_invalid_regions_without_sending_credentials(), test_bedrock_dispatch_pins_native_auth_and_aliases(), test_regional_bedrock_catalog_uses_control_plane_and_inference_profiles(), get()
+
 ### Community 899 - "TINA native ASR"
 Cohesion: 0.50
 Nodes (4): Build and run, Timing and resource limits, TINA native ASR, Tiếng Việt
-
-### Community 900 - "feed.mjs"
-Cohesion: 0.29
-Nodes (9): HERE, pollTranscript(), post(), READ_REDIS, remote(), seenLife, seenSeg, streamLifecycle() (+1 more)
 
 ### Community 901 - "runtime_kernel — the kernel"
 Cohesion: 0.50
@@ -5193,8 +5172,8 @@ Cohesion: 0.25
 Nodes (8): Install and download once, Replay the synthetic pilot, Start and stop on your machine, TINA speech client, speech-room.v1, speech-room.v1 — enrolled room arbitration and restart fencing, speech.v1, speech.v1 — correlated playback and the single-room voice pilot
 
 ### Community 903 - "Resources"
-Cohesion: 0.15
-Nodes (13): Type, Type, Type, Properties, Type, RetentionInDays, Resources, AgentApiClients (+5 more)
+Cohesion: 0.13
+Nodes (15): Type, Type, Type, Type, Properties, Type, RetentionInDays, Resources (+7 more)
 
 ### Community 904 - "deploy/compose/bin — deployment and gate runners"
 Cohesion: 0.50
@@ -5217,8 +5196,8 @@ Cohesion: 0.28
 Nodes (8): GET(), BrowserApiUrlInput, hostnameFromHostHeader(), isInternalServiceUrl(), isLoopbackHost(), normalizedUrl(), publicUrlFromRequestHost(), resolveBrowserApiUrl()
 
 ### Community 909 - "Resources"
-Cohesion: 0.05
-Nodes (37): AWSTemplateFormatVersion, Description, Properties, Type, DnsRecords, NamespaceId, TTL, Type (+29 more)
+Cohesion: 0.11
+Nodes (17): AWSTemplateFormatVersion, Description, Type, ExcludePunctuation, PasswordLength, Properties, Type, GenerateSecretString (+9 more)
 
 ### Community 910 - "deploy/transcription — the STT service, deployed separately"
 Cohesion: 0.50
@@ -5300,9 +5279,9 @@ Nodes (5): docs/ARCHITECTURE.md — moved documentation, Contract-bounded archit
 Cohesion: 0.50
 Nodes (4): Interactive bots, Per-surface status (0.12, verified against the tree), What you can do today, Where this is going
 
-### Community 930 - "asr-status/route.ts"
-Cohesion: 0.23
-Nodes (9): cache, dynamic, GET(), AsrServiceStatus, asrStatusEndpoint(), AsrStatusResult, AsrStatusSchema, ms (+1 more)
+### Community 930 - "calendar/oauth/start/route.ts"
+Cohesion: 0.33
+Nodes (9): CalendarOAuthStatePayload, getGoogleClientId(), getStateSecret(), POST(), resolveRedirectUri(), signStatePayload(), toBase64Url(), RFC-4648 (+1 more)
 
 ### Community 931 - "scripts/probe — the standing full-journey smoke probe (`make probe`)"
 Cohesion: 0.50
@@ -5373,8 +5352,8 @@ Cohesion: 0.67
 Nodes (3): agent-api — the agent control plane (Python), Document edit preconditions, Meeting Knowledge Wiki approval
 
 ### Community 949 - "ContainerDefinitions"
-Cohesion: 0.07
-Nodes (30): Environment, Essential, HealthCheck, Image, LinuxParameters, LogConfiguration, Name, PortMappings (+22 more)
+Cohesion: 0.11
+Nodes (18): Environment, Essential, HealthCheck, Image, LinuxParameters, LogConfiguration, Name, PortMappings (+10 more)
 
 ### Community 950 - "Your workspace — knowledge agent conventions"
 Cohesion: 0.67
@@ -5384,9 +5363,9 @@ Nodes (3): Your workspace — knowledge agent conventions, Open Knowledge Format
 Cohesion: 0.23
 Nodes (5): _default_subject(), _golden(), _isolated_home(), _repo_root(), transcription_golden()
 
-### Community 952 - "test_plan_timeout_uses_completion_api_shared_sources_and_still_requires_verification"
-Cohesion: 0.18
-Nodes (8): test_clarification_is_spoken_but_rechecks_all_context_sources(), test_lookup_round_can_recover_a_semantic_miss_and_cannot_open_unapproved_paths(), test_plan_timeout_uses_completion_api_shared_sources_and_still_requires_verification(), complete(), generate(), test_worker_repairs_one_rejected_draft_with_a_shared_deadline_and_rechecks(), factory(), complete()
+### Community 952 - "tina/[...path]/route.ts"
+Cohesion: 0.33
+Nodes (9): DELETE(), dynamic, GET(), PATCH(), POST(), proxyRequest(), PUT(), revalidate (+1 more)
 
 ### Community 953 - "processed-notes.v1 — the per-meeting cleaned-transcript stream + its terminal marker"
 Cohesion: 0.40
@@ -5634,7 +5613,7 @@ Nodes (10): Properties, Type, GroupDescription, SecurityGroupIngress, VpcId, Ing
 
 ### Community 1033 - "Resources"
 Cohesion: 0.12
-Nodes (19): Properties, Type, Type, Properties, Type, Type, Type, ExcludePunctuation (+11 more)
+Nodes (19): Properties, Type, Properties, Type, Properties, Type, Type, ExcludePunctuation (+11 more)
 
 ### Community 1034 - "viegem/start.sh"
 Cohesion: 0.50
@@ -5651,10 +5630,6 @@ Nodes (3): terminal, publicUrl, replicaCount
 ### Community 1061 - "test_store.py"
 Cohesion: 0.24
 Nodes (6): _record(), test_count_for_owner_counts_only_active(), test_delete(), test_list_returns_all(), test_set_get_roundtrip(), test_set_overwrites()
-
-### Community 1088 - "tina_style.py"
-Cohesion: 0.24
-Nodes (9): emit(), curses_theme(), paint(), rgb(), xterm_index(), draw(), menu_loop(), move() (+1 more)
 
 ### Community 1090 - "EgressProxyDiscovery"
 Cohesion: 0.20
@@ -5697,8 +5672,8 @@ Cohesion: 0.22
 Nodes (9): DependsOn, Properties, Type, VpcOriginEndpointConfig, Origin, Arn, HTTPPort, Name (+1 more)
 
 ### Community 1194 - "viewer-background.ts"
-Cohesion: 0.05
-Nodes (71): apiBase(), BotConnection, BotProcessedNotes, botSegments(), BotSpeakerLink, DesktopConnection, epoch(), hasOwnedBotInRoom() (+63 more)
+Cohesion: 0.10
+Nodes (37): ACCOUNT_KEY, authorizationCode(), DEFAULT_GATEWAY, DEFAULT_TERMINAL, ExtensionAccount, OAUTH_VALUE, SESSION_MESSAGE, SessionCommand (+29 more)
 
 ### Community 1476 - "Properties"
 Cohesion: 0.12
@@ -5711,6 +5686,10 @@ Nodes (17): DependsOn, EntryPoint, Environment, Essential, HealthCheck, Image, L
 ### Community 1481 - "Properties"
 Cohesion: 0.12
 Nodes (17): AuthorizationConfig, FilesystemId, TransitEncryption, Cpu, ExecutionRoleArn, Family, Memory, NetworkMode (+9 more)
+
+### Community 1524 - "InMemoryDeliveryLedger"
+Cohesion: 0.12
+Nodes (11): build_delivery_record(), InMemoryDeliveryLedger, RedisDeliveryLedger, _sanitize(), _app(), _seed(), test_delivery_history_is_owner_scoped(), test_ledger_is_newest_first_and_capped() (+3 more)
 
 ### Community 1527 - ""Local change workflow""
 Cohesion: 0.40
@@ -5725,20 +5704,20 @@ Cohesion: 0.20
 Nodes (9): AWSTemplateFormatVersion, AWSAgentToolkit, Conditions, SharedWritable, WithSharedWorkspace, WithStream, Description, Metadata (+1 more)
 
 ### Community 1541 - "meet-facts.ts"
-Cohesion: 0.21
-Nodes (14): botFetch(), createMeetFacts(), refresh(), render(), request(), submit(), syncButtons(), element() (+6 more)
+Cohesion: 0.20
+Nodes (14): BotConnection, createMeetFacts(), refresh(), render(), request(), submit(), syncButtons(), element() (+6 more)
 
 ### Community 1550 - "Properties"
 Cohesion: 0.17
 Nodes (12): Cpu, ExecutionRoleArn, Family, Memory, NetworkMode, RequiresCompatibilities, RuntimePlatform, Volumes (+4 more)
 
 ### Community 1557 - "Resources"
-Cohesion: 0.18
-Nodes (11): Type, Type, Properties, Type, Type, RetentionInDays, Resources, Discovery (+3 more)
+Cohesion: 0.17
+Nodes (11): AWSTemplateFormatVersion, Description, Type, Properties, Type, Type, RetentionInDays, Resources (+3 more)
 
 ### Community 1562 - "offscreen.ts"
-Cohesion: 0.35
-Nodes (10): commands, PCM_WORKLET_URL, post(), recordingMix(), startMic(), startTab(), stop(), stopRemote() (+2 more)
+Cohesion: 0.14
+Nodes (18): commands, PCM_WORKLET_URL, post(), recordingMix(), startMic(), startTab(), stop(), stopRemote() (+10 more)
 
 ### Community 1577 - "Properties"
 Cohesion: 0.29
@@ -5747,10 +5726,6 @@ Nodes (7): Properties, DnsRecords, NamespaceId, TTL, Type, DnsConfig, Name
 ### Community 1578 - "Properties"
 Cohesion: 0.17
 Nodes (12): Cpu, ExecutionRoleArn, Family, Memory, NetworkMode, RequiresCompatibilities, RuntimePlatform, TaskDefinition (+4 more)
-
-### Community 1593 - "_FakeRedis"
-Cohesion: 0.14
-Nodes (5): _FakeRedis, _native_streams(), test_copilot_processing_is_opt_in(), test_session_end_reaps_copilot_without_writing_the_carrier(), test_two_distinct_meetings_stay_separate()
 
 ### Community 1594 - "Properties"
 Cohesion: 0.22
@@ -5768,9 +5743,9 @@ Nodes (21): Default, Description, Type, Default, Description, Type, Type, Type (
 Cohesion: 0.22
 Nodes (9): Properties, Type, HealthCheckIntervalSeconds, HealthCheckPath, HealthyThresholdCount, Port, Protocol, TargetType (+1 more)
 
-### Community 1613 - "test_main_ensure_fts_index_wiring.py"
-Cohesion: 0.27
-Nodes (5): _fake_app(), _FakeRedis, _StubTranscriptStore, test_ensure_fts_index_is_called_from_the_real_lifespan(), test_ensure_fts_index_is_skipped_gracefully_without_the_real_store()
+### Community 1613 - "sys"
+Cohesion: 0.02
+Nodes (93): valid_wav(), ReviewRequest, ExtensionCode, ExtensionCredential, GoogleBinding, _fetch_bot_context(), _transcription_from_context(), build_production_app() (+85 more)
 
 ### Community 1614 - "workspace-release.buildspec.yml"
 Cohesion: 0.22
@@ -5779,10 +5754,6 @@ Nodes (8): commands, env, shell, phases, build, pre_build, commands, version
 ### Community 1615 - "eval-ui/server.mjs"
 Cohesion: 0.17
 Nodes (13): boundedPath(), CONTENT_TYPES, createTeamsCsrcEvalServer(), HERE, parseRange(), sendFile(), sendJson(), SHARED_TRANSCRIPT_RENDERER (+5 more)
-
-### Community 1616 - "teams-caption-wiring.test.ts"
-Cohesion: 0.06
-Nodes (17): BUNDLE, captionBridgeLogs, captionNames, captured, El, g, hints, intervals (+9 more)
 
 ### Community 1617 - "TINA on AWS"
 Cohesion: 0.10
@@ -5793,24 +5764,28 @@ Cohesion: 0.50
 Nodes (6): _accept(), _rig(), test_recipient_redeems_their_email_before_playback_and_cannot_delete(), test_recording_permission_is_explicit_and_recipient_restricted(), test_recording_reads_recheck_revocation_and_expiry(), test_transcript_only_share_does_not_grant_recordings()
 
 ### Community 1619 - "cursor"
-Cohesion: 0.23
-Nodes (10): meeting_stream(), gen(), cursor(), note_events(), retract_event(), seg_events(), _decode_sse_cursor(), _encode_sse_cursor() (+2 more)
+Cohesion: 0.27
+Nodes (8): gen(), cursor(), note_events(), retract_event(), seg_events(), _decode_sse_cursor(), _encode_sse_cursor(), test_sse_cursor_encode_decode_roundtrip()
 
 ### Community 1620 - "test_denial_passthrough.py"
-Cohesion: 0.05
-Nodes (33): FakeRedisBus, _coerce_segment(), ingest(), _log_publish_failure(), _mutable_channel(), _now_iso(), _resolve_native(), _to_native_wire() (+25 more)
+Cohesion: 0.04
+Nodes (33): _coerce_segment(), ingest(), _log_publish_failure(), _mutable_channel(), _now_iso(), _resolve_native(), _to_native_wire(), _transcript_stream() (+25 more)
 
 ### Community 1621 - "terminal"
 Cohesion: 0.18
 Nodes (11): condition, agent-api, terminal, depends_on, environment, image, init, networks (+3 more)
 
 ### Community 1622 - "bedrock_workspace.py"
-Cohesion: 0.09
-Nodes (19): BedrockWorkspaceHarness, _extract_title(), _is_allowed_wiki_path(), _iter_workspace_files(), walk_dir(), _normalize_relative_path(), _reach_tool_specs(), _read_regular_file() (+11 more)
+Cohesion: 0.05
+Nodes (33): _extract_title(), _is_allowed_wiki_path(), _iter_workspace_files(), walk_dir(), _normalize_relative_path(), _read_regular_file(), _resolve_mount(), _slugify_label() (+25 more)
 
 ### Community 1623 - ".do_GET"
 Cohesion: 0.33
 Nodes (3): _H, _relay(), _run()
+
+### Community 1624 - "gateway/tests/test_health.py"
+Cohesion: 0.38
+Nodes (3): _app(), test_health_needs_no_api_key(), test_health_ok()
 
 ### Community 1625 - "register"
 Cohesion: 0.24
@@ -5825,8 +5800,8 @@ Cohesion: 0.12
 Nodes (16): must, why, com.aws.cloudformation.Context, Cpu, ExecutionRoleArn, Family, Memory, NetworkMode (+8 more)
 
 ### Community 1628 - "Properties"
-Cohesion: 0.22
-Nodes (9): Properties, Type, DnsRecords, NamespaceId, TTL, Type, DnsConfig, Name (+1 more)
+Cohesion: 0.29
+Nodes (7): Properties, DnsRecords, NamespaceId, TTL, Type, DnsConfig, Name
 
 ### Community 1630 - "Properties"
 Cohesion: 0.12
@@ -5844,13 +5819,13 @@ Nodes (16): Statement, Version, Properties, Type, PolicyDocument, PolicyName, St
 Cohesion: 0.18
 Nodes (11): TargetGroupArn, Type, Field, Values, Actions, Conditions, ListenerArn, Priority (+3 more)
 
-### Community 1635 - "test_stack_redis.py"
-Cohesion: 0.13
-Nodes (6): test_list_queue_lpush_brpop(), test_pubsub_bot_commands_and_status(), test_pubsub_publish_subscribe_tc_meeting(), test_sorted_set_zadd_zrangebyscore(), test_stream_xadd_xreadgroup_xack(), test_stream_xautoclaim_reclaims_orphans()
+### Community 1635 - "_validator_for"
+Cohesion: 0.29
+Nodes (3): test_golden_conforms_to_its_def(), test_minted_token_conforms(), _validator_for()
 
 ### Community 1636 - "threading"
 Cohesion: 0.05
-Nodes (29): allowed_local_roots(), assert_allowed_scheme(), assert_fetchable(), assert_public_host(), _bare_host(), _checked_host(), contained_local_path(), _host_is_internal() (+21 more)
+Nodes (28): allowed_local_roots(), assert_allowed_scheme(), assert_fetchable(), assert_public_host(), _bare_host(), _checked_host(), contained_local_path(), _host_is_internal() (+20 more)
 
 ### Community 1637 - "ContainerDefinitions"
 Cohesion: 0.20
@@ -5861,16 +5836,12 @@ Cohesion: 0.28
 Nodes (13): COS30, ISO_COPY, IsoBox(), IsoCopy, IsoLaptop(), IsoNodeId, IsoTablet(), NODE_ORDER (+5 more)
 
 ### Community 1639 - "sync.py"
-Cohesion: 0.07
-Nodes (25): Meeting, MeetingSession, _backfill_token_scopes(), _col_default_sql(), ensure_schema_sync(), _ensure_schema_sync(), _pg_type(), _sync_columns() (+17 more)
-
-### Community 1640 - "test_stress_spawn_cap_holds_at_scale"
-Cohesion: 0.22
-Nodes (3): SlowRepo, test_stress_spawn_cap_holds_at_scale(), spawn()
+Cohesion: 0.24
+Nodes (8): _backfill_token_scopes(), _col_default_sql(), _ensure_schema_sync(), _pg_type(), _sync_columns(), _sync_functions(), _sync_indexes(), _unique_index_failure_message()
 
 ### Community 1641 - "engine"
-Cohesion: 0.03
-Nodes (53): _permission_settings(), rerank_voice_sources(), test_worker_selects_voice_prompt_and_validates_clarification(), complete(), test_malformed_voice_reply_gets_one_regeneration_and_still_requires_source_review(), test_voice_worker_distinguishes_empty_evidence_from_provider_failure(), complete(), test_worker_dispatches_voice_plan_to_selected_completion_without_treating_it_as_claims() (+45 more)
+Cohesion: 0.05
+Nodes (31): llm_rerank(), complete(), rerank_voice_sources(), sources(), test_empty_rank_does_not_seed_irrelevant_sources_from_each_meeting(), test_empty_rank_retains_bounded_lookup_or_real_verifier_failure_status(), test_empty_rank_with_pinned_sources_keeps_full_contradiction_review_but_repair_cannot_reseed(), test_empty_worker_generation_and_format_repair_cannot_restore_discarded_sources() (+23 more)
 
 ### Community 1642 - "test_note_date.py"
 Cohesion: 0.24
@@ -5884,9 +5855,9 @@ Nodes (12): csrc, CUT, Ev, events, evs, hints, kept, meta (+4 more)
 Cohesion: 0.50
 Nodes (3): Ask TINA trong Google Meet, Signed-in toolbar popup, TINA Extension sign-in popup
 
-### Community 1648 - "test_recording_golden.py"
-Cohesion: 0.36
-Nodes (4): _golden_dir(), test_golden_dir_present(), test_golden_master(), _vector_paths()
+### Community 1648 - "Properties"
+Cohesion: 0.29
+Nodes (7): Properties, DnsRecords, NamespaceId, TTL, Type, DnsConfig, Name
 
 ### Community 1649 - "staging-edge.yml"
 Cohesion: 0.25
@@ -5894,7 +5865,7 @@ Nodes (7): AWSTemplateFormatVersion, Conditions, CreateAlternateDnsAlias, Create
 
 ### Community 1650 - "audio-pipeline.ts"
 Cohesion: 0.05
-Nodes (23): AudioCaptureSource, AudioChunk, BotConfig, ChunkSink, MediaRecorderCapture, MediaRecorderCaptureOptions, _publisherProvider(), PulseAudioCapture (+15 more)
+Nodes (18): AudioCaptureSource, AudioChunk, BotConfig, ChunkSink, MediaRecorderCapture, MediaRecorderCaptureOptions, _publisherProvider(), PulseAudioCapture (+10 more)
 
 ### Community 1651 - "test_lifecycle_http.py"
 Cohesion: 0.26
@@ -5912,17 +5883,17 @@ Nodes (11): Properties, Type, Properties, Type, ImageTagMutability, RepositoryNa
 Cohesion: 0.25
 Nodes (8): Properties, Type, CapacityProvider, Weight, CapacityProviders, ClusterName, DefaultCapacityProviderStrategy, Cluster
 
-### Community 1655 - "guard"
-Cohesion: 0.31
-Nodes (3): GuardTests, ExperimentStopped, guard()
+### Community 1655 - "notification-banner.tsx"
+Cohesion: 0.33
+Nodes (4): getDismissedIds(), Notification, NotificationBanner(), typeConfig
 
 ### Community 1656 - "Properties"
 Cohesion: 0.29
 Nodes (7): Properties, DnsRecords, NamespaceId, TTL, Type, DnsConfig, Name
 
 ### Community 1657 - "tests/test_task_flow.py"
-Cohesion: 0.10
-Nodes (18): TaskFlowStore, voice_token(), Repo, test_a_room_capability_cannot_validate_another_rooms_turn(), get_meeting(), test_shared_meeting_policy_requires_owned_non_deleted_distinct_sources_and_current_owner(), get(), context() (+10 more)
+Cohesion: 0.19
+Nodes (12): Repo, context(), flow_service(), factory(), upstream(), question(), test_late_context_reset_cannot_erase_a_replacement_turns_flow(), test_only_heard_prompts_continue_the_same_caller_flow() (+4 more)
 
 ### Community 1658 - "Statement"
 Cohesion: 0.13
@@ -5960,6 +5931,10 @@ Nodes (6): RouteTableIds, ServiceName, VpcEndpointType, S3GatewayEndpoint, Prope
 Cohesion: 0.12
 Nodes (16): must, why, Version, Key, Value, com.aws.cloudformation.Context, Encrypted, FileSystemPolicy (+8 more)
 
+### Community 1668 - "parametrize"
+Cohesion: 0.33
+Nodes (4): test_a_persons_bearer_does_not_open_an_admin_route(), test_no_credential_at_all_is_refused(), test_the_operator_key_still_opens_every_one_of_them(), test_the_operator_key_still_opens_the_admin_routes()
+
 ### Community 1670 - "DistributionConfig"
 Cohesion: 0.10
 Nodes (20): ErrorCachingMinTTL, ErrorCode, AllowedMethods, CachePolicyId, FunctionAssociations, OriginRequestPolicyId, TargetOriginId, ViewerProtocolPolicy (+12 more)
@@ -5968,9 +5943,9 @@ Nodes (20): ErrorCachingMinTTL, ErrorCode, AllowedMethods, CachePolicyId, Functi
 Cohesion: 0.36
 Nodes (4): checkForTeamsRemoval(), startTeamsRemovalMonitor(), GENERIC_ALERTS, teamsRemovalIndicators
 
-### Community 1672 - "InMemoryCommandPublisher"
+### Community 1672 - "meeting_api/__init__.py"
 Cohesion: 0.04
-Nodes (30): CommandPublisher, InMemoryCommandPublisher, _is_stale_stopped_booting(), _iso_age_seconds(), _log_stop_teardown_failed(), _teardown_and_terminalize_booting(), _admin_token(), _CapturingWebhookTransport (+22 more)
+Nodes (29): join_retry_tick(), _publish(), __getattr__(), new_session(), MeetingSession, test_boot_loop_set_excludes_dead_scheduler_tick(), test_create_app_health(), test_lifecycle_callback_on_unified_app() (+21 more)
 
 ### Community 1673 - "staging-terminal.yml"
 Cohesion: 0.10
@@ -5981,8 +5956,8 @@ Cohesion: 0.33
 Nodes (6): Enable, Rollback, DeploymentCircuitBreaker, MaximumPercent, MinimumHealthyPercent, DeploymentConfiguration
 
 ### Community 1676 - "Conditions"
-Cohesion: 0.13
-Nodes (15): Conditions, WithAgentReach, WithChatGPTVoice, WithDynamicWorkspace, WithEfsMigration, WithLegacyEfs, WithS3Workspace, WithTaskRole (+7 more)
+Cohesion: 0.10
+Nodes (20): AWSTemplateFormatVersion, AWSAgentToolkit, Conditions, WithAgentReach, WithChatGPTVoice, WithDynamicWorkspace, WithEfsMigration, WithLegacyEfs (+12 more)
 
 ### Community 1677 - "Properties"
 Cohesion: 0.14
@@ -5999,10 +5974,6 @@ Nodes (14): Version, Description, EnableKeyRotation, KeyPolicy, WorkspaceDataKey
 ### Community 1682 - "inputs"
 Cohesion: 0.14
 Nodes (14): default, type, default, type, default, type, build-asr, build-gipformer (+6 more)
-
-### Community 1683 - "w"
-Cohesion: 0.30
-Nodes (4): interleaving(), visit(), MixedSpeakerTests, w()
 
 ### Community 1684 - "analytics.ts"
 Cohesion: 0.43
@@ -6025,16 +5996,16 @@ Cohesion: 0.40
 Nodes (5): ViewerCertificate, AcmCertificateArn, CloudFrontDefaultCertificate, MinimumProtocolVersion, SslSupportMethod
 
 ### Community 1689 - "Properties"
-Cohesion: 0.09
-Nodes (23): Properties, Command, EntryPoint, Environment, Essential, Image, LogConfiguration, Name (+15 more)
+Cohesion: 0.08
+Nodes (25): Properties, Type, Command, EntryPoint, Environment, Essential, Image, LogConfiguration (+17 more)
 
 ### Community 1690 - "Statement"
 Cohesion: 0.13
 Nodes (15): Statement, Version, Properties, Type, PolicyDocument, PolicyName, Statement, Version (+7 more)
 
 ### Community 1691 - "SecurityGroupIngress"
-Cohesion: 0.25
-Nodes (9): Properties, Properties, GroupDescription, SecurityGroupIngress, VpcId, FromPort, IpProtocol, SourceSecurityGroupId (+1 more)
+Cohesion: 0.17
+Nodes (13): Properties, Type, Properties, Type, GroupDescription, SecurityGroupIngress, VpcId, CoreClients (+5 more)
 
 ### Community 1692 - "Outputs"
 Cohesion: 0.15
@@ -6052,9 +6023,9 @@ Nodes (13): AssignPublicIp, SecurityGroups, Subnets, Properties, AwsvpcConfigura
 Cohesion: 0.22
 Nodes (12): CHART_YAML, { execFileSync }, fs, latestGitTag(), main(), normalizeVersion(), OUT_FILE, path (+4 more)
 
-### Community 1697 - "ControlError"
-Cohesion: 0.14
-Nodes (5): RemoteWorkers, ControlError, Identity, request_json(), Workers
+### Community 1697 - "HealthCheck"
+Cohesion: 0.33
+Nodes (6): HealthCheck, Command, Interval, Retries, StartPeriod, Timeout
 
 ### Community 1698 - "Properties"
 Cohesion: 0.18
@@ -6063,6 +6034,10 @@ Nodes (11): TargetGroupArn, Type, Field, Values, Properties, Type, Actions, Cond
 ### Community 1699 - "pending-stability.test.ts"
 Cohesion: 0.43
 Nodes (7): harness(), main(), ok(), Pub, result(), seg(), sleep()
+
+### Community 1700 - "test_disconnect_before_pcm_headers_releases_reserved_audio_slot"
+Cohesion: 0.33
+Nodes (4): test_disconnect_before_pcm_headers_releases_reserved_audio_slot(), disconnect_headers(), failed_send(), send()
 
 ### Community 1701 - "attribute.mjs"
 Cohesion: 0.29
@@ -6076,9 +6051,9 @@ Nodes (5): Default, MaxValue, MinValue, Type, GlobalQuota
 Cohesion: 0.50
 Nodes (4): AllowedPattern, Default, Type, DraftWorkerImage
 
-### Community 1705 - "default_preactive_grace"
-Cohesion: 0.25
-Nodes (4): default_preactive_grace(), test_lead_and_lobby_budget_together_cover_a_late_host(), test_default_pre_active_grace_is_derived_from_the_issued_lobby_budget(), test_pre_active_grace_follows_the_lobby_budget_env_override()
+### Community 1705 - "overrides"
+Cohesion: 0.40
+Nodes (5): overrides, nanoid, postcss, sharp, undici
 
 ### Community 1706 - "docs-current-gate.mjs"
 Cohesion: 0.29
@@ -6112,13 +6087,13 @@ Nodes (10): Properties, Type, GroupDescription, SecurityGroupIngress, VpcId, Ing
 Cohesion: 0.21
 Nodes (12): Properties, Type, Properties, GroupDescription, SecurityGroupIngress, VpcId, AppSecurityGroup, FromPort (+4 more)
 
-### Community 1715 - "ChatGPTVoiceOwner"
-Cohesion: 0.50
-Nodes (4): AllowedPattern, Default, Type, ChatGPTVoiceOwner
+### Community 1715 - "handler_for"
+Cohesion: 0.60
+Nodes (4): handler_for(), do_GET(), do_POST(), _reply()
 
-### Community 1717 - "EnableDurableWorkspace"
-Cohesion: 0.50
-Nodes (4): AllowedValues, Default, Type, EnableDurableWorkspace
+### Community 1717 - "_transcript_route"
+Cohesion: 0.40
+Nodes (4): test_transcript_cursor_past_the_end_is_empty_not_an_error(), test_transcript_since_index_returns_only_new_segments(), test_transcript_without_cursor_returns_everything(), _transcript_route()
 
 ### Community 1720 - "Properties"
 Cohesion: 0.12
@@ -6140,9 +6115,9 @@ Nodes (16): AWSTemplateFormatVersion, Value, Value, Value, Value, Conditions, Pr
 Cohesion: 0.18
 Nodes (11): Value, Value, Outputs, GatewayTargetGroupArn, McpUrl, PublicMcpUrl, ServiceName, TaskDefinitionArn (+3 more)
 
-### Community 1725 - "Runnable"
-Cohesion: 0.06
-Nodes (30): DynamicWorkspaceConfig, DynamicWorkspaceProvisioner, validate_dynamic_mounts(), _allowed_workspace_unit_tools(), ECSBackend, _encode_dotenv(), _validate_workspace_runner(), _workspace_idle_timeout_sec() (+22 more)
+### Community 1725 - "Json"
+Cohesion: 0.02
+Nodes (71): Advance, _get(), pending(), render_citations(), link(), replace(), web_sources(), _copy_sources() (+63 more)
 
 ### Community 1726 - "ChatGPTVoiceRoom"
 Cohesion: 0.50
@@ -6151,10 +6126,6 @@ Nodes (4): AllowedPattern, Default, Type, ChatGPTVoiceRoom
 ### Community 1727 - "staging-workspace-s3.yml"
 Cohesion: 0.18
 Nodes (10): AWSTemplateFormatVersion, AWSAgentToolkit, Conditions, HasCustomAllowlist, HasProxyRepoArn, WithAgentReach, WithEgressProxy, Description (+2 more)
-
-### Community 1728 - "EnableVoiceCompletion"
-Cohesion: 0.50
-Nodes (4): AllowedValues, Default, Type, EnableVoiceCompletion
 
 ### Community 1729 - "DraftPilotUserIds"
 Cohesion: 0.50
@@ -6172,57 +6143,41 @@ Nodes (4): WorkspaceBedrockOwner, AllowedPattern, Default, Type
 Cohesion: 0.50
 Nodes (4): AllowedValues, Default, Type, MigrateFromEfs
 
-### Community 1733 - "WorkspacePilotRoleB"
-Cohesion: 0.50
-Nodes (4): WorkspacePilotRoleB, AllowedPattern, Default, Type
+### Community 1733 - "SecurityGroupIngress"
+Cohesion: 0.40
+Nodes (5): SecurityGroupIngress, FromPort, IpProtocol, SourceSecurityGroupId, ToPort
 
-### Community 1735 - "WorkspacePilotUserIds"
-Cohesion: 0.50
-Nodes (4): WorkspacePilotUserIds, AllowedPattern, Default, Type
+### Community 1735 - "DesiredCount"
+Cohesion: 0.40
+Nodes (5): Default, MaxValue, MinValue, Type, DesiredCount
 
-### Community 1736 - "test_manifest_files.py"
-Cohesion: 0.33
-Nodes (5): _load(), test_no_manifest_declares_a_credential_argument(), test_one_domain_per_manifest_and_no_name_claimed_twice(), test_the_full_deployment_and_the_smallest_one_both_assemble(), test_there_is_at_least_one_manifest_and_every_one_of_them_validates()
+### Community 1736 - "email.ts"
+Cohesion: 0.60
+Nodes (4): createTransporter(), sendEmail(), SendEmailOptions, sendMagicLinkEmail()
 
 ### Community 1737 - "assert-release-version.js"
 Cohesion: 0.29
 Nodes (10): APP_ROOT, fs, GENERATED, main(), normalizeVersion(), path, readChartAppVersion(), readVersionFile() (+2 more)
 
-### Community 1738 - "anthropic_tools"
-Cohesion: 0.48
-Nodes (3): anthropic_tools(), gemini_tools(), _request()
-
 ### Community 1739 - "Properties"
-Cohesion: 0.15
-Nodes (14): Properties, Properties, GroupDescription, SecurityGroupEgress, SecurityGroupIngress, VpcId, CidrIp, FromPort (+6 more)
+Cohesion: 0.20
+Nodes (11): Properties, Properties, Type, GroupDescription, SecurityGroupEgress, VpcId, Ingress, CidrIp (+3 more)
 
 ### Community 1740 - "CustomDomainName"
 Cohesion: 0.50
 Nodes (4): Default, Description, Type, CustomDomainName
 
-### Community 1741 - "test_native_probe_rejects_incomplete_tool_followup"
-Cohesion: 0.20
-Nodes (10): _anthropic_tool_response(), _gemini_tool_response(), test_anthropic_probe_preserves_thinking_signature_and_tool_id(), post(), test_deepseek_probes_its_anthropic_chat_and_compat_summary_dialects(), post(), test_gemini_tests_native_chat_tool_round_trip_and_summary_without_claiming_cli_execution(), post() (+2 more)
-
-### Community 1742 - "truth.py"
-Cohesion: 0.29
-Nodes (5): active_at(), active_intervals(), build(), correlate(), load()
-
 ### Community 1744 - "teams-chat.ts"
 Cohesion: 0.20
 Nodes (7): CONTAINER_SELECTORS, MESSAGE_SELECTORS, SENDER_SELECTORS, TeamsChat, TeamsChatMessage, TeamsChatOptions, TEXT_SELECTORS
 
-### Community 1745 - "test_packaging.py"
-Cohesion: 0.33
-Nodes (3): _copy_sources(), test_entrypoint_module_is_packaged(), test_every_dockerfile_copy_source_exists_in_repo()
-
-### Community 1747 - "DateTimePicker.tsx"
-Cohesion: 0.33
-Nodes (8): atTime(), chipStyle, DateTimePicker(), DAYS, fmtValue(), MONTHS, nextHalfHour(), sameDay()
-
-### Community 1749 - "WorkspaceSharedRoleC"
+### Community 1746 - "VoicePilotUserIds"
 Cohesion: 0.50
-Nodes (4): WorkspaceSharedRoleC, AllowedPattern, Default, Type
+Nodes (4): VoicePilotUserIds, AllowedPattern, Default, Type
+
+### Community 1749 - "admin_old_name"
+Cohesion: 0.67
+Nodes (3): admin_old_name(), test_the_old_name_says_once_that_it_is_deprecated(), test_the_old_name_still_opens_the_door_for_one_release()
 
 ### Community 1750 - "Properties"
 Cohesion: 0.10
@@ -6232,25 +6187,17 @@ Nodes (20): Command, EntryPoint, Environment, Essential, Image, LogConfiguration
 Cohesion: 0.50
 Nodes (4): WorkspaceStorage, AllowedValues, Default, Type
 
-### Community 1752 - "InvocationBucket"
-Cohesion: 0.67
-Nodes (3): Default, Type, InvocationBucket
-
-### Community 1753 - "WorkspaceWikiRoleB"
-Cohesion: 0.50
-Nodes (4): WorkspaceWikiRoleB, AllowedPattern, Default, Type
-
-### Community 1754 - "staging-agent-api.yml"
-Cohesion: 0.33
-Nodes (5): AWSTemplateFormatVersion, AWSAgentToolkit, Description, Metadata, AWSToolsMetrics
+### Community 1754 - "test_owner_voice_and_glossary_are_pinned_privately_per_session"
+Cohesion: 1.00
+Nodes (3): test_owner_voice_and_glossary_are_pinned_privately_per_session(), factory(), upstream()
 
 ### Community 1755 - "ValkeySubnets"
 Cohesion: 0.20
 Nodes (10): Properties, Type, DBSubnetGroupDescription, Description, SubnetIds, PostgresSubnets, ValkeySubnets, Condition (+2 more)
 
-### Community 1756 - "HealthCheck"
-Cohesion: 0.33
-Nodes (6): HealthCheck, Command, Interval, Retries, StartPeriod, Timeout
+### Community 1756 - "WorkspaceRuntimeSecurityGroupId"
+Cohesion: 0.67
+Nodes (3): WorkspaceRuntimeSecurityGroupId, Default, Type
 
 ### Community 1757 - "WorkspacePilotUserIds"
 Cohesion: 0.50
@@ -6268,29 +6215,37 @@ Nodes (6): viegem-models, entrypoint, image, networks, profiles, volumes
 Cohesion: 0.40
 Nodes (5): WorkspaceMaxLifetimeSec, Default, MaxValue, MinValue, Type
 
+### Community 1761 - "DefaultBotName"
+Cohesion: 0.67
+Nodes (3): Default, Type, DefaultBotName
+
 ### Community 1762 - "ContainerDefinitions"
-Cohesion: 0.12
-Nodes (16): Essential, HealthCheck, Image, LogConfiguration, MountPoints, Name, PortMappings, ReadonlyRootFilesystem (+8 more)
+Cohesion: 0.20
+Nodes (10): Essential, Image, LogConfiguration, MountPoints, Name, PortMappings, ReadonlyRootFilesystem, LogDriver (+2 more)
 
 ### Community 1764 - "SharedWorkspace"
 Cohesion: 0.50
 Nodes (4): SharedWorkspace, AllowedPattern, Default, Type
 
-### Community 1765 - "WorkspaceChatGPTOwner"
-Cohesion: 0.50
-Nodes (4): WorkspaceChatGPTOwner, AllowedPattern, Default, Type
+### Community 1765 - "FlowsApiKeyArn"
+Cohesion: 0.67
+Nodes (3): Default, Type, FlowsApiKeyArn
 
-### Community 1766 - "meeting_api/__main__.py"
+### Community 1766 - "build_production_app"
 Cohesion: 0.04
-Nodes (28): build_ics_client(), fetch_configs(), aggregate_stamps(), read_stamp(), store_stamp(), RedisStreamBus, preflight(), build_engine() (+20 more)
+Nodes (37): build_ics_client(), fetch_configs(), fetch_google_events(), fetch_ics(), _google_access_token(), _account_id(), _conference(), _email() (+29 more)
 
 ### Community 1767 - "recording_codec.py"
 Cohesion: 0.31
 Nodes (4): _build_recording_master(), _build_wav_master(), _build_webm_master(), _parse_wav_header()
 
-### Community 1769 - "WorkspacePilotRoleA"
-Cohesion: 0.50
-Nodes (4): WorkspacePilotRoleA, AllowedPattern, Default, Type
+### Community 1768 - "GatewayExtensionOrigins"
+Cohesion: 0.67
+Nodes (3): Default, Type, GatewayExtensionOrigins
+
+### Community 1769 - "GoogleSecretArn"
+Cohesion: 0.67
+Nodes (3): Default, Type, GoogleSecretArn
 
 ### Community 1770 - "jobs"
 Cohesion: 0.22
@@ -6304,29 +6259,29 @@ Nodes (4): _columns(), digest(), _is_column_call(), _tablename()
 Cohesion: 0.29
 Nodes (3): _batch(), client(), test_a_row_that_fails_with_a_secret_looking_message_does_not_echo_it()
 
-### Community 1773 - "WorkspaceS3Users"
-Cohesion: 0.50
-Nodes (4): WorkspaceS3Users, AllowedPattern, Default, Type
+### Community 1773 - "LiveKitAgentUrl"
+Cohesion: 0.67
+Nodes (3): Default, Type, LiveKitAgentUrl
 
 ### Community 1774 - "csrc-spine.smoke.test.ts"
-Cohesion: 0.28
-Nodes (7): ChunkSegment, TurnSourceObservation, AMP(), Row, run(), speech(), voiceOf()
+Cohesion: 0.32
+Nodes (6): TurnSourceObservation, AMP(), Row, run(), speech(), voiceOf()
 
 ### Community 1775 - "Two-model live meeting state"
 Cohesion: 0.20
 Nodes (9): failure_code(), Enable locally, Finalization and Wiki, Operator profiling, Processing, Shared-document research, State editing and approvals, Two-model live meeting state (+1 more)
 
-### Community 1776 - "WorkspaceWikiRoleA"
-Cohesion: 0.50
-Nodes (4): WorkspaceWikiRoleA, AllowedPattern, Default, Type
+### Community 1776 - "LiveKitSecretArn"
+Cohesion: 0.67
+Nodes (3): Default, Type, LiveKitSecretArn
 
-### Community 1777 - "CoreLogs"
-Cohesion: 0.50
-Nodes (4): Properties, Type, RetentionInDays, CoreLogs
+### Community 1777 - "McpOriginSecurityGroupId"
+Cohesion: 0.67
+Nodes (3): Default, Type, McpOriginSecurityGroupId
 
-### Community 1778 - "LoadBalancers"
-Cohesion: 0.50
-Nodes (4): ContainerName, ContainerPort, TargetGroupArn, LoadBalancers
+### Community 1778 - "TranscriptionTokenArn"
+Cohesion: 0.67
+Nodes (3): TranscriptionTokenArn, Default, Type
 
 ### Community 1780 - "NovaWorkspaceOwnerIds"
 Cohesion: 0.50
@@ -6340,17 +6295,33 @@ Nodes (24): OwnerGid, OwnerUid, Permissions, Gid, Uid, FileSystemId, PosixUser, 
 Cohesion: 0.33
 Nodes (6): Properties, Type, ExcludePunctuation, PasswordLength, GenerateSecretString, DispatchSigningKey
 
+### Community 1783 - "TranscriptionUrl"
+Cohesion: 0.67
+Nodes (3): TranscriptionUrl, Default, Type
+
 ### Community 1784 - "WorkspaceWorkerImage"
 Cohesion: 0.50
 Nodes (4): WorkspaceWorkerImage, AllowedPattern, Default, Type
 
-### Community 1789 - "AgentApiImage"
+### Community 1785 - "TtsProfileKeyArn"
 Cohesion: 0.67
-Nodes (3): AllowedPattern, Type, AgentApiImage
+Nodes (3): TtsProfileKeyArn, Default, Type
 
-### Community 1790 - "AgentReachClientSecurityGroupId"
+### Community 1786 - "format_event"
+Cohesion: 0.30
+Nodes (3): format_event(), trace(), verdict()
+
+### Community 1787 - "TtsTokenArn"
 Cohesion: 0.67
-Nodes (3): Default, Type, AgentReachClientSecurityGroupId
+Nodes (3): TtsTokenArn, Default, Type
+
+### Community 1788 - "_gh"
+Cohesion: 0.15
+Nodes (8): _gh(), test_github_body_calls_out_the_meeting_join_key(), test_github_body_states_when_no_meeting_was_supplied(), test_github_format_maps_the_ticket_onto_an_issue(), test_github_format_still_never_forwards_the_api_key(), test_github_labels_are_configurable(), test_github_labels_default_to_state_incoming(), test_github_response_number_and_html_url_reach_the_calling_agent()
+
+### Community 1789 - "TtsUrl"
+Cohesion: 0.67
+Nodes (3): TtsUrl, Default, Type
 
 ### Community 1791 - "TranscriptionModel"
 Cohesion: 0.67
@@ -6360,65 +6331,29 @@ Nodes (3): TranscriptionModel, Default, Type
 Cohesion: 0.67
 Nodes (3): TranscriptionUrl, Default, Type
 
-### Community 1793 - "validate_webhook_url"
-Cohesion: 0.12
-Nodes (9): PinnedURL, validate_webhook_url(), test_ssrf_dns_rebinding_to_private_blocked(), test_ssrf_toctou_connect_time_pinning_present(), test_ssrf_unresolvable_blocked(), test_allowed_urls(), test_blocked_urls(), test_dns_rebinding_to_private_blocked() (+1 more)
+### Community 1793 - "webhooks/__init__.py"
+Cohesion: 0.05
+Nodes (22): _deliver_signed(), DeliveryResult, is_event_enabled(), _RetryableStatus, _is_blocked_hostname(), _is_blocked_ip(), PinnedURL, _resolve_host() (+14 more)
 
 ### Community 1794 - "build"
 Cohesion: 0.25
 Nodes (7): if, needs, runs-on, jobs, build, name, permissions
 
-### Community 1795 - "fastapi_testclient"
-Cohesion: 0.06
-Nodes (22): events(), event_to_invocation(), _FakeRuntime, test_bad_event_envelope_raises(), test_event_with_inline_plan_maps_to_conformant_unit_with_opaque_ref(), test_event_without_a_plan_raises(), test_meeting_completed_maps_to_transcription_trigger(), _client() (+14 more)
+### Community 1795 - "test_workspace_manage_routes.py"
+Cohesion: 0.20
+Nodes (10): _client(), _FakeIdentity, _FakeRuntime, _run(), _seed_primary(), test_git_remote_status_no_home(), test_git_remote_status_reports_ahead_after_a_local_commit(), test_manage_is_scoped_to_the_header_identity() (+2 more)
 
 ### Community 1796 - "Contents"
 Cohesion: 0.29
 Nodes (6): Contents, Package 1 — Chat AI, Toasts & Theme, Package 2 — Meeting Workspace, Live Bot & Knowledge Hub, Package 3 — App Shell, Navigation, Tasks & Pre-Login Landing, `src/web/lucian/`, Theme Bridge
 
 ### Community 1797 - "VoiceActivityDetector"
-Cohesion: 0.10
-Nodes (5): SileroVadModelConfig, SpeechSegment, TenVadModelConfig, VadModelConfig, VoiceActivityDetector
-
-### Community 1798 - "AgentReachUrl"
-Cohesion: 0.67
-Nodes (3): Default, Type, AgentReachUrl
-
-### Community 1800 - "parametrize"
-Cohesion: 0.29
-Nodes (5): test_api_provider_tests_require_own_keys_and_redact_errors(), test_groq_checks_chat_tool_round_trip_and_summary_models_using_their_actual_dialects(), post(), test_groq_never_passes_a_text_ping_or_malformed_tool_call(), test_native_text_only_ping_cannot_pass_the_chat_tool_test()
-
-### Community 1801 - "handler"
-Cohesion: 0.43
-Nodes (6): handler(), do_GET(), do_POST(), handle_request(), reply(), setup()
-
-### Community 1803 - "ChatGPTVoiceModel"
-Cohesion: 0.67
-Nodes (3): Default, Type, ChatGPTVoiceModel
-
-### Community 1804 - "ChatGPTVoiceSecretArn"
-Cohesion: 0.67
-Nodes (3): Default, Type, ChatGPTVoiceSecretArn
-
-### Community 1805 - "WorkspaceBedrockModel"
-Cohesion: 0.67
-Nodes (3): WorkspaceBedrockModel, Default, Type
-
-### Community 1806 - "WorkspaceChatGPTSecretArn"
-Cohesion: 0.67
-Nodes (3): WorkspaceChatGPTSecretArn, Default, Type
-
-### Community 1807 - "WorkspaceS3DataKeyArn"
-Cohesion: 0.67
-Nodes (3): WorkspaceS3DataKeyArn, Default, Type
+Cohesion: 0.07
+Nodes (6): CircularBuffer, SileroVadModelConfig, SpeechSegment, TenVadModelConfig, VadModelConfig, VoiceActivityDetector
 
 ### Community 1808 - "SyncCoordinator"
-Cohesion: 0.08
-Nodes (12): FakeS3, _FakeS3Error, test_workspace_sync_enforces_and_refreshes_readonly_mounts_nonroot(), handler_for(), do_GET(), do_POST(), _reply(), main() (+4 more)
-
-### Community 1809 - "WorkspaceS3SecretsKeyArn"
-Cohesion: 0.67
-Nodes (3): WorkspaceS3SecretsKeyArn, Default, Type
+Cohesion: 0.13
+Nodes (6): test_workspace_sync_enforces_and_refreshes_readonly_mounts_nonroot(), main(), SyncCoordinator, _pull_one(), _push_one(), WorkspaceSyncClient
 
 ### Community 1810 - "BotSpeakerIdleTimeoutSec"
 Cohesion: 0.67
@@ -6456,10 +6391,6 @@ Nodes (3): Default, Type, DraftValkeySecurityGroupId
 Cohesion: 0.67
 Nodes (3): Default, Type, DynamicWorkspaceTaskRoleArn
 
-### Community 1822 - "_resolve_native"
-Cohesion: 0.12
-Nodes (6): _classify_http(), _clear_fault(), _resolve_native(), test_resolve_native_requests_limit_within_gateway_cap(), test_resolve_native_returns_only_the_matched_id(), read()
-
 ### Community 1823 - "WorkspaceS3DataKeyArn"
 Cohesion: 0.67
 Nodes (3): WorkspaceS3DataKeyArn, Default, Type
@@ -6481,8 +6412,8 @@ Cohesion: 0.60
 Nodes (6): steps, steps, name, run, uses, steps
 
 ### Community 1829 - "shared/__init__.py"
-Cohesion: 0.06
-Nodes (10): DeterministicDecider, _slug(), ActionKind, AgentRunResult, IdentityPort, RuntimePort, TranscriptSource, VcsPort (+2 more)
+Cohesion: 0.08
+Nodes (14): DeterministicDecider, run(), _slug(), ActionKind, AgentRunRequest, AgentRunResult, RuntimePort, TranscriptSource (+6 more)
 
 ### Community 1830 - "WorkspaceRoleArns"
 Cohesion: 0.67
@@ -6499,10 +6430,6 @@ Nodes (3): WorkspaceTasks, Default, Type
 ### Community 1834 - "OwnerQuota"
 Cohesion: 0.40
 Nodes (5): Default, MaxValue, MinValue, Type, OwnerQuota
-
-### Community 1840 - "_handle"
-Cohesion: 0.18
-Nodes (6): _authorized_owner(), _handle(), _report_fault(), _resume_cursor(), _title(), test_late_native_resolution_does_not_fork_or_collapse()
 
 ### Community 1841 - "staging-workspace-s3-monitoring.yml"
 Cohesion: 0.33
@@ -6577,25 +6504,25 @@ Nodes (3): VoiceServiceName, Default, Type
   behavior/mail/README.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1419 isolated node(s):** `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `ADMIN_API_TOKEN`, `AGENT_WORKER_COMMAND`, `ANTHROPIC_API_KEY` (+1414 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 16393 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **1419 isolated node(s):** `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `ADR-0027`, `ADR-0027`, `ADMIN_API_TOKEN` (+1414 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 16424 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **703 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `TINA on AWS` connect `TINA on AWS` to `aws/README.md`?**
-  _High betweenness centrality (0.064) - this node is a cross-community bridge._
+- **Why does `get_meeting_transcript()` connect `create_app` to `TINA on AWS`?**
+  _High betweenness centrality (0.053) - this node is a cross-community bridge._
 - **Are the 264 inferred relationships involving `InMemoryMeetingRepo` (e.g. with `DuplicateMeeting` and `MaxBotsExceeded`) actually correct?**
   _`InMemoryMeetingRepo` has 264 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `ADMIN_API_TOKEN` to the rest of the system?**
+- **What connects `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `ADR-0027` to the rest of the system?**
   _1419 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `ref_node_fs` be split into smaller, more focused modules?**
-  _Cohesion score 0.010183255167622026 - nodes in this community are weakly interconnected._
-- **Why does `get_meeting_transcript()` connect `create_app` to `TINA on AWS`?**
-  _High betweenness centrality (0.064) - this node is a cross-community bridge._
-- **Should `test_unit_foundation.py` be split into smaller, more focused modules?**
-  _Cohesion score 0.05335628227194492 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.007137174678940789 - nodes in this community are weakly interconnected._
+- **Why does `Read-only MCP on staging` connect `TINA on AWS` to `create_app`?**
+  _High betweenness centrality (0.053) - this node is a cross-community bridge._
+- **Should `voice_knowledge.py` be split into smaller, more focused modules?**
+  _Cohesion score 0.05721168322794339 - nodes in this community are weakly interconnected._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._

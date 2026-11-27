@@ -3,7 +3,7 @@
  *  `MeetingDetailView`, Meetings Notebook (`meetingsFilter`, date grouping, multi-filter, rename/•••,
  *  split-button Capture ▾), Ask Tina (MCP Tool Approval, Copy/Share, chat search), and Dev/Admin gating. */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import {
   isTerminalOwnedPath,
   terminalMeetingIdFromPath,
@@ -976,6 +976,22 @@ describe("WebShell production UI (Option A & Option B)", () => {
     }
   });
 
+  it("opens Settings on Account and keeps explicit Calendar links", async () => {
+    mockEnvironment({ admin: false });
+    const { unmount } = render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(await screen.findByRole("heading", { name: "Account", level: 1 })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Account" }).getAttribute("aria-current")).toBe("page");
+    expect(new URLSearchParams(window.location.search).get("settingsSection")).toBe("account");
+    expect(screen.getByRole("heading", { name: "Access and session" })).toBeTruthy();
+
+    unmount();
+    window.history.replaceState({}, "", "/?nav=settings&settingsWorkspace=personal&settingsSection=calendar");
+    render(<WebShell />);
+    expect(await screen.findByRole("heading", { name: "Calendar & Auto-join" })).toBeTruthy();
+  });
+
   it("hides AI Models & Transcription and Team Global Defaults in Web Settings when NEXT_PUBLIC_HIDE_MODEL_SETTINGS=1 (or via /api/auth/me runtime flag)", async () => {
     vi.stubEnv("NEXT_PUBLIC_HIDE_MODEL_SETTINGS", "1");
     try {
@@ -984,11 +1000,12 @@ describe("WebShell production UI (Option A & Option B)", () => {
       const { unmount } = render(<WebShell />);
 
       await waitFor(() => {
-        expect(screen.getByRole("link", { name: "Open TINA Terminal" }).getAttribute("href")).toBe("/terminal");
+        const account = screen.getByRole("region", { name: "Account" });
+        expect(within(account).getByRole("link", { name: "Open TINA Terminal" }).getAttribute("href")).toBe("/terminal");
       });
-      // Falls back from ?settingsSection=models to Calendar & Auto-join and omits the Personal Models item
+      // Falls back from ?settingsSection=models to Account and omits the Personal Models item
       expect(screen.queryByRole("button", { name: /AI Models & Transcription/i })).toBeNull();
-      expect(screen.getByRole("heading", { name: "Calendar & Auto-join" })).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Account" })).toBeTruthy();
 
       // Team Settings keeps Workspaces & Members + ASR Workers for admins, but hides Global Defaults
       fireEvent.click(screen.getByRole("tab", { name: "Team" }));
