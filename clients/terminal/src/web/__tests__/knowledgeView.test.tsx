@@ -207,6 +207,8 @@ describe("knowledgeFriendly helpers", () => {
     expect(describeAgentTool("mcp__tina-workspace__search_wiki").done).toBe("Searched Knowledge");
     expect(describeAgentTool("mcp__tina-workspace__read_wiki").done).toBe("Read page");
     expect(describeAgentTool("mcp__tina-workspace__update_wiki").kind).toBe("write");
+    expect(describeAgentTool("FileChange").kind).toBe("write");
+    expect(describeAgentTool("FileChange").done).toBe("Updated page");
     expect(describeAgentTool("mcp__tina-reach__reach_web_read").done).toBe("Read web page");
   });
 

@@ -233,7 +233,7 @@ def _permission_settings(mounts: list[dict], allowed_tools: set[str],
     if "WebSearch" not in allowed_tools and "WebFetch" not in allowed_tools:
         permissions["deny"].append("read_url(*)")
     return {
-        "agentMode": "accept-edits" if writable else "plan",
+        "agentMode": "plan" if read_only else ("accept-edits" if (writable or shell_disabled) else "plan"),
         "toolPermission": "proceed-in-sandbox",
         "enableTerminalSandbox": not shell_disabled,
         "allowNonWorkspaceAccess": False,
@@ -515,7 +515,7 @@ class AntigravityHarness:
                 effort=os.environ.get("TINA_AGENT_EFFORT"),
                 settings_path=str(settings_path),
                 extra_dirs=dirs,
-                read_only=read_only or shell_disabled,
+                read_only=read_only,
                 sandbox=not shell_disabled,
             )
             home = str(self._home) if self._home else ""

@@ -34,7 +34,8 @@ from llm.workspace_mcp import (
 )
 
 _REAL_POPEN = subprocess.Popen
-_DIRECT_WORKSPACE_TOOLS = frozenset({"Bash", "Read", "Write", "Edit", "Glob", "Grep"})
+_DIRECT_WORKSPACE_TOOLS = frozenset({"Bash", "Read", "Write", "Edit", "Glob", "Grep", "NotebookEdit"})
+_FARGATE_DISALLOWED_WORKSPACE_TOOLS = ("Bash", "Read", "Write", "Edit", "Glob", "Grep", "NotebookEdit")
 
 
 def _short(content: object, n: int = 80) -> str:
@@ -133,6 +134,8 @@ def build_argv(
     prompt: str,
     *,
     allowed_tools: Iterable[str] = (),
+    disallowed_tools: Iterable[str] = (),
+    permission_mode: str = "acceptEdits",
     session: Optional[str] = None,
     model: Optional[str] = None,
     mcp_config: Optional[str] = None,
@@ -143,20 +146,23 @@ def build_argv(
 
     `--permission-mode acceptEdits` auto-accepts Read/Edit/Write so the turn runs fully headless; the
     `--allowedTools` scope is the capability gate (the model writes entities, `run_harness_turn`
-    does the git commit). `--mcp-config <file>` + `--strict-mcp-config` attach EXACTLY the unit's
-    granted MCP tools (the toolbelt) and nothing else. The container sandbox is the other
-    enforcement layer.
+    does the git commit). When running without a Linux user-namespace sandbox (e.g. AWS ECS Fargate),
+    callers pass `permission_mode="default"` and `disallowed_tools` so built-in `Bash`/`Edit`/`Write`
+    are explicitly blocked and all workspace work routes through `--strict-mcp-config`.
 
     `effort` is retained as a compatibility argument and ignored. All providers use automatic
     thinking; old settings must never reintroduce a manual CLI effort pin.
     """
     argv = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
-            "--include-partial-messages", "--permission-mode", "acceptEdits"]
+            "--include-partial-messages", "--permission-mode", permission_mode]
     tools = list(allowed_tools)
     if tools:
         argv += ["--allowedTools", ",".join(tools)]
     else:
         argv += ["--tools", ""]
+    blocked = list(dict.fromkeys(t for t in disallowed_tools if isinstance(t, str) and t))
+    if blocked:
+        argv += ["--disallowedTools", ",".join(blocked)]
     if mcp_config:
         argv += ["--mcp-config", mcp_config, "--strict-mcp-config"]
     if session:
@@ -314,6 +320,28 @@ class ClaudeCodeHarness:
                 selected[name] = {"url": url}
         return selected
 
+    @staticmethod
+    def _expand_mcp_allowed_tools(
+        allowed_list: list[str],
+        inline_servers: dict[str, dict],
+        mcp_tools: Optional[dict[str, list[str]]],
+    ) -> list[str]:
+        """Scope inline MCP server grants to exact `mcp__<server>__<tool>` entries when tool lists are provided."""
+        expanded: list[str] = []
+        for entry in allowed_list:
+            if entry.startswith("mcp__"):
+                server = entry[5:]
+                selected = (mcp_tools or {}).get(server)
+                if server in inline_servers and isinstance(selected, list) and selected:
+                    expanded.extend(
+                        f"mcp__{server}__{tool}"
+                        for tool in selected
+                        if isinstance(tool, str) and tool
+                    )
+                    continue
+            expanded.append(entry)
+        return list(dict.fromkeys(expanded))
+
     def run_turn(self, work: Path, prompt: str, *, allowed_tools: Iterable[str] = (),
                  session: Optional[str] = None, model: Optional[str] = None,
                  mcp_config: Optional[str] = None, gated_mcp_servers: Iterable[str] = (),
@@ -352,6 +380,9 @@ class ClaudeCodeHarness:
             ws_tools = _select_workspace_mcp_tools(allowed_set, read_only=read_only)
             effective_prompt = prompt
             effective_allowed = [tool for tool in allowed_list if tool != "Bash"]
+            disallowed: tuple[str, ...] = ("Bash",)
+            permission_mode = "default" if read_only else "acceptEdits"
+            effective_mcp_tools = dict(mcp_tools) if mcp_tools else {}
             merged_servers: dict[str, dict] = {}
             if mcp_config and Path(mcp_config).is_file():
                 try:
@@ -375,24 +406,31 @@ class ClaudeCodeHarness:
                     merged_servers[_WORKSPACE_MCP_SERVER] = _build_workspace_mcp_spec(
                         mounts_file, ws_tools, read_only=read_only,
                     )
+                    effective_mcp_tools[_WORKSPACE_MCP_SERVER] = ws_tools
                     effective_allowed = [
                         tool for tool in effective_allowed if tool not in _DIRECT_WORKSPACE_TOOLS
                     ]
                     ws_grant = f"mcp__{_WORKSPACE_MCP_SERVER}"
                     if ws_grant not in effective_allowed:
                         effective_allowed.append(ws_grant)
+                    disallowed = _FARGATE_DISALLOWED_WORKSPACE_TOOLS
+                    permission_mode = "default"
                     effective_prompt = (
                         _workspace_mcp_instructions(ws_mounts, ws_tools, read_only=read_only)
                         + "\n\n"
                         + prompt
                     )
+                effective_allowed = self._expand_mcp_allowed_tools(
+                    effective_allowed, merged_servers, effective_mcp_tools,
+                )
                 temp_mcp_config: Optional[str] = mcp_config
                 if merged_servers:
                     config = Path(directory) / "mcp.json"
                     config.write_text(json.dumps({"mcpServers": merged_servers}), encoding="utf-8")
                     temp_mcp_config = str(config)
                 argv = build_argv(
-                    effective_prompt, allowed_tools=effective_allowed, session=session, model=model,
+                    effective_prompt, allowed_tools=effective_allowed, disallowed_tools=disallowed,
+                    permission_mode=permission_mode, session=session, model=model,
                     effort=effort or None, mcp_config=temp_mcp_config, output_schema=output_schema,
                 )
                 yield from parse_stream_json(self._exec(argv, str(work)), structured_output=output_schema is not None)
@@ -400,10 +438,11 @@ class ClaudeCodeHarness:
 
         if mcp_config is None and inline_servers:
             # Non-secret granted MCP servers (such as tina-reach) attach for the duration of the turn.
+            scoped_allowed = self._expand_mcp_allowed_tools(allowed_list, inline_servers, mcp_tools)
             with tempfile.TemporaryDirectory(prefix="tina-reach-mcp-") as directory:
                 config = Path(directory) / "mcp.json"
                 config.write_text(json.dumps({"mcpServers": inline_servers}), encoding="utf-8")
-                argv = build_argv(prompt, allowed_tools=allowed_list, session=session, model=model,
+                argv = build_argv(prompt, allowed_tools=scoped_allowed, session=session, model=model,
                                   effort=effort or None, mcp_config=str(config), output_schema=output_schema)
                 yield from parse_stream_json(self._exec(argv, str(work)), structured_output=output_schema is not None)
             return

@@ -63,6 +63,7 @@ export function describeAgentTool(rawTool: string): ToolDescriptor {
       };
     case "update_wiki":
     case "Edit":
+    case "FileChange":
       return {
         icon: "edit",
         active: "Updating page…",

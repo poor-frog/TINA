@@ -29,7 +29,9 @@ from llm.bedrock_workspace import (
     _wiki_tool,
 )
 
-_MAX_RPC_LINE_BYTES = 131072
+# Accommodates _MAX_BYTES (32 KB) Markdown payloads even if a JSON-RPC client ASCII-escapes
+# non-ASCII text (such as Vietnamese) as \uXXXX (~6 bytes/char => ~192 KiB + JSON envelope).
+_MAX_RPC_LINE_BYTES = 262144
 _MAX_WRITES_PER_SESSION = 16
 _MAX_RESOURCES = 100
 _RESOURCE_PREFIX = "tina-workspace://"

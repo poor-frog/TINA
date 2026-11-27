@@ -592,7 +592,11 @@ class CodexHarness:
         if shell_disabled:
             ws_mounts = _load_workspace_mounts(mounts, read_only=read_only)
             ws_tools = _select_workspace_mcp_tools(allowed, read_only=read_only)
-            if ws_mounts and ws_tools and self._codex_home is not None:
+            if ws_mounts and ws_tools and self._codex_home is None:
+                log.warning(
+                    "Codex shell sandbox disabled without prepare(); skipping tina-workspace MCP attachment",
+                )
+            elif ws_mounts and ws_tools and self._codex_home is not None:
                 mounts_file = self._codex_home / f"tina-mounts-{uuid4().hex}.json"
                 mounts_file.write_text(
                     json.dumps(list(ws_mounts.values()), ensure_ascii=False),

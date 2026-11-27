@@ -255,3 +255,60 @@ def test_groq_workspace_mcp_namespace_round_trip():
     restored = restore_reach_event({"type": "response.output_item.done", "item": clean["input"][0]})
     assert restored["item"] == call
     assert restore_reach_event({"response": {"output": [clean["input"][0]]}})["response"]["output"] == [call]
+
+
+def test_workspace_mcp_accepts_large_ascii_escaped_vietnamese_markdown(tmp_path: Path):
+    private, _global_dir, _system_dir, raw_mounts = _seed_mounts(tmp_path)
+    mounts_file = tmp_path / "mounts.json"
+    mounts_file.write_text(json.dumps(raw_mounts), encoding="utf-8")
+
+    # 1) Valid ~30 KB UTF-8 accented body (~90 KiB when JSON-escaped with ensure_ascii=True) succeeds.
+    valid_body = "# Báo cáo\n" + ("é" * 15000)
+    assert len(valid_body.encode("utf-8")) <= 32000
+    # 2) Oversized body (>32 KB UTF-8, >131 KiB ASCII-escaped) returns clean isError without killing the server.
+    oversized_body = "é" * 24000
+    oversized_req = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "create_wiki",
+            "arguments": {"workspace": "2", "path": "notes/too-big.md", "text": oversized_body},
+        },
+    }
+    assert len((json.dumps(oversized_req, ensure_ascii=True) + "\n").encode("ascii")) > 131072
+
+    messages = [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "create_wiki",
+                "arguments": {"workspace": "2", "path": "notes/bao-cao.md", "text": valid_body},
+            },
+        },
+        oversized_req,
+        {"jsonrpc": "2.0", "id": 3, "method": "ping"},
+    ]
+    run = subprocess.run(
+        [
+            sys.executable,
+            str(Path(workspace_mcp.__file__).resolve()),
+            "--mounts-file", str(mounts_file),
+            "--tools", *workspace_mcp.READ_TOOLS, *workspace_mcp.WRITE_TOOLS,
+        ],
+        cwd=private,
+        env={"PATH": os.defpath},
+        input="".join(json.dumps(m, ensure_ascii=True) + "\n" for m in messages),
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    assert run.returncode == 0, run.stderr
+    by_id = {row["id"]: row["result"] for row in (json.loads(line) for line in run.stdout.splitlines())}
+    assert by_id[1]["isError"] is False
+    assert (private / "notes" / "bao-cao.md").read_text(encoding="utf-8") == valid_body
+    assert by_id[2]["isError"] is True
+    assert "too large" in by_id[2]["content"][0]["text"].lower()
+    assert by_id[3] == {}

@@ -605,18 +605,25 @@ def test_claude_fargate_strips_bash_and_attaches_workspace_mcp(
     ))
     assert events[-1]["ok"] is True
     allowed_arg = captured["argv"][captured["argv"].index("--allowedTools") + 1].split(",")
+    disallowed_arg = captured["argv"][captured["argv"].index("--disallowedTools") + 1].split(",")
+    perm_mode = captured["argv"][captured["argv"].index("--permission-mode") + 1]
+    assert perm_mode == "default"
+    assert {"Bash", "Read", "Write", "Edit", "Glob", "Grep", "NotebookEdit"}.issubset(set(disallowed_arg))
     assert "Bash" not in allowed_arg
     assert "Write" not in allowed_arg
-    assert "mcp__tina-workspace" in allowed_arg
-    assert "mcp__tina-reach" in allowed_arg
+    assert "mcp__tina-workspace" not in allowed_arg
+    assert "mcp__tina-workspace__search_wiki" in allowed_arg
+    assert "mcp__tina-reach__reach_web_search" in allowed_arg
     assert set(captured["mcp"]["mcpServers"]) == {"tina-workspace", "tina-reach"}
     ws_args = captured["mcp"]["mcpServers"]["tina-workspace"]["args"]
     if read_only_turn:
         assert "--readonly" in ws_args
         assert "create_wiki" not in ws_args
+        assert "mcp__tina-workspace__create_wiki" not in allowed_arg
     else:
         assert "--readonly" not in ws_args
         assert "create_wiki" in ws_args
+        assert "mcp__tina-workspace__create_wiki" in allowed_arg
     assert "tina-workspace" in captured["argv"][captured["argv"].index("-p") + 1]
     assert not captured["cfg_path"].exists()
 
@@ -625,6 +632,7 @@ def test_claude_attaches_non_reach_ungated_inline_mcp_servers(tmp_path: Path):
     captured: dict = {}
 
     def execute(argv, _cwd):
+        captured["argv"] = argv
         cfg_path = Path(argv[argv.index("--mcp-config") + 1])
         captured["mcp"] = json.loads(cfg_path.read_text())
         yield json.dumps({"type": "result", "subtype": "success", "result": "ok", "session_id": "s1"})
@@ -636,6 +644,9 @@ def test_claude_attaches_non_reach_ungated_inline_mcp_servers(tmp_path: Path):
         mcp_tools={"custom-docs": ["search"]},
     ))
     assert events[-1]["ok"] is True
+    allowed_arg = captured["argv"][captured["argv"].index("--allowedTools") + 1].split(",")
+    assert "mcp__custom-docs__search" in allowed_arg
+    assert "mcp__custom-docs" not in allowed_arg
     assert captured["mcp"] == {
         "mcpServers": {"custom-docs": {"command": "docs-mcp", "args": ["--readonly"]}},
     }

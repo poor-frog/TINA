@@ -400,8 +400,12 @@ def test_antigravity_excludes_system_mount_locks_global_and_respects_untrusted_t
     assert "write_file(*)" in captured["settings"]["permissions"]["deny"]
 
 
+import pytest
+
+
+@pytest.mark.parametrize("read_only_turn", [False, True])
 def test_antigravity_fargate_disables_sandbox_and_attaches_workspace_mcp(
-    monkeypatch, tmp_path: Path,
+    monkeypatch, tmp_path: Path, read_only_turn: bool,
 ):
     private = tmp_path / "2"
     global_dir = tmp_path / "_global"
@@ -433,15 +437,25 @@ def test_antigravity_fargate_disables_sandbox_and_attaches_workspace_mcp(
 
     harness = AntigravityHarness(exec_fn=execute)
     harness.prepare(private, chat_root=system_dir)
-    events = list(harness.run_turn(private, "Summarize Jane Liu", allowed_tools=["Read", "Write", "Edit", "Bash"]))
+    tools = ["Read", "Bash"] if read_only_turn else ["Read", "Write", "Edit", "Bash"]
+    events = list(harness.run_turn(private, "Summarize Jane Liu", allowed_tools=tools))
     assert events[-1]["ok"] is True
     assert "--sandbox" not in captured["argv"]
-    assert captured["argv"][captured["argv"].index("--mode") + 1] == "plan"
     assert captured["settings"]["enableTerminalSandbox"] is False
     assert "command(*)" in captured["settings"]["permissions"]["deny"]
     assert "write_file(*)" in captured["settings"]["permissions"]["deny"]
     assert "mcp(tina-workspace/search_wiki)" in captured["settings"]["permissions"]["allow"]
-    assert "mcp(tina-workspace/create_wiki)" in captured["settings"]["permissions"]["allow"]
     assert "tina-workspace" in captured["mcp"]["mcpServers"]
+    ws_args = captured["mcp"]["mcpServers"]["tina-workspace"]["args"]
+    if read_only_turn:
+        assert captured["argv"][captured["argv"].index("--mode") + 1] == "plan"
+        assert captured["settings"]["agentMode"] == "plan"
+        assert "mcp(tina-workspace/create_wiki)" not in captured["settings"]["permissions"]["allow"]
+        assert "--readonly" in ws_args
+    else:
+        assert captured["argv"][captured["argv"].index("--mode") + 1] == "accept-edits"
+        assert captured["settings"]["agentMode"] == "accept-edits"
+        assert "mcp(tina-workspace/create_wiki)" in captured["settings"]["permissions"]["allow"]
+        assert "--readonly" not in ws_args
     assert "tina-workspace" in captured["argv"][captured["argv"].index("-p") + 1]
     assert not captured["mounts_file"].exists()

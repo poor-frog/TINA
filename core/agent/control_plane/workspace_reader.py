@@ -18,7 +18,7 @@ def _tool_op(name: str) -> dict:
     """Classify a claude tool name into one of the terminal's op labels (read/search/edit/git/web/tool).
     Mirrors the frontend ``toolOp`` so the loaded history reads the same as a live turn."""
     t = (name or "").lower()
-    if any(k in t for k in ("read", "cat", "open")) and "edit" not in t:
+    if any(k in t for k in ("read", "cat", "open", "list")) and "edit" not in t:
         label = "read"
     elif any(k in t for k in ("search", "grep", "find", "glob")):
         label = "search"
