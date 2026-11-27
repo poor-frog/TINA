@@ -1,0 +1,267 @@
+/* Hallmark · built: Extension welcome · shape: app screen · scope: app · genre: modern-minimal · theme: TINA Obsidian Teal · v2.0.0 */
+/* Critique · make the actual download prominent and put the install instructions beside it. */
+/* Programmatic heading focus announces this step before the tab order starts. */
+h1.title:focus {
+  outline: none;
+}
+
+.primary,
+.continue {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 100%;
+  font: 600 14px/1.3 var(--sans);
+}
+
+.primary {
+  width: 236px;
+  min-height: 54px;
+  padding: 8px 16px;
+  border: 1px solid var(--brand);
+  border-radius: 16px;
+  background: var(--brand);
+  color: var(--on-brand);
+  text-align: center;
+  text-decoration: none;
+  transition: transform 0.15s;
+}
+
+.primary:hover {
+  border-color: var(--brand-hover);
+  background: var(--brand-hover);
+}
+
+.primary:active {
+  transform: scale(0.98);
+}
+
+.continue {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.continue:hover,
+.continue:active {
+  background: var(--subtle);
+  color: var(--ink);
+}
+
+.primary:focus-visible,
+.continue:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.compatibility {
+  max-width: 36ch;
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.guide {
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.guide h2 {
+  margin: 0 0 16px;
+  font: 600 18px/1.3 var(--sans);
+  text-wrap: balance;
+}
+
+.steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: install-step;
+}
+
+.steps li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 4px;
+  padding: 12px 0;
+  counter-increment: install-step;
+}
+
+.steps li + li {
+  border-top: 1px solid var(--line);
+}
+
+.steps li:last-child {
+  padding-bottom: 0;
+}
+
+.steps li::before {
+  content: counter(install-step);
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.steps li strong {
+  align-self: center;
+  font-size: 15px;
+}
+
+.steps li > span {
+  grid-column: 2;
+  overflow-wrap: break-word;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.steps code {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.93em;
+}
+
+.copyAddress {
+  grid-column: 2;
+  min-width: 0;
+  margin-top: 4px;
+}
+
+.copyLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--subtle);
+}
+
+.copyLine code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.copyButton {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 96px;
+  min-height: 46px;
+  margin-inline-start: auto;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 13px/1.2 var(--sans);
+  transition: transform 0.45s cubic-bezier(.34, 1.45, .64, 1);
+}
+
+.copyButton:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.copyButton:active {
+  transform: scale(0.88);
+}
+
+.copyButton:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.copyButton[aria-disabled="true"] {
+  cursor: wait;
+}
+
+.copyIcons {
+  display: inline-flex;
+  inline-size: 20px;
+  block-size: 20px;
+}
+
+.copyIcons svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.checkIcon {
+  animation: revealCheck 0.5s cubic-bezier(.34, 1.45, .64, 1);
+}
+
+.checkIcon path {
+  stroke-width: 2.6;
+  stroke-dasharray: 22;
+  animation: drawCheck 0.4s cubic-bezier(.2, .8, .2, 1) 0.1s backwards;
+}
+
+.copyButton[data-copied="true"] {
+  background: var(--brand);
+  color: var(--on-brand);
+}
+
+@keyframes revealCheck {
+  from {
+    opacity: 0;
+    transform: scale(0.4) rotate(-30deg);
+  }
+}
+
+@keyframes drawCheck {
+  from { stroke-dashoffset: 22; }
+}
+
+.copyError {
+  margin: 4px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .guide {
+    padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primary,
+  .copyButton {
+    transition: none;
+  }
+
+  .checkIcon,
+  .checkIcon path {
+    animation: none;
+  }
+
+  .primary:active,
+  .copyButton:active {
+    transform: none;
+  }
+}

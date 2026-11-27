@@ -6,7 +6,7 @@ import { useState, type CSSProperties, type ReactNode } from "react";
 import { startGoogleCalendarLink } from "../lib/googleCalendarClient";
 import styles from "./calendarWelcome.module.css";
 
-const CALENDAR_SETTINGS = "/?nav=settings&settingsWorkspace=personal&settingsSection=calendar";
+export const CALENDAR_WELCOME_SETTINGS = "/?nav=settings&settingsWorkspace=personal&settingsSection=calendar";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri"] as const;
 const HOURS = ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00"];
 // Each slot is 30 minutes, starting at 09:00.
@@ -33,7 +33,7 @@ export function CalendarWelcome({
     setBusy(true);
     setError("");
     try {
-      await startGoogleCalendarLink(new URL(CALENDAR_SETTINGS, window.location.origin).href);
+      await startGoogleCalendarLink(new URL(CALENDAR_WELCOME_SETTINGS, window.location.origin).href);
     } catch {
       setError("Couldn’t open Google Calendar. Try again or skip for now.");
       setBusy(false);

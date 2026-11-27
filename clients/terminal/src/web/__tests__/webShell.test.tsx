@@ -300,25 +300,27 @@ describe("Calendar welcome after sign-in", () => {
   beforeEach(() => {
     localStorage.removeItem("tina.calendar-welcome-dismissed");
     vi.mocked(signIn).mockClear();
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Chrome/130.0.0.0");
   });
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     window.history.replaceState({}, "", "/");
     localStorage.removeItem("tina.calendar-welcome-dismissed");
   });
 
-  function mockProfile(calendarWelcome?: string) {
+  function mockProfile(profile: { calendarWelcome?: string; extensionWelcome?: string; extensionStoreUrl?: string }) {
     const fetcher = vi.fn(async (input: RequestInfo | URL) =>
-      Response.json(String(input) === "/api/auth/me" ? { calendarWelcome } : {}),
+      Response.json(String(input) === "/api/auth/me" ? profile : {}),
     );
     vi.stubGlobal("fetch", fetcher);
     return fetcher;
   }
 
   it("opens the existing Google Calendar OAuth flow and returns to Calendar settings", async () => {
-    const fetcher = mockProfile("new-account");
+    const fetcher = mockProfile({ calendarWelcome: "new-account" });
     render(<AuthGate calendarWelcome><div>App</div></AuthGate>);
     expect(await screen.findByText("Sample week")).toBeTruthy();
     expect(screen.getByText("Project review").closest("li")?.textContent).toBe("Wed14:00Project review");
@@ -330,22 +332,77 @@ describe("Calendar welcome after sign-in", () => {
     expect(fetcher).toHaveBeenCalledWith("/api/auth/google-calendar-link", expect.objectContaining({ method: "POST" }));
   });
 
-  it("remembers Skip across reloads and preserves links to other views", async () => {
-    mockProfile("new-account");
+  it("advances to ZIP install after Skip and remembers completion across reloads", async () => {
+    mockProfile({ calendarWelcome: "new-account" });
     const first = render(<AuthGate calendarWelcome><div>App</div></AuthGate>);
     fireEvent.click(await screen.findByRole("button", { name: "Skip for now" }));
-    expect(await screen.findByText("App")).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Download extension ZIP" })).toHaveProperty("download", "meettina-extension.zip");
     first.unmount();
 
     const later = render(<AuthGate calendarWelcome><div>App</div></AuthGate>);
+    fireEvent.click(await screen.findByRole("button", { name: "Continue to TINA" }));
     expect(await screen.findByText("App")).toBeTruthy();
     later.unmount();
-
-    mockProfile("another-new-account");
-    window.history.replaceState({}, "", "/?nav=settings&settingsSection=calendar");
     render(<AuthGate calendarWelcome><div>App</div></AuthGate>);
     expect(await screen.findByText("App")).toBeTruthy();
+  });
+
+  it("confirms the Chrome extensions address only after a successful clipboard write", async () => {
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const writeText = vi.fn().mockRejectedValueOnce(new Error("Permission denied")).mockResolvedValueOnce(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      mockProfile({ extensionWelcome: "linked-account" });
+      render(<AuthGate calendarWelcome><div>App</div></AuthGate>);
+      const button = await screen.findByRole("button", { name: "Copy Chrome extensions address" });
+      button.focus();
+      fireEvent.click(button);
+      expect(await screen.findByText(/Couldn’t copy/)).toBeTruthy();
+      expect(screen.queryByText("Copied")).toBeNull();
+      expect(document.activeElement).toBe(button);
+      expect(document.querySelector("textarea[readonly]")).toBeNull();
+
+      fireEvent.click(button);
+      expect(await screen.findByText("Copied")).toBeTruthy();
+      expect(screen.getByText("Address copied.")).toBeTruthy();
+      expect(writeText).toHaveBeenLastCalledWith("chrome://extensions");
+    } finally {
+      if (originalClipboard) Object.defineProperty(navigator, "clipboard", originalClipboard);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
+  it("opens the configured Web Store after the Calendar OAuth return and preserves the Settings URL", async () => {
+    const target = "/?nav=settings&settingsWorkspace=personal&settingsSection=calendar";
+    const storeUrl = "https://chromewebstore.google.com/detail/meettina/fcogeajjhhcadbnamadikkefdfmaaiil";
+    mockProfile({ extensionWelcome: "linked-account", extensionStoreUrl: storeUrl });
+    window.history.replaceState({}, "", target);
+    render(<AuthGate calendarWelcome><div>App</div></AuthGate>);
+    const link = await screen.findByRole("link", { name: "Open Chrome Web Store" });
+    expect(link.getAttribute("href")).toBe(storeUrl);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(screen.queryByRole("button", { name: "Copy Chrome extensions address" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to TINA" }));
+    expect(await screen.findByText("App")).toBeTruthy();
+    expect(window.location.pathname + window.location.search).toBe(target);
+  });
+
+  it("keeps explicit links to other views and offers desktop instructions on mobile", async () => {
+    mockProfile({ calendarWelcome: "another-new-account" });
+    window.history.replaceState({}, "", "/?nav=settings&settingsSection=calendar");
+    const deepLink = render(<AuthGate calendarWelcome><div>App</div></AuthGate>);
+    expect(await screen.findByText("App")).toBeTruthy();
     expect(window.location.search).toContain("settingsSection=calendar");
+    deepLink.unmount();
+
+    window.history.replaceState({}, "", "/");
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("iPhone Mobile");
+    mockProfile({ extensionWelcome: "mobile-account" });
+    render(<AuthGate calendarWelcome><div>App</div></AuthGate>);
+    expect(await screen.findByText(/Open TINA in Chrome on a computer/)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Download extension ZIP" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy Chrome extensions address" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Continue to TINA" })).toBeTruthy();
   });
 });
 

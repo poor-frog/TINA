@@ -46,6 +46,7 @@ describe("Calendar callback never falls back to TINA login", () => {
   it("rejects expired link intent and preserves the TINA account", async () => {
     vi.useFakeTimers();
     mocks.jar.set("tina-token", "existing-owner-token");
+    mocks.jar.set(CALENDAR_WELCOME_COOKIE, "first-login");
     mocks.jar.set(GOOGLE_CALENDAR_LINK_COOKIE, createGoogleCalendarLinkIntent(1)!);
     vi.advanceTimersByTime(601_000);
     expect(await signIn()).toBe(false);
@@ -60,7 +61,8 @@ describe("Calendar callback never falls back to TINA login", () => {
     expect(await signIn()).toBe(true);
     expect(mocks.save).toHaveBeenCalledWith("existing-owner-token", expect.objectContaining({ email: "linked@example.test" }));
     expect(mocks.login).not.toHaveBeenCalled();
-    expect(mocks.set).toHaveBeenCalledWith(CALENDAR_WELCOME_COOKIE, "", expect.objectContaining({ maxAge: 0 }));
+    expect(mocks.set).toHaveBeenCalledWith(CALENDAR_WELCOME_COOKIE, "extension:first-login",
+      expect.objectContaining({ maxAge: 86_400, httpOnly: true }));
   });
   it("continues normal Google login even when a stale link cookie exists", async () => {
     mocks.jar.set(GOOGLE_CALENDAR_LINK_COOKIE, "stale-intent");

@@ -16,7 +16,10 @@ import { cookies } from "next/headers";
 import { AUTH_COOKIE, USER_INFO_COOKIE, findOrCreateUserToken, linkGoogleCalendarAccount, validateAuthToken } from "../adminApi";
 import { sendLoginEmail } from "../../mail/templates";
 import { googleAvatarUrl } from "../googleAvatar";
-import { CALENDAR_WELCOME_COOKIE, GOOGLE_CALENDAR_LINK_COOKIE, listGoogleCalendars, verifyGoogleCalendarLinkIntent } from "../googleCalendarLink";
+import {
+  CALENDAR_WELCOME_COOKIE, CALENDAR_WELCOME_EXTENSION_PREFIX, CALENDAR_WELCOME_MAX_AGE,
+  GOOGLE_CALENDAR_LINK_COOKIE, listGoogleCalendars, verifyGoogleCalendarLinkIntent,
+} from "../googleCalendarLink";
 import { GOOGLE_CALENDAR_PROVIDER, GOOGLE_CALENDAR_AUTHORIZATION_PARAMS, GOOGLE_CALENDAR_SCOPES } from "../../../../lib/googleCalendar";
 
 const isGoogleEnabled = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
@@ -109,9 +112,10 @@ export const authOptions: AuthOptions = {
             calendars,
           });
           clearIntent();
-          if (saved.ok && cookieStore.get(CALENDAR_WELCOME_COOKIE)) {
-            cookieStore.set(CALENDAR_WELCOME_COOKIE, "", {
-              httpOnly: true, secure: isSecureRequest(), sameSite: "lax", maxAge: 0, path: "/",
+          const welcome = cookieStore.get(CALENDAR_WELCOME_COOKIE)?.value;
+          if (saved.ok && welcome && !welcome.startsWith(CALENDAR_WELCOME_EXTENSION_PREFIX)) {
+            cookieStore.set(CALENDAR_WELCOME_COOKIE, CALENDAR_WELCOME_EXTENSION_PREFIX + welcome, {
+              httpOnly: true, secure: isSecureRequest(), sameSite: "lax", maxAge: CALENDAR_WELCOME_MAX_AGE, path: "/",
             });
           }
           return saved.ok;
@@ -144,7 +148,7 @@ export const authOptions: AuthOptions = {
       const cookieStore = await cookies();
       cookieStore.set(AUTH_COOKIE, result.token, opts);
       if (result.justCreated && isGoogleEnabled()) {
-        cookieStore.set(CALENDAR_WELCOME_COOKIE, crypto.randomUUID(), { ...opts, maxAge: 24 * 60 * 60 });
+        cookieStore.set(CALENDAR_WELCOME_COOKIE, crypto.randomUUID(), { ...opts, maxAge: CALENDAR_WELCOME_MAX_AGE });
       } else if (cookieStore.get(CALENDAR_WELCOME_COOKIE)) {
         cookieStore.set(CALENDAR_WELCOME_COOKIE, "", { ...opts, maxAge: 0 });
       }

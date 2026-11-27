@@ -2,6 +2,8 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const GOOGLE_CALENDAR_LINK_COOKIE = "tina-google-calendar-link";
 export const CALENDAR_WELCOME_COOKIE = "tina-calendar-welcome";
+export const CALENDAR_WELCOME_EXTENSION_PREFIX = "extension:";
+export const CALENDAR_WELCOME_MAX_AGE = 24 * 60 * 60;
 const LINK_INTENT_TTL_MS = 10 * 60 * 1000;
 const MAX_CALENDAR_LIST_BYTES = 1_000_000;
 

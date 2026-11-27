@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { getServerSession } from "next-auth";
 import { AUTH_COOKIE, USER_INFO_COOKIE } from "../adminApi";
 import { googleAvatarUrl } from "../googleAvatar";
-import { CALENDAR_WELCOME_COOKIE } from "../googleCalendarLink";
+import { CALENDAR_WELCOME_COOKIE, CALENDAR_WELCOME_EXTENSION_PREFIX } from "../googleCalendarLink";
 import { authOptions } from "../[...nextauth]/authOptions";
 import { canUseWorkspacePilot } from "../workspacePilot";
 import { extensionStoreUrl } from "../../extension/config";
@@ -47,7 +47,10 @@ export async function GET() {
   }
 
   const storeUrl = extensionStoreUrl();
-  const calendarWelcome = cookieStore.get(CALENDAR_WELCOME_COOKIE)?.value;
+  const welcome = cookieStore.get(CALENDAR_WELCOME_COOKIE)?.value;
+  const welcomeStep = welcome?.startsWith(CALENDAR_WELCOME_EXTENSION_PREFIX)
+    ? { extensionWelcome: welcome.slice(CALENDAR_WELCOME_EXTENSION_PREFIX.length) }
+    : welcome ? { calendarWelcome: welcome } : {};
 
   return NextResponse.json(
     { authenticated: true, user: { email: email ?? null, name: name ?? null, image },
@@ -56,7 +59,7 @@ export async function GET() {
         ? { hideModelSettings: hideModelSettings() }
         : {}),
       ...(storeUrl ? { extensionStoreUrl: storeUrl } : {}),
-      ...(calendarWelcome ? { calendarWelcome } : {}) },
+      ...welcomeStep },
     { headers: NO_STORE },
   );
 }
