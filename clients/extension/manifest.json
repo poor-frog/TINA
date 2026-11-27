@@ -19,6 +19,7 @@
   "host_permissions": [
     "http://localhost/*",
     "http://127.0.0.1/*",
+    "https://meettina.site/*",
     "https://tinabot.duckdns.org/*",
     "https://meet.google.com/*"
   ],

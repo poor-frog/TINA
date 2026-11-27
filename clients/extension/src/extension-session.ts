@@ -1,7 +1,7 @@
 export const ACCOUNT_KEY = 'tinaExtensionAccount';
 export const SESSION_MESSAGE = 'tina-extension-session';
-export const DEFAULT_GATEWAY = 'https://tinabot.duckdns.org/extension-api';
-export const DEFAULT_TERMINAL = 'https://tinabot.duckdns.org';
+export const DEFAULT_GATEWAY = 'https://meettina.site/extension-api';
+export const DEFAULT_TERMINAL = 'https://meettina.site';
 export const OAUTH_VALUE = /^[A-Za-z0-9_-]{43}$/;
 
 export interface ExtensionAccount { id: string; email: string; key: string; gateway: string; terminal: string }
