@@ -25,7 +25,7 @@ import { deleteSession, listSessions, sessionHistory, type SessionSummary } from
 import { listWorkspaceTree, readActiveSet } from "../surfaces/workspaceApi";
 import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
 import { routineCreationPrompt, stripContextBlocks } from "../surfaces/chat";
-import { presentError } from "../surfaces/apiClient";
+import { ApiError, presentError } from "../surfaces/apiClient";
 import type { MeetingFocus } from "../surfaces/chatContext";
 import { meetingPhase, type MeetingMock } from "../surfaces/meetingModel";
 import type { ToolApprovalDecision, ToolApprovalState } from "../workbench/toolApproval";
@@ -164,6 +164,8 @@ export function AskTinaView({
   const [phase, setPhase] = useState<ChatPhase | null>(null);
   const [dictating, setDictating] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [sessionListError, setSessionListError] = useState<string | null>(null);
+  const [sessionListLoading, setSessionListLoading] = useState(true);
   const [actionFeedback, setActionFeedback] = useState<Record<string, string>>({});
   const [confirmDeleteSession, setConfirmDeleteSession] = useState<string | null>(null);
   const [deletingSessions, setDeletingSessions] = useState<Record<string, boolean>>({});
@@ -191,12 +193,19 @@ export function AskTinaView({
   messagesRef.current = messages;
 
   const loadSessionList = useCallback(() => {
+    setSessionListLoading(true);
     void listSessions()
       .then((rows) => {
         setSessions(rows);
-        setSessionError(null);
+        setSessionListError(null);
       })
-      .catch((err) => setSessionError(presentError(err).headline));
+      .catch((err: unknown) => {
+        const { headline } = presentError(err);
+        const unavailable = err instanceof ApiError && err.status === 404 &&
+          err.detail === "agent endpoints are disabled in meetings mode";
+        setSessionListError(unavailable ? "Chat history is unavailable for this account." : headline);
+      })
+      .finally(() => setSessionListLoading(false));
   }, []);
 
   useEffect(() => {
@@ -933,6 +942,22 @@ export function AskTinaView({
     void sendMessage(text);
   };
 
+  const emptyConversation = !historyLoading && messages.length === 0;
+  const draftStarter = (text: string) => {
+    setDraft(text);
+    setMentionMatch(null);
+    setMentionedTargets([]);
+    composerRef.current?.focus();
+  };
+  const historyIssue = sessionListError && (
+    <div className="tina-web-ask-history-issue">
+      <span role="alert">{sessionListError}</span>
+      <button type="button" onClick={loadSessionList} disabled={sessionListLoading}>
+        {sessionListLoading ? "Checking…" : "Retry history"}
+      </button>
+    </div>
+  );
+
   const lastMessageId = messages[messages.length - 1]?.id;
   const showSlashHint = draft.startsWith("/") && !/^\/routine\s+\S/i.test(draft);
 
@@ -1103,7 +1128,11 @@ export function AskTinaView({
                 </div>
               ))}
 
-          {filteredSessions.length === 0 && (
+          {!sidebarCollapsed && historyIssue}
+          {!sessionListError && sessionListLoading && sessions.length === 0 && (
+            <div role="status" className="tina-web-ask-sessions-empty">Loading conversations…</div>
+          )}
+          {!sessionListError && !sessionListLoading && filteredSessions.length === 0 && (
             <div className="tina-web-ask-sessions-empty">
               {sessions.length === 0
                 ? "Conversations appear here after your first question."
@@ -1113,7 +1142,7 @@ export function AskTinaView({
         </div>
       </aside>
 
-      <section className="tina-web-ask-main">
+      <section className="tina-web-ask-main" data-empty={emptyConversation || undefined}>
         <header className="tina-web-ask-topbar">
           <div className="tina-web-ask-topbar-left">
             <button
@@ -1160,6 +1189,7 @@ export function AskTinaView({
 
         <div ref={scrollRef} className="tina-web-ask-scroll" onScroll={handleThreadScroll}>
           <div className="tina-web-ask-thread">
+            {sidebarCollapsed && historyIssue}
             {sessionError && (
               <div role="alert" className="tina-web-msg-error">
                 <WebIcon name="alertTriangle" size={15} />
@@ -1178,28 +1208,35 @@ export function AskTinaView({
                 </h1>
                 <p className="tina-web-ask-hero-sub">
                   {selectedMeeting
-                    ? "Ask what was decided, who took an action item, or where it came up."
-                    : "Ask about your meeting transcripts or workspace documents. Select a meeting to narrow the search."}
+                    ? "Find a decision, an action item, or the moment it came up."
+                    : "Find decisions, follow-ups, and answers in your meetings and workspace."}
                 </p>
-                <div className="tina-web-ask-starter-grid">
+                <div className="tina-web-ask-starter-grid" role="group" aria-label="Suggested prompts">
                   {suggestedMeeting && (
                     <button
                       type="button"
                       className="tina-web-ask-starter-card"
                       onClick={() => void sendMessage("What decisions and action items came out of this meeting?", suggestedMeeting.id)}
                     >
-                      {selectedMeeting ? "Summarize this meeting" : `Summarize ${suggestedMeeting.title_custom || suggestedMeeting.title}`}
+                      <WebIcon name="fileText" size={16} />
+                      <span>{selectedMeeting ? "Summarize this meeting" : `Summarize ${suggestedMeeting.title_custom || suggestedMeeting.title}`}</span>
                     </button>
                   )}
                   <button
                     type="button"
                     className="tina-web-ask-starter-card"
-                    onClick={() => {
-                      setDraft("/routine ");
-                      composerRef.current?.focus();
-                    }}
+                    onClick={() => draftStarter("What follow-up actions were agreed on, and who owns them?")}
                   >
-                    Schedule a routine
+                    <WebIcon name="listChecks" size={16} />
+                    <span>Find follow-up actions</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="tina-web-ask-starter-card"
+                    onClick={() => draftStarter("/routine ")}
+                  >
+                    <WebIcon name="skills" size={16} />
+                    <span>Schedule a routine</span>
                   </button>
                 </div>
               </div>
@@ -1495,7 +1532,7 @@ export function AskTinaView({
                   onSubmit(e);
                 }
               }}
-              placeholder="Ask Tina about any meeting, type @ to mention, or /routine…"
+              placeholder={selectedMeeting ? "Ask about this meeting…" : "Ask a question or type @ to add context…"}
               aria-label="Message Ask Tina"
             />
             <div className="tina-web-ask-bar">

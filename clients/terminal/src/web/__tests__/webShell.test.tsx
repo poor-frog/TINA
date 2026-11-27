@@ -602,6 +602,35 @@ describe("WebShell production UI (Option A & Option B)", () => {
     });
   });
 
+  it("keeps the composer usable when chat history is unavailable and retries history separately", async () => {
+    const fetchMock = mockEnvironment({ admin: false });
+    const fetchDefault = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input) === "/api/sessions") {
+        return new Response(JSON.stringify({
+          error: "not_found",
+          detail: "agent endpoints are disabled in meetings mode",
+        }), { status: 404 });
+      }
+      return fetchDefault(input, init);
+    });
+    render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Chat history is unavailable for this account.");
+    expect(screen.queryByText("Conversations appear here after your first question.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Find follow-up actions" }));
+    const composer = screen.getByLabelText<HTMLTextAreaElement>("Message Ask Tina");
+    expect(composer.value).toBe("What follow-up actions were agreed on, and who owns them?");
+    expect(document.activeElement).toBe(composer);
+
+    fetchMock.mockImplementation(fetchDefault);
+    fireEvent.click(screen.getByRole("button", { name: "Retry history" }));
+    expect(await screen.findByText("Q4 Rollout Checklist")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(composer.value).toContain("follow-up actions");
+  });
+
   it("supports Ask Tina chat search, MCP Tool Approval decisions, and Copy/Share response actions", async () => {
     const fetchMock = mockEnvironment({ admin: false });
     const writeText = vi.fn().mockResolvedValue(undefined);
