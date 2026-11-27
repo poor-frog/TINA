@@ -2038,14 +2038,7 @@
   font-size: 13.5px;
 }
 
-.tina-web-ask-main[data-empty] .tina-web-ask-scroll {
-  flex: 0 1 auto;
-  margin-block-start: auto;
-  padding-block-end: 16px;
-}
-
 .tina-web-ask-main[data-empty] .tina-web-ask-footer {
-  margin-block-end: auto;
   background: none;
 }
 
@@ -2075,6 +2068,10 @@
   visibility: hidden;
 }
 
+.tina-web-ask-hero {
+  padding-block-start: clamp(12px, 5vh, 44px);
+}
+
 .tina-web-ask-hero-title {
   min-width: 0;
   margin: 0 0 8px;
@@ -2095,32 +2092,52 @@
 }
 
 .tina-web-ask-starter-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 12px;
 }
 
 .tina-web-ask-starter-card {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  max-width: 100%;
-  min-height: 44px;
-  padding: 8px 12px;
-  border-radius: 8px;
+  gap: 12px;
+  min-height: 52px;
+  padding: 4px 12px;
+  border-radius: 10px;
   border: 1px solid var(--tw-line);
   background: var(--tw-card);
   color: var(--tw-text);
   text-align: start;
 }
 
-.tina-web-ask-starter-card svg {
-  flex: none;
+.tina-web-ask-starter-meeting {
+  grid-column: 1 / -1;
 }
 
-.tina-web-ask-starter-card span {
-  min-width: 0;
+.tina-web-ask-starter-card > svg,
+.tina-web-ask-starter-copy > span {
+  color: var(--tw-text-3);
+}
+
+.tina-web-ask-starter-card:hover > svg:first-child {
+  color: var(--focus);
+}
+
+.tina-web-ask-starter-copy {
+  display: grid;
+  gap: 4px;
+  line-height: 1.4;
   overflow-wrap: anywhere;
+}
+
+.tina-web-ask-starter-copy strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tina-web-ask-starter-copy > span {
+  font-size: 13px;
 }
 
 .tina-web-ask-starter-card:hover,
@@ -2160,17 +2177,6 @@
 
 .tina-web-ask-history-issue button:disabled {
   color: var(--tw-text-3);
-}
-
-@media (max-height: 560px) {
-  .tina-web-ask-main[data-empty] .tina-web-ask-scroll {
-    flex: 1 1 auto;
-    margin-block-start: 0;
-  }
-
-  .tina-web-ask-main[data-empty] .tina-web-ask-footer {
-    margin-block-end: 0;
-  }
 }
 
 /* Conversation Turns & Open Editorial Agent Replies */

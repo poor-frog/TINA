@@ -153,6 +153,7 @@ export function AskTinaView({
   onConsumeInitialPrompt: () => void;
 }) {
   const mentionListboxId = useId();
+  const starterId = useId();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionQuery, setSessionQuery] = useState("");
   const [activeSession, setActiveSession] = useState<string>(() => newSessionId());
@@ -1208,35 +1209,55 @@ export function AskTinaView({
                 </h1>
                 <p className="tina-web-ask-hero-sub">
                   {selectedMeeting
-                    ? "Find a decision, an action item, or the moment it came up."
-                    : "Find decisions, follow-ups, and answers in your meetings and workspace."}
+                    ? "Ask about what was said or decided in this meeting."
+                    : "Ask questions about your meeting transcripts and workspace documents."}
                 </p>
                 <div className="tina-web-ask-starter-grid" role="group" aria-label="Suggested prompts">
                   {suggestedMeeting && (
                     <button
                       type="button"
-                      className="tina-web-ask-starter-card"
+                      className="tina-web-ask-starter-card tina-web-ask-starter-meeting"
+                      aria-labelledby={`${starterId}-summary`}
+                      aria-describedby={`${starterId}-summary-description`}
                       onClick={() => void sendMessage("What decisions and action items came out of this meeting?", suggestedMeeting.id)}
                     >
-                      <WebIcon name="fileText" size={16} />
-                      <span>{selectedMeeting ? "Summarize this meeting" : `Summarize ${suggestedMeeting.title_custom || suggestedMeeting.title}`}</span>
+                      <WebIcon name="fileText" size={18} />
+                      <span className="tina-web-ask-starter-copy">
+                        <strong id={`${starterId}-summary`}>
+                          {selectedMeeting ? "Summarize this meeting" : `Summarize ${suggestedMeeting.title_custom || suggestedMeeting.title}`}
+                        </strong>
+                        <span id={`${starterId}-summary-description`}>Get the key decisions and next steps.</span>
+                      </span>
+                      <WebIcon name="chevronRight" size={16} />
                     </button>
                   )}
                   <button
                     type="button"
                     className="tina-web-ask-starter-card"
+                    aria-labelledby={`${starterId}-follow-ups`}
+                    aria-describedby={`${starterId}-follow-ups-description`}
                     onClick={() => draftStarter("What follow-up actions were agreed on, and who owns them?")}
                   >
-                    <WebIcon name="listChecks" size={16} />
-                    <span>Find follow-up actions</span>
+                    <WebIcon name="listChecks" size={18} />
+                    <span className="tina-web-ask-starter-copy">
+                      <strong id={`${starterId}-follow-ups`}>Find follow-up actions</strong>
+                      <span id={`${starterId}-follow-ups-description`}>Review next steps and their owners.</span>
+                    </span>
+                    <WebIcon name="chevronRight" size={16} />
                   </button>
                   <button
                     type="button"
                     className="tina-web-ask-starter-card"
+                    aria-labelledby={`${starterId}-routine`}
+                    aria-describedby={`${starterId}-routine-description`}
                     onClick={() => draftStarter("/routine ")}
                   >
-                    <WebIcon name="skills" size={16} />
-                    <span>Schedule a routine</span>
+                    <WebIcon name="skills" size={18} />
+                    <span className="tina-web-ask-starter-copy">
+                      <strong id={`${starterId}-routine`}>Schedule a routine</strong>
+                      <span id={`${starterId}-routine-description`}>Choose a schedule for a recurring task.</span>
+                    </span>
+                    <WebIcon name="chevronRight" size={16} />
                   </button>
                 </div>
               </div>
