@@ -763,14 +763,41 @@ describe("WebShell production UI (Option A & Option B)", () => {
     expect((await screen.findAllByText("Linh")).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("renders the 3-column Fireflies-style Meeting Workspace (Smart Search, Notes/Skills/Action Items, Ask Tina/Transcript, Bottom Player)", async () => {
-    const fetchMock = mockEnvironment({ admin: false });
+  it("starts Smart Search closed on desktop and keeps both controls in sync", async () => {
+    mockEnvironment({ admin: false });
     vi.stubGlobal("innerWidth", 1440);
     try {
       render(<WebShell initialMeetingId="102" />);
     } finally {
       vi.unstubAllGlobals();
     }
+
+    await screen.findByRole("heading", { name: "Design Review" });
+    const smartSearchToggle = screen.getByRole("button", { name: "Show Smart Search" });
+    const talkTimeBtn = screen.getByRole("button", { name: "Talk time" });
+    const sidebarName = "Smart Search and Talk time & metrics";
+    expect(smartSearchToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("complementary", { name: sidebarName })).toBeNull();
+
+    fireEvent.click(smartSearchToggle);
+    const sidebar = screen.getByRole("complementary", { name: sidebarName });
+    expect(smartSearchToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(smartSearchToggle.getAttribute("aria-controls")).toBe(sidebar.id);
+    expect(talkTimeBtn.getAttribute("aria-expanded")).toBe("true");
+    const refreshButton = screen.getByRole("button", { name: "Refresh speaker metrics" });
+    expect(refreshButton.textContent).toBe("Refresh");
+    expect(refreshButton.querySelector("svg")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide Smart Search" }));
+    expect(screen.queryByRole("complementary", { name: sidebarName })).toBeNull();
+    expect(talkTimeBtn.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(talkTimeBtn);
+    expect(screen.getByRole("heading", { name: "Smart Search" })).toBeTruthy();
+  });
+
+  it("renders the 3-column Fireflies-style Meeting Workspace (Smart Search, Notes/Skills/Action Items, Ask Tina/Transcript, Bottom Player)", async () => {
+    const fetchMock = mockEnvironment({ admin: false });
+    render(<WebShell initialMeetingId="102" />);
 
     // Center Notes document renders title, code badge, summary card, and action item creator
     expect(await screen.findByRole("heading", { name: "Design Review" })).toBeTruthy();
@@ -793,25 +820,7 @@ describe("WebShell production UI (Option A & Option B)", () => {
     fireEvent.click(screen.getByRole("button", { name: "What were the main topics?" }));
     expect(await screen.findByText(/Drafted follow-up summary/)).toBeTruthy();
 
-    const smartSearchToggle = screen.getByRole("button", { name: "Show Smart Search" });
-    const talkTimeBtn = screen.getByRole("button", { name: "Talk time" });
-    const sidebarName = "Smart Search and Talk time & metrics";
-    expect(smartSearchToggle.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByRole("complementary", { name: sidebarName })).toBeNull();
-
-    fireEvent.click(smartSearchToggle);
-    const sidebar = screen.getByRole("complementary", { name: sidebarName });
-    expect(smartSearchToggle.getAttribute("aria-expanded")).toBe("true");
-    expect(smartSearchToggle.getAttribute("aria-controls")).toBe(sidebar.id);
-    expect(talkTimeBtn.getAttribute("aria-expanded")).toBe("true");
-    const refreshButton = screen.getByRole("button", { name: "Refresh speaker metrics" });
-    expect(refreshButton.textContent).toBe("Refresh");
-    expect(refreshButton.querySelector("svg")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Hide Smart Search" }));
-    expect(screen.queryByRole("complementary", { name: sidebarName })).toBeNull();
-    expect(talkTimeBtn.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(talkTimeBtn);
+    fireEvent.click(screen.getByRole("button", { name: "Talk time" }));
     expect(screen.getByRole("heading", { name: "Smart Search" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Linh/i }));
     expect(screen.getByRole("tab", { name: /Transcript/i }).getAttribute("aria-selected")).toBe("true");

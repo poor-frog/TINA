@@ -1,7 +1,7 @@
 # Graph Report - TINA-s3-ephemeral  (2026-11-27)
 
 ## Corpus Check
-- 3549 files · ~2,663,348 words
+- 3549 files · ~2,663,392 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 210 file(s) not represented in the graph (top: (none) 67, .css 64, .lock 22)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `fbb3d5d5`
+- Built from commit: `2e56bd7e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -6504,7 +6504,7 @@ Nodes (3): VoiceServiceName, Default, Type
   behavior/mail/README.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1419 isolated node(s):** `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `ADR-0028`, `ADR-0027`, `ADMIN_API_TOKEN` (+1414 more)
+- **1419 isolated node(s):** `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `ADR-0027`, `ADMIN_API_TOKEN`, `AGENT_WORKER_COMMAND` (+1414 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 16570 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **690 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -6512,15 +6512,15 @@ Nodes (3): VoiceServiceName, Default, Type
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `get_meeting_transcript()` connect `tina_mcp/app.py` to `TINA on AWS`?**
-  _High betweenness centrality (0.047) - this node is a cross-community bridge._
+  _High betweenness centrality (0.046) - this node is a cross-community bridge._
 - **Are the 264 inferred relationships involving `InMemoryMeetingRepo` (e.g. with `DuplicateMeeting` and `MaxBotsExceeded`) actually correct?**
   _`InMemoryMeetingRepo` has 264 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `ADR-0028` to the rest of the system?**
+- **What connects `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `ADR-0027` to the rest of the system?**
   _1419 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `ref_node_fs` be split into smaller, more focused modules?**
   _Cohesion score 0.009244183942979123 - nodes in this community are weakly interconnected._
-- **Why does `Read-only MCP on staging` connect `TINA on AWS` to `tina_mcp/app.py`?**
-  _High betweenness centrality (0.047) - this node is a cross-community bridge._
+- **Why does `TINA on AWS` connect `TINA on AWS` to `aws/README.md`?**
+  _High betweenness centrality (0.046) - this node is a cross-community bridge._
 - **Should `test_unit_foundation.py` be split into smaller, more focused modules?**
   _Cohesion score 0.0389937106918239 - nodes in this community are weakly interconnected._
 
