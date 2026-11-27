@@ -28,7 +28,10 @@ const postBuild = {
       cpSync('src/meet-panel.html', `${outdir}/meet-panel.html`);
       cpSync('src/welcome.html', `${outdir}/welcome.html`);
       cpSync('src/welcome.css', `${outdir}/welcome.css`);
-      cpSync('assets', `${outdir}/assets`, { recursive: true });
+      cpSync('assets', `${outdir}/assets`, {
+        recursive: true,
+        filter: src => !/(?:^|[\\/])README\.md$/i.test(src),
+      });
       cpSync(resolve(__dirname, '../../branding/tokens.css'), `${outdir}/assets/tina-tokens.css`);
       const now = new Date();
       const minuteOfDay = now.getHours() * 60 + now.getMinutes();
@@ -37,6 +40,9 @@ const postBuild = {
       manifest.version = version;
       manifest.version_name = `${RELEASE ? 'release' : 'viewer'} ${now.toLocaleString('en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}`;
       if (RELEASE) {
+        if (manifest.description.length > 132) {
+          throw new Error(`Chrome Web Store manifest description must be <= 132 chars (got ${manifest.description.length}).`);
+        }
         manifest.host_permissions = manifest.host_permissions.filter(host => RELEASE_HOSTS.includes(host));
       }
       writeFileSync(`${outdir}/manifest.json`, JSON.stringify(manifest, null, 2));

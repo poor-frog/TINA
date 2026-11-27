@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "MeetTina",
   "version": "0.1.0",
-  "description": "Send MeetTina Bot to supported meeting tabs and read authorized transcripts in MeetTina and Google Meet. This extension does not capture audio.",
+  "description": "Send MeetTina Bot to meetings and read authorized live transcripts, translations, and notes in Google Meet. No audio capture.",
   "permissions": [
     "storage",
     "identity",
