@@ -17,13 +17,13 @@ vi.mock("../adminApi", () => ({
 import { authOptions } from "../[...nextauth]/authOptions";
 
 const callback = authOptions.callbacks!.signIn!;
-function signIn(provider = GOOGLE_CALENDAR_PROVIDER) {
+function signIn(provider = GOOGLE_CALENDAR_PROVIDER, scopes: readonly string[] = GOOGLE_CALENDAR_SCOPES) {
   const profile = { sub: "google-id", email: "linked@example.test", email_verified: true };
   return callback({
     user: { id: "other-google-user", email: "linked@example.test" },
     profile,
     account: { provider, type: "oauth", providerAccountId: "google-id",
-      scope: GOOGLE_CALENDAR_SCOPES.join(" "), access_token: "synthetic-access", refresh_token: "synthetic-refresh" },
+      scope: scopes.join(" "), access_token: "synthetic-access", refresh_token: "synthetic-refresh" },
   });
 }
 const response = (items: unknown[], nextPageToken?: string) => new Response(JSON.stringify({ items, nextPageToken }));
@@ -63,6 +63,15 @@ describe("Calendar callback never falls back to TINA login", () => {
     expect(mocks.login).not.toHaveBeenCalled();
     expect(mocks.set).toHaveBeenCalledWith(CALENDAR_WELCOME_COOKIE, "extension:first-login",
       expect.objectContaining({ maxAge: 86_400, httpOnly: true }));
+  });
+  it("rejects a grant missing event read access before listing calendars", async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    mocks.jar.set("tina-token", "existing-owner-token");
+    mocks.jar.set(GOOGLE_CALENDAR_LINK_COOKIE, createGoogleCalendarLinkIntent(1)!);
+    expect(await signIn(GOOGLE_CALENDAR_PROVIDER, [GOOGLE_CALENDAR_SCOPES[0]])).toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
   });
   it("continues normal Google login even when a stale link cookie exists", async () => {
     mocks.jar.set(GOOGLE_CALENDAR_LINK_COOKIE, "stale-intent");

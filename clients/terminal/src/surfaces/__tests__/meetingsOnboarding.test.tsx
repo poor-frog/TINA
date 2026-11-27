@@ -125,16 +125,13 @@ describe("Google Calendar onboarding", () => {
     expect(new URL(options!.callbackUrl!).searchParams.get("tina-calendar-settings")).toBe("google-linked");
     const authorization = new URLSearchParams(params);
     expect(authorization.get("access_type")).toBe("offline");
+    expect(authorization.has("include_granted_scopes")).toBe(false);
     expect(authorization.get("scope")?.split(/\s+/).sort()).toEqual([
       "openid",
       "email",
       "profile",
       "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
       "https://www.googleapis.com/auth/calendar.events.readonly",
-      "https://www.googleapis.com/auth/meetings.space.readonly",
-      "https://www.googleapis.com/auth/contacts.readonly",
-      "https://www.googleapis.com/auth/contacts.other.readonly",
-      "https://www.googleapis.com/auth/directory.readonly",
     ].sort());
   });
 

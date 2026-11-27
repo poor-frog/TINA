@@ -4,7 +4,7 @@ import styles from "./PrivacyPolicy.module.css";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — MeetTina",
-  description: "How MeetTina and the MeetTina Chrome Extension handle authentication, meeting data, and browser permissions.",
+  description: "How MeetTina and the MeetTina Chrome Extension handle authentication, Google Calendar, meeting data, and browser permissions.",
 };
 
 export default function PrivacyPolicyPage() {
@@ -46,7 +46,37 @@ export default function PrivacyPolicyPage() {
         </section>
 
         <section className={styles.card}>
-          <h2>2. What the Chrome Extension Does Not Do</h2>
+          <h2>2. Google Calendar</h2>
+          <p>
+            Connecting Google Calendar is optional. MeetTina uses read-only access to list your calendars
+            and import upcoming meetings from the calendars you add. It reads event titles, times,
+            descriptions, locations, meeting links, and available attendee and response details.
+            MeetTina uses that information to show upcoming meetings, support meeting preparation and
+            enabled follow-ups, and send a bot when you enable auto-join for a selected calendar.
+          </p>
+          <p>
+            MeetTina stores your connected Google account, calendar selections, and imported meeting records
+            on its servers. It encrypts your refresh token at rest and uses it to sync while the connection
+            is active. The hosted service uses AWS to process and store this data. If you enable follow-up
+            emails, eligible recipients can receive those emails through our email service.
+            MeetTina does not sell Google user data or use it for advertising.
+          </p>
+          <p>
+            Earlier versions let users grant additional read-only Google Meet and People access. Where
+            such a grant remains active, MeetTina uses it to match recorded Meet attendance to email
+            addresses for follow-up.
+          </p>
+          <p>
+            To stop sync and remove the stored grant, go to{" "}
+            <strong>Settings → Calendar &amp; Auto-join → Disconnect account</strong>. Calendar sources from
+            that account are removed. Meetings with another source, manually planned meetings, and existing
+            meeting artifacts may remain. You can also revoke access from your Google Account.
+            For remaining data, use the deletion request process below.
+          </p>
+        </section>
+
+        <section className={styles.card}>
+          <h2>3. What the Chrome Extension Does Not Do</h2>
           <ul>
             <li>
               <strong>No audio, microphone, or video capture:</strong> The MeetTina Chrome Extension does not request microphone, camera, or tab audio capture permissions and does not record or upload browser media streams.
@@ -61,7 +91,7 @@ export default function PrivacyPolicyPage() {
         </section>
 
         <section className={styles.card}>
-          <h2>3. Chrome Extension Permissions</h2>
+          <h2>4. Chrome Extension Permissions</h2>
           <ul>
             <li><strong>identity:</strong> Runs the PKCE authorization flow with <code>https://meettina.site/connect-extension</code>.</li>
             <li><strong>storage:</strong> Stores your revocable extension session credential and UI preferences locally.</li>
@@ -72,7 +102,7 @@ export default function PrivacyPolicyPage() {
         </section>
 
         <section className={styles.card}>
-          <h2>4. Security, Retention &amp; Revocation</h2>
+          <h2>5. Security, Retention &amp; Revocation</h2>
           <p>
             All extension communication with MeetTina uses HTTPS. Browser extension tokens are scoped strictly to extension meeting/transcript routes and can be revoked immediately at any time by clicking <strong>Sign out</strong> in the extension or revoking tokens in MeetTina Settings.
           </p>
