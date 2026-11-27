@@ -1,6 +1,7 @@
 """Post-meeting email: one recipient-bound link to each saved artifact, with durable progress."""
 from __future__ import annotations
 
+import datetime
 import re
 from urllib.parse import quote, urlencode, urlsplit
 
@@ -8,6 +9,26 @@ from flows import Done, StepError
 from . import common, mailtext, meeting
 from .notify import notify
 from .email_design import render_followup
+
+_ICT = datetime.timezone(datetime.timedelta(hours=7))
+
+
+def _meeting_time_meta(row: dict) -> tuple[str, str]:
+    """Format the meeting timestamp in ICT (UTC+7) plus a 2-char calendar day badge."""
+    for key in ("start_time", "scheduled_at", "created_at"):
+        raw = row.get(key)
+        if not raw:
+            continue
+        try:
+            dt = datetime.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            local = dt.astimezone(_ICT)
+            label = f"{local.day:02d} Thg {local.month:02d} lúc {local.hour:02d}:{local.minute:02d} ICT"
+            return label, f"{local.day:02d}"
+        except Exception:  # noqa: BLE001
+            continue
+    return "", ""
 
 
 def _address(value) -> str:
@@ -29,6 +50,8 @@ def send(ctx):
     if status != 200 or not isinstance(owner, dict) or not _address(owner.get("email")):
         raise StepError("Cannot resolve meeting owner's email", retryable=status >= 500)
     organizer = _address(owner["email"])
+    organizer_name = " ".join(str(owner.get("name") or "").split())[:100]
+    meeting_time, calendar_day = _meeting_time_meta(row)
     title = " ".join(str(data.get("title") or ctx.refs.get("title") or ctx.refs.get("native") or "Cuộc họp").split())[:512]
     participants = [organizer]
     followup = ctx.flow.param("attendee_followup") if ctx.flow else None
@@ -81,6 +104,9 @@ def send(ctx):
         recipients.extend(a for a in participants if a != organizer)
 
     report = str(ctx.prior["process_meeting"]["report"]).strip()
+    insights = ctx.prior["process_meeting"].get("insights")
+    if not isinstance(insights, dict):
+        insights = None
     if not report:
         raise StepError("Cannot send meeting follow-up without a summary", retryable=False)
     if not ctx.scratch.get("summary_saved"):
@@ -117,8 +143,21 @@ def send(ctx):
                 "summary_link": link + f"#meeting-summary-{mid}",
                 "recording_link": link + f"#meeting-recording-{mid}",
             })
-            html_body = render_followup(subject, title, body,
-                                       link + f"#meeting-summary-{mid}", link + f"#meeting-recording-{mid}")
+            html_body = render_followup(
+                subject,
+                title,
+                body,
+                link + f"#meeting-summary-{mid}",
+                link + f"#meeting-recording-{mid}",
+                organizer_name=organizer_name,
+                organizer_email=organizer,
+                meeting_time=meeting_time,
+                calendar_day=calendar_day,
+                report=report,
+                insights=insights,
+                app_link=base,
+                settings_link=f"{base}/?nav=settings&settingsSection=account",
+            )
             message_id = notify(address, " ".join(subject.split()), body, html_body=html_body)
             # shortcut: SMTP cannot deduplicate a crash after acceptance; use an idempotent provider if required.
             sent.append(address)

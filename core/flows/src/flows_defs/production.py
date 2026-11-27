@@ -827,8 +827,12 @@ def build(reg: Registry, db) -> None:
         report = body.get("report") if isinstance(body, dict) else None
         if not isinstance(report, str) or not report.strip():
             raise StepError("Meeting report service returned no report")
-        return Done({"report": report, "group": str(ctx.refs.get("group") or "").strip(),
-                     "room_read": []})
+        result = {"report": report, "group": str(ctx.refs.get("group") or "").strip(),
+                  "room_read": []}
+        insights = body.get("insights") if isinstance(body, dict) else None
+        if isinstance(insights, dict):
+            result["insights"] = insights
+        return Done(result)
 
     @reg.step(needs=("agent", "meetings"))
     def email_meeting_followup(ctx: StepCtx):

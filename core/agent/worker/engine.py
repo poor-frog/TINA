@@ -657,7 +657,9 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
     from shared.voice_rerank import RERANK_SYSTEM, rerank_voice_sources
     from shared.voice_evidence import evidence_pack
     from shared.voice_trace import voice_span
-    from shared.meeting_knowledge import PREFIX, SYSTEM, validate_answer
+    from shared.meeting_knowledge import (
+        PREFIX, RECAP_SYSTEM, SYSTEM, recap_schema, validate_answer, validate_recap_answer,
+    )
     from shared.voice_knowledge import (VOICE_SYSTEM, VOICE_TOOLS, VOICE_PLAN_SYSTEM, VOICE_INTENT_SYSTEM, VOICE_SOURCE_SYSTEM, VOICE_REPAIR_SYSTEM, VOICE_FORMAT_SYSTEM, GENERAL_SYSTEM, VERIFY_SYSTEM,
         normalize_empty_voice_answer, validate_voice_answer, verify_voice_reply, voice_tool_calls)
     from shared.voice_summary import MAP_SYSTEM, SELECT_SYSTEM
@@ -729,7 +731,8 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                     log.info('voice schema unsupported; using validated completion')
                     remaining = voice_deadline - time.monotonic()
                     if remaining < 1: raise TimeoutError('Voice completion budget exhausted')
-                    provider = completion_from_env(timeout=min(10, remaining))
+                    fallback_timeout = 35 if mode == 'post_meeting_recap' else 10
+                    provider = completion_from_env(timeout=min(fallback_timeout, remaining))
             return provider.complete(prompt, system=system).text
         def checked_completion(prompt, system):
             remaining = voice_deadline - time.monotonic()
@@ -763,6 +766,10 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                 text = assistant_complete(payload['text'], SYSTEM, schema, timeout=40,
                                           current=check_current, meeting_assistant=True)
             validate_answer(text, answer_sources)
+        elif mode == 'post_meeting_recap':
+            schema = recap_schema(answer_sources)
+            text = generate(provider, payload['text'], RECAP_SYSTEM, schema, use_harness=False)
+            validate_recap_answer(text, answer_sources)
         elif mode == 'voice_summary_select':
             text = generate(completion_from_env(timeout=15), payload['text'], SELECT_SYSTEM)
             ids = {i for fact in source['summary_facts'] for i in fact['source_ids']}

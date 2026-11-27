@@ -281,3 +281,39 @@ def test_duplicate_completion_event_creates_one_followup_delivery(world):
             break
     assert len(db.execute("SELECT 1 FROM reaction WHERE flow='post_meeting'")) == 1
     assert len(channel.sent) == 2
+
+
+def test_followup_passes_rich_insights_organizer_and_ict_time_to_html(world, monkeypatch):
+    from flows_steps import common, meeting
+
+    reg, channel, ctx, _, _ = world
+    meeting.meeting_row("7", 41)["start_time"] = "2026-11-20T10:45:00Z"
+    real_http = common.http
+
+    def named_owner_http(method, url, headers, body=None):
+        if method == "GET" and url.endswith("/admin/users/7"):
+            return 200, {"id": 7, "name": "Quang Thanh", "email": "anna@bank.test"}
+        return real_http(method, url, headers, body)
+
+    monkeypatch.setattr(common, "http", named_owner_http)
+    ctx.prior["process_meeting"] = {
+        "report": "- **Kế hoạch:** Chốt phát hành vào thứ Sáu.",
+        "insights": {
+            "question_count": 5,
+            "action_item_count": 1,
+            "topics": ["Phát hành", "Kiểm thử"],
+            "overview": [{"title": "Kế hoạch", "text": "Chốt phát hành vào thứ Sáu."}],
+            "action_items": ["Gửi bản dựng staging trước thứ Năm."],
+        },
+    }
+    result = reg.steps["email_meeting_followup"](ctx)
+    assert isinstance(result, Done) and result.result["sent"] == 2
+    html = channel.sent[0]["html_body"]
+    assert "Quang Thanh" in html
+    assert "20 Thg 11 lúc 17:45 ICT" in html
+    assert "5 câu hỏi được đặt ra" in html
+    assert "1 việc cần làm được ghi nhận" in html
+    assert "Phát hành" in html and "Kiểm thử" in html
+    assert "Tổng quan cuộc họp" in html
+    assert "Gửi bản dựng staging trước thứ Năm." in html
+

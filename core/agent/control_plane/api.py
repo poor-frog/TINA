@@ -1804,7 +1804,9 @@ def create_app(
     def post_meeting_report(meeting_id: int, request: Request):
         """Generate a report only from the completed meeting's canonical transcript."""
         from control_plane.meeting_knowledge import meeting_get
-        from shared.meeting_knowledge import digest, sources_for, validate_answer
+        from shared.meeting_knowledge import (
+            count_transcript_questions, digest, sources_for, validate_recap_answer,
+        )
 
         secret = settings.internal_api_secret.get_secret_value() if settings is not None else ""
         supplied = request.headers.get("x-internal-secret", "")
@@ -1839,27 +1841,62 @@ def create_app(
         if sum(len(x["quote"]) for x in excerpts) > 48000 or len(excerpts) > 40:
             raise HTTPException(413, "Meeting transcript exceeds the report budget")
         payload = {
-            "question": ("Write a shared meeting summary in the main language of the transcript. "
-                         "Cover the main topics, confirmed decisions and explicit next actions. "
-                         "Use concise claims and omit anything the transcript does not establish."),
+            "mode": "post_meeting_recap",
+            "question": ("Write a structured shared meeting summary in the main language of the transcript. "
+                         "Cover the main topics, concise highlights (each with a short topic label), "
+                         "confirmed decisions, explicit next actions, and questions raised. "
+                         "Omit anything the transcript does not establish."),
             "sources": excerpts,
         }
         raw = _transcript_completion(
             request, text=json.dumps(payload, ensure_ascii=False), task="knowledge",
         )
         try:
-            claims = validate_answer(raw, excerpts)["claims"]
+            recap = validate_recap_answer(raw, excerpts)
         except (ValueError, TypeError, KeyError) as exc:
             raise HTTPException(502, "Meeting report could not be validated") from exc
         if digest(read_sources()) != digest(original):
             raise HTTPException(409, "Transcript changed while generating its report")
+        claims = recap["claims"]
+        transcript_questions = count_transcript_questions(original)
+        question_count = max(len(recap["questions"]), transcript_questions)
         if not claims:
             # A valid empty result conveys no meeting facts. Let the normal follow-up deliver
             # the authorized artifact links with an explicit status in place of a summary.
-            return {"report": ("TINA ch\u01b0a t\u1ea1o \u0111\u01b0\u1ee3c t\xf3m t\u1eaft c\xf3 c\u0103n c\u1ee9 t\u1eeb b\u1ea3n ch\xe9p l\u1eddi. "
-                               "M\u1edf trang cu\u1ed9c h\u1ecdp \u0111\u1ec3 xem b\u1ea3n ch\xe9p l\u1eddi v\xe0 b\u1ea3n ghi n\u1ebfu c\xf3.")}
-        report = "\n".join(f"- {claim['text']}" for claim in claims)
-        return {"report": report[:6000]}
+            return {
+                "report": ("TINA ch\u01b0a t\u1ea1o \u0111\u01b0\u1ee3c t\xf3m t\u1eaft c\xf3 c\u0103n c\u1ee9 t\u1eeb b\u1ea3n ch\xe9p l\u1eddi. "
+                           "M\u1edf trang cu\u1ed9c h\u1ecdp \u0111\u1ec3 xem b\u1ea3n ch\xe9p l\u1eddi v\xe0 b\u1ea3n ghi n\u1ebfu c\xf3."),
+                "insights": {
+                    "question_count": question_count,
+                    "action_item_count": len(recap["action_items"]),
+                    "topics": recap["topics"][:8],
+                    "overview": [],
+                    "action_items": [item["text"] for item in recap["action_items"][:6]],
+                    "questions": [item["text"] for item in recap["questions"][:6]],
+                },
+            }
+        lines: list[str] = []
+        overview: list[dict[str, str]] = []
+        for claim in claims:
+            topic = claim.get("topic", "").strip()
+            text = claim["text"].strip()
+            if topic and not text.casefold().startswith(topic.casefold()):
+                lines.append(f"- **{topic}:** {text}")
+            else:
+                lines.append(f"- {text}")
+            overview.append({"title": topic, "text": text})
+        report = "\n".join(lines)[:6000]
+        return {
+            "report": report,
+            "insights": {
+                "question_count": question_count,
+                "action_item_count": len(recap["action_items"]),
+                "topics": recap["topics"][:8],
+                "overview": overview[:6],
+                "action_items": [item["text"] for item in recap["action_items"][:6]],
+                "questions": [item["text"] for item in recap["questions"][:6]],
+            },
+        }
 
     @app.post("/api/dictation/polish")
     def polish_dictation(body: DictationPolishBody, request: Request):
