@@ -171,6 +171,43 @@
   background: var(--tw-surface-teal);
 }
 
+.wsDropdownActionMuted {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--tw-text-2);
+  text-align: left;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.wsDropdownActionMuted:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--tw-text);
+}
+
+.wsDropdownActionDanger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--tw-danger);
+  text-align: left;
+  transition: background 100ms ease;
+}
+
+.wsDropdownActionDanger:hover {
+  background: var(--tw-danger-bg);
+}
+
 .railPrimaryActions {
   display: flex;
   align-items: center;
@@ -1080,6 +1117,18 @@
   color: var(--tw-danger);
 }
 
+.btnDangerSolid {
+  background: #c63b43;
+  border-color: #c63b43;
+  color: #ffffff;
+}
+
+.btnDangerSolid:hover:not(:disabled) {
+  background: #dc4850;
+  border-color: #dc4850;
+  color: #ffffff;
+}
+
 .docScroll {
   flex: 1;
   min-height: 0;
@@ -1818,6 +1867,85 @@
   display: flex;
   flex-direction: column;
   gap: 13px;
+}
+
+.cardDanger {
+  border-color: rgba(240, 141, 144, 0.28);
+}
+
+.dangerList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dangerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--tw-line-soft);
+  background: var(--tw-bg);
+}
+
+.dangerRowMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dangerRowTitle {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--tw-text);
+}
+
+.protectedNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--tw-line-soft);
+  background: var(--tw-bg);
+  color: var(--tw-text-3);
+}
+
+.archivedList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.archivedRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--tw-line-soft);
+  background: var(--tw-bg);
+}
+
+.archivedMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.archivedActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
 }
 
 .cardHead {
@@ -2878,12 +3006,17 @@
 /* ── Light Theme Polish ──────────────────────────────────────────────── */
 :global(html[data-theme="light"]) .treeRow:hover,
 :global(html[data-theme="light"]) .wsDropdownItem:hover,
+:global(html[data-theme="light"]) .wsDropdownActionMuted:hover,
 :global(html[data-theme="light"]) .pageMenuItem:hover,
 :global(html[data-theme="light"]) .catHeader:hover,
 :global(html[data-theme="light"]) .commitHead:hover,
 :global(html[data-theme="light"]) .crumbBtn:hover,
 :global(html[data-theme="light"]) .iconGhostBtn:hover:not(:disabled) {
   background: rgba(15, 23, 42, 0.05);
+}
+
+:global(html[data-theme="light"]) .cardDanger {
+  border-color: rgba(200, 52, 60, 0.28);
 }
 
 :global(html[data-theme="light"]) .wsTag {
@@ -2999,5 +3132,10 @@
   }
   .templateCardGrid {
     grid-template-columns: 1fr;
+  }
+  .dangerRow,
+  .archivedRow {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

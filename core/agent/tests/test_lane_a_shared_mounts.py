@@ -279,6 +279,31 @@ def test_unshare_moves_a_shared_workspace_back_to_private(tmp_path):
     assert shared_active_mounts(tmp_path, "member1", idx.list("member1")) == []   # ws_dir gone → not mounted
 
 
+def test_unshare_then_delete_permanently_removes_team_space_and_keeps_baseline(tmp_path):
+    from control_plane.workspace_attach import (
+        ensure_workspace_private,
+        delete_workspace,
+        attached_workspaces,
+        active_workspaces,
+    )
+    (tmp_path / "owner1").mkdir(parents=True)
+    (tmp_path / "owner1" / "README.md").write_text("# Personal baseline\n")
+    _grant(tmp_path, "wsTeamDel", owner="owner1", subject="member1", role="contributor")
+    assert (tmp_path / "wsTeamDel").exists()
+
+    # Owner deletes a Team Space via unshare -> delete_workspace(new_slug)
+    temp_slug = ensure_workspace_private(tmp_path, "owner1", "wsTeamDel")
+    assert not (tmp_path / "wsTeamDel").exists()
+    assert (tmp_path / ".attached" / "owner1" / temp_slug).exists()
+
+    delete_workspace(tmp_path, "owner1", temp_slug)
+    assert not (tmp_path / ".attached" / "owner1" / temp_slug).exists()
+    assert temp_slug not in attached_workspaces(tmp_path, "owner1")["slots"]
+    assert temp_slug not in [m.slug for m in active_workspaces(tmp_path, "owner1")]
+    # Baseline personal workspace remains completely untouched
+    assert (tmp_path / "owner1" / "README.md").read_text() == "# Personal baseline\n"
+
+
 def test_archive_and_delete_workspace(tmp_path, monkeypatch):
     import pytest
     from control_plane.workspace_attach import (create_workspace, set_archived, delete_workspace,

@@ -60,7 +60,9 @@ import {
   deleteWorkspaceDocument,
   getGitToken,
   gitRemoteStatus,
+  leaveWorkspace,
   listSharedMemberships,
+  listWorkspaceMembers,
   listWorkspaceTree,
   mintInvite,
   moveWorkspaceDocument,
@@ -80,6 +82,7 @@ import {
   searchWorkspaceContent,
   setSharedActive,
   shareEnableWorkspace,
+  unshareWorkspace,
   uploadWorkspaceFiles,
   writeWorkspacePurpose,
   type ActiveMount,
@@ -90,6 +93,7 @@ import {
   type Membership,
   type SavedGitToken,
   type WorkspaceDocument,
+  type WorkspaceMember,
   type WorkspaceSearchHit,
 } from "../surfaces/workspaceApi";
 import styles from "./knowledgeView.module.css";
@@ -108,6 +112,32 @@ interface WorkspaceEntry {
   mounted: boolean;
   readOnly: boolean;
 }
+
+interface ArchivedSpaceEntry {
+  slotSlug: string;
+  rawName: string;
+  name: string;
+}
+
+type SpaceLifecycleModal =
+  | {
+      action: "delete";
+      kind: "extra" | "shared" | "archived";
+      slug: string;
+      name: string;
+      rawName: string;
+    }
+  | {
+      action: "unshare";
+      workspaceId: string;
+      name: string;
+      rawName: string;
+    }
+  | {
+      action: "leave";
+      workspaceId: string;
+      name: string;
+    };
 
 interface TreeNode {
   name: string;
@@ -307,11 +337,16 @@ export function KnowledgeView({
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
 
-  // Create space modal
+  // Create space & lifecycle confirmation modals
   const [createWsOpen, setCreateWsOpen] = useState(false);
   const [newWsName, setNewWsName] = useState("");
   const [newWsShared, setNewWsShared] = useState(false);
   const [createWsError, setCreateWsError] = useState<string | null>(null);
+  const [lifecycleModal, setLifecycleModal] = useState<SpaceLifecycleModal | null>(null);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState("");
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const [spaceMembers, setSpaceMembers] = useState<WorkspaceMember[]>([]);
+  const archivedSectionRef = useRef<HTMLElement>(null);
 
   // ── Library & Unified Search state ───────────────────────────────────
   const [files, setFiles] = useState<string[]>([]);
@@ -399,6 +434,33 @@ export function KnowledgeView({
   useEffect(() => {
     setCreateWsError(null);
   }, [createWsOpen]);
+
+  const openLifecycleModal = useCallback((next: SpaceLifecycleModal) => {
+    setLifecycleModal(next);
+    setDeleteConfirmInput("");
+    setLifecycleError(null);
+  }, []);
+
+  const closeLifecycleModal = useCallback(() => {
+    if (busy) return;
+    setLifecycleModal(null);
+    setDeleteConfirmInput("");
+    setLifecycleError(null);
+  }, [busy]);
+
+  // Close Space Lifecycle confirmation modal on Escape when idle
+  useEffect(() => {
+    if (!lifecycleModal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) {
+        setLifecycleModal(null);
+        setDeleteConfirmInput("");
+        setLifecycleError(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lifecycleModal, busy]);
 
   // Close popovers on Escape or outside click
   useEffect(() => {
@@ -490,6 +552,22 @@ export function KnowledgeView({
 
     return entries;
   }, [attached, activeSet, memberships, hasGlobal]);
+
+  const archivedSpaces = useMemo<ArchivedSpaceEntry[]>(() => {
+    const seedSlug = attached.active ?? "seed";
+    const sharedIds = new Set(memberships.map((m) => m.workspace_id));
+    const list: ArchivedSpaceEntry[] = [];
+    for (const [slotSlug, meta] of Object.entries(attached.slots)) {
+      if (!meta.archived || slotSlug === seedSlug || slotSlug === "seed-prev" || sharedIds.has(slotSlug)) continue;
+      const raw = meta.name || meta.repo || slotSlug;
+      list.push({
+        slotSlug,
+        rawName: raw,
+        name: friendlyWorkspaceLabel(raw, "extra"),
+      });
+    }
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [attached, memberships]);
 
   const activeWs = useMemo<WorkspaceEntry>(
     () => workspaces.find((w) => w.id === selectedWsId) ?? workspaces[0],
@@ -646,6 +724,7 @@ export function KnowledgeView({
     if (!activeWs) return;
     setEditing(false);
     setInviteLink(null);
+    setSpaceMembers([]);
     setExpandedSha(null);
     setShowDiffSha(null);
     setDiffsBySha({});
@@ -796,16 +875,20 @@ export function KnowledgeView({
   // ── Load Activity & GitHub Sync when on Activity & Settings view ─────
   const loadGitAndSync = useCallback(async (ws: WorkspaceEntry) => {
     const opts = ws.slug ? { slug: ws.slug } : undefined;
-    const [g, rs, tok] = await Promise.all([
+    const [g, rs, tok, members] = await Promise.all([
       readWorkspaceGit(opts).catch(() => null),
       ws.kind === "global" ? Promise.resolve(null) : gitRemoteStatus(opts).catch(() => null),
       ws.kind === "global"
         ? Promise.resolve({ set: false, masked: null })
         : getGitToken().catch(() => ({ set: false, masked: null })),
+      ws.kind === "shared" && ws.slug
+        ? listWorkspaceMembers(ws.slug).catch(() => [])
+        : Promise.resolve([]),
     ]);
     setGitState(g);
     setRemoteStatus(rs);
     setGitToken(tok);
+    setSpaceMembers(members);
   }, []);
 
   useEffect(() => {
@@ -1236,6 +1319,140 @@ export function KnowledgeView({
     }, ws.mounted ? `Paused Tina access for "${ws.name}".` : `Tina can now read "${ws.name}".`);
   };
 
+  const pruneHistoryForWorkspace = useCallback((removedWsId: string) => {
+    setNavHistory((prev) => {
+      const filtered = prev.filter((item) => item.wsId !== removedWsId);
+      setNavIndex((idx) => Math.min(idx, filtered.length - 1));
+      return filtered;
+    });
+  }, []);
+
+  const handleArchiveSpace = (ws: WorkspaceEntry) => {
+    if (ws.kind !== "extra" || !ws.slotSlug) return;
+    if (!confirmDiscardDraft()) return;
+    void runAction(async () => {
+      await archiveWorkspace(ws.slotSlug!, true);
+      invalidateDocLinkCaches();
+      await loadWorkspaces();
+      pruneHistoryForWorkspace(ws.id);
+      setSelectedPath(null);
+      setEditing(false);
+      setInviteLink(null);
+      setSelectedWsId("personal");
+    }, `Archived "${ws.name}". You can restore or delete it anytime under Archived Spaces.`);
+  };
+
+  const handleRestoreArchivedSpace = (entry: ArchivedSpaceEntry) => {
+    void runAction(async () => {
+      await archiveWorkspace(entry.slotSlug, false);
+      invalidateDocLinkCaches();
+      await loadWorkspaces();
+      setSelectedWsId(`extra:${entry.slotSlug}`);
+    }, `Restored "${entry.name}".`);
+  };
+
+  const isDeleteConfirmMatch = useMemo(() => {
+    if (lifecycleModal?.action !== "delete") return false;
+    const typed = deleteConfirmInput.trim().toLowerCase();
+    if (!typed) return false;
+    return (
+      typed === lifecycleModal.name.trim().toLowerCase() ||
+      typed === lifecycleModal.rawName.trim().toLowerCase()
+    );
+  }, [lifecycleModal, deleteConfirmInput]);
+
+  const handleConfirmLifecycleModal = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!lifecycleModal) return;
+    if (lifecycleModal.action === "delete" && !isDeleteConfirmMatch) return;
+
+    setBusy(true);
+    setLifecycleError(null);
+    setError(null);
+    setNotice(null);
+    try {
+      if (lifecycleModal.action === "delete") {
+        if (lifecycleModal.kind === "shared") {
+          const unshared = await unshareWorkspace(lifecycleModal.slug);
+          try {
+            await deleteWorkspace(unshared.slug);
+          } catch (delErr) {
+            invalidateDocLinkCaches();
+            await loadWorkspaces();
+            pruneHistoryForWorkspace(`shared:${lifecycleModal.slug}`);
+            setSelectedWsId(`extra:${unshared.slug}`);
+            setSelectedPath(null);
+            setEditing(false);
+            setInviteLink(null);
+            setLifecycleModal({
+              action: "delete",
+              kind: "extra",
+              slug: unshared.slug,
+              name: lifecycleModal.name,
+              rawName: lifecycleModal.rawName,
+            });
+            setLifecycleError(
+              `Stopped sharing "${lifecycleModal.name}", but final deletion failed: ${presentError(delErr).headline}. It is now in your Private spaces — click "Permanently delete" again to retry.`,
+            );
+            return;
+          }
+          invalidateDocLinkCaches();
+          await loadWorkspaces();
+          pruneHistoryForWorkspace(`shared:${lifecycleModal.slug}`);
+          setSelectedWsId("personal");
+          setSelectedPath(null);
+          setEditing(false);
+          setInviteLink(null);
+        } else {
+          await deleteWorkspace(lifecycleModal.slug);
+          invalidateDocLinkCaches();
+          await loadWorkspaces();
+          if (lifecycleModal.kind === "extra") {
+            pruneHistoryForWorkspace(`extra:${lifecycleModal.slug}`);
+            if (activeWs?.id === `extra:${lifecycleModal.slug}`) {
+              setSelectedWsId("personal");
+              setSelectedPath(null);
+              setEditing(false);
+              setInviteLink(null);
+            }
+          }
+        }
+        const deletedName = lifecycleModal.name;
+        setLifecycleModal(null);
+        setDeleteConfirmInput("");
+        setNotice(`Permanently deleted "${deletedName}".`);
+      } else if (lifecycleModal.action === "unshare") {
+        const res = await unshareWorkspace(lifecycleModal.workspaceId);
+        invalidateDocLinkCaches();
+        await loadWorkspaces();
+        pruneHistoryForWorkspace(`shared:${lifecycleModal.workspaceId}`);
+        setSelectedWsId(`extra:${res.slug}`);
+        setSelectedPath(null);
+        setEditing(false);
+        setInviteLink(null);
+        const unsharedName = lifecycleModal.name;
+        setLifecycleModal(null);
+        setNotice(`Stopped sharing "${unsharedName}". It is now a private space.`);
+      } else if (lifecycleModal.action === "leave") {
+        await leaveWorkspace(lifecycleModal.workspaceId);
+        invalidateDocLinkCaches();
+        await loadWorkspaces();
+        pruneHistoryForWorkspace(`shared:${lifecycleModal.workspaceId}`);
+        setSelectedWsId("personal");
+        setSelectedPath(null);
+        setEditing(false);
+        setInviteLink(null);
+        const leftName = lifecycleModal.name;
+        setLifecycleModal(null);
+        setNotice(`Left "${leftName}".`);
+      }
+    } catch (err) {
+      setLifecycleError(presentError(err).headline);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const loadDiffIfNeeded = async (sha: string) => {
     if (diffsBySha[sha] || !activeWs) return;
     try {
@@ -1321,6 +1538,21 @@ export function KnowledgeView({
   const privateSpaces = workspaces.filter((w) => w.kind === "personal" || w.kind === "extra");
   const teamSpaces = workspaces.filter((w) => w.kind === "shared");
   const globalSpace = workspaces.find((w) => w.kind === "global");
+  const sharedOwnerCount = useMemo(
+    () => spaceMembers.filter((m) => m.role === "owner").length,
+    [spaceMembers],
+  );
+  const canOwnerLeaveShared = Boolean(
+    activeWs?.kind === "shared" && activeWs.role === "owner" && sharedOwnerCount > 1,
+  );
+  const canDeleteActiveSpace = Boolean(
+    activeWs &&
+      ((activeWs.kind === "extra" && activeWs.slotSlug) ||
+        (activeWs.kind === "shared" && activeWs.slug && activeWs.role === "owner")),
+  );
+  const canLeaveActiveSpace = Boolean(
+    activeWs && activeWs.kind === "shared" && activeWs.slug && activeWs.role !== "owner",
+  );
   const recentCards = useMemo(() => userVisibleFiles.slice(0, 8), [userVisibleFiles]);
   const mappablePageCount = useMemo(
     () => userVisibleFiles.filter((f) => f.toLowerCase().endsWith(".md")).length,
@@ -1469,6 +1701,85 @@ export function KnowledgeView({
                   </>
                 )}
 
+                <div className={styles.wsDropdownDivider} />
+                {activeWs && activeWs.kind !== "global" && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.wsDropdownActionMuted}
+                    onClick={() => {
+                      if (!confirmDiscardDraft()) return;
+                      setWsMenuOpen(false);
+                      setActiveTab("sync");
+                      setMobileRailOpen(false);
+                    }}
+                  >
+                    <WebIcon name="sliders" size={13} />
+                    <span>Space settings</span>
+                  </button>
+                )}
+                {archivedSpaces.length > 0 && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.wsDropdownActionMuted}
+                    onClick={() => {
+                      if (!confirmDiscardDraft()) return;
+                      setWsMenuOpen(false);
+                      setActiveTab("sync");
+                      setMobileRailOpen(false);
+                      window.setTimeout(() => {
+                        archivedSectionRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+                      }, 40);
+                    }}
+                  >
+                    <WebIcon name="rotateCcw" size={13} />
+                    <span className={styles.wsName}>Archived spaces</span>
+                    <span className={styles.wsTag}>{archivedSpaces.length}</span>
+                  </button>
+                )}
+                {canDeleteActiveSpace && activeWs && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.wsDropdownActionDanger}
+                    onClick={() => {
+                      if (!confirmDiscardDraft()) return;
+                      setWsMenuOpen(false);
+                      setMobileRailOpen(false);
+                      openLifecycleModal({
+                        action: "delete",
+                        kind: activeWs.kind === "shared" ? "shared" : "extra",
+                        slug: activeWs.kind === "shared" ? activeWs.slug! : activeWs.slotSlug!,
+                        name: activeWs.name,
+                        rawName: activeWs.rawName,
+                      });
+                    }}
+                  >
+                    <WebIcon name="trash" size={13} />
+                    <span>Delete this space</span>
+                  </button>
+                )}
+                {canLeaveActiveSpace && activeWs && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={styles.wsDropdownActionDanger}
+                    onClick={() => {
+                      if (!confirmDiscardDraft()) return;
+                      setWsMenuOpen(false);
+                      setMobileRailOpen(false);
+                      openLifecycleModal({
+                        action: "leave",
+                        workspaceId: activeWs.slug!,
+                        name: activeWs.name,
+                      });
+                    }}
+                  >
+                    <WebIcon name="logout" size={13} />
+                    <span>Leave this space</span>
+                  </button>
+                )}
                 <div className={styles.wsDropdownDivider} />
                 <button
                   type="button"
@@ -1975,6 +2286,19 @@ export function KnowledgeView({
                           "Your central library for notes, meeting summaries, projects, and reference files."}
                       </p>
                     </div>
+                    {activeWs && activeWs.kind !== "global" && (
+                      <button
+                        type="button"
+                        className={styles.btn}
+                        onClick={() => {
+                          if (!confirmDiscardDraft()) return;
+                          setActiveTab("sync");
+                        }}
+                      >
+                        <WebIcon name="sliders" size={13} />
+                        <span>Space settings</span>
+                      </button>
+                    )}
                   </div>
 
                   {/* Quick Action Cards */}
@@ -2412,104 +2736,304 @@ export function KnowledgeView({
                           <span>Share with Team</span>
                         </h3>
                         <p className={styles.cardSub}>
-                          Invite teammates to read, edit, and collaborate on pages in this space.
+                          {activeWs.kind === "personal"
+                            ? "My Space is your personal private library. Create a Team Space or an additional Private Space to invite teammates."
+                            : "Invite teammates to read, edit, and collaborate on pages in this space."}
+                        </p>
+                      </div>
+                      {activeWs.kind === "shared" && spaceMembers.length > 0 && (
+                        <span className={`${styles.wsTag} ${styles.wsTagShared}`}>
+                          {spaceMembers.length} {spaceMembers.length === 1 ? "member" : "members"}
+                        </span>
+                      )}
+                    </div>
+
+                    {activeWs.kind === "personal" ? (
+                      <div className={styles.inlineForm}>
+                        <button
+                          type="button"
+                          className={styles.btn}
+                          disabled={busy}
+                          onClick={() => {
+                            setNewWsShared(true);
+                            setCreateWsOpen(true);
+                          }}
+                        >
+                          <WebIcon name="plus" size={13} />
+                          <span>Create team space</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className={styles.inlineForm}>
+                          <button
+                            type="button"
+                            className={`${styles.btn} ${styles.btnPrimary}`}
+                            disabled={busy}
+                            onClick={() =>
+                              void runAction(async () => {
+                                let wsId = activeWs.kind === "shared" ? activeWs.slug! : null;
+                                if (!wsId && activeWs.slotSlug) {
+                                  const promoted = await shareEnableWorkspace(activeWs.slotSlug);
+                                  wsId = promoted.workspace_id;
+                                  await loadWorkspaces();
+                                  setSelectedWsId(`shared:${wsId}`);
+                                }
+                                if (!wsId) return;
+                                const minted = await mintInvite({
+                                  workspace_id: wsId,
+                                  role: "contributor",
+                                  mode: "open",
+                                  expires_in_sec: 7 * 86400,
+                                  max_uses: 25,
+                                });
+                                const origin = typeof window !== "undefined" ? window.location.origin : "";
+                                setInviteLink(`${origin}/?invite=${encodeURIComponent(minted.token)}`);
+                              }, "Share invite link created (valid 7 days).")
+                            }
+                          >
+                            <WebIcon name="share" size={13} />
+                            <span>Create share link</span>
+                          </button>
+                        </div>
+
+                        {inviteLink && (
+                          <div className={styles.inlineForm}>
+                            <input
+                              type="text"
+                              readOnly
+                              className={styles.input}
+                              style={{ flex: 1 }}
+                              value={inviteLink}
+                              aria-label="Share invite link"
+                            />
+                            <button
+                              type="button"
+                              className={styles.btn}
+                              onClick={() => {
+                                void navigator.clipboard?.writeText(inviteLink);
+                                setNotice("Copied invite link to clipboard.");
+                              }}
+                            >
+                              <WebIcon name="copy" size={13} />
+                              <span>Copy</span>
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </section>
+
+                  {/* Card 3: Space Lifecycle & Danger Zone */}
+                  <section
+                    className={`${styles.card} ${activeWs.kind !== "personal" ? styles.cardDanger : ""}`}
+                    aria-label={activeWs.kind === "personal" ? "Space lifecycle" : "Danger Zone"}
+                  >
+                    <div className={styles.cardHead}>
+                      <div>
+                        <h3 className={styles.cardTitle}>
+                          <WebIcon
+                            name={activeWs.kind === "personal" ? "shield" : "alertTriangle"}
+                            size={15}
+                          />
+                          <span>{activeWs.kind === "personal" ? "Space Lifecycle" : "Danger Zone"}</span>
+                        </h3>
+                        <p className={styles.cardSub}>
+                          {activeWs.kind === "personal"
+                            ? "Manage archiving and permanent deletion rules for this space."
+                            : activeWs.kind === "shared"
+                              ? "Manage team access, leave this space, or permanently delete it."
+                              : "Archive this space to hide it without losing data, or permanently delete it."}
                         </p>
                       </div>
                     </div>
 
-                    <div className={styles.inlineForm}>
-                      <button
-                        type="button"
-                        className={`${styles.btn} ${styles.btnPrimary}`}
-                        disabled={busy}
-                        onClick={() =>
-                          void runAction(async () => {
-                            let wsId = activeWs.kind === "shared" ? activeWs.slug! : null;
-                            if (!wsId && activeWs.slotSlug) {
-                              const promoted = await shareEnableWorkspace(activeWs.slotSlug);
-                              wsId = promoted.workspace_id;
-                              await loadWorkspaces();
-                              setSelectedWsId(`shared:${wsId}`);
-                            }
-                            if (!wsId) return;
-                            const minted = await mintInvite({
-                              workspace_id: wsId,
-                              role: "contributor",
-                              mode: "open",
-                              expires_in_sec: 7 * 86400,
-                              max_uses: 25,
-                            });
-                            const origin = typeof window !== "undefined" ? window.location.origin : "";
-                            setInviteLink(`${origin}/?invite=${encodeURIComponent(minted.token)}`);
-                          }, "Share invite link created (valid 7 days).")
-                        }
-                      >
-                        <WebIcon name="share" size={13} />
-                        <span>Create share link</span>
-                      </button>
+                    {activeWs.kind === "personal" && (
+                      <div className={styles.protectedNotice}>
+                        <WebIcon name="info" size={15} />
+                        <div>
+                          <div className={styles.dangerRowTitle}>Default personal space cannot be deleted</div>
+                          <p className={styles.cardSub}>
+                            My Space is your baseline personal library and is protected from archiving or deletion.
+                            Additional private spaces and team spaces can be archived, unshared, left, or deleted anytime.
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
-                      {activeWs.kind === "extra" && activeWs.slotSlug && (
-                        <>
+                    {activeWs.kind === "extra" && activeWs.slotSlug && (
+                      <div className={styles.dangerList}>
+                        <div className={styles.dangerRow}>
+                          <div className={styles.dangerRowMeta}>
+                            <div className={styles.dangerRowTitle}>Archive space</div>
+                            <p className={styles.cardSub}>
+                              Hide this space from your library and pause Tina access while keeping all pages and
+                              history. Restore or delete it anytime under Archived Spaces.
+                            </p>
+                          </div>
                           <button
                             type="button"
                             className={styles.btn}
                             disabled={busy}
-                            onClick={() =>
-                              void runAction(async () => {
-                                await archiveWorkspace(activeWs.slotSlug!, true);
-                                await loadWorkspaces();
-                                setSelectedWsId("personal");
-                              }, `Archived "${activeWs.name}".`)
-                            }
+                            onClick={() => handleArchiveSpace(activeWs)}
                           >
-                            Archive space
+                            <WebIcon name="pause" size={13} />
+                            <span>Archive space</span>
                           </button>
+                        </div>
+
+                        <div className={styles.dangerRow}>
+                          <div className={styles.dangerRowMeta}>
+                            <div className={styles.dangerRowTitle}>Delete space</div>
+                            <p className={styles.cardSub}>
+                              Permanently remove &ldquo;{activeWs.name}&rdquo; along with all pages, uploaded files, and
+                              version history. This cannot be undone.
+                            </p>
+                          </div>
                           <button
                             type="button"
                             className={`${styles.btn} ${styles.btnDanger}`}
                             disabled={busy}
-                            onClick={() => {
-                              if (
-                                typeof window !== "undefined" &&
-                                !window.confirm(`Permanently delete "${activeWs.name}"?`)
-                              ) {
-                                return;
-                              }
-                              void runAction(async () => {
-                                await deleteWorkspace(activeWs.slotSlug!);
-                                await loadWorkspaces();
-                                setSelectedWsId("personal");
-                              }, `Deleted "${activeWs.name}".`);
-                            }}
+                            onClick={() =>
+                              openLifecycleModal({
+                                action: "delete",
+                                kind: "extra",
+                                slug: activeWs.slotSlug!,
+                                name: activeWs.name,
+                                rawName: activeWs.rawName,
+                              })
+                            }
                           >
                             <WebIcon name="trash" size={13} />
                             <span>Delete space</span>
                           </button>
-                        </>
-                      )}
-                    </div>
+                        </div>
+                      </div>
+                    )}
 
-                    {inviteLink && (
-                      <div className={styles.inlineForm}>
-                        <input
-                          type="text"
-                          readOnly
-                          className={styles.input}
-                          style={{ flex: 1 }}
-                          value={inviteLink}
-                          aria-label="Share invite link"
-                        />
-                        <button
-                          type="button"
-                          className={styles.btn}
-                          onClick={() => {
-                            void navigator.clipboard?.writeText(inviteLink);
-                            setNotice("Copied invite link to clipboard.");
-                          }}
-                        >
-                          <WebIcon name="copy" size={13} />
-                          <span>Copy</span>
-                        </button>
+                    {activeWs.kind === "shared" && activeWs.slug && (
+                      <div className={styles.dangerList}>
+                        {activeWs.role === "owner" ? (
+                          <>
+                            <div className={styles.dangerRow}>
+                              <div className={styles.dangerRowMeta}>
+                                <div className={styles.dangerRowTitle}>Stop sharing (Convert to Private)</div>
+                                <p className={styles.cardSub}>
+                                  Revoke access for all teammates and move this space back into your private spaces. All
+                                  pages and history stay intact.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className={styles.btn}
+                                disabled={busy}
+                                onClick={() =>
+                                  openLifecycleModal({
+                                    action: "unshare",
+                                    workspaceId: activeWs.slug!,
+                                    name: activeWs.name,
+                                    rawName: activeWs.rawName,
+                                  })
+                                }
+                              >
+                                <WebIcon name="user" size={13} />
+                                <span>Stop sharing</span>
+                              </button>
+                            </div>
+
+                            <div className={styles.dangerRow}>
+                              <div className={styles.dangerRowMeta}>
+                                <div className={styles.dangerRowTitle}>Leave space</div>
+                                <p className={styles.cardSub}>
+                                  {canOwnerLeaveShared
+                                    ? "Remove yourself from this team space. Other owners and members keep access."
+                                    : "You are the sole owner of this space. Add another owner in Settings → Team before leaving, or stop sharing / delete it instead."}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className={styles.btn}
+                                disabled={busy || !canOwnerLeaveShared}
+                                title={
+                                  canOwnerLeaveShared
+                                    ? "Remove yourself from this team space"
+                                    : "Assign another owner before leaving, or stop sharing / delete this space"
+                                }
+                                onClick={() =>
+                                  openLifecycleModal({
+                                    action: "leave",
+                                    workspaceId: activeWs.slug!,
+                                    name: activeWs.name,
+                                  })
+                                }
+                              >
+                                <WebIcon name="logout" size={13} />
+                                <span>Leave space</span>
+                              </button>
+                            </div>
+
+                            <div className={styles.dangerRow}>
+                              <div className={styles.dangerRowMeta}>
+                                <div className={styles.dangerRowTitle}>Delete team space</div>
+                                <p className={styles.cardSub}>
+                                  Immediately revoke access for all teammates and permanently delete &ldquo;
+                                  {activeWs.name}&rdquo; including all pages, uploaded files, and version history.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className={`${styles.btn} ${styles.btnDanger}`}
+                                disabled={busy}
+                                onClick={() =>
+                                  openLifecycleModal({
+                                    action: "delete",
+                                    kind: "shared",
+                                    slug: activeWs.slug!,
+                                    name: activeWs.name,
+                                    rawName: activeWs.rawName,
+                                  })
+                                }
+                              >
+                                <WebIcon name="trash" size={13} />
+                                <span>Delete space</span>
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className={styles.dangerRow}>
+                              <div className={styles.dangerRowMeta}>
+                                <div className={styles.dangerRowTitle}>Leave space</div>
+                                <p className={styles.cardSub}>
+                                  Remove yourself from &ldquo;{activeWs.name}&rdquo;. Other teammates keep access and no
+                                  pages are deleted.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className={`${styles.btn} ${styles.btnDanger}`}
+                                disabled={busy}
+                                onClick={() =>
+                                  openLifecycleModal({
+                                    action: "leave",
+                                    workspaceId: activeWs.slug!,
+                                    name: activeWs.name,
+                                  })
+                                }
+                              >
+                                <WebIcon name="logout" size={13} />
+                                <span>Leave space</span>
+                              </button>
+                            </div>
+
+                            <div className={styles.protectedNotice}>
+                              <WebIcon name="info" size={15} />
+                              <p className={styles.cardSub}>
+                                Only a space owner can stop sharing or permanently delete a team space.
+                              </p>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                   </section>
@@ -2524,6 +3048,68 @@ export function KnowledgeView({
                     This built-in library contains shared handbooks and templates managed by your organization. Tina
                     reads these guides automatically across every space.
                   </p>
+                </section>
+              )}
+
+              {/* Conditional Card: Archived Spaces */}
+              {archivedSpaces.length > 0 && (
+                <section
+                  ref={archivedSectionRef}
+                  className={styles.card}
+                  aria-label="Archived spaces"
+                >
+                  <div className={styles.cardHead}>
+                    <div>
+                      <h3 className={styles.cardTitle}>
+                        <WebIcon name="rotateCcw" size={15} />
+                        <span>Archived Spaces</span>
+                      </h3>
+                      <p className={styles.cardSub}>
+                        Archived private spaces are hidden from your sidebar and paused from Tina access. Restore a space
+                        to continue using it, or delete it permanently.
+                      </p>
+                    </div>
+                    <span className={styles.wsTag}>{archivedSpaces.length}</span>
+                  </div>
+
+                  <div className={styles.archivedList}>
+                    {archivedSpaces.map((entry) => (
+                      <div key={entry.slotSlug} className={styles.archivedRow}>
+                        <div className={styles.archivedMeta}>
+                          <span className={styles.dangerRowTitle}>{entry.name}</span>
+                          {devView && <span className={styles.sha}>{entry.slotSlug}</span>}
+                        </div>
+                        <div className={styles.archivedActions}>
+                          <button
+                            type="button"
+                            className={styles.btn}
+                            disabled={busy}
+                            onClick={() => handleRestoreArchivedSpace(entry)}
+                          >
+                            <WebIcon name="rotateCcw" size={13} />
+                            <span>Restore</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`${styles.btn} ${styles.btnDanger}`}
+                            disabled={busy}
+                            onClick={() =>
+                              openLifecycleModal({
+                                action: "delete",
+                                kind: "archived",
+                                slug: entry.slotSlug,
+                                name: entry.name,
+                                rawName: entry.rawName,
+                              })
+                            }
+                          >
+                            <WebIcon name="trash" size={13} />
+                            <span>Delete</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </section>
               )}
 
@@ -3031,6 +3617,117 @@ export function KnowledgeView({
               <button type="submit" className={`${styles.btn} ${styles.btnPrimary}`} disabled={busy || !newWsName.trim()}>
                 {busy ? "Creating…" : "Create space"}
               </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ── Modal 4: Space Lifecycle Confirmation (Delete / Stop Sharing / Leave) ── */}
+      {lifecycleModal && (
+        <div
+          className={styles.modalBackdrop}
+          role="dialog"
+          aria-modal="true"
+          aria-label={
+            lifecycleModal.action === "delete"
+              ? `Delete ${lifecycleModal.name}`
+              : lifecycleModal.action === "unshare"
+                ? `Stop sharing ${lifecycleModal.name}`
+                : `Leave ${lifecycleModal.name}`
+          }
+          onClick={closeLifecycleModal}
+        >
+          <form
+            className={styles.modalCard}
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleConfirmLifecycleModal}
+          >
+            <h3 className={styles.modalTitle}>
+              {lifecycleModal.action === "delete"
+                ? lifecycleModal.kind === "shared"
+                  ? `Delete team space "${lifecycleModal.name}"?`
+                  : `Delete "${lifecycleModal.name}"?`
+                : lifecycleModal.action === "unshare"
+                  ? `Stop sharing "${lifecycleModal.name}"?`
+                  : `Leave "${lifecycleModal.name}"?`}
+            </h3>
+
+            {lifecycleModal.action === "delete" && (
+              <>
+                <div className={`${styles.alert} ${styles.alertDanger}`}>
+                  <span>
+                    {lifecycleModal.kind === "shared"
+                      ? "All teammates will immediately lose access, and every page, uploaded file, and version history in this team space will be permanently deleted. This action cannot be undone."
+                      : "Every page, uploaded file, and version history in this space will be permanently deleted. This action cannot be undone."}
+                  </span>
+                </div>
+                <label className={styles.fieldLabel}>
+                  <span>
+                    Type <strong>{lifecycleModal.name}</strong> to confirm permanent deletion
+                  </span>
+                  <input
+                    type="text"
+                    className={styles.input}
+                    aria-label="Confirm space name"
+                    placeholder={lifecycleModal.name}
+                    value={deleteConfirmInput}
+                    onChange={(e) => {
+                      setDeleteConfirmInput(e.target.value);
+                      setLifecycleError(null);
+                    }}
+                    disabled={busy}
+                    autoFocus
+                  />
+                </label>
+              </>
+            )}
+
+            {lifecycleModal.action === "unshare" && (
+              <p className={styles.cardSub}>
+                All teammates will immediately lose access and active share links will stop working. The space will be
+                moved back into your Private spaces with all pages and history intact.
+              </p>
+            )}
+
+            {lifecycleModal.action === "leave" && (
+              <p className={styles.cardSub}>
+                You will be removed from &ldquo;{lifecycleModal.name}&rdquo; and it will no longer appear in your
+                Knowledge library or Tina context. Other teammates keep access and no pages are deleted.
+              </p>
+            )}
+
+            {lifecycleError && (
+              <div className={`${styles.alert} ${styles.alertDanger}`} role="alert">
+                <span>{lifecycleError}</span>
+              </div>
+            )}
+
+            <div className={styles.inlineForm} style={{ justifyContent: "flex-end" }}>
+              <button type="button" className={styles.btn} disabled={busy} onClick={closeLifecycleModal}>
+                Cancel
+              </button>
+              {lifecycleModal.action === "delete" && (
+                <button
+                  type="submit"
+                  className={`${styles.btn} ${styles.btnDangerSolid}`}
+                  disabled={busy || !isDeleteConfirmMatch}
+                >
+                  <WebIcon name="trash" size={13} />
+                  <span>{busy ? "Deleting…" : "Permanently delete"}</span>
+                </button>
+              )}
+              {lifecycleModal.action === "unshare" && (
+                <button type="submit" className={`${styles.btn} ${styles.btnDanger}`} disabled={busy}>
+                  <WebIcon name="user" size={13} />
+                  <span>{busy ? "Converting…" : "Stop sharing"}</span>
+                </button>
+              )}
+              {lifecycleModal.action === "leave" && (
+                <button type="submit" className={`${styles.btn} ${styles.btnDanger}`} disabled={busy}>
+                  <WebIcon name="logout" size={13} />
+                  <span>{busy ? "Leaving…" : "Leave space"}</span>
+                </button>
+              )}
             </div>
           </form>
         </div>

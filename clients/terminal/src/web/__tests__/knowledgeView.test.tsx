@@ -642,4 +642,244 @@ describe("KnowledgeView v3 (Notion-Style Non-Tech Knowledge Hub)", () => {
     expect(String(payload?.content)).toContain("title: TQuang");
     expect(String(payload?.content)).toMatch(/^updated: "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"$/m);
   });
+
+  it("manages full space lifecycle: protected My Space, Archive/Restore/Delete for Extra Space, Unshare/Leave/Delete for Team Spaces, and partial-failure recovery", async () => {
+    vi.restoreAllMocks();
+
+    type MockSlot = { repo: string | null; ref: string | null; name?: string; archived?: boolean };
+    const state: {
+      slots: Record<string, MockSlot>;
+      active: Array<{ slug: string; repo: null; ref: null; role: string; path: string; write: boolean; primary: boolean; name?: string }>;
+      memberships: Array<{ workspace_id: string; role: string }>;
+      membersByWs: Record<string, Array<{ subject: string; role: string; email?: string }>>;
+      failNextDeleteSlug: string | null;
+      calls: Array<{ method: string; url: string; body?: unknown }>;
+    } = {
+      slots: {
+        seed: { repo: null, ref: null, name: "Personal" },
+        "project-notes": { repo: null, ref: null, name: "Project Notes", archived: false },
+        "old-archive": { repo: null, ref: null, name: "Old Archive", archived: true },
+      },
+      active: [
+        { slug: "seed", repo: null, ref: null, role: "private", path: "/workspaces/42", write: true, primary: true, name: "Personal" },
+        { slug: "project-notes", repo: null, ref: null, role: "private", path: "/workspaces/.attached/42/project-notes", write: true, primary: false, name: "Project Notes" },
+      ],
+      memberships: [
+        { workspace_id: "team-alpha", role: "owner" },
+        { workspace_id: "team-beta", role: "owner" },
+        { workspace_id: "team-gamma", role: "contributor" },
+      ],
+      membersByWs: {
+        "team-alpha": [{ subject: "42", role: "owner", email: "me@acme.test" }],
+        "team-beta": [
+          { subject: "42", role: "owner", email: "me@acme.test" },
+          { subject: "99", role: "owner", email: "coowner@acme.test" },
+        ],
+        "team-gamma": [
+          { subject: "99", role: "owner", email: "owner@acme.test" },
+          { subject: "42", role: "contributor", email: "me@acme.test" },
+        ],
+      },
+      failNextDeleteSlug: null,
+      calls: [],
+    };
+    let nextUnshareIdx = 1;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const method = (init?.method || "GET").toUpperCase();
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      state.calls.push({ method, url, body });
+      const json = (payload: unknown, status = 200) =>
+        new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
+
+      if (url.includes("/api/workspace/attached")) {
+        return json({ active: "seed", slots: state.slots });
+      }
+      if (url.includes("/api/workspace/active")) {
+        return json({ subject: "42", active: state.active });
+      }
+      if (url.includes("/api/workspace/shared")) {
+        return json({ memberships: state.memberships });
+      }
+      if (url.includes("/api/workspace/members")) {
+        const wsId = new URL(url, "https://meettina.test").searchParams.get("workspace_id") || "";
+        return json({ members: state.membersByWs[wsId] ?? [] });
+      }
+      const archiveMatch = url.match(/\/api\/workspace\/([^/?]+)\/archive$/);
+      if (archiveMatch && method === "POST") {
+        const slug = decodeURIComponent(archiveMatch[1]);
+        const archived = Boolean((body as { archived?: boolean })?.archived);
+        if (state.slots[slug]) state.slots[slug] = { ...state.slots[slug], archived };
+        return json({ slug, archived });
+      }
+      const unshareMatch = url.match(/\/api\/workspace\/([^/?]+)\/unshare$/);
+      if (unshareMatch && method === "POST") {
+        const wsId = decodeURIComponent(unshareMatch[1]);
+        const newSlug = `workspace-${nextUnshareIdx++}`;
+        state.memberships = state.memberships.filter((m) => m.workspace_id !== wsId);
+        state.slots[newSlug] = { repo: null, ref: null, name: wsId, archived: false };
+        return json({ slug: newSlug });
+      }
+      const leaveMatch = url.match(/\/api\/workspace\/([^/?]+)\/leave$/);
+      if (leaveMatch && method === "POST") {
+        const wsId = decodeURIComponent(leaveMatch[1]);
+        state.memberships = state.memberships.filter((m) => m.workspace_id !== wsId);
+        return json({ ok: true, left: wsId });
+      }
+      const deleteMatch = url.match(/\/api\/workspace\/([^/?]+)$/);
+      if (deleteMatch && method === "DELETE") {
+        const slug = decodeURIComponent(deleteMatch[1]);
+        if (state.failNextDeleteSlug === slug) {
+          state.failNextDeleteSlug = null;
+          return json({ detail: "Temporary storage error" }, 500);
+        }
+        delete state.slots[slug];
+        state.active = state.active.filter((a) => a.slug !== slug);
+        return json({ slug, deleted: true });
+      }
+      if (url.includes("/api/workspace/tree")) {
+        return json({ files: ["README.md"] });
+      }
+      if (url.includes("/api/workspace/purpose")) {
+        return json({ purpose: "Notes" });
+      }
+      if (url.includes("/api/workspace/git-remote-status")) {
+        return json({ has_home: false, remote: "origin", url: null, branch: "main", tracked: false, ahead: 0, behind: 0 });
+      }
+      if (url.includes("/api/workspace/git-token")) {
+        return json({ set: false, masked: null });
+      }
+      if (url.includes("/api/workspace/git")) {
+        return json({ branch: "main", changes: [], commits: [] });
+      }
+      return json({});
+    });
+
+    render(<KnowledgeView onAskTina={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "My Space" })).toBeTruthy();
+    });
+
+    // 1. My Space: Space settings quick button on Overview opens Activity & Settings; My Space is clearly protected
+    fireEvent.click(screen.getByRole("button", { name: /Space settings/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Default personal space cannot be deleted/i)).toBeTruthy();
+    });
+    expect(screen.queryByRole("button", { name: /^Delete space$/i })).toBeNull();
+    // Pre-existing archived space is visible and deletable from Archived Spaces card
+    const archivedCard = screen.getByLabelText("Archived spaces");
+    expect(within(archivedCard).getByText("Old Archive")).toBeTruthy();
+    fireEvent.click(within(archivedCard).getByRole("button", { name: /^Delete$/i }));
+    const deleteArchivedDialog = await screen.findByRole("dialog", { name: /Delete Old Archive/i });
+    const confirmArchivedBtn = within(deleteArchivedDialog).getByRole("button", { name: /Permanently delete/i }) as HTMLButtonElement;
+    expect(confirmArchivedBtn.disabled).toBe(true);
+    fireEvent.change(within(deleteArchivedDialog).getByLabelText("Confirm space name"), { target: { value: "Old Archive" } });
+    expect(confirmArchivedBtn.disabled).toBe(false);
+    fireEvent.click(confirmArchivedBtn);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Delete Old Archive/i })).toBeNull();
+      expect(screen.queryByLabelText("Archived spaces")).toBeNull();
+    });
+    expect(state.calls.some((c) => c.method === "DELETE" && c.url.endsWith("/api/workspace/old-archive"))).toBe(true);
+
+    // 2. Extra Private Space: Archive -> appears in Archived Spaces -> Restore -> Delete via Space Picker quick action
+    fireEvent.click(screen.getByRole("button", { name: /Switch space/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Project Notes/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Project Notes" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Activity & Settings/i }));
+    const extraDanger = await screen.findByLabelText("Danger Zone");
+    fireEvent.click(within(extraDanger).getByRole("button", { name: /Archive space/i }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Archived spaces")).toBeTruthy();
+      expect(within(screen.getByLabelText("Archived spaces")).getByText("Project Notes")).toBeTruthy();
+    });
+    // Space Picker shows Archived spaces count
+    fireEvent.click(screen.getByRole("button", { name: /Switch space/i }));
+    expect(await screen.findByRole("menuitem", { name: /Archived spaces/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Switch space/i }));
+    // Restore brings Project Notes back
+    fireEvent.click(within(screen.getByLabelText("Archived spaces")).getByRole("button", { name: /Restore/i }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Archived spaces")).toBeNull();
+    });
+    expect(state.calls.some((c) => c.method === "POST" && c.url.endsWith("/api/workspace/project-notes/archive") && (c.body as { archived?: boolean })?.archived === false)).toBe(true);
+    // Delete Project Notes directly from Space Picker quick action
+    fireEvent.click(screen.getByRole("button", { name: /Switch space/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Delete this space/i }));
+    const deleteExtraDialog = await screen.findByRole("dialog", { name: /Delete Project Notes/i });
+    fireEvent.change(within(deleteExtraDialog).getByLabelText("Confirm space name"), { target: { value: "project notes" } });
+    fireEvent.click(within(deleteExtraDialog).getByRole("button", { name: /Permanently delete/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Delete Project Notes/i })).toBeNull();
+    });
+    expect(state.calls.some((c) => c.method === "DELETE" && c.url.endsWith("/api/workspace/project-notes"))).toBe(true);
+
+    // 3. Team Space (Sole Owner — Team Alpha): Leave is disabled, Delete runs unshare -> delete with partial-failure retry
+    fireEvent.click(screen.getByRole("button", { name: /Switch space/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Team Alpha/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Team Alpha" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Activity & Settings/i }));
+    const alphaDanger = await screen.findByLabelText("Danger Zone");
+    expect((within(alphaDanger).getByRole("button", { name: /Leave space/i }) as HTMLButtonElement).disabled).toBe(true);
+    // Trigger Delete with simulated failure on step 2 (DELETE /api/workspace/workspace-1)
+    state.failNextDeleteSlug = "workspace-1";
+    fireEvent.click(within(alphaDanger).getByRole("button", { name: /Delete space/i }));
+    const deleteAlphaDialog = await screen.findByRole("dialog", { name: /Delete Team Alpha/i });
+    expect(deleteAlphaDialog.textContent).toContain("All teammates will immediately lose access");
+    fireEvent.change(within(deleteAlphaDialog).getByLabelText("Confirm space name"), { target: { value: "Team Alpha" } });
+    fireEvent.click(within(deleteAlphaDialog).getByRole("button", { name: /Permanently delete/i }));
+    // Modal remains open with recovery message and retries DELETE without re-unsharing
+    const retryAlert = await within(deleteAlphaDialog).findByRole("alert");
+    expect(retryAlert.textContent).toContain("Stopped sharing");
+    expect(retryAlert.textContent).toContain("retry");
+    fireEvent.click(within(deleteAlphaDialog).getByRole("button", { name: /Permanently delete/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Delete Team Alpha/i })).toBeNull();
+    });
+    expect(state.calls.filter((c) => c.method === "POST" && c.url.endsWith("/api/workspace/team-alpha/unshare")).length).toBe(1);
+    expect(state.calls.filter((c) => c.method === "DELETE" && c.url.endsWith("/api/workspace/workspace-1")).length).toBe(2);
+
+    // 4. Team Space (Co-Owner — Team Beta): Leave is enabled, and Stop sharing converts to private space
+    fireEvent.click(screen.getByRole("button", { name: /Switch space/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Team Beta/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Team Beta" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Activity & Settings/i }));
+    const betaDanger = await screen.findByLabelText("Danger Zone");
+    await waitFor(() => {
+      expect((within(betaDanger).getByRole("button", { name: /Leave space/i }) as HTMLButtonElement).disabled).toBe(false);
+    });
+    fireEvent.click(within(betaDanger).getByRole("button", { name: /Stop sharing/i }));
+    const unshareDialog = await screen.findByRole("dialog", { name: /Stop sharing Team Beta/i });
+    fireEvent.click(within(unshareDialog).getByRole("button", { name: /Stop sharing/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Stop sharing Team Beta/i })).toBeNull();
+    });
+    expect(state.calls.some((c) => c.method === "POST" && c.url.endsWith("/api/workspace/team-beta/unshare"))).toBe(true);
+
+    // 5. Team Space (Contributor — Team Gamma): no Delete/Stop sharing; Leave works via confirmation modal
+    fireEvent.click(screen.getByRole("button", { name: /Switch space/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Team Gamma/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Team Gamma" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Activity & Settings/i }));
+    const gammaDanger = await screen.findByLabelText("Danger Zone");
+    expect(within(gammaDanger).queryByRole("button", { name: /Delete space/i })).toBeNull();
+    expect(within(gammaDanger).queryByRole("button", { name: /Stop sharing/i })).toBeNull();
+    expect(within(gammaDanger).getByText(/Only a space owner/i)).toBeTruthy();
+    fireEvent.click(within(gammaDanger).getByRole("button", { name: /Leave space/i }));
+    const leaveDialog = await screen.findByRole("dialog", { name: /Leave Team Gamma/i });
+    fireEvent.click(within(leaveDialog).getByRole("button", { name: /Leave space/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Leave Team Gamma/i })).toBeNull();
+    });
+    expect(state.calls.some((c) => c.method === "POST" && c.url.endsWith("/api/workspace/team-gamma/leave"))).toBe(true);
+  });
 });
