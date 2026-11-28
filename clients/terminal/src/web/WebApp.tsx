@@ -404,7 +404,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
 
             {view === "tasks" && !meetOnly && <TasksView onAskTina={askTina} />}
 
-            {view === "routines" && !meetOnly && <RoutinesView onAskTina={askTina} />}
+            {view === "routines" && !meetOnly && <RoutinesView />}
 
             {view === "settings" && (
               <SettingsView

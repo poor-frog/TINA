@@ -134,14 +134,17 @@ def _read_routine_text(path: Path) -> str:
         os.close(directory)
 
 
-def _write_routine_text(path: Path, text: str) -> None:
+def _write_routine_text(path: Path, text: str, *, create: bool = False) -> None:
     directory = _routine_directory(path)
     temporary = '.routine-' + os.urandom(10).hex()
     try:
         fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
         with os.fdopen(fd, 'w') as stream:
             stream.write(text)
-        os.replace(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory)
+        if create:
+            os.link(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
+        else:
+            os.replace(temporary, path.name, src_dir_fd=directory, dst_dir_fd=directory)
     finally:
         try:
             os.unlink(temporary, dir_fd=directory)
@@ -470,6 +473,44 @@ def mutate_routine_file(subject, identifier, *, scheduler, invocations_url, work
             _write_routine_text(path, '---\n' + yaml.safe_dump(fm, allow_unicode=True, sort_keys=False) + '---\n' + match.group(4))
         return _reconcile_workspace_routines(subject, scheduler=scheduler, invocations_url=invocations_url,
                                              workspaces_dir=workspaces_dir)
+
+
+def create_workspace_routine(routine, *, scheduler, invocations_url, workspaces_dir):
+    subject = routine["owner"]
+    trigger = routine["trigger"]
+    cron, prompt = trigger["cron"], routine["plan"]["prompt"]
+    if not _valid_cron(cron) or not prompt.strip() or not routine["name"].strip():
+        raise ValueError("A name, valid five-field cron schedule, and task instructions are required")
+    root = _safe_workspace_dir(workspaces_dir, subject)
+    with workspace_write_lock(root):
+        bases = _workspace_bases(workspaces_dir, subject)
+        if not bases:
+            raise ValueError("Activate a private workspace before creating a routine")
+        workspace, base = bases[0]
+        path = base / ROUTINES_DIR / f'{routine["id"]}.md'
+        timezone = trigger.get("timezone", "UTC")
+        file = RoutineFile(path.stem, True, cron, prompt, path, timezone, routine["name"])
+        # Validate the job, including deployment signing configuration, before publishing a file.
+        job = _compile_workspace_job(file, subject=subject, invocations_url=invocations_url, workspace=workspace)
+        text = "---\n" + yaml.safe_dump({
+            "name": routine["name"], "enabled": True, "timezone": timezone, "cron": cron, "prompt": prompt,
+        }, allow_unicode=True, sort_keys=False) + "---\n"
+        if len(text) > 128000:
+            raise ValueError("Routine configuration is too large")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            _write_routine_text(path, text, create=True)
+        except FileExistsError:
+            if _read_routine_text(path) != text:
+                raise FileExistsError("A routine with this name and schedule exists. Edit it in Routines.") from None
+        scheduled = True
+        try:
+            _reconcile_workspace_routines(subject, scheduler=scheduler, invocations_url=invocations_url,
+                                          workspaces_dir=workspaces_dir)
+        except (OSError, ValueError):
+            log.warning("Routine file saved but scheduler reconciliation failed for %s", subject, exc_info=True)
+            scheduled = False
+        return {"id": job["metadata"]["routine_id"], "path": f"{ROUTINES_DIR}/{path.name}", "scheduled": scheduled}
 
 
 def _job_fingerprint(job_spec: dict) -> str:

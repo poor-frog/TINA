@@ -23,6 +23,26 @@ import {
 import type { ChatStreamCallbacks } from "../../surfaces/chatStream";
 import type { MeetingMock } from "../../surfaces/meetingModel";
 
+function mockNativeDialog() {
+  // jsdom has a dialog element but does not implement the native modal methods.
+  const proto = HTMLDialogElement.prototype;
+  const showModal = Object.getOwnPropertyDescriptor(proto, "showModal");
+  const close = Object.getOwnPropertyDescriptor(proto, "close");
+  Object.defineProperty(proto, "showModal", {
+    configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); },
+  });
+  Object.defineProperty(proto, "close", {
+    configurable: true, value(this: HTMLDialogElement) { this.removeAttribute("open"); },
+  });
+  onTestFinished(() => {
+    cleanup();
+    if (showModal) Object.defineProperty(proto, "showModal", showModal);
+    else Reflect.deleteProperty(proto, "showModal");
+    if (close) Object.defineProperty(proto, "close", close);
+    else Reflect.deleteProperty(proto, "close");
+  });
+}
+
 vi.mock("next-auth/react", () => ({
   signIn: vi.fn(),
 }));
@@ -738,22 +758,8 @@ describe("WebShell production UI (Option A & Option B)", () => {
   });
 
   it("adds a recorded meeting to a writable workspace using its row ID", async () => {
-    // jsdom has a dialog element but does not implement the native modal methods.
-    const proto = HTMLDialogElement.prototype;
-    const showModal = Object.getOwnPropertyDescriptor(proto, "showModal");
-    const close = Object.getOwnPropertyDescriptor(proto, "close");
-    Object.defineProperty(proto, "showModal", {
-      configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); },
-    });
-    Object.defineProperty(proto, "close", {
-      configurable: true, value(this: HTMLDialogElement) { this.removeAttribute("open"); },
-    });
+    mockNativeDialog();
     onTestFinished(() => {
-      cleanup();
-      if (showModal) Object.defineProperty(proto, "showModal", showModal);
-      else Reflect.deleteProperty(proto, "showModal");
-      if (close) Object.defineProperty(proto, "close", close);
-      else Reflect.deleteProperty(proto, "close");
       mockListSharedMemberships.mockResolvedValue([{ workspace_id: "eng-syncs", role: "owner" }]);
     });
     const fetchMock = mockEnvironment({ admin: false });
@@ -777,16 +783,40 @@ describe("WebShell production UI (Option A & Option B)", () => {
     expect(await screen.findByText(/Meeting added to/)).toBeTruthy();
   });
 
-  it("offers the latest recording in Ask Tina and lets the user finish a routine draft", async () => {
-    mockEnvironment({ admin: false });
+  it("saves a confirmed routine through the scheduler API and still offers the latest recording", async () => {
+    mockNativeDialog();
+    const fetchMock = mockEnvironment({ admin: false });
+    const fetchDefault = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input) === "/api/routines" && init?.method === "POST") {
+        return Response.json({ id: "rt_test", path: "routines/rt_test.md", scheduled: true });
+      }
+      return fetchDefault(input, init);
+    });
     render(<WebShell />);
     fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
 
     const composer = await screen.findByLabelText<HTMLTextAreaElement>("Message Ask Tina");
-    fireEvent.click(screen.getByRole("button", { name: "Schedule a routine" }));
-    expect(composer.value).toBe("/routine ");
-    expect(document.activeElement).toBe(composer);
+    fireEvent.change(composer, { target: { value: "/routine Báo cáo các task đang mở" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const dialog = screen.getByRole("dialog", { name: "Create routine" });
+    const fields = within(dialog);
+    expect(fields.getByLabelText<HTMLTextAreaElement>("Task instructions").value).toBe("Báo cáo các task đang mở");
     expect(capturedChatCallbacks).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/routines")).toBe(false);
+    fireEvent.change(fields.getByLabelText("Routine name"), { target: { value: "Báo cáo task mở" } });
+    fireEvent.change(fields.getByLabelText("Cron schedule"), { target: { value: "*/5 * * * *" } });
+    fireEvent.change(fields.getByLabelText("IANA time zone"), { target: { value: "Asia/Ho_Chi_Minh" } });
+    fireEvent.click(fields.getByRole("button", { name: "Save and enable" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Create routine" })).toBeNull());
+    expect(fetchMock).toHaveBeenCalledWith("/api/routines", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        name: "Báo cáo task mở", cron: "*/5 * * * *", timezone: "Asia/Ho_Chi_Minh",
+        prompt: "Báo cáo các task đang mở", workspace_file: true, run_now: false,
+      }),
+    }));
+    expect(composer.value).toBe("");
 
     fireEvent.click(screen.getByRole("button", { name: "Summarize Design Review" }));
     await waitFor(() => {

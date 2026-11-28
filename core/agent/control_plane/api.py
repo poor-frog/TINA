@@ -367,6 +367,7 @@ class RoutineCreate(BaseModel):
     prompt: str
     timezone: str = 'UTC'
     run_now: bool = True  # fire one immediate run so the author sees a result without waiting for cron
+    workspace_file: bool = False
 
 
 class RoutineEnabledPatch(BaseModel):
@@ -2533,7 +2534,14 @@ def create_app(
             routine = routines_mod.make_routine(
                 subject=subject_of(request), name=body.name, cron=body.cron, prompt=body.prompt, timezone=body.timezone,
             )
+            if body.workspace_file:
+                saved = workspace_routines_mod.create_workspace_routine(
+                    routine, scheduler=scheduler, invocations_url=invocations_url, workspaces_dir=wsr.root,
+                )
+                return {**saved, "ran_now": False}
             job_spec = routines_mod.compile_to_job(routine, invocations_url=invocations_url)
+        except FileExistsError as e:
+            raise HTTPException(status_code=409, detail=str(e))
         except (ValueError, ValidationError) as e:  # bad cron form / non-conformant routine — fail loud
             raise HTTPException(status_code=400, detail=str(getattr(e, "message", e)))
         job = scheduler.schedule(job_spec)

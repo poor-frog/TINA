@@ -1,9 +1,10 @@
 "use client";
 /** AskTinaView — Full-page Production AI Assistant backed by TINA's resumable SSE `/api/chat`,
- *  MCP Tool Approval cards (`/api/chat/approval`), real `/routine` prompt compilation, Copy/Share
+ *  MCP Tool Approval cards (`/api/chat/approval`), confirmed `/routine` creation, Copy/Share
  *  message actions, parsed context pills, and searchable `/api/sessions` history. */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
 import { WebIcon } from "./Icons";
+import { RoutineCreateDialog } from "./RoutineCreateDialog";
 import { AgentActivitySteps, describeAgentTool } from "./AgentActivitySteps";
 import { LucianThinkingText } from "./lucian/LucianThinkingText";
 import { LucianToolApprovalCard } from "./lucian/LucianToolApprovalCard";
@@ -41,7 +42,7 @@ import { startStreamingDictation, type StreamingDictation } from "../ui-kit/micD
 import { deleteSession, listSessions, sessionHistory, type SessionSummary } from "../surfaces/sessionsApi";
 import { listWorkspaceTree, readActiveSet } from "../surfaces/workspaceApi";
 import { streamChatTurn, type ChatPhase, type MeetingGrounding } from "../surfaces/chatStream";
-import { stripContextBlocks } from "../surfaces/chat";
+import { isRoutineCommand, routineDescription, stripContextBlocks } from "../surfaces/chat";
 import { ApiError, presentError } from "../surfaces/apiClient";
 import type { FocusPayload, MeetingFocus } from "../surfaces/chatContext";
 import { meetingPhase, type MeetingMock } from "../surfaces/meetingModel";
@@ -178,6 +179,7 @@ export function AskTinaView({
   const [workspaceDocs, setWorkspaceDocs] = useState<string[]>([]);
   const [activeSpaces, setActiveSpaces] = useState<Array<{ slug: string; name?: string | null }>>([]);
   const [mentionedTargets, setMentionedTargets] = useState<MentionTarget[]>([]);
+  const [routineRequest, setRoutineRequest] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const historyRef = useRef<AbortController | null>(null);
@@ -484,6 +486,10 @@ export function AskTinaView({
       const trimmed = rawPrompt.trim();
       const uploadedFiles = opts?.uploadedFiles ?? [];
       if ((!trimmed && uploadedFiles.length === 0) || abortRef.current || historyRef.current) return;
+      if (isRoutineCommand(trimmed)) {
+        setRoutineRequest(routineDescription(trimmed));
+        return;
+      }
 
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
       const mentionCtx = compileMentionContext(opts?.mentions ?? []);
@@ -1013,6 +1019,11 @@ export function AskTinaView({
     const trimmed = draft.trim();
     const hasFiles = attachments.length > 0;
     if ((!trimmed && !hasFiles) || busy || uploading || historyLoading) return;
+    if (isRoutineCommand(trimmed)) {
+      pickers.closePickers();
+      void sendMessage(trimmed);
+      return;
+    }
 
     // Validate & handle slash commands BEFORE uploading files or clearing draft/attachments.
     if (trimmed) {
@@ -1395,7 +1406,7 @@ export function AskTinaView({
                     className="tina-web-ask-starter-card"
                     aria-labelledby={`${starterId}-routine`}
                     aria-describedby={`${starterId}-routine-description`}
-                    onClick={() => draftStarter("/routine ")}
+                    onClick={() => setRoutineRequest("")}
                   >
                     <WebIcon name="skills" size={18} />
                     <span className="tina-web-ask-starter-copy">
@@ -1864,6 +1875,16 @@ export function AskTinaView({
           </form>
         </div>
       </section>
+      {routineRequest !== null && (
+        <RoutineCreateDialog
+          request={routineRequest}
+          onClose={() => setRoutineRequest(null)}
+          onSaved={() => {
+            setRoutineRequest(null);
+            setDraft((value) => isRoutineCommand(value.trim()) ? "" : value);
+          }}
+        />
+      )}
     </div>
   );
 }

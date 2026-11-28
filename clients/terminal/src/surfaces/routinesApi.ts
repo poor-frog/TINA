@@ -17,6 +17,14 @@ export async function listRoutines(): Promise<Routine[]> {
   return (data.routines ?? []).map((r) => ({ ...r, name: r.name, enabled: r.enabled }));
 }
 
+export function createWorkspaceRoutine(routine: { name: string; cron: string; timezone: string; prompt: string }) {
+  return getJson<{ id: string; path: string; scheduled?: boolean }>("/api/routines", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...routine, workspace_file: true, run_now: false }),
+  });
+}
+
 export async function deleteRoutine(id: string, expectedSha256?: string): Promise<void> {
   await getJson(`/api/routines/${encodeURIComponent(id)}${expectedSha256 ? `?expected_sha256=${encodeURIComponent(expectedSha256)}` : ''}`, { method: "DELETE" });
 }

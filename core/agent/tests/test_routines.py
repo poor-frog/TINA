@@ -16,7 +16,7 @@ from control_plane.api import create_app
 from shared.config import load_settings
 from control_plane.dispatch import Dispatcher
 from control_plane.workspace_reader import WorkspaceReader
-from control_plane.workspace_routines import reconcile_workspace_routines
+from control_plane.workspace_routines import load_routine_file, reconcile_workspace_routines
 
 
 class _FakeRuntime:
@@ -143,6 +143,39 @@ def test_create_and_list_routines_over_http():
     rid = body["routine"]["id"]
     assert client.delete(f"/api/routines/{rid}", params={"subject": "u_jane"}).status_code == 200
     assert scheduler.jobs == []
+
+
+def test_create_workspace_routine_is_visible_and_scheduled_once(tmp_path):
+    scheduler = _FakeScheduler()
+    client, dispatcher = _app(scheduler, reader=WorkspaceReader(str(tmp_path)))
+    headers = {"X-User-Id": "u_jane"}
+    routine = {
+        "workspace_file": True, "name": "[TEST] Báo cáo task mở",
+        "cron": "*/5 * * * *", "timezone": "Asia/Ho_Chi_Minh",
+        "prompt": "Đọc danh sách task đang mở.",
+    }
+
+    invalid = client.post("/api/routines", headers=headers, json={**routine, "cron": "99 * * * *"})
+    assert invalid.status_code == 400
+    response = client.post("/api/routines", headers=headers, json=routine)
+    assert response.status_code == 201, response.text
+    saved = response.json()
+    assert saved["scheduled"] and not saved["ran_now"]
+    assert not dispatcher.dispatched
+    assert saved["path"].startswith("routines/")
+    parsed = load_routine_file(tmp_path / "u_jane" / saved["path"])
+    assert parsed and parsed.prompt == routine["prompt"] and parsed.timezone == routine["timezone"]
+
+    listed = client.get("/api/routines", headers=headers).json()["routines"]
+    assert len(listed) == 1
+    card = listed[0]
+    assert card["id"] == saved["id"] and card["name"] == routine["name"]
+    assert card["editable"] and card["next_run"] == 1000.0
+    assert client.get("/api/routines", headers={"X-User-Id": "u_bob"}).json()["routines"] == []
+    assert client.post("/api/routines", headers=headers, json=routine).json() == saved
+    assert len(scheduler.jobs) == 1
+    conflict = client.post("/api/routines", headers=headers, json={**routine, "prompt": "Khác."})
+    assert conflict.status_code == 409
 
 
 def test_routines_501_when_scheduler_not_wired():

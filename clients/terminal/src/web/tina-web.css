@@ -2885,9 +2885,8 @@
 }
 
 .tina-web-field input,
-.tina-web-field select {
-  height: 38px;
-  padding: 0 11px;
+.tina-web-field select,
+.tina-web-field textarea {
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: var(--tw-card);
@@ -2895,8 +2894,21 @@
   font-size: 13.5px;
 }
 
+.tina-web-field input,
+.tina-web-field select {
+  height: 38px;
+  padding: 0 11px;
+}
+
+.tina-web-field textarea {
+  padding: 8px 11px;
+  font-family: inherit;
+  resize: vertical;
+}
+
 .tina-web-field input:focus,
-.tina-web-field select:focus {
+.tina-web-field select:focus,
+.tina-web-field textarea:focus {
   border-color: var(--tw-mint);
   outline: none;
 }

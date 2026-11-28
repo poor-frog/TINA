@@ -508,11 +508,11 @@ const ROUTINE_NAME_STOP_WORDS = new Set([
   "hour", "hours", "day", "days", "week", "weeks", "month", "months", "am", "pm",
 ]);
 
-function isRoutineCommand(text: string): boolean {
+export function isRoutineCommand(text: string): boolean {
   return /^\/routine(?:\s|$)/i.test(text);
 }
 
-function routineDescription(text: string): string {
+export function routineDescription(text: string): string {
   return text.replace(/^\/routine(?:\s+|$)/i, "").trim();
 }
 
