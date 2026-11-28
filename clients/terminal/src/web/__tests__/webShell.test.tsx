@@ -798,15 +798,28 @@ describe("WebShell production UI (Option A & Option B)", () => {
 
     const composer = await screen.findByLabelText<HTMLTextAreaElement>("Message Ask Tina");
     fireEvent.change(composer, { target: { value: "/routine Báo cáo các task đang mở" } });
+    const options = new Intl.DateTimeFormat().resolvedOptions();
+    const resolvedOptions = vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
+      .mockReturnValueOnce({ ...options, timeZone: "Asia/Saigon" });
+    onTestFinished(() => { resolvedOptions.mockRestore(); });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     const dialog = screen.getByRole("dialog", { name: "Create routine" });
     const fields = within(dialog);
     expect(fields.getByLabelText<HTMLTextAreaElement>("Task instructions").value).toBe("Báo cáo các task đang mở");
+    const timeZone = fields.getByLabelText<HTMLInputElement>("IANA time zone");
+    expect(timeZone.value).toBe("Asia/Ho_Chi_Minh");
     expect(capturedChatCallbacks).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/routines")).toBe(false);
     fireEvent.change(fields.getByLabelText("Routine name"), { target: { value: "Báo cáo task mở" } });
-    fireEvent.change(fields.getByLabelText("Cron schedule"), { target: { value: "*/5 * * * *" } });
-    fireEvent.change(fields.getByLabelText("IANA time zone"), { target: { value: "Asia/Ho_Chi_Minh" } });
+    const schedule = fields.getByLabelText("Schedule", { exact: true });
+    expect(fields.queryByLabelText("Cron schedule")).toBeNull();
+    fireEvent.change(schedule, { target: { value: "custom" } });
+    expect(fields.getByLabelText("Cron schedule")).toBeTruthy();
+    fireEvent.change(schedule, { target: { value: "daily" } });
+    expect(fields.getByLabelText("Time of day")).toBeTruthy();
+    fireEvent.change(schedule, { target: { value: "*/5 * * * *" } });
+    expect(fields.queryByLabelText("Cron schedule")).toBeNull();
+    fireEvent.change(timeZone, { target: { value: "Asia/Saigon" } });
     fireEvent.click(fields.getByRole("button", { name: "Save and enable" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Create routine" })).toBeNull());
     expect(fetchMock).toHaveBeenCalledWith("/api/routines", expect.objectContaining({

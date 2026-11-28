@@ -5,6 +5,11 @@ import { presentError } from "../surfaces/apiClient";
 import { createWorkspaceRoutine } from "../surfaces/routinesApi";
 import { emitWebToast } from "./lucian/webToast";
 
+function routineTimeZone(value: string): string {
+  // Some browsers return this legacy alias, which the staging API rejects.
+  return value === "Asia/Saigon" ? "Asia/Ho_Chi_Minh" : value;
+}
+
 export function RoutineCreateDialog({ request = "", onClose, onSaved }: {
   request?: string;
   onClose: () => void;
@@ -12,8 +17,10 @@ export function RoutineCreateDialog({ request = "", onClose, onSaved }: {
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [name, setName] = useState("");
-  const [cron, setCron] = useState("");
-  const [timezone, setTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  const [schedule, setSchedule] = useState("");
+  const [dailyTime, setDailyTime] = useState("");
+  const [customCron, setCustomCron] = useState("");
+  const [timezone, setTimezone] = useState(() => routineTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"));
   const [prompt, setPrompt] = useState(request);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -26,12 +33,20 @@ export function RoutineCreateDialog({ request = "", onClose, onSaved }: {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving || !name.trim() || !cron.trim() || !timezone.trim() || !prompt.trim()) return;
+    if (saving || !name.trim() || !schedule || !timezone.trim() || !prompt.trim()) return;
+    let cron = schedule;
+    if (schedule === "custom") cron = customCron.trim();
+    if (schedule === "daily") {
+      if (!dailyTime) return;
+      const [hour, minute] = dailyTime.split(":").map(Number);
+      cron = `${minute} ${hour} * * *`;
+    }
+    if (!cron) return;
     setSaving(true);
     setError("");
     try {
       const result = await createWorkspaceRoutine({
-        name: name.trim(), cron: cron.trim(), timezone: timezone.trim(), prompt: prompt.trim(),
+        name: name.trim(), cron: cron.trim(), timezone: routineTimeZone(timezone.trim()), prompt: prompt.trim(),
       });
       if (!result.id || !result.path) throw new Error("This server does not support saving workspace routines.");
       emitWebToast(result.scheduled
@@ -55,9 +70,25 @@ export function RoutineCreateDialog({ request = "", onClose, onSaved }: {
           <label className="tina-web-field">Routine name
             <input required maxLength={120} value={name} disabled={saving} onChange={(event) => setName(event.target.value)} />
           </label>
-          <label className="tina-web-field">Cron schedule
-            <input required placeholder="*/5 * * * *" value={cron} disabled={saving} onChange={(event) => setCron(event.target.value)} />
+          <label className="tina-web-field">Schedule
+            <select required value={schedule} disabled={saving} onChange={(event) => setSchedule(event.target.value)}>
+              <option value="" disabled>Choose a schedule</option>
+              <option value="*/5 * * * *">Every 5 minutes</option>
+              <option value="0 * * * *">Every hour</option>
+              <option value="daily">Daily at a set time</option>
+              <option value="custom">Custom cron</option>
+            </select>
           </label>
+          {schedule === "daily" && (
+            <label className="tina-web-field">Time of day
+              <input type="time" required value={dailyTime} disabled={saving} onChange={(event) => setDailyTime(event.target.value)} />
+            </label>
+          )}
+          {schedule === "custom" && (
+            <label className="tina-web-field">Cron schedule
+              <input required placeholder="*/5 * * * *" value={customCron} disabled={saving} onChange={(event) => setCustomCron(event.target.value)} />
+            </label>
+          )}
           <label className="tina-web-field">IANA time zone
             <input required value={timezone} disabled={saving} onChange={(event) => setTimezone(event.target.value)} />
           </label>

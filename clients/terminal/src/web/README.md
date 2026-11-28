@@ -52,8 +52,8 @@ TINA Terminal workbench at `/terminal`.
   (`#453`), connected agent task-step timeline (`#454`), morphing tool approval card (`#455`), and
   morphing voice dictation pill (`#457`). Shared `@` mentions and `/` commands also power the inline
   `KnowledgeCopilotDrawer` and `MeetingSidePanel` composers.
-  Full-page Ask Tina opens a confirmation form for `/routine`. The form and the Routines
-  page both save a scheduler-managed file in the first active private workspace.
+  Full-page Ask Tina and the Routines page open the same confirmation form with schedule
+  presets and a custom cron option. The form saves a routine in the first active private workspace.
 - **Lucian micro-interaction layer (`lucian/`)**: Ported MIT primitives from Lucian UX/UI Prompt
   bridged onto TINA's dark/light/landing palettes (`lucianTokens.css`), including the global stacked
   toast deck (`#435`), circular-reveal dark/light toggle (`#219`), live-meeting Dynamic Island
