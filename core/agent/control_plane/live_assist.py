@@ -171,7 +171,20 @@ def dispatch_request(dispatcher, job, client=None):
         if outcome == 'published' and not accepted.get('accepted'):
             scrub_stale_snapshot(dispatcher.settings, job)
         return
-    model = dispatcher.settings.state_fast_model if role == 'fast' else dispatcher.settings.state_reason_model
+    from control_plane.meeting_voice_completion import resolve_voice_model_env
+    resolver = getattr(dispatcher, 'resolve_model_config', None)
+    user_model_env = (
+        resolve_voice_model_env(
+            resolver(str(job['user_id'])),
+            allowlist=dispatcher.settings.model_allowlist,
+            subject=str(job['user_id']),
+        )
+        if callable(resolver) else {}
+    )
+    model = (
+        (user_model_env.get('TINA_LLM_MODEL') or '').strip()
+        or (dispatcher.settings.state_fast_model if role == 'fast' else dispatcher.settings.state_reason_model)
+    )
     allow = dispatcher.settings.model_allowlist
     if not model or (allow and model not in {m.strip() for m in allow.split(',')}):
         meeting_post(dispatcher.settings, job, 'result', {'role': role, 'generation': job['generation'], 'error': 'model_not_configured'})

@@ -102,6 +102,8 @@ def resolve_voice_model_env(model_config: dict | None, *, allowlist: str = "", s
     """Translate a subject's Settings -> Models config into CompletionPort env vars for voice."""
     if not isinstance(model_config, dict):
         return {}
+    if str(model_config.get("meeting_use_default") or "").strip().lower() == "true":
+        return {}
     mode = (model_config.get("mode") or "").strip()
     if not mode or mode in ("openai-subscription", "antigravity"):
         return {}
@@ -134,6 +136,31 @@ def resolve_voice_model_env(model_config: dict | None, *, allowlist: str = "", s
     return result
 
 
+def fallback_reason_from_stderr(stderr: str | bytes | None) -> str | None:
+    """Detect the secret-free fallback marker emitted on external provider 401/403/429."""
+    from llm.errors import PROVIDER_FALLBACK_MARKER
+
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    for line in (stderr or "").splitlines():
+        trimmed = line.strip()
+        if trimmed.startswith(PROVIDER_FALLBACK_MARKER):
+            reason = trimmed[len(PROVIDER_FALLBACK_MARKER):].strip()
+            if reason in ("auth", "rate_limit"):
+                return reason
+    return None
+
+
+def can_fallback_to_bedrock(model_env: dict[str, str] | None) -> bool:
+    """True when an external/custom model_env can fall back to deployment-default Amazon Bedrock."""
+    if not model_env:
+        return False
+    if (os.environ.get("TINA_LLM_PROVIDER") or "").strip() != "bedrock-converse":
+        return False
+    provider = (model_env.get("TINA_LLM_PROVIDER") or "").strip()
+    return provider != "bedrock-converse" or bool((model_env.get("AWS_BEARER_TOKEN_BEDROCK") or "").strip())
+
+
 def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,
              model_env: dict[str, str] | None = None) -> str:
     if not payload.get("voice_turn"):
@@ -150,14 +177,16 @@ def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,
         if deadline <= time.time():
             raise HTTPException(504, "Voice retrieval timed out")
         raise HTTPException(429, "Voice completion is busy")
-    env = {key: os.environ[key] for key in (
+    base_env = {key: os.environ[key] for key in (
         "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_DEFAULT_REGION", "AWS_REGION",
         "PATH", "PYTHONPATH", "TINA_LLM_PROVIDER", "TINA_LLM_MODEL",
     ) if key in os.environ}
-    env.update(REDIS_URL=redis_url, HOME="/tmp",
-               TINA_CHAT_SESSION="meeting-knowledge-" + payload["request_id"])
+    base_env.update(REDIS_URL=redis_url, HOME="/tmp",
+                    TINA_CHAT_SESSION="meeting-knowledge-" + payload["request_id"])
     if source.get("mode") == "voice_web" and not chatgpt_plan and os.environ.get("TINA_AGENT_REACH_URL"):
-        env["TINA_AGENT_REACH_URL"] = os.environ["TINA_AGENT_REACH_URL"]
+        base_env["TINA_AGENT_REACH_URL"] = os.environ["TINA_AGENT_REACH_URL"]
+    env = dict(base_env)
+    fallback_eligible = not chatgpt_plan and can_fallback_to_bedrock(model_env)
     try:
         if chatgpt_plan:
             from control_plane.aws_voice_chatgpt import access_token
@@ -187,6 +216,23 @@ def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,
             cwd="/tmp", env=env,
             timeout=remaining,
         )
+        if fallback_eligible and (result.returncode or not result.stdout):
+            reason = fallback_reason_from_stderr(result.stderr)
+            if reason is not None:
+                _log_worker_timings(result.stderr)
+                fallback_remaining = deadline - time.time()
+                if fallback_remaining > 1.0:
+                    log.warning(
+                        "Voice completion external provider failed reason=%s; falling back to Amazon Bedrock",
+                        reason,
+                    )
+                    result = subprocess.run(
+                        [sys.executable, "-m", "worker.meeting_voice_local"],
+                        input=json.dumps(payload, ensure_ascii=False), text=True, encoding="utf-8",
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        cwd="/tmp", env=dict(base_env),
+                        timeout=fallback_remaining,
+                    )
     except subprocess.TimeoutExpired as exc:
         _log_worker_timings(exc.stderr)
         raise HTTPException(504, "Voice completion timed out") from exc

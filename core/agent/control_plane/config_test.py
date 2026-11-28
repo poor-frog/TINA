@@ -412,12 +412,15 @@ def run_models_test(config: dict, env: Optional[dict] = None,
     base_url = (config.get("base_url") or "").strip() or env.get("ANTHROPIC_BASE_URL", "")
     api_key = (config.get("api_key") or "").strip() or env.get("ANTHROPIC_AUTH_TOKEN", "") \
         or env.get("ANTHROPIC_API_KEY", "")
+    meeting_use_default = str(config.get("meeting_use_default") or "").strip().lower() == "true"
     if mode in ("groq", "deepseek", "gemini"):
         # Never use an Anthropic/OpenAI env credential as a Groq fallback.
         probe = {"groq": test_groq, "deepseek": test_deepseek, "gemini": test_gemini}[mode]
         out = probe((config.get("api_key") or "").strip(),
                     (config.get("model") or "").strip(),
-                    (config.get("meeting_model") or "").strip(), post=post)
+                    "" if meeting_use_default else (config.get("meeting_model") or "").strip(), post=post)
+        if out["ok"] and meeting_use_default:
+            out["summary"] += " Voice & Meeting tasks use Amazon Bedrock (Default)."
         out["mode"] = mode
     elif mode == "custom" or (not mode and base_url and api_key):
         out = test_custom_endpoint(base_url, api_key, (config.get("model") or "").strip(),
@@ -428,7 +431,7 @@ def run_models_test(config: dict, env: Optional[dict] = None,
         out = test_bedrock(bedrock_key,
                            (config.get("model") or "").strip(),
                            (config.get("region") or env.get("AWS_REGION") or "").strip(), post=post)
-        meeting_model = (config.get("meeting_model") or "").strip()
+        meeting_model = "" if meeting_use_default else (config.get("meeting_model") or "").strip()
         if out["ok"] and meeting_model and meeting_model != (config.get("model") or "").strip():
             out = test_bedrock(bedrock_key, meeting_model,
                                (config.get("region") or env.get("AWS_REGION") or "").strip(), post=post,
@@ -436,7 +439,18 @@ def run_models_test(config: dict, env: Optional[dict] = None,
             out["summary"] = "Meeting model: " + out["summary"]
         out["mode"] = "bedrock"
     elif mode == "openai-api":
-        out = test_openai_responses(api_key, (config.get("model") or "").strip(), post=post)
+        openai_key = (config.get("api_key") or "").strip() or env.get("OPENAI_API_KEY", "")
+        chat_model = (config.get("model") or "").strip() or "gpt-5"
+        out = test_openai_responses(openai_key, chat_model, post=post)
+        meeting_model = "" if meeting_use_default else (config.get("meeting_model") or "").strip()
+        if out["ok"] and meeting_model and meeting_model != chat_model:
+            meeting_out = test_openai_responses(openai_key, meeting_model, post=post)
+            if not meeting_out["ok"]:
+                out = {**meeting_out, "summary": "Voice & Meeting model: " + meeting_out["summary"]}
+            else:
+                out["summary"] += f" Voice & Meeting model OK ({meeting_model})."
+        elif out["ok"] and meeting_use_default:
+            out["summary"] += " Voice & Meeting tasks use Amazon Bedrock (Default)."
         out["mode"] = "openai-api"
     elif mode == "openai-subscription":
         try:
@@ -453,12 +467,20 @@ def run_models_test(config: dict, env: Optional[dict] = None,
             "access. The first agent turn will report authentication and model errors.",
         )
         out["mode"] = "antigravity"
+    elif not mode and (env.get("TINA_LLM_PROVIDER") or "").strip() == "bedrock-converse":
+        bedrock_model = (env.get("TINA_LLM_MODEL") or "Amazon Bedrock").strip()
+        out = _result(
+            True,
+            f"Built-in Amazon Bedrock deployment default is active ({bedrock_model}). No personal API key required.",
+            status=200,
+        )
+        out["mode"] = "bedrock"
     else:
         out = test_subscription_credentials(creds_path)
         out["mode"] = "subscription"
     # Non-secret provenance so the UI can say WHAT was tested.
     out["config"] = {k: v for k, v in config.items() if k in ("mode", "model", "meeting_model",
-                                                              "base_url") and v}
+                                                              "meeting_use_default", "base_url") and v}
     return out
 
 

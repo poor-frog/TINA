@@ -245,6 +245,7 @@ def meeting_card_turn(
     card_kinds: list[str] | None = None, steering: str = "",
     polish_rules: str = DEFAULT_POLISH_RULES, tag_rules: str = DEFAULT_TAG_RULES,
     completion=None,
+    raise_on_fallback_error: bool = False,
 ) -> Iterator[dict]:
     """One copilot beat: polish the recent transcript window + emit a proactive card per salient
     finding, via ONE direct ``CompletionPort`` call. A beat is a pure prompt→text turn — everything
@@ -275,9 +276,18 @@ def meeting_card_turn(
     except LLMAuthError as exc:
         # Fail LOUD on a 401/auth mismatch: a distinct auth-error (provider host + the
         # BASE_URL-vs-KEY fix) instead of the opaque generic model-error (WS1b).
+        from llm.errors import emit_provider_fallback_marker
+        emit_provider_fallback_marker(exc)
+        if raise_on_fallback_error:
+            raise
         yield auth_error_event(exc, model=model, stage="meeting-card")
         return
     except Exception as exc:
+        from llm.errors import emit_provider_fallback_marker, provider_fallback_reason
+        if provider_fallback_reason(exc):
+            emit_provider_fallback_marker(exc)
+            if raise_on_fallback_error:
+                raise
         if looks_like_auth_failure(exc):
             yield auth_error_event(exc, model=model, stage="meeting-card")
             return

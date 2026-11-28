@@ -365,12 +365,12 @@ class CalendarPatch(BaseModel):
 # (dispatch/bot_spawn only override what is set here).
 MODEL_MODES = ("subscription", "custom", "bedrock", "openai-api", "openai-subscription",
                "antigravity", "groq", "deepseek", "gemini")
-_MODELS_FIELDS = ("mode", "model", "meeting_model", "base_url", "api_key", "effort", "region",
+_MODELS_FIELDS = ("mode", "model", "meeting_model", "meeting_use_default", "base_url", "api_key", "effort", "region",
                   "antigravity_terms_acknowledged")
 # Provider API presets use their own endpoint and credentials. A provider switch must not redirect
 # a retained credential or inherit another provider's model identifiers across these boundaries.
 _DIRECT_API_MODES = frozenset(("groq", "deepseek", "gemini"))
-_API_PROVIDER_FIELDS = ("model", "meeting_model", "base_url", "api_key", "effort", "region")
+_API_PROVIDER_FIELDS = ("model", "meeting_model", "meeting_use_default", "base_url", "api_key", "effort", "region")
 _TRANSCRIPTION_FIELDS = (
     "default_backend", "url", "token", "funasr_url", "sherpa_url", "apple_url", "apple_token", "nvidia_url", "nvidia_token", "viegem_url", "viegem_token",
 )
@@ -443,6 +443,7 @@ class ModelPrefsUpdate(BaseModel):
     mode: Optional[str] = None
     model: Optional[str] = None
     meeting_model: Optional[str] = None
+    meeting_use_default: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     region: Optional[str] = None
@@ -487,6 +488,8 @@ def _validate_config_fields(update: dict, *, kind: str) -> dict:
                                 detail=f"mode must be one of {sorted(MODEL_MODES)}")
         if field == "runtime_enabled" and value not in ("true", "false"):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="runtime_enabled must be true or false")
+        if field == "meeting_use_default" and value not in ("true", "false"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="meeting_use_default must be true or false")
         if field == "backend" and value not in ("default", "apple", "nvidia", "funasr", "sherpa", "viegem", "custom"):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                                 detail="backend must be default, apple, nvidia, funasr, sherpa, viegem, or custom")
@@ -1252,6 +1255,7 @@ def create_app() -> FastAPI:
             "mode": prefs.get("mode"),
             "model": prefs.get("model"),
             "meeting_model": prefs.get("meeting_model"),
+            "meeting_use_default": prefs.get("meeting_use_default"),
             "base_url": prefs.get("base_url"),
             "region": prefs.get("region"),
             "effort": prefs.get("effort"),

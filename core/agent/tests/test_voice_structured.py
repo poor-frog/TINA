@@ -393,3 +393,50 @@ def test_resolve_voice_model_env_and_local_completion_model_isolation(monkeypatc
     assert seen_envs[1]['TINA_LLM_PROVIDER'] == 'bedrock-converse'
     assert seen_envs[1]['TINA_LLM_MODEL'] == 'us.anthropic.claude-sonnet-4-6'
     assert seen_envs[1]['AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'] == '/v2/credentials/test'
+
+    # meeting_use_default="true" forces Voice/Meeting tasks back to deployment default ({})
+    assert meeting_voice_completion.resolve_voice_model_env(
+        {'mode': 'openai-api', 'api_key': 'sk-test', 'model': 'gpt-5', 'meeting_use_default': 'true'},
+    ) == {}
+    # Gemini BYO resolves to Google's OpenAI-compatible endpoint with default gemini-3.5-flash
+    gemini_env = meeting_voice_completion.resolve_voice_model_env({'mode': 'gemini', 'api_key': 'AIza-test'})
+    assert gemini_env['TINA_LLM_PROVIDER'] == 'openai-compat'
+    assert gemini_env['TINA_LLM_BASE_URL'] == 'https://generativelanguage.googleapis.com/v1beta/openai'
+    assert gemini_env['TINA_LLM_MODEL'] == 'gemini-3.5-flash'
+
+
+@pytest.mark.parametrize('reason', ['auth', 'rate_limit'])
+def test_voice_completion_falls_back_to_bedrock_on_external_auth_or_rate_limit(monkeypatch, reason):
+    from control_plane import meeting_voice_completion
+    from llm.errors import PROVIDER_FALLBACK_MARKER
+
+    monkeypatch.setenv('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI', '/v2/credentials/staging')
+    monkeypatch.setenv('TINA_LLM_PROVIDER', 'bedrock-converse')
+    monkeypatch.setenv('TINA_LLM_MODEL', 'amazon.nova-lite-v1:0')
+
+    attempts = []
+
+    def fake_run(*_, env, **kwargs):
+        attempts.append(dict(env))
+        if len(attempts) == 1:
+            return SimpleNamespace(
+                stderr=f'{PROVIDER_FALLBACK_MARKER}{reason}\nLLMError: rejected\n',
+                stdout='',
+                returncode=1,
+            )
+        return SimpleNamespace(stderr='', stdout='{"claims":[{"text":"Bedrock reply","source_ids":["s0"]}]}', returncode=0)
+
+    monkeypatch.setattr(meeting_voice_completion.subprocess, 'run', fake_run)
+    payload = {'request_id': 'fallback-test', 'voice_turn': {'meeting_id': 1, 'holder': 's:1'}}
+    openai_env = meeting_voice_completion.resolve_voice_model_env(
+        {'mode': 'openai-api', 'api_key': 'sk-bad', 'model': 'gpt-5'},
+    )
+    out = meeting_voice_completion.complete(payload, {'mode': 'voice'}, 'redis://fixture', model_env=openai_env)
+    assert 'Bedrock reply' in out
+    assert len(attempts) == 2
+    assert attempts[0]['TINA_LLM_PROVIDER'] == 'openai-responses'
+    assert 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI' not in attempts[0]
+    assert attempts[1]['TINA_LLM_PROVIDER'] == 'bedrock-converse'
+    assert attempts[1]['TINA_LLM_MODEL'] == 'amazon.nova-lite-v1:0'
+    assert attempts[1]['AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'] == '/v2/credentials/staging'
+

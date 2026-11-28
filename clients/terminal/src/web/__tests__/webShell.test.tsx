@@ -1122,24 +1122,24 @@ describe("WebShell production UI (Option A & Option B)", () => {
     }
   });
 
-  it("renders redesigned Agent Model Provider & Auth cards, ChatGPT OAuth disconnect, API key reveal, Antigravity guard, and connection test", async () => {
+  it("renders streamlined 4-provider matrix (Amazon Bedrock, OpenAI, Gemini, Groq), legacy ChatGPT OAuth disconnect, API key reveal, and Bedrock meeting toggle", async () => {
     window.history.replaceState({}, "", "/?nav=settings&settingsWorkspace=personal&settingsSection=models");
     const fetchMock = mockEnvironment({ admin: false });
     render(<WebShell />);
 
-    // ChatGPT Plan OAuth card displays connected identity & real SVG logos render for all providers
+    // Legacy ChatGPT Plan OAuth card still works if already configured; Step 1 shows the 4 approved providers
     expect(await screen.findByText("ChatGPT Plan Connected")).toBeTruthy();
     expect(screen.getByText("nghixa021@gmail.com")).toBeTruthy();
     const logoSrcs = Array.from(document.querySelectorAll("img.tina-web-provider-logo")).map((el) =>
       el.getAttribute("src"),
     );
-    expect(logoSrcs).toContain("/provider-logos/openai.svg");
-    expect(logoSrcs).toContain("/provider-logos/claude.svg");
-    expect(logoSrcs).toContain("/provider-logos/gemini.svg");
-    expect(logoSrcs).toContain("/provider-logos/deepseek.svg");
-    expect(logoSrcs).toContain("/provider-logos/groq.svg");
     expect(logoSrcs).toContain("/provider-logos/aws.svg");
-    expect(logoSrcs).toContain("/provider-logos/antigravity.svg");
+    expect(logoSrcs).toContain("/provider-logos/openai.svg");
+    expect(logoSrcs).toContain("/provider-logos/gemini.svg");
+    expect(logoSrcs).toContain("/provider-logos/groq.svg");
+    expect(logoSrcs).not.toContain("/provider-logos/claude.svg");
+    expect(logoSrcs).not.toContain("/provider-logos/deepseek.svg");
+    expect(logoSrcs).not.toContain("/provider-logos/antigravity.svg");
 
     fireEvent.click(screen.getByRole("button", { name: /Test connection/i }));
     expect(await screen.findByText("Connection verified")).toBeTruthy();
@@ -1155,7 +1155,7 @@ describe("WebShell production UI (Option A & Option B)", () => {
     });
     expect(await screen.findByText("Connect your ChatGPT Plan")).toBeTruthy();
 
-    // Switch provider card to OpenAI API -> shows secret reveal toggle & saves via PUT /api/user/models
+    // Switch provider card to OpenAI API -> shows secret reveal toggle, meeting toggle, & saves via PUT /api/user/models
     fireEvent.click(screen.getByRole("radio", { name: /OpenAI API/i }));
     const keyInput = screen.getByLabelText("Credential") as HTMLInputElement;
     expect(keyInput.type).toBe("password");
@@ -1163,22 +1163,35 @@ describe("WebShell production UI (Option A & Option B)", () => {
     expect(keyInput.type).toBe("text");
     fireEvent.change(keyInput, { target: { value: "sk-test-12345" } });
 
+    const bedrockMeetingToggle = screen.getByRole("checkbox", {
+      name: /Use Amazon Bedrock \(Default\) for Voice & Meeting/i,
+    }) as HTMLInputElement;
+    expect(bedrockMeetingToggle.checked).toBe(false);
+    fireEvent.click(bedrockMeetingToggle);
+    expect(bedrockMeetingToggle.checked).toBe(true);
+    const meetingModelInput = screen.getByLabelText("Meeting model") as HTMLInputElement;
+    expect(meetingModelInput.disabled).toBe(true);
+    expect(meetingModelInput.value).toBe("Amazon Bedrock (Default)");
+
     const saveBtn = screen.getByRole("button", { name: /Save changes/i });
     expect((saveBtn as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(saveBtn);
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/user/models",
-        expect.objectContaining({ method: "PUT" }),
+      const putCall = fetchMock.mock.calls.find(
+        ([url, init]) => String(url) === "/api/user/models" && init?.method === "PUT",
       );
+      expect(putCall).toBeTruthy();
+      expect(JSON.parse(String(putCall![1]!.body))).toMatchObject({
+        mode: "openai-api",
+        api_key: "sk-test-12345",
+        meeting_use_default: "true",
+      });
     });
 
-    // Switch to Antigravity CLI -> Save stays disabled until risk checkbox is acknowledged
-    fireEvent.click(screen.getByRole("radio", { name: /Antigravity CLI/i }));
-    expect(screen.getByText(/Account suspension risk/i)).toBeTruthy();
-    expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("checkbox", { name: /I have read this warning/i }));
-    expect((screen.getByRole("button", { name: /Save changes/i }) as HTMLButtonElement).disabled).toBe(false);
+    // Switch back to Amazon Bedrock (Default) -> hides API key input and explains built-in Bedrock default
+    fireEvent.click(screen.getByRole("radio", { name: /Amazon Bedrock/i }));
+    expect(screen.queryByLabelText("Credential")).toBeNull();
+    expect(screen.getByText(/No personal API key required/i)).toBeTruthy();
   });
 
   it("unlocks Ask Tina in WebShell for authorized workspace-pilot users while keeping /terminal restricted to admins", async () => {

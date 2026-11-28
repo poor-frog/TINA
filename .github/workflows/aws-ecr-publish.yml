@@ -73,7 +73,7 @@ jobs:
                   "repo": "tina-staging/terminal",
                   "context": ".",
                   "dockerfile": "clients/terminal/Dockerfile",
-                  "build_args": "NEXT_PUBLIC_TERMINAL_MODE=workspace-pilot\nNEXT_PUBLIC_HIDE_MODEL_SETTINGS=1",
+                  "build_args": "NEXT_PUBLIC_TERMINAL_MODE=workspace-pilot",
                   "paths": ("clients/terminal/", "packages/"),
                   "smoke_cmd": "node -e \"require('node:assert').ok(require('node:fs').existsSync('.next/BUILD_ID'))\"",
               },

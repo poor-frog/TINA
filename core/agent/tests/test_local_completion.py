@@ -262,6 +262,8 @@ def test_meeting_state_keeps_platform_provider_and_anthropic_without_key_falls_b
         def resolve(self, subject):
             if subject == "5":
                 return {}
+            if subject == "8":
+                return {"mode": "groq", "api_key": "gsk-test", "model": "openai/gpt-oss-20b", "meeting_use_default": "true"}
             return {"mode": "groq", "api_key": "gsk-test", "model": "openai/gpt-oss-20b"}
 
     monkeypatch.setattr(
@@ -278,12 +280,30 @@ def test_meeting_state_keeps_platform_provider_and_anthropic_without_key_falls_b
     dispatcher.dispatch(inv_notes, trusted_canonical_notes=True)
     assert bg_calls[-1]["model_env"]["TINA_LLM_PROVIDER"] == "openai-compat"
 
+    # Meeting state follows the user's Voice & Meeting model unless meeting_use_default="true".
     inv_state = units.make_dispatch(
         subject="7", trigger="transcription",
         start=units.entrypoint(inline=units.MEETING_STATE_PREFIX + '{"meeting_id":42}'),
         context={"kind": "meeting", "meeting": {"meeting_id": "42", "session_uid": "state-fast-2", "platform": "google_meet"}},
     )
     dispatcher.dispatch(inv_state, trusted_meeting_state=True)
+    assert bg_calls[-1]["model_env"]["TINA_LLM_PROVIDER"] == "openai-compat"
+
+    # With meeting_use_default="true", both notes and meeting state stay on deployment Bedrock default (None).
+    inv_notes_default = units.make_dispatch(
+        subject="8", trigger="transcription",
+        start=units.entrypoint(inline=units.CANONICAL_NOTES_PREFIX + '{"meeting_id":42}'),
+        context={"kind": "meeting", "meeting": {"meeting_id": "42", "session_uid": "canonical-3", "platform": "google_meet"}},
+    )
+    dispatcher.dispatch(inv_notes_default, trusted_canonical_notes=True)
+    assert bg_calls[-1]["model_env"] is None
+
+    inv_state_default = units.make_dispatch(
+        subject="8", trigger="transcription",
+        start=units.entrypoint(inline=units.MEETING_STATE_PREFIX + '{"meeting_id":42}'),
+        context={"kind": "meeting", "meeting": {"meeting_id": "42", "session_uid": "state-fast-3", "platform": "google_meet"}},
+    )
+    dispatcher.dispatch(inv_state_default, trusted_meeting_state=True)
     assert bg_calls[-1]["model_env"] is None
 
     inv_nova = units.make_dispatch(
@@ -377,3 +397,112 @@ def test_voice_completion_waits_for_slot_and_logs_safe_stderr_error_kind(monkeyp
     assert err.value.status_code == 502
     assert "returncode=2" in caplog.text and "error=RuntimeError" in caplog.text
     assert "PRIVATE_MEETING_TRANSCRIPT" not in caplog.text
+
+
+def test_local_completion_and_background_jobs_fall_back_to_bedrock_on_auth_or_rate_limit(monkeypatch):
+    from llm.errors import PROVIDER_FALLBACK_MARKER
+
+    monkeypatch.setenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "/v2/creds/staging")
+    monkeypatch.setenv("TINA_LLM_PROVIDER", "bedrock-converse")
+    monkeypatch.setenv("TINA_LLM_MODEL", "amazon.nova-lite-v1:0")
+    monkeypatch.setenv("TINA_STATE_FAST_MODEL", "amazon.nova-lite-v1:0")
+
+    ext_env = {
+        "TINA_LLM_PROVIDER": "openai-responses",
+        "TINA_LLM_API_KEY": "sk-bad",
+        "TINA_LLM_MODEL": "gpt-5",
+    }
+
+    # 1. Synchronous local_completion.complete falls back to Bedrock on translation_error="rate_limit"
+    sync_envs = []
+
+    def fake_sync_run(*_, env, **kwargs):
+        sync_envs.append(dict(env))
+        if len(sync_envs) == 1:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({"text": "", "complete": True, "translation_error": "rate_limit"}),
+                stderr="",
+            )
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"text": "Bedrock fallback translation", "complete": True}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(local_completion.subprocess, "run", fake_sync_run)
+    out = local_completion.complete(
+        task="translate", inline="inline", session_id="tx-fb-1", label="Live translation", model_env=ext_env,
+    )
+    assert out == "Bedrock fallback translation"
+    assert len(sync_envs) == 2
+    assert sync_envs[0]["TINA_LLM_PROVIDER"] == "openai-responses"
+    assert "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI" not in sync_envs[0]
+    assert sync_envs[1]["TINA_LLM_PROVIDER"] == "bedrock-converse"
+    assert sync_envs[1]["AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"] == "/v2/creds/staging"
+
+    # 2. Synchronous local_completion.complete falls back on auth marker with empty text / non-zero exit
+    sync_envs.clear()
+
+    def fake_auth_fail(*_, env, **kwargs):
+        sync_envs.append(dict(env))
+        if len(sync_envs) == 1:
+            return SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr=f"{PROVIDER_FALLBACK_MARKER}auth\nLLMAuthError: unauthorized\n",
+            )
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"text": "Polished by Bedrock", "complete": True}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(local_completion.subprocess, "run", fake_auth_fail)
+    assert local_completion.complete(
+        task="polish", inline="inline", session_id="pol-fb-1", label="Text polish", model_env=ext_env,
+    ) == "Polished by Bedrock"
+    assert len(sync_envs) == 2 and sync_envs[1]["TINA_LLM_PROVIDER"] == "bedrock-converse"
+
+    # 3. Background meeting_state job passes TINA_ALLOW_FALLBACK_RETRY=1 and retries on Bedrock with TINA_FALLBACK_MODEL
+    bg_envs = []
+    threads = []
+    real_thread = local_completion.threading.Thread
+
+    def track_thread(*args, **kwargs):
+        t = real_thread(*args, **kwargs)
+        threads.append(t)
+        return t
+
+    def fake_bg_run(*_, env, **kwargs):
+        bg_envs.append(dict(env))
+        if len(bg_envs) == 1:
+            return SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr=f"{PROVIDER_FALLBACK_MARKER}rate_limit\nLLMError: 429\n",
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(local_completion.threading, "Thread", track_thread)
+    monkeypatch.setattr(local_completion.subprocess, "run", fake_bg_run)
+    local_completion.dispatch_background_meeting_job(
+        task="meeting_state",
+        unit_id="agent-meet-state-fb",
+        owner="7",
+        inline="inline",
+        redis_url="redis://127.0.0.1:6379/0",
+        workspace_path="/tmp",
+        out_topic="out",
+        model_env=ext_env,
+    )
+    for t in threads:
+        t.join(timeout=5.0)
+    assert len(bg_envs) == 2
+    assert bg_envs[0]["TINA_LLM_PROVIDER"] == "openai-responses"
+    assert bg_envs[0]["TINA_ALLOW_FALLBACK_RETRY"] == "1"
+    assert bg_envs[1]["TINA_LLM_PROVIDER"] == "bedrock-converse"
+    assert bg_envs[1]["TINA_FALLBACK_MODEL"] == "amazon.nova-lite-v1:0"
+    assert "TINA_ALLOW_FALLBACK_RETRY" not in bg_envs[1]
+    assert bg_envs[1]["AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"] == "/v2/creds/staging"
+

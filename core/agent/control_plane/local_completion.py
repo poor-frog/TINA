@@ -12,7 +12,11 @@ from typing import Callable
 
 from fastapi import HTTPException
 
-from control_plane.meeting_voice_completion import _VOICE_MODEL_ENV_KEYS
+from control_plane.meeting_voice_completion import (
+    _VOICE_MODEL_ENV_KEYS,
+    can_fallback_to_bedrock,
+    fallback_reason_from_stderr,
+)
 
 log = logging.getLogger(__name__)
 _pool_slots = BoundedSemaphore(2)
@@ -60,12 +64,17 @@ def dispatch_background_meeting_job(
     """Run a trusted tool-less background meeting job (canonical_notes / meeting_state) asynchronously."""
     if task not in _BACKGROUND_TASKS:
         raise ValueError(f"Unsupported background meeting task: {task}")
-    env = _build_subprocess_env(model_env, extra={
+    extra_env = {
         "REDIS_URL": redis_url,
         "TINA_OWNER": owner,
         "TINA_WORKSPACE_PATH": workspace_path,
         "TINA_UNIT_OUT_TOPIC": out_topic,
-    })
+    }
+    fallback_eligible = can_fallback_to_bedrock(model_env)
+    env = _build_subprocess_env(
+        model_env,
+        extra={**extra_env, **({"TINA_ALLOW_FALLBACK_RETRY": "1"} if fallback_eligible else {})},
+    )
 
     def _run() -> None:
         if not _background_slots.acquire(timeout=30.0):
@@ -85,6 +94,31 @@ def dispatch_background_meeting_job(
                 cwd="/tmp", env=env,
                 timeout=max(5.0, float(timeout_seconds)),
             )
+            if result.returncode and fallback_eligible:
+                reason = fallback_reason_from_stderr(getattr(result, "stderr", None))
+                if reason is not None:
+                    log.warning(
+                        "background meeting job external provider failed task=%s unit=%s reason=%s; falling back to Amazon Bedrock",
+                        task, unit_id, reason,
+                    )
+                    fallback_extra = dict(extra_env)
+                    if task == "meeting_state":
+                        default_state_model = (
+                            os.environ.get("TINA_STATE_FAST_MODEL")
+                            or os.environ.get("TINA_LLM_MODEL")
+                            or ""
+                        ).strip()
+                        if default_state_model:
+                            fallback_extra["TINA_FALLBACK_MODEL"] = default_state_model
+                    fallback_env = _build_subprocess_env(None, extra=fallback_extra)
+                    result = subprocess.run(
+                        [sys.executable, "-m", "worker.local_completion"],
+                        input=json.dumps({"task": task, "inline": inline}, ensure_ascii=False),
+                        text=True, encoding="utf-8",
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        cwd="/tmp", env=fallback_env,
+                        timeout=max(5.0, float(timeout_seconds)),
+                    )
             if result.returncode:
                 log.warning("background meeting job failed task=%s unit=%s rc=%s err=%s",
                             task, unit_id, result.returncode, _stderr_tail(getattr(result, "stderr", None)))
@@ -113,15 +147,50 @@ def complete(
     if not _pool_slots.acquire(blocking=False):
         raise HTTPException(429, f"{label} is busy; retry shortly")
     env = _build_subprocess_env(model_env, extra={"TINA_CHAT_SESSION": session_id})
+    fallback_eligible = can_fallback_to_bedrock(model_env)
+    payload_json = json.dumps({"task": task, "inline": inline}, ensure_ascii=False)
     try:
         result = subprocess.run(
             [sys.executable, "-m", "worker.local_completion"],
-            input=json.dumps({"task": task, "inline": inline}, ensure_ascii=False),
+            input=payload_json,
             text=True, encoding="utf-8",
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             cwd="/tmp", env=env,
             timeout=max(1.0, float(timeout_seconds)),
         )
+        if fallback_eligible:
+            reason = fallback_reason_from_stderr(getattr(result, "stderr", None))
+            envelope_err = None
+            has_text = False
+            if result.returncode == 0 and result.stdout:
+                try:
+                    parsed = json.loads(result.stdout)
+                    if isinstance(parsed, dict):
+                        if parsed.get("translation_error") in ("auth", "rate_limit"):
+                            envelope_err = parsed["translation_error"]
+                        has_text = isinstance(parsed.get("text"), str) and bool(parsed["text"].strip())
+                except ValueError:
+                    pass
+            fallback_reason = reason or envelope_err
+            if fallback_reason is not None and (
+                result.returncode
+                or not result.stdout
+                or envelope_err is not None
+                or not has_text
+            ):
+                log.warning(
+                    "local completion external provider failed task=%s reason=%s; falling back to Amazon Bedrock",
+                    task, fallback_reason,
+                )
+                fallback_env = _build_subprocess_env(None, extra={"TINA_CHAT_SESSION": session_id})
+                result = subprocess.run(
+                    [sys.executable, "-m", "worker.local_completion"],
+                    input=payload_json,
+                    text=True, encoding="utf-8",
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    cwd="/tmp", env=fallback_env,
+                    timeout=max(1.0, float(timeout_seconds)),
+                )
     except subprocess.TimeoutExpired as exc:
         raise HTTPException(504, f"{label} timed out") from exc
     finally:

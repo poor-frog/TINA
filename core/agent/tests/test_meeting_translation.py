@@ -713,3 +713,107 @@ def test_translate_single_phrase_avoids_json_prompt_and_sanitizes_context():
         '[{"source_transcript": "a", "translated": "First."}, "{\\"source_transcript\\": \\"b\\", \\"translated\\": \\"Second.\\"}"]',
     ])
     assert translate_phrase_batch(batch_comp, ['a', 'b'], 'English', 'test-model') == ['First.', 'Second.']
+
+
+def test_direct_translate_respects_meeting_use_default_and_falls_back_to_bedrock_on_auth_or_rate_limit(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+    from control_plane.api import create_app
+    from control_plane.dispatch import Dispatcher
+    from control_plane.workspace_reader import WorkspaceReader
+    from shared.config import load_settings
+    from llm.errors import LLMAuthError, LLMError
+    import llm.openai_responses as openai_responses
+    import llm.bedrock_converse as bedrock_converse
+
+    bedrock_calls = []
+
+    class FakeBedrock:
+        def __init__(self, *, model=None, timeout=120.0, **kwargs):
+            bedrock_calls.append(model)
+
+        def complete(self, prompt, *, system=None, model=None, response_schema=None):
+            return SimpleNamespace(text='Bedrock translated line.')
+
+    class FailingOpenAI:
+        def __init__(self, **kwargs):
+            self._client = SimpleNamespace(close=lambda: None)
+
+        def complete(self, prompt, *, system=None, model=None, response_schema=None):
+            raise LLMAuthError('invalid key', status_code=401)
+
+    class FakeRuntime:
+        def spawn(self, *args, **kwargs):
+            return {'workload_id': 'w1'}
+
+    class FakeIdentity:
+        def mint(self, *args, **kwargs):
+            return 'tok'
+
+    class FakeStreamReader:
+        def read(self, unit_id, *, resume=None):
+            yield {'type': 'message-delta', 'text': 'Worker Bedrock translation.'}
+            yield {'type': 'turn-complete'}
+
+    class FakeResolver:
+        def __init__(self, cfg):
+            self._cfg = cfg
+
+        def resolve(self, subject):
+            return dict(self._cfg)
+
+    monkeypatch.setattr(openai_responses, 'OpenAIResponsesCompletion', FailingOpenAI)
+    monkeypatch.setattr(bedrock_converse, 'BedrockConverseCompletion', FakeBedrock)
+    monkeypatch.setenv('TINA_LLM_PROVIDER', 'bedrock-converse')
+    monkeypatch.setenv('TINA_LLM_MODEL', 'amazon.nova-lite-v1:0')
+
+    # 1. External OpenAI returns 401 -> direct translation falls back in-process to Amazon Bedrock.
+    dispatcher = Dispatcher(
+        load_settings(llm_provider='bedrock-converse', llm_model='amazon.nova-lite-v1:0'),
+        FakeRuntime(), FakeIdentity(),
+        model_config=FakeResolver({'mode': 'openai-api', 'api_key': 'sk-bad', 'model': 'gpt-5'}),
+    )
+    client = TestClient(create_app(
+        dispatcher, reader=WorkspaceReader(str(tmp_path)),
+        stream_reader=FakeStreamReader(), direct_translate=True,
+    ))
+    resp = client.post('/api/dictation/translate', headers={'X-User-Id': '7'},
+                       json={'text': 'xin chào mọi người', 'target_language': 'en'})
+    assert resp.status_code == 200
+    assert resp.json() == {'translated_text': 'Bedrock translated line.'}
+    assert bedrock_calls == ['amazon.nova-lite-v1:0']
+
+    # 2. External OpenAI returns 429 rate-limit -> also falls back to Amazon Bedrock.
+    class RateLimitedOpenAI(FailingOpenAI):
+        def complete(self, prompt, *, system=None, model=None, response_schema=None):
+            raise LLMError('rate limited', status_code=429)
+
+    monkeypatch.setattr(openai_responses, 'OpenAIResponsesCompletion', RateLimitedOpenAI)
+    resp_429 = client.post('/api/dictation/translate', headers={'X-User-Id': '7'},
+                           json={'text': 'cảm ơn bạn', 'target_language': 'en'})
+    assert resp_429.status_code == 200
+    assert resp_429.json() == {'translated_text': 'Bedrock translated line.'}
+    assert len(bedrock_calls) == 2
+
+    # 3. meeting_use_default="true" bypasses external provider completely (falls through to default Bedrock path).
+    def must_not_call_openai(**kwargs):
+        raise AssertionError('external provider must not be invoked when meeting_use_default=true')
+
+    monkeypatch.setattr(openai_responses, 'OpenAIResponsesCompletion', must_not_call_openai)
+    dispatcher_default = Dispatcher(
+        load_settings(llm_provider='bedrock-converse', llm_model='amazon.nova-lite-v1:0'),
+        FakeRuntime(), FakeIdentity(),
+        model_config=FakeResolver({
+            'mode': 'openai-api', 'api_key': 'sk-good', 'model': 'gpt-5', 'meeting_use_default': 'true',
+        }),
+    )
+    client_default = TestClient(create_app(
+        dispatcher_default, reader=WorkspaceReader(str(tmp_path)),
+        stream_reader=FakeStreamReader(), direct_translate=True,
+    ))
+    resp_default = client_default.post('/api/dictation/translate', headers={'X-User-Id': '7'},
+                                       json={'text': 'chào buổi sáng', 'target_language': 'en'})
+    assert resp_default.status_code == 200
+    assert resp_default.json() == {'translated_text': 'Worker Bedrock translation.'}
+

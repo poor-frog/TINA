@@ -202,3 +202,34 @@ def test_transport_error_hides_exception_details_and_key(error, status, capsys):
     assert KEY not in response.text
     assert "private transport detail" not in response.text
     assert KEY not in capsys.readouterr().err
+
+
+def test_groq_proxy_honors_configured_https_proxy_only_for_http_schemes(monkeypatch):
+    from llm import groq_responses
+
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("https_proxy", raising=False)
+    assert groq_responses._configured_https_proxy() is None
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://egress-proxy.tina-staging.local:3128")
+    assert groq_responses._configured_https_proxy() == "http://egress-proxy.tina-staging.local:3128"
+
+    seen_kwargs = []
+    real_client = httpx.Client
+
+    def capture_client(*args, **kwargs):
+        seen_kwargs.append(kwargs)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(groq_responses.httpx, "Client", capture_client)
+    with groq_responses_proxy(KEY):
+        pass
+    assert seen_kwargs and seen_kwargs[0]["proxy"] == "http://egress-proxy.tina-staging.local:3128"
+    assert seen_kwargs[0]["trust_env"] is False
+    assert seen_kwargs[0]["follow_redirects"] is False
+
+    monkeypatch.setenv("HTTPS_PROXY", "socks5://127.0.0.1:1080")
+    assert groq_responses._configured_https_proxy() is None
+    monkeypatch.setenv("HTTPS_PROXY", "file:///etc/passwd")
+    assert groq_responses._configured_https_proxy() is None
+

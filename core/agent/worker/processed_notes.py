@@ -30,8 +30,10 @@ def run(stream, work, inline, *, completion=None):
     try:
         if not cfg.enabled:
             raise ValueError('workspace_processing_disabled')
+        allow_fallback_retry = os.environ.get('TINA_ALLOW_FALLBACK_RETRY') == '1'
         for event in meeting_card_turn(work, segments, model=cfg.model, card_kinds=cfg.card_kinds,
-                steering=cfg.steering, polish_rules=cfg.polish_rules, tag_rules=cfg.tag_rules, completion=completion):
+                steering=cfg.steering, polish_rules=cfg.polish_rules, tag_rules=cfg.tag_rules,
+                completion=completion, raise_on_fallback_error=allow_fallback_retry):
             if event.get('type') in ('model-error', 'auth-error'):
                 raise RuntimeError('model_unavailable')
             if event.get('type') == 'note' and event.get('note', {}).get('id') in notes:
@@ -41,6 +43,10 @@ def run(stream, work, inline, *, completion=None):
         result['notes'] = list(notes.values())
         result['cards'] = cards
     except Exception as exc:
+        from llm.errors import emit_provider_fallback_marker, provider_fallback_reason
+        if os.environ.get('TINA_ALLOW_FALLBACK_RETRY') == '1' and provider_fallback_reason(exc):
+            emit_provider_fallback_marker(exc)
+            raise
         # Do not publish provider error bodies or source text into logs/diagnostics.
         result['error'] = type(exc).__name__
     stream.xadd('canonical_notes_results', {'payload': json.dumps(result, ensure_ascii=False)})

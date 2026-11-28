@@ -357,6 +357,13 @@ def overlay_model_config(env: dict[str, str], config: dict, *, allowlist: str = 
             env["OPENAI_API_KEY"] = key
             env["TINA_LLM_API_KEY"] = key
             env["ACCESS_TOKEN"] = ""
+            target = model or "gpt-5"
+            target = target if _allowlisted(target, allowlist) else ""
+            env["TINA_AGENT_MODEL"] = target
+            env["TINA_LLM_MODEL"] = target
+            env["TINA_MEETING_MODEL"] = (
+                meeting_model if meeting_model and _allowlisted(meeting_model, allowlist) else target
+            )
         else:
             from control_plane.openai_auth import ChatGPTAuthError, access_token
             try:
@@ -746,14 +753,11 @@ class Dispatcher:
             from control_plane.meeting_voice_completion import resolve_voice_model_env
             inline = ((invocation.get("start") or {}).get("entrypoint") or {}).get("inline") or ""
             subject = identity["subject"]
-            model_env = (
-                resolve_voice_model_env(
-                    self.resolve_model_config(subject),
-                    allowlist=self._settings.model_allowlist,
-                    subject=subject,
-                )
-                if trusted_canonical_notes else None
-            )
+            model_env = resolve_voice_model_env(
+                self.resolve_model_config(subject),
+                allowlist=self._settings.model_allowlist,
+                subject=subject,
+            ) or None
             ws_root = Path(self._settings.workspaces_dir)
             ws_path = str(ws_root / subject)
             s3_sync = None

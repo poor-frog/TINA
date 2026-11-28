@@ -219,6 +219,7 @@ def run(stream, inline, *, completion=None):
     try:
         started = time.perf_counter()
         completion = completion or completion_from_env()
+        effective_model = (os.environ.get('TINA_FALLBACK_MODEL') or '').strip() or job['model']
         span('client_init', started)
         segments = job['segments']
         # Bound source pages at segment boundaries; only exceptional oversized segments are split.
@@ -248,13 +249,13 @@ def run(stream, inline, *, completion=None):
             span('prompt_build', prompt_start)
             call_start = time.perf_counter()
             try:
-                reply = completion.complete(prompt, system=SYSTEM, model=job['model'])
+                reply = completion.complete(prompt, system=SYSTEM, model=effective_model)
             except Exception as exc:
-                span('model_request', call_start, model=job['model'], provider=completion.name, status='error',
+                span('model_request', call_start, model=effective_model, provider=completion.name, status='error',
                      **model_request_failure(exc))
                 raise
             usage = getattr(reply, 'usage', None) or {}
-            span('model_request', call_start, model=reply.model or job['model'], provider=completion.name, status='ok', **usage)
+            span('model_request', call_start, model=reply.model or effective_model, provider=completion.name, status='ok', **usage)
             parse_start = time.perf_counter()
             try:
                 text = reply.text.strip()
@@ -308,10 +309,14 @@ def run(stream, inline, *, completion=None):
                 working_context['working_page_output'] = value if len(json.dumps(value)) <= 40000 else {'summaries': value['summaries']}
             if len(groups) > 1:
                 stream.xadd('meeting_state_results', {'payload': json.dumps(dict(base, heartbeat=True))})
-        result.update(output=output, provenance={'model': job['model'], 'provider': completion.name,
+        result.update(output=output, provenance={'model': effective_model, 'provider': completion.name,
                        'prompt_version': '3',
                        'prompt_sha256': prompt_hashes[0] if len(prompt_hashes) == 1 else hashlib.sha256(''.join(prompt_hashes).encode()).hexdigest()})
     except Exception as exc:
+        from llm.errors import emit_provider_fallback_marker, provider_fallback_reason
+        if os.environ.get('TINA_ALLOW_FALLBACK_RETRY') == '1' and provider_fallback_reason(exc):
+            emit_provider_fallback_marker(exc)
+            raise
         result['error'] = type(exc).__name__  # never provider/source bodies
     span('worker_execution', execution_started, status='error' if result.get('error') else 'ok')
     result['timing'] = {'queued_at': job['queued_at']}

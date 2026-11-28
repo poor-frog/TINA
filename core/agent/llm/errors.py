@@ -109,6 +109,26 @@ def completion_failure_code(exc: Exception) -> str:
     return 'unavailable'
 
 
+PROVIDER_FALLBACK_MARKER = "TINA_PROVIDER_FALLBACK_ELIGIBLE:"
+
+
+def provider_fallback_reason(exc: Exception) -> str | None:
+    """Return 'auth' or 'rate_limit' when an external provider error should fall back to Bedrock."""
+    code = completion_failure_code(exc)
+    return code if code in ("auth", "rate_limit") else None
+
+
+def emit_provider_fallback_marker(exc: Exception) -> str | None:
+    """Write a secret-free stderr marker line for local/voice subprocess fallback on 401/403/429."""
+    reason = provider_fallback_reason(exc)
+    if reason is not None:
+        try:
+            os.write(2, f"{PROVIDER_FALLBACK_MARKER}{reason}\n".encode("ascii"))
+        except OSError:
+            pass
+    return reason
+
+
 # Substrings that mark a provider authentication failure in provider/CLI output.
 _AUTH_SIGNATURE_RE = re.compile(
     r"\b401\b"

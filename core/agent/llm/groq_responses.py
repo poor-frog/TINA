@@ -10,8 +10,10 @@ from contextlib import contextmanager
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 import threading
 from typing import Iterator
+from urllib.parse import urlparse
 
 import httpx
 
@@ -118,21 +120,40 @@ class _LoopbackServer(ThreadingHTTPServer):
         pass
 
 
+def _configured_https_proxy() -> str | None:
+    """Honor the sandbox's explicit HTTPS_PROXY (e.g. AWS Fargate egress allowlist proxy).
+
+    Only accepts http(s) URLs with a hostname so ambient/malformed env vars cannot smuggle schemes.
+    """
+    raw = (os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or "").strip()
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    if parsed.scheme in ("http", "https") and parsed.hostname:
+        return raw
+    return None
+
+
 @contextmanager
 def groq_responses_proxy(api_key: str, *,
                          transport: httpx.BaseTransport | None = None) -> Iterator[str]:
     """Yield an authenticated loopback base URL for one Codex harness turn.
 
     ``transport`` permits offline protocol tests. Production always uses the
-    fixed HTTPS Groq endpoint with redirects and ambient proxy settings disabled.
+    fixed HTTPS Groq endpoint with redirects disabled, honoring an explicit
+    sandbox ``HTTPS_PROXY`` when configured (e.g. Fargate egress proxy).
     Incoming authentication is checked but never used to choose upstream auth.
     """
     if not api_key or any(ord(char) < 33 or ord(char) > 126 for char in api_key):
         raise LLMConfigError("A valid Groq API key is required for the Groq runner.")
     expected_auth = ("Bearer " + api_key).encode("ascii")
+    proxy_url = None if transport is not None else _configured_https_proxy()
     client = httpx.Client(
-        transport=transport, timeout=httpx.Timeout(120.0, connect=15.0),
-        follow_redirects=False, trust_env=False,
+        transport=transport,
+        proxy=proxy_url,
+        timeout=httpx.Timeout(120.0, connect=15.0),
+        follow_redirects=False,
+        trust_env=False,
     )
 
     class Handler(BaseHTTPRequestHandler):

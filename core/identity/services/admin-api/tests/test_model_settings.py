@@ -472,3 +472,22 @@ def test_retired_asr_preferences_use_the_configured_default(monkeypatch):
     assert _transcription_summary(prefs, platform)["source"] == "platform"
     assert _effective_transcription({**prefs, "runtime_enabled": "false"}, platform)["disabled"] is True
     assert _effective_transcription({**prefs, "backend": "custom"}, platform)["token"] == "custom"
+
+
+def test_meeting_use_default_roundtrips_and_validates(client):
+    uid, tok = _user_token(client, email="meeting-default@example.test")
+    headers = {"X-API-Key": tok}
+
+    assert client.put("/user/models", headers=headers, json={"meeting_use_default": "maybe"}).status_code == 422
+
+    saved = client.put("/user/models", headers=headers, json={
+        "mode": "openai-api", "model": "gpt-5", "api_key": "sk-test-1234abcd", "meeting_use_default": "true",
+    })
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["meeting_use_default"] == "true"
+    assert client.get("/user/models", headers=headers).json()["meeting_use_default"] == "true"
+
+    effective = client.get(f"/internal/users/{uid}/model-config", headers=_internal()).json()["models"]
+    assert effective["mode"] == "openai-api"
+    assert effective["meeting_use_default"] == "true"
+

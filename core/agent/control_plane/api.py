@@ -1097,6 +1097,8 @@ def _direct_translate_completion(
         if settings.llm_model:
             env["TINA_LLM_MODEL"] = settings.llm_model
     model_config = dispatcher.resolve_model_config(subject)
+    if isinstance(model_config, dict) and str(model_config.get("meeting_use_default") or "").strip().lower() == "true":
+        return None
     if model_config:
         overlay_model_config(
             env,
@@ -1176,21 +1178,41 @@ def _direct_translate_completion(
     ] or None
     clean_speaker = str(speaker).strip()[:120] if isinstance(speaker, str) and speaker.strip() else None
 
-    try:
+    def _run_translation_with(adapter, target_model):
         if TRANSLATION_BATCH_SEPARATOR in text:
             parts = text.split(TRANSLATION_BATCH_SEPARATOR)
             if not parts or any(not p.strip() for p in parts) or len(parts) > 8:
                 raise ValueError("invalid batch translation payload")
             translated_parts = translate_phrase_batch(
-                comp, parts, language_name, model, context=clean_context, speaker=clean_speaker,
+                adapter, parts, language_name, target_model, context=clean_context, speaker=clean_speaker,
             )
             return TRANSLATION_BATCH_SEPARATOR.join(translated_parts)
         return translate_single_phrase(
-            comp, text, language_name, model, context=clean_context, speaker=clean_speaker,
+            adapter, text, language_name, target_model, context=clean_context, speaker=clean_speaker,
         )
+
+    try:
+        return _run_translation_with(comp, model)
     except Exception as exc:  # noqa: BLE001 — do not expose transcript or provider response text
         logger.warning("direct live translation failed provider=%s error=%s", provider, type(exc).__name__)
         code = completion_failure_code(exc)
+        if (
+            code in ("auth", "rate_limit")
+            and provider != "bedrock-converse"
+            and (os.environ.get("TINA_LLM_PROVIDER") or "").strip() == "bedrock-converse"
+        ):
+            logger.warning(
+                "direct live translation external provider failed provider=%s reason=%s; falling back to Amazon Bedrock",
+                provider, code,
+            )
+            try:
+                from llm.bedrock_converse import BedrockConverseCompletion
+                fallback_model = (os.environ.get("TINA_LLM_MODEL") or "").strip() or None
+                bedrock_comp = BedrockConverseCompletion(model=fallback_model, timeout=30.0)
+                return _run_translation_with(bedrock_comp, fallback_model)
+            except Exception as fallback_exc:  # noqa: BLE001
+                logger.warning("direct live translation Bedrock fallback failed error=%s", type(fallback_exc).__name__)
+                code = completion_failure_code(fallback_exc)
         status = TRANSLATION_FAILURE_STATUS.get(code, 503) if isinstance(code, str) else 503
         raise HTTPException(status_code=status, detail="Live translation could not complete") from exc
     finally:

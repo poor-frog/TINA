@@ -30,7 +30,7 @@ import {
 } from "../surfaces/settingsApi";
 import styles from "./webModelsPanel.module.css";
 
-type ProviderGroup = "managed" | "api" | "advanced";
+type ProviderGroup = "managed" | "api";
 
 interface ProviderMeta {
   id: string;
@@ -47,29 +47,13 @@ interface ProviderMeta {
 const PROVIDERS: readonly ProviderMeta[] = [
   {
     id: "",
-    name: "Deployment Default",
-    logo: "tina-mark-inverse.svg",
-    logoStyle: "color",
+    name: "Amazon Bedrock",
+    logo: "aws.svg",
+    logoStyle: "awsLight",
     group: "managed",
-    badge: "Ready",
-    summary: "Built-in TINA AI — works out of the box",
-    defaultModelHint: "Built-in (Amazon Nova / Claude)",
-  },
-  {
-    id: "openai-subscription",
-    name: "ChatGPT Plan",
-    logo: "openai.svg",
-    logoStyle: "invertLight",
-    group: "managed",
-    summary: "Sign in with your ChatGPT account (no API key)",
-  },
-  {
-    id: "subscription",
-    name: "Claude Subscription",
-    logo: "claude.svg",
-    logoStyle: "color",
-    group: "managed",
-    summary: "Use workspace Claude subscription",
+    badge: "Default",
+    summary: "Built-in Amazon Bedrock — ready to use with no API key",
+    defaultModelHint: "Amazon Nova / Claude",
   },
   {
     id: "openai-api",
@@ -92,6 +76,35 @@ const PROVIDERS: readonly ProviderMeta[] = [
     defaultModelHint: "gemini-3.5-flash",
   },
   {
+    id: "groq",
+    name: "Groq",
+    logo: "groq.svg",
+    logoStyle: "rounded",
+    group: "api",
+    summary: "Ultra-fast GPT-OSS, Llama, and Qwen",
+    keyUrl: "https://console.groq.com/keys",
+    defaultModelHint: "openai/gpt-oss-20b",
+  },
+];
+
+const LEGACY_PROVIDERS: readonly ProviderMeta[] = [
+  {
+    id: "openai-subscription",
+    name: "ChatGPT Plan",
+    logo: "openai.svg",
+    logoStyle: "invertLight",
+    group: "managed",
+    summary: "Sign in with your ChatGPT account (no API key)",
+  },
+  {
+    id: "subscription",
+    name: "Claude Subscription",
+    logo: "claude.svg",
+    logoStyle: "color",
+    group: "managed",
+    summary: "Use workspace Claude subscription",
+  },
+  {
     id: "deepseek",
     name: "DeepSeek",
     logo: "deepseek.svg",
@@ -102,30 +115,20 @@ const PROVIDERS: readonly ProviderMeta[] = [
     defaultModelHint: "deepseek-flash",
   },
   {
-    id: "groq",
-    name: "Groq",
-    logo: "groq.svg",
-    logoStyle: "rounded",
-    group: "api",
-    summary: "Ultra-fast Llama, Qwen, and OSS",
-    keyUrl: "https://console.groq.com/keys",
-    defaultModelHint: "openai/gpt-oss-20b",
-  },
-  {
     id: "bedrock",
-    name: "AWS Bedrock",
+    name: "AWS Bedrock (Custom)",
     logo: "aws.svg",
     logoStyle: "awsLight",
-    group: "advanced",
+    group: "api",
     badge: "Cloud",
-    summary: "Amazon Nova & Claude via AWS Bedrock",
+    summary: "Custom AWS Bedrock region & bearer token",
   },
   {
     id: "custom",
     name: "Custom Endpoint",
     logo: "openrouter.svg",
     logoStyle: "invertLight",
-    group: "advanced",
+    group: "api",
     summary: "OpenAI or Anthropic-compatible URL",
   },
   {
@@ -133,16 +136,15 @@ const PROVIDERS: readonly ProviderMeta[] = [
     name: "Antigravity CLI",
     logo: "antigravity.svg",
     logoStyle: "color",
-    group: "advanced",
+    group: "api",
     badge: "Unsupported",
     summary: "Consumer CLI (not recommended)",
   },
 ];
 
-const PROVIDER_GROUPS: Array<{ id: ProviderGroup; label: string; hint: string; cols: 2 | 3 }> = [
-  { id: "managed", label: "Ready to use", hint: "Sign in or use TINA's built-in AI without managing API keys", cols: 3 },
-  { id: "api", label: "Bring your own API key", hint: "Connect directly to your preferred AI provider", cols: 2 },
-  { id: "advanced", label: "Cloud & advanced", hint: "Enterprise cloud regions and custom gateways", cols: 3 },
+const PROVIDER_GROUPS: Array<{ id: ProviderGroup; label: string; hint: string; cols: 1 | 2 | 3 }> = [
+  { id: "managed", label: "Built-in default", hint: "Amazon Bedrock managed by TINA — works out of the box", cols: 1 },
+  { id: "api", label: "Bring your own API key", hint: "Connect OpenAI, Google Gemini, or Groq for Chat & Voice Agent", cols: 3 },
 ];
 
 const API_KEY_MODES = new Set([
@@ -194,7 +196,12 @@ function asStrings(v: Record<string, unknown> | null | undefined): Record<string
 }
 
 function providerById(id: string | undefined): ProviderMeta {
-  return PROVIDERS.find((p) => p.id === (id ?? "")) ?? PROVIDERS[0];
+  const key = id ?? "";
+  return (
+    PROVIDERS.find((p) => p.id === key) ??
+    LEGACY_PROVIDERS.find((p) => p.id === key) ??
+    PROVIDERS[0]
+  );
 }
 
 function isMaskedSecret(val: string | undefined): boolean {
@@ -258,15 +265,17 @@ export function WebModelsPanel({
 
   const activeProvider = providerById(agentSummary.mode);
   const activeMode = agentSummary.mode ?? "";
+  const meetingUsesBedrockDefault =
+    activeMode === "" || agentSummary.meeting_use_default === "true";
   const activeChatSummary =
     activeMode === ""
       ? chatGptStatus.connected
         ? "ChatGPT Plan (OAuth)"
-        : agentSummary.model || "Built-in TINA AI"
+        : agentSummary.model || "Amazon Bedrock (Default)"
       : agentSummary.model || activeProvider.defaultModelHint || activeProvider.name;
-  const activeMeetingSummary =
-    agentSummary.meeting_model ||
-    (activeMode === "" ? "Built-in · Amazon Nova Lite" : "Same as chat model");
+  const activeMeetingSummary = meetingUsesBedrockDefault
+    ? "Amazon Bedrock (Default)"
+    : agentSummary.meeting_model || agentSummary.model || activeProvider.defaultModelHint || "Same as Chat Agent";
 
   return (
     <div className={styles.root}>
@@ -307,7 +316,7 @@ export function WebModelsPanel({
                 <span className={styles.overviewValue} title={activeMeetingSummary}>
                   {activeMeetingSummary}
                 </span>
-                <span className={styles.overviewMeta}>Summaries · Live voice</span>
+                <span className={styles.overviewMeta}>Voice · Translation · Notes</span>
               </span>
             </button>
 
@@ -486,7 +495,16 @@ function AgentProviderForm({
   }, [scope, loading, mode, onChatGptStatus]);
 
   const TRACKED_KEYS = useMemo(
-    () => ["mode", "base_url", "region", "api_key", "antigravity_terms_acknowledged", "model", "meeting_model"],
+    () => [
+      "mode",
+      "base_url",
+      "region",
+      "api_key",
+      "antigravity_terms_acknowledged",
+      "model",
+      "meeting_model",
+      "meeting_use_default",
+    ],
     [],
   );
 
@@ -502,6 +520,7 @@ function AgentProviderForm({
       // Clear stale model/meeting_model when switching providers so an old model ID never leaks across modes
       next.model = "";
       next.meeting_model = "";
+      next.meeting_use_default = "";
       if (apiModelProvider(value) || apiModelProvider(values.mode)) {
         next.api_key = "";
         next.base_url = "";
@@ -639,7 +658,13 @@ function AgentProviderForm({
                   <span className={styles.groupHint}>{group.hint}</span>
                 </div>
                 <div
-                  className={group.cols === 2 ? styles.matrixTwo : styles.matrixThree}
+                  className={
+                    group.cols === 1
+                      ? styles.matrixOne
+                      : group.cols === 2
+                        ? styles.matrixTwo
+                        : styles.matrixThree
+                  }
                   role="radiogroup"
                   aria-label={`${group.label} providers`}
                 >
@@ -738,7 +763,7 @@ function AgentProviderForm({
             <WebIcon name="shield" size={15} />
             <span>
               {mode === ""
-                ? "No personal credential required. TINA uses the workspace deployment default model and credential."
+                ? "No personal API key required. Chat Agent, Voice Agent, Live Translation, and Meeting Notes run on built-in Amazon Bedrock."
                 : "Uses the deployment Claude subscription credentials. Pick a preferred Claude tier below if needed."}
             </span>
           </div>
@@ -880,79 +905,121 @@ function AgentProviderForm({
               <span className={styles.optionalTag}>Optional</span>
             </div>
             <p className={styles.sectionLead}>
-              Leave blank to use the recommended model automatically, or choose specific models for chat and meetings.
+              {mode === ""
+                ? "Using built-in Amazon Bedrock defaults automatically for Chat Agent, Voice Agent, Live Translation, and Meeting Notes."
+                : "Choose separate models for Chat Agent and Voice / Meeting tasks, or keep Amazon Bedrock for meetings."}
             </p>
           </div>
         </div>
 
-        <div className={styles.fieldGrid}>
-          <div className={`${styles.field} ${mode === "antigravity" ? styles.fieldFull : ""}`}>
-            <span className={styles.fieldLabel}>Chat model</span>
-            {scope === "personal" && mode === "openai-subscription" ? (
-              <ChatGPTModelInput
-                value={values.model ?? ""}
-                onChange={(val) => updateField("model", val)}
-                style={pickerFieldStyle}
-              />
-            ) : useModelPicker ? (
-              <ModelPicker
-                key={`chat-${mode}`}
-                ariaLabel="Chat model"
-                value={values.model ?? ""}
-                onChange={(val) => updateField("model", val)}
-                mode={mode}
-                apiKey={values.api_key}
-                region={values.region}
-                requiresTools
-                suggestDefault={mode === "bedrock"}
-                emptyLabel={chatModelEmptyLabel}
-                style={pickerFieldStyle}
-              />
-            ) : (
-              <input
-                type="text"
-                aria-label="Chat model"
-                className={styles.input}
-                value={values.model ?? ""}
-                placeholder={
-                  apiProviderInfo
-                    ? `${apiProviderInfo.model} (default)`
-                    : "Deployment default (e.g. sonnet)"
-                }
-                onChange={(e) => updateField("model", e.target.value)}
-              />
-            )}
+        {mode === "" ? (
+          <div className={styles.managedNote}>
+            <WebIcon name="sparkleSmall" size={15} />
+            <span>
+              Chat Agent, Voice Agent, Live Translation, and Meeting Notes automatically use TINA&apos;s Amazon Bedrock deployment defaults.
+            </span>
           </div>
+        ) : (
+          <>
+            <div className={styles.fieldGrid}>
+              <div className={`${styles.field} ${mode === "antigravity" ? styles.fieldFull : ""}`}>
+                <span className={styles.fieldLabel}>Chat Agent model</span>
+                {scope === "personal" && mode === "openai-subscription" ? (
+                  <ChatGPTModelInput
+                    value={values.model ?? ""}
+                    onChange={(val) => updateField("model", val)}
+                    style={pickerFieldStyle}
+                  />
+                ) : useModelPicker ? (
+                  <ModelPicker
+                    key={`chat-${mode}`}
+                    ariaLabel="Chat model"
+                    value={values.model ?? ""}
+                    onChange={(val) => updateField("model", val)}
+                    mode={mode}
+                    apiKey={values.api_key}
+                    region={values.region}
+                    requiresTools
+                    suggestDefault={mode === "bedrock"}
+                    emptyLabel={chatModelEmptyLabel}
+                    style={pickerFieldStyle}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    aria-label="Chat model"
+                    className={styles.input}
+                    value={values.model ?? ""}
+                    placeholder={
+                      apiProviderInfo
+                        ? `${apiProviderInfo.model} (default)`
+                        : "Deployment default (e.g. sonnet)"
+                    }
+                    onChange={(e) => updateField("model", e.target.value)}
+                  />
+                )}
+              </div>
 
-          {mode !== "antigravity" && (
-            <div className={styles.field}>
-              <span className={styles.fieldLabel}>Meeting summary model</span>
-              {useModelPicker ? (
-                <ModelPicker
-                  key={`meeting-${mode}`}
-                  ariaLabel="Meeting model"
-                  value={values.meeting_model ?? ""}
-                  onChange={(val) => updateField("meeting_model", val)}
-                  mode={mode}
-                  apiKey={values.api_key}
-                  region={values.region}
-                  requiresTools={false}
-                  emptyLabel="Same as chat model"
-                  style={pickerFieldStyle}
-                />
-              ) : (
-                <input
-                  type="text"
-                  aria-label="Meeting model"
-                  className={styles.input}
-                  value={values.meeting_model ?? ""}
-                  placeholder="Same as chat model"
-                  onChange={(e) => updateField("meeting_model", e.target.value)}
-                />
+              {mode !== "antigravity" && (
+                <div className={styles.field}>
+                  <span className={styles.fieldLabel}>Voice &amp; Meeting model</span>
+                  {values.meeting_use_default === "true" ? (
+                    <input
+                      type="text"
+                      aria-label="Meeting model"
+                      className={styles.input}
+                      value="Amazon Bedrock (Default)"
+                      disabled
+                    />
+                  ) : useModelPicker ? (
+                    <ModelPicker
+                      key={`meeting-${mode}`}
+                      ariaLabel="Meeting model"
+                      value={values.meeting_model ?? ""}
+                      onChange={(val) => updateField("meeting_model", val)}
+                      mode={mode}
+                      apiKey={values.api_key}
+                      region={values.region}
+                      requiresTools={false}
+                      emptyLabel="Same as Chat Agent model"
+                      style={pickerFieldStyle}
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      aria-label="Meeting model"
+                      className={styles.input}
+                      value={values.meeting_model ?? ""}
+                      placeholder="Same as Chat Agent model"
+                      onChange={(e) => updateField("meeting_model", e.target.value)}
+                    />
+                  )}
+                  <p className={styles.fieldHint}>
+                    Applies to Voice Agent, Live Translation, and Meeting Notes. Auto-falls back to Amazon Bedrock on 401/429.
+                  </p>
+                </div>
               )}
             </div>
-          )}
-        </div>
+
+            {mode !== "antigravity" && (
+              <label className={styles.meetingDefaultToggle}>
+                <input
+                  type="checkbox"
+                  checked={values.meeting_use_default === "true"}
+                  onChange={(e) =>
+                    updateField("meeting_use_default", e.target.checked ? "true" : "")
+                  }
+                />
+                <span className={styles.meetingDefaultToggleCopy}>
+                  <strong>Use Amazon Bedrock (Default) for Voice &amp; Meeting</strong>
+                  <span>
+                    Use {activeMeta.name} for Chat Agent only, while Voice Agent, Live Translation, and Meeting Notes stay on built-in Amazon Bedrock.
+                  </span>
+                </span>
+              </label>
+            )}
+          </>
+        )}
       </section>
 
       {/* Action Footer (elevated & highlighted when changes are unsaved) */}

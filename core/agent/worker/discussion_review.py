@@ -171,6 +171,8 @@ def run(stream, out_topic, start):
         response = classify(prepared)
         stream.xadd(out_topic, {'event': json.dumps({'type': 'message-delta', 'text': json.dumps(response, ensure_ascii=False)})})
     except Exception as exc:  # Never log transcript, prompts or provider responses.
+        from llm.errors import emit_provider_fallback_marker
+        emit_provider_fallback_marker(exc)
         detail = _safe_failure(exc) if isinstance(exc, (ValueError, ValidationError)) else ''
         logging.getLogger(__name__).warning('discussion review failed error=%s detail=%s', type(exc).__name__, detail)
     stream.xadd(out_topic, {'event': json.dumps({'type': 'turn-complete'})})

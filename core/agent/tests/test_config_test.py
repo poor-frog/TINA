@@ -498,3 +498,43 @@ def test_transcription_accepts_silence_from_tokenless_funasr():
         probe=lambda e, t: (200, '{"text":""}'), model="custom", require_token=False,
     )
     assert out["ok"]
+
+
+def test_run_models_test_builtin_bedrock_default_and_openai_api_defaults():
+    # Built-in Amazon Bedrock default passes cleanly without looking for Claude subscription files
+    bedrock_out = ct.run_models_test(
+        {},
+        env={"TINA_LLM_PROVIDER": "bedrock-converse", "TINA_LLM_MODEL": "amazon.nova-lite-v1:0"},
+    )
+    assert bedrock_out["ok"] is True
+    assert bedrock_out["mode"] == "bedrock"
+    assert "Amazon Bedrock" in bedrock_out["summary"]
+
+    # OpenAI API defaults blank model to gpt-5 (never leaking Bedrock TINA_LLM_MODEL) and tests meeting_model
+    seen = []
+
+    def post(url, payload, headers):
+        seen.append((url, payload["model"], headers))
+        return 200, "{}"
+
+    out = ct.run_models_test(
+        {"mode": "openai-api", "api_key": "sk-test-secret", "meeting_model": "gpt-5-mini"},
+        env={"TINA_LLM_PROVIDER": "bedrock-converse", "TINA_LLM_MODEL": "amazon.nova-lite-v1:0"},
+        post=post,
+    )
+    assert out["ok"] is True
+    assert out["mode"] == "openai-api"
+    assert [m for _, m, _ in seen] == ["gpt-5", "gpt-5-mini"]
+    assert "sk-test-secret" not in json.dumps(out)
+
+    # With meeting_use_default="true", only chat model is probed and summary notes Amazon Bedrock for meetings
+    seen.clear()
+    out_default_meeting = ct.run_models_test(
+        {"mode": "openai-api", "api_key": "sk-test-secret", "meeting_model": "gpt-5-mini", "meeting_use_default": "true"},
+        env={"TINA_LLM_PROVIDER": "bedrock-converse"},
+        post=post,
+    )
+    assert out_default_meeting["ok"] is True
+    assert [m for _, m, _ in seen] == ["gpt-5"]
+    assert "Amazon Bedrock" in out_default_meeting["summary"]
+

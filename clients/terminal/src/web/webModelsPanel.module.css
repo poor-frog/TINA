@@ -333,10 +333,15 @@
   color: var(--m-ink-4);
 }
 
+.matrixOne,
 .matrixThree,
 .matrixTwo {
   display: grid;
   gap: 10px;
+}
+
+.matrixOne {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .matrixThree {
@@ -776,6 +781,46 @@
 
 .secretInput {
   padding-right: 40px;
+}
+
+.meetingDefaultToggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: var(--space-3);
+  padding: 12px 14px;
+  border: 1px solid var(--m-line);
+  border-radius: var(--m-r);
+  background: var(--m-chrome);
+  cursor: pointer;
+}
+
+.meetingDefaultToggle input[type="checkbox"] {
+  margin-top: 2px;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--m-accent);
+  flex: none;
+  cursor: pointer;
+}
+
+.meetingDefaultToggleCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.meetingDefaultToggleCopy strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--m-ink);
+}
+
+.meetingDefaultToggleCopy span {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--m-ink-3);
 }
 
 .secretToggle {

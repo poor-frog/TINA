@@ -955,6 +955,8 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
         else:
             log.warning('meeting knowledge failed error=TimeoutError')
     except Exception as exc:  # Never log questions, sources or provider responses.
+        from llm.errors import emit_provider_fallback_marker
+        emit_provider_fallback_marker(exc)
         log.warning('meeting knowledge failed error=%s', type(exc).__name__)
     finally:
         if lease is not None: lease.close()
@@ -992,6 +994,8 @@ def _run_dictation_polish(stream, out_topic: str, start: dict) -> None:
             raise ValueError("invalid polish result")
         event = {"type": "message-delta", "text": polished}
     except Exception as exc:  # noqa: BLE001 — do not log transcript or provider response text
+        from llm.errors import emit_provider_fallback_marker
+        emit_provider_fallback_marker(exc)
         log.warning("dictation polish failed request_id=%s error=%s", request_id, type(exc).__name__)
         event = None
     if event is not None:
@@ -1044,6 +1048,8 @@ def _run_dictation_translate(stream, out_topic: str, start: dict) -> None:
             translated = _translate_single_phrase(comp, text, language_name, model, context=context, speaker=speaker)
         event = {"type": "message-delta", "text": translated}
     except Exception as exc:  # noqa: BLE001 — do not log transcript or provider response text
+        from llm.errors import emit_provider_fallback_marker
+        emit_provider_fallback_marker(exc)
         log.warning("dictation translation failed request_id=%s error=%s", request_id, type(exc).__name__)
         completion['translation_error'] = completion_failure_code(exc)
         event = None

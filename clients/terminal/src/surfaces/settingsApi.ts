@@ -8,6 +8,7 @@ export type ModelPrefs = {
   mode?: "subscription" | "custom" | "bedrock" | "openai-api" | "openai-subscription" | "antigravity" | "groq" | "deepseek" | "gemini" | null;
   model?: string | null;
   meeting_model?: string | null;
+  meeting_use_default?: string | null;
   effort?: string | null; // deprecated; ignored by runners, cleared on save (Auto)
   base_url?: string | null;
   region?: string | null;
@@ -17,6 +18,7 @@ export type ModelPrefs = {
 };
 
 const API_MODEL_PROVIDERS = {
+  "openai-api": { label: "OpenAI", model: "gpt-5", keyUrl: "https://platform.openai.com/api-keys" },
   groq: { label: "Groq", model: "openai/gpt-oss-20b", keyUrl: "https://console.groq.com/keys" },
   deepseek: { label: "DeepSeek", model: "deepseek-flash", keyUrl: "https://platform.deepseek.com/api_keys" },
   gemini: { label: "Gemini", model: "gemini-3.5-flash", keyUrl: "https://aistudio.google.com/apikey" },
