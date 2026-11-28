@@ -138,15 +138,19 @@ class Runtime:
         except Exception:  # noqa: BLE001 — discovery failure must not block the boot
             return 0
         adopted = 0
+        discovered_ids: set[str] = set()
         for info in discovered:
             wid = info.get("workload_id")
             name = info.get("name")
             if not wid or not name:
                 continue
+            discovered_ids.add(wid)
             self._handles.setdefault(wid, WorkloadHandle(id=wid, impl=name))
             if self.store.get(wid) is not None:
                 continue                       # durable store kept the record — handle was the gap
-            spec = WorkloadSpec(workloadId=wid, profile="adopted", env={})
+            owner_val = (info.get("owner") or "").strip()
+            env = {"TINA_OWNER": owner_val} if owner_val else {}
+            spec = WorkloadSpec(workloadId=wid, profile="adopted", env=env)
             status = WorkloadStatus(
                 workloadId=wid, profile=spec.profile,
                 state=RuntimeState.running, backend=self.backend.name,
@@ -159,6 +163,24 @@ class Runtime:
                 status.stopReason = StopReason.completed if code == 0 else StopReason.failed
             self._persist(spec, status)
             adopted += 1
+
+        # Reconcile persisted active records that vanished from the substrate while the runtime was
+        # down so stale running/starting entries never permanently occupy quota slots after restart.
+        for rec in list(self.store.list()):
+            wid = rec.spec.workloadId
+            if wid in discovered_ids:
+                continue
+            if rec.status.state in (RuntimeState.starting, RuntimeState.running):
+                st = rec.status
+                was_starting = st.state is RuntimeState.starting
+                st.state = RuntimeState.stopped
+                st.stoppedAt = _now()
+                st.stopReason = StopReason.start_failed if was_starting else StopReason.completed
+                self._persist(rec.spec, st)
+                self._handles.pop(wid, None)
+                if self.enforcer is not None:
+                    self.enforcer.forget(wid)
+                self._emit(wid, RuntimeState.stopped, stopReason=st.stopReason)
         return adopted
 
     # ── runtime.v1 operations ────────────────────────────────────────────────
@@ -253,12 +275,32 @@ class Runtime:
         record = self._record(workload_id)
         status = record.status
         # A running record with NO in-process handle (restart) re-derives one from the substrate,
-        # so the exit-reflection below stays truthful across a runtime recreate.
-        handle = (
-            self._handle_for(workload_id)
-            if status.state == RuntimeState.running
-            else self._handles.get(workload_id)
-        )
+        # so the exit-reflection below stays truthful across a runtime recreate. If a backend
+        # supporting `find` definitively confirms the workload is absent (returns None without
+        # error), mark it stopped so vanished containers/tasks never leak quota slots.
+        handle = self._handles.get(workload_id)
+        definitively_missing = False
+        if status.state == RuntimeState.running and handle is None:
+            finder = getattr(self.backend, "find", None)
+            if finder is not None:
+                try:
+                    handle = finder(workload_id)
+                except Exception:  # noqa: BLE001 — transient lookup failure must never falsely stop a live workload
+                    handle = None
+                else:
+                    if handle is not None:
+                        self._handles[workload_id] = handle
+                    else:
+                        definitively_missing = True
+        if status.state == RuntimeState.running and definitively_missing:
+            status.state = RuntimeState.stopped
+            status.stoppedAt = _now()
+            status.stopReason = StopReason.completed
+            self._persist(record.spec, status)
+            if self.enforcer is not None:
+                self.enforcer.forget(workload_id)
+            self._emit(workload_id, RuntimeState.stopped, stopReason=status.stopReason)
+            return status
         # reflect a workload that exited on its own (only observable while we hold a live handle)
         if status.state == RuntimeState.running and handle is not None:
             code = self.backend.exit_code(handle)

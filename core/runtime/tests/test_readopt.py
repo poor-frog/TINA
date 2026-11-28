@@ -423,3 +423,73 @@ def test_k8s_discovers_pods_by_label(monkeypatch):
         "workload_id": "mtg-9-dead", "name": "tina-mtg-9-dead",
         "running": False, "exit_code": 137,
     }
+
+
+def test_vanished_container_reconciles_to_stopped_and_frees_owner_quota():
+    """A persisted `running` record whose substrate container disappeared must reconcile to
+    `stopped` on get()/create() so zombie entries never permanently exhaust owner_quota."""
+    be, _ = _backend({})  # substrate has NO containers
+    store = InMemoryStore()
+    spec = WorkloadSpec(workloadId="mtg-zombie-1", profile="meeting-bot", env={"TINA_OWNER": "6"})
+    store.set(WorkloadRecord(
+        spec=spec,
+        status=WorkloadStatus(
+            workloadId="mtg-zombie-1", profile="meeting-bot",
+            state=RuntimeState.running, backend="docker",
+        ),
+        owner="6",
+    ))
+    rt = Runtime(backend=be, profiles={}, store=store, owner_quota=1)
+    assert store.count_for_owner("6") == 1
+    st = rt.get("mtg-zombie-1")
+    assert st.state is RuntimeState.stopped
+    assert store.count_for_owner("6") == 0
+
+
+def test_transient_find_error_does_not_falsely_stop_running_workload():
+    """If backend.find() raises a transient error, get() must keep the record running."""
+    be, _ = _backend({})
+
+    def _boom(_wid: str):
+        raise RuntimeError("temporary API outage")
+
+    be.find = _boom  # type: ignore[method-assign]
+    store = InMemoryStore()
+    spec = WorkloadSpec(workloadId="mtg-live-1", profile="meeting-bot", env={"TINA_OWNER": "6"})
+    store.set(WorkloadRecord(
+        spec=spec,
+        status=WorkloadStatus(
+            workloadId="mtg-live-1", profile="meeting-bot",
+            state=RuntimeState.running, backend="docker",
+        ),
+        owner="6",
+    ))
+    rt = Runtime(backend=be, profiles={}, store=store)
+    assert rt.get("mtg-live-1").state is RuntimeState.running
+
+
+def test_adopt_reconciles_missing_store_records_and_preserves_discovered_owner():
+    """adopt() marks persisted running/starting records absent from the substrate as stopped,
+    and propagates `owner` from discovered workloads so they don't collapse into owner=''."""
+    class _DiscoveryBackend:
+        name = "ecs"
+
+        def list_workload_containers(self):
+            return [
+                {"workload_id": "mtg-alive", "name": "arn:alive", "running": True, "exit_code": None, "owner": "6"},
+            ]
+
+    store = InMemoryStore()
+    for wid, state in (("mtg-stale-run", RuntimeState.running), ("mtg-stale-start", RuntimeState.starting)):
+        store.set(WorkloadRecord(
+            spec=WorkloadSpec(workloadId=wid, profile="meeting-bot", env={}),
+            status=WorkloadStatus(workloadId=wid, profile="meeting-bot", state=state, backend="ecs"),
+            owner="",
+        ))
+    rt = Runtime(backend=_DiscoveryBackend(), profiles={}, store=store)  # type: ignore[arg-type]
+    assert rt.adopt() == 1
+    assert store.get("mtg-stale-run").status.state is RuntimeState.stopped
+    assert store.get("mtg-stale-start").status.state is RuntimeState.stopped
+    assert store.count_for_owner("") == 0
+    assert store.get("mtg-alive").owner == "6"
+    assert store.count_for_owner("6") == 1

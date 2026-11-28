@@ -217,6 +217,7 @@ def build_workload_spec(
     callback_url: Optional[str] = None,
     extra_env: Optional[dict[str, str]] = None,
     profile: str = "meeting-bot",
+    owner: Optional[str] = None,
 ) -> dict:
     """Wrap ``invocation`` as the bot's ONE config env var (``TINA_BOT_CONFIG``) inside a ``runtime.v1``
     ``WorkloadSpec``. The ``profile`` names the serving backend: ``meeting-bot`` is the container
@@ -233,6 +234,9 @@ def build_workload_spec(
     env: dict[str, str] = {"TINA_BOT_CONFIG": payload, "BOT_CONFIG": payload}
     if extra_env:
         env.update({k: str(v) for k, v in extra_env.items()})
+    owner_str = str(owner).strip() if owner is not None else ""
+    if owner_str:
+        env.setdefault("TINA_OWNER", owner_str)
     spec: dict[str, Any] = {
         "workloadId": workload_id,
         "profile": profile,

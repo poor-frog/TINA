@@ -129,3 +129,38 @@ def test_workspace_placement_failure_cleans_only_the_declined_invocation(backend
     with pytest.raises(TimeoutError):
         backend.start(uid, runnable, env)
     backend.s3.delete_object.assert_not_called()
+
+
+def test_missing_ecs_task_reports_exited_and_cleans_up_without_blocking(backend):
+    """When ECS prunes a stopped task (~1h after exit), describe_tasks returns MISSING.
+    exit_code() must return 0 (never None) so Runtime.get() frees the quota slot, and
+    cleanup() must reclaim the invocation file instead of raising 'stopping' forever."""
+    handle = backend.start("mtg-missing", Runnable(image=IMAGE), ENV | {"TINA_OWNER": "6"})
+    tags = backend.ecs.run_task.call_args.kwargs["tags"]
+    assert {"key": "tina:runtime-owner", "value": "6"} in tags
+
+    backend.ecs.describe_tasks.return_value = {
+        "tasks": [],
+        "failures": [{"arn": TASK, "reason": "MISSING"}],
+    }
+    assert backend.exit_code(handle) == 0
+    backend.cleanup(handle)
+    backend.ecs.stop_task.assert_not_called()
+    backend.s3.delete_object.assert_called_once_with(Bucket="private-test", Key=backend._key("mtg-missing"))
+
+    # list_workload_containers surfaces tina:runtime-owner when stamped
+    backend.ecs.get_paginator.return_value.paginate.return_value = [{"taskArns": [TASK]}]
+    backend.ecs.describe_tasks.return_value = {
+        "tasks": [{
+            "taskArn": TASK,
+            "lastStatus": "RUNNING",
+            "containers": [],
+            "tags": [
+                {"key": "tina:runtime-workload", "value": "mtg-owned"},
+                {"key": "tina:runtime-owner", "value": "6"},
+            ],
+        }],
+    }
+    assert backend.list_workload_containers() == [
+        {"workload_id": "mtg-owned", "name": TASK, "running": True, "exit_code": None, "owner": "6"},
+    ]

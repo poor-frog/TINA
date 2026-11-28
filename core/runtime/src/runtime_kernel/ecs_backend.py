@@ -357,6 +357,10 @@ class ECSBackend:
         self._put_env_file(key, payload)
         if sync_key and sync_payload is not None:
             self._put_env_file(sync_key, sync_payload)
+        tags = [{"key": self._managed, "value": workload_id}]
+        owner_tag = (env.get("TINA_OWNER") or "").strip()
+        if owner_tag:
+            tags.append({"key": "tina:runtime-owner", "value": owner_tag})
         response = self.ecs.run_task(
             cluster=self.cluster, taskDefinition=definition,
             launchType="FARGATE", platformVersion="1.4.0", count=1,
@@ -367,7 +371,7 @@ class ECSBackend:
             overrides={"containerOverrides": [{"name": container, "environmentFiles": [
                 {"type": "s3", "value": f"arn:{self.partition}:s3:::{self.bucket}/{key}"},
             ]}, *sidecar]},
-            tags=[{"key": self._managed, "value": workload_id}],
+            tags=tags,
         )
         if container == "worker" and response.get("failures") and not response.get("tasks"):
             self.s3.delete_object(Bucket=self.bucket, Key=key)
@@ -397,7 +401,12 @@ class ECSBackend:
 
     def exit_code(self, handle: WorkloadHandle) -> int | None:
         tasks = self._describe([handle._impl])
-        return self._exit_code(tasks[0]) if tasks else None
+        if not tasks:
+            # _describe raises on any non-MISSING failure; an empty list means ECS explicitly
+            # reported the task MISSING (stopped and pruned after ~1h). Return 0 (mirroring
+            # K8sBackend) so Runtime.get() reconciles it to stopped and frees the quota slot.
+            return 0
+        return self._exit_code(tasks[0])
 
     def _discover(self, **filters):
         paginator = self.ecs.get_paginator("list_tasks")
@@ -426,10 +435,13 @@ class ECSBackend:
             tags = {tag["key"]: tag["value"] for tag in task.get("tags", [])}
             if self._managed in tags:
                 code = self._exit_code(task)
-                workloads.append({
+                entry = {
                     "workload_id": tags[self._managed], "name": task["taskArn"],
                     "running": code is None, "exit_code": code,
-                })
+                }
+                if tags.get("tina:runtime-owner"):
+                    entry["owner"] = tags["tina:runtime-owner"]
+                workloads.append(entry)
         return workloads
 
     def terminate(self, handle: WorkloadHandle) -> None:
@@ -443,7 +455,13 @@ class ECSBackend:
 
     def cleanup(self, handle: WorkloadHandle) -> None:
         tasks = self._describe([handle._impl])
-        if not tasks or self._exit_code(tasks[0]) is None:
+        if not tasks:
+            # Task already stopped and pruned by ECS (MISSING): reclaim bot/draft invocation file
+            # best-effort without raising a permanent "stopping" error.
+            if not handle.id.startswith("agent-"):
+                self.s3.delete_object(Bucket=self.bucket, Key=self._key(handle.id, draft=False))
+            return
+        if self._exit_code(tasks[0]) is None:
             self.terminate(handle)
             raise RuntimeError("ECS task is stopping; retry cleanup after it has stopped")
         if any(c["name"] == "worker" for c in tasks[0]["containers"]):

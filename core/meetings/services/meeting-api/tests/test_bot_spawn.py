@@ -280,6 +280,21 @@ async def test_request_bot_quota_propagates(monkeypatch):
     with pytest.raises(QuotaExceeded):
         await request_bot(repo, runtime, user_id=USER, platform="google_meet",
                           native_meeting_id="x", redis_url="r", token_secret=SECRET)
+    # Workload spec carries TINA_OWNER=<user_id> so runtime accounts quota per user (not owner='')
+    assert runtime.specs[0]["env"]["TINA_OWNER"] == str(USER)
+    # QuotaExceeded marks the newly created meeting row `failed` so retries never collide with 409
+    rows = list(repo._meetings.values())
+    assert len(rows) == 1
+    assert rows[0]["status"] == "failed"
+    assert rows[0]["data"]["failure_stage"] == "requested"
+    assert "quota" in rows[0]["data"]["failure_reason"].lower()
+
+    # Once quota frees up, retrying the same meeting succeeds cleanly instead of hitting 409 DuplicateMeeting
+    runtime._quota_exceeded = False
+    retried = await request_bot(repo, runtime, user_id=USER, platform="google_meet",
+                                native_meeting_id="x", redis_url="r", token_secret=SECRET)
+    assert retried["status"] == "requested"
+    assert runtime.specs[-1]["env"]["TINA_OWNER"] == str(USER)
 
 
 # ── #718: a workload DEAD AT START is refused, the row is failed with the reason, no `requested` lingers

@@ -62,7 +62,18 @@ export function presentError(e: unknown): PresentedError {
     if (e.status === 502 || e.status === 504) return { headline: "The TINA server can't reach a backend service right now.", detail };
     if (e.status === 401) return { headline: "Your API key was rejected — sign in again.", detail };
     if (e.status === 403) return { headline: "Your key doesn't have access to this.", detail };
-    if (e.status === 429) return { headline: "Rate limit hit — try again in a moment.", detail };
+    if (e.status === 429) {
+      if (/runtime kernel|owner quota/i.test(e.detail)) {
+        return {
+          headline: "Bot capacity limit reached — stop an active bot or try again in a moment.",
+          detail,
+        };
+      }
+      if (isProse(e.detail) && /\b(bot|bots|concurrent|quota|limit)\b|giây/i.test(e.detail)) {
+        return { headline: e.detail.trim(), detail };
+      }
+      return { headline: "Rate limit hit — try again in a moment.", detail };
+    }
     // Remaining 4xx/5xx: a prose `detail` is the backend's own user-facing reason — pass it
     // through VERBATIM (e.g. a typed transcription 503). A payload-shaped detail stays operator-only.
     if (isProse(e.detail)) return { headline: e.detail.trim(), detail };

@@ -18,7 +18,9 @@ const FIX = {
   auth: new ApiError(401, "Invalid API key", "/api/tokens"),
   scope: new ApiError(403, "Forbidden", "/api/admin/settings/models"),
   validation422Json: new ApiError(422, '{"field":"ics_url","msg":"invalid url"}', "/api/user/calendar"),
-  rateLimit: new ApiError(429, "Bot concurrency limit reached", "/api/bots"),
+  rateLimit: new ApiError(429, "Too many requests", "/api/meetings"),
+  botConcurrency429: new ApiError(429, "User has reached the maximum concurrent bot limit (3).", "/api/bots"),
+  runtimeQuota429: new ApiError(429, "runtime kernel: owner quota exceeded", "/api/bots"),
   // A typed backend detail that SHOULD pass through verbatim (the STT 503 —
   // meeting-api bot_spawn/router.py: TranscriptionNotConfigured → 503 detail=str(e)).
   typed503: new ApiError(503, "Transcription is not configured: set TRANSCRIPTION_SERVICE_URL or ask your operator", "/api/bots"),
@@ -52,6 +54,16 @@ describe("presentError — ApiError → user truth (fixture range)", () => {
   });
   it("rate-limit 429 → rate limit truth", () => {
     expect(presentError(FIX.rateLimit).headline).toBe("Rate limit hit — try again in a moment.");
+  });
+  it("bot concurrency 429 → preserves clear user-facing limit message instead of generic rate limit", () => {
+    expect(presentError(FIX.botConcurrency429).headline).toBe(
+      "User has reached the maximum concurrent bot limit (3).",
+    );
+  });
+  it("runtime quota 429 → maps kernel plumbing detail to clear bot capacity guidance", () => {
+    const p = presentError(FIX.runtimeQuota429);
+    expect(p.headline).toBe("Bot capacity limit reached — stop an active bot or try again in a moment.");
+    expect(p.headline).not.toContain("runtime kernel");
   });
   it("A3: a typed backend 503 detail passes through VERBATIM — never genericized", () => {
     expect(presentError(FIX.typed503).headline).toBe(FIX.typed503.detail);

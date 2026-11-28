@@ -944,6 +944,7 @@ async def request_bot(
         invocation=invocation,
         extra_env=tts_env,
         callback_url=f"{meeting_api_url}/runtime/callback",
+        owner=str(user_id),
     )
     try:
         result = await runtime.create_workload(spec)
@@ -954,7 +955,18 @@ async def request_bot(
         spawned_state = result.get("state")
         if spawned_state in ("stopped", "destroyed"):
             raise SpawnFailed(f"workload dead on spawn: {result.get('stopReason') or spawned_state}")
-    except QuotaExceeded:
+    except QuotaExceeded as e:
+        # No workload was spawned: fail the just-inserted meeting row immediately so it does not
+        # linger in `requested` and block retries with 409 AuthSessionBusy or DuplicateMeeting.
+        reason = str(e) or "Bot concurrency limit reached"
+        try:
+            await repo.fail_meeting(meeting_id=meeting_id, reason=reason, failure_stage="requested")
+        except Exception as fail_err:  # noqa: BLE001 — failing the row is best-effort; never mask the 429
+            log_event(
+                "bot_spawn_fail_row_error", audience="system", level="error",
+                span="bots.create", user_id=user_id, meeting_id=str(meeting_id),
+                fields={"error": str(fail_err)},
+            )
         log_event(
             "bot_spawn_quota_exceeded", audience="user", level="warning",
             span="bots.create", user_id=user_id, meeting_id=str(meeting_id),
