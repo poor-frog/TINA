@@ -213,9 +213,9 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 20 }}>
+        <div className="tina-web-tasks-toolbar">
           <label className="tina-web-field">
-            <span>Workspace</span>
+            <span className="sr-only">Workspace</span>
             <select value={workspace} disabled={!!togglingPath} onChange={(event) => {
               loadVersion.current += 1;
               setTasks([]);

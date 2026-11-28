@@ -1574,6 +1574,23 @@
   border-color: var(--tw-mint);
 }
 
+.tina-web-tasks-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.tina-web-tasks-toolbar .tina-web-field {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tina-web-tasks-toolbar .tina-web-filter-input {
+  height: 38px;
+}
+
 .tina-web-meeting-list {
   flex: 1;
   min-height: 0;
