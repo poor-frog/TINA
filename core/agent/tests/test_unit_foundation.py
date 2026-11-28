@@ -567,7 +567,7 @@ def test_groq_overlay_preserves_meeting_override_and_honors_model_allowlist():
 
 @pytest.mark.parametrize("mode,runner,base,default", [
     ("deepseek", "claude-code", "https://api.deepseek.com", "deepseek-flash"),
-    ("gemini", "antigravity", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.5-flash"),
+    ("gemini", "antigravity", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.8-flash"),
 ])
 def test_api_providers_route_both_call_shapes_and_isolate_defaults(mode, runner, base, default):
     env = {key: "foreign-secret" for key in dispatch.MODEL_AUTH_ENV_ALLOWLIST}

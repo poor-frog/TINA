@@ -12,9 +12,9 @@
 export type ModelChoice = { id: string; label: string; supportsTools?: boolean };
 
 const GEMINI_FALLBACK: ModelChoice[] = [
-  { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
-  { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
   { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
+  { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
+  { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
   { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview" },
 ];
 

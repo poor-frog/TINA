@@ -17,16 +17,16 @@ export type ModelPrefs = {
   antigravity_terms_acknowledged?: string | null;
 };
 
-const API_MODEL_PROVIDERS = {
-  "openai-api": { label: "OpenAI", model: "gpt-5", keyUrl: "https://platform.openai.com/api-keys" },
+const API_MODEL_PROVIDERS: Record<string, { label: string; model: string; meetingModel?: string; keyUrl: string }> = {
+  "openai-api": { label: "OpenAI", model: "gpt-5", meetingModel: "gpt-5-mini", keyUrl: "https://platform.openai.com/api-keys" },
   groq: { label: "Groq", model: "openai/gpt-oss-20b", keyUrl: "https://console.groq.com/keys" },
   deepseek: { label: "DeepSeek", model: "deepseek-flash", keyUrl: "https://platform.deepseek.com/api_keys" },
-  gemini: { label: "Gemini", model: "gemini-3.5-flash", keyUrl: "https://aistudio.google.com/apikey" },
-} as const;
+  gemini: { label: "Gemini", model: "gemini-3.8-flash", keyUrl: "https://aistudio.google.com/apikey" },
+};
 
 export function apiModelProvider(mode: string | undefined) {
   return mode && Object.hasOwn(API_MODEL_PROVIDERS, mode)
-    ? API_MODEL_PROVIDERS[mode as keyof typeof API_MODEL_PROVIDERS] : null;
+    ? API_MODEL_PROVIDERS[mode] : null;
 }
 
 export function canSaveModelPrefs(values: Record<string, string>): boolean {

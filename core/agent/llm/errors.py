@@ -67,13 +67,43 @@ def structured_output_unsupported(response: httpx.Response, parameter: str) -> b
     if response.status_code not in (400, 422):
         return False
     try:
-        error = response.json().get('error', {})
-        return (isinstance(error, dict)
-                and error.get('code') in ('unsupported_parameter', 'unsupported_value')
-                and isinstance(error.get('param'), str)
-                and (error['param'] == parameter or error['param'].startswith(parameter + '.')))
+        payload = response.json()
     except (ValueError, AttributeError):
         return False
+    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+        error = payload[0].get('error', {})
+    elif isinstance(payload, dict):
+        error = payload.get('error', {})
+    else:
+        return False
+    if not isinstance(error, dict):
+        return False
+    code = error.get('code')
+    param = error.get('param')
+    if (code in ('unsupported_parameter', 'unsupported_value')
+            and isinstance(param, str)
+            and (param == parameter or param.startswith(parameter + '.'))):
+        return True
+    if parameter != 'response_format' or code == 'invalid_json_schema':
+        return False
+    msg = (error.get('message') or '').lower() if isinstance(error.get('message'), str) else ''
+    if not msg:
+        return False
+    # Gemini OpenAI-compat returns INVALID_ARGUMENT (often wrapped in a 1-element list) when rejecting
+    # JSON Schema keywords such as additionalProperties, nullable unions, or strict response_format.
+    if error.get('status') == 'INVALID_ARGUMENT' and any(
+        token in msg for token in ('response_format', 'response_schema', 'json_schema', 'additionalproperties', 'schema', 'strict')
+    ):
+        return True
+    # Groq and other OpenAI-compat endpoints return invalid_request_error when a model does not support
+    # strict json_schema / structured outputs.
+    if error.get('type') == 'invalid_request_error' and any(
+        token in msg for token in ('response_format', 'response format', 'json_schema', 'structured output')
+    ) and any(
+        cue in msg for cue in ('not support', 'unsupported', 'does not support', 'only supported', 'not allowed')
+    ):
+        return True
+    return False
 
 
 def completion_failure_code(exc: Exception) -> str:

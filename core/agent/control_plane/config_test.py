@@ -334,7 +334,7 @@ def test_gemini(api_key: str, model: str = "", meeting_model: str = "", *,
     if not api_key:
         return _result(False, "Gemini API key is missing. Add a Gemini API key in Settings → Models.")
     from control_plane.model_probe import gemini_tools
-    chat_model = model.strip() or "gemini-3.5-flash"
+    chat_model = model.strip() or "gemini-3.8-flash"
     summary_model = meeting_model.strip() or chat_model
     chat = gemini_tools(chat_model, api_key, post)
     if not chat["ok"]:
@@ -440,9 +440,13 @@ def run_models_test(config: dict, env: Optional[dict] = None,
         out["mode"] = "bedrock"
     elif mode == "openai-api":
         openai_key = (config.get("api_key") or "").strip() or env.get("OPENAI_API_KEY", "")
-        chat_model = (config.get("model") or "").strip() or "gpt-5"
+        raw_chat = (config.get("model") or "").strip()
+        chat_model = raw_chat or "gpt-5"
         out = test_openai_responses(openai_key, chat_model, post=post)
-        meeting_model = "" if meeting_use_default else (config.get("meeting_model") or "").strip()
+        raw_meeting = (config.get("meeting_model") or "").strip()
+        meeting_model = "" if meeting_use_default else (
+            raw_meeting or ("gpt-5-mini" if (not raw_chat or raw_chat == "gpt-5") else "")
+        )
         if out["ok"] and meeting_model and meeting_model != chat_model:
             meeting_out = test_openai_responses(openai_key, meeting_model, post=post)
             if not meeting_out["ok"]:

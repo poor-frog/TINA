@@ -398,11 +398,74 @@ def test_resolve_voice_model_env_and_local_completion_model_isolation(monkeypatc
     assert meeting_voice_completion.resolve_voice_model_env(
         {'mode': 'openai-api', 'api_key': 'sk-test', 'model': 'gpt-5', 'meeting_use_default': 'true'},
     ) == {}
-    # Gemini BYO resolves to Google's OpenAI-compatible endpoint with default gemini-3.5-flash
+    # Gemini BYO resolves to Google's OpenAI-compatible endpoint with default gemini-3.8-flash
     gemini_env = meeting_voice_completion.resolve_voice_model_env({'mode': 'gemini', 'api_key': 'AIza-test'})
     assert gemini_env['TINA_LLM_PROVIDER'] == 'openai-compat'
     assert gemini_env['TINA_LLM_BASE_URL'] == 'https://generativelanguage.googleapis.com/v1beta/openai'
-    assert gemini_env['TINA_LLM_MODEL'] == 'gemini-3.5-flash'
+    assert gemini_env['TINA_LLM_MODEL'] == 'gemini-3.8-flash'
+
+    # OpenAI API with blank models defaults Chat to gpt-5 and Voice/Meeting to gpt-5-mini
+    openai_default_env = meeting_voice_completion.resolve_voice_model_env(
+        {'mode': 'openai-api', 'api_key': 'sk-test-key'},
+    )
+    assert openai_default_env['TINA_LLM_PROVIDER'] == 'openai-responses'
+    assert openai_default_env['TINA_LLM_MODEL'] == 'gpt-5-mini'
+
+
+def test_structured_output_unsupported_handles_gemini_array_and_groq_model_rejection():
+    # Bug #2: Gemini OpenAI-compat wraps 400 INVALID_ARGUMENT schema rejections in a JSON list
+    gemini_adapter = OpenAICompatCompletion(
+        base_url='https://generativelanguage.googleapis.com/v1beta/openai',
+        api_key='AIza-test',
+        model='gemini-3.8-flash',
+        transport=httpx.MockTransport(lambda _: httpx.Response(400, json=[{
+            'error': {
+                'code': 400,
+                'status': 'INVALID_ARGUMENT',
+                'message': 'Invalid JSON payload received. Unknown name "additionalProperties" in response_format schema.',
+            },
+        }])),
+    )
+    with pytest.raises(LLMStructuredOutputUnsupported):
+        gemini_adapter.complete_structured('synthetic', system='voice', schema=voice_schema('answer'))
+
+    # Bug #2: Groq returns invalid_request_error when a model does not support json_schema strict mode
+    groq_adapter = OpenAICompatCompletion(
+        base_url='https://api.groq.com/openai/v1',
+        api_key='gsk-test',
+        model='llama-3.3-70b-versatile',
+        transport=httpx.MockTransport(lambda _: httpx.Response(400, json={
+            'error': {
+                'type': 'invalid_request_error',
+                'message': 'This model does not support response format `json_schema`.',
+            },
+        })),
+    )
+    with pytest.raises(LLMStructuredOutputUnsupported):
+        groq_adapter.complete_structured('synthetic', system='voice', schema=voice_schema('answer'))
+
+
+@pytest.mark.parametrize('code,expected_status,expected_auth', [
+    ('rate_limit_exceeded', 429, False),
+    ('insufficient_quota', 429, False),
+    ('invalid_api_key', 401, True),
+])
+def test_openai_responses_stream_failure_preserves_rate_limit_and_auth_codes(code, expected_status, expected_auth):
+    # Bug #3: SSE response.failed / error events carry typed status codes so Bedrock fallback triggers
+    from llm.errors import LLMAuthError, provider_fallback_reason
+
+    event = {'type': 'response.failed', 'response': {'error': {'code': code, 'message': 'rejected'}}}
+    adapter = OpenAIResponsesCompletion(
+        base_url='https://api.openai.com/v1',
+        api_key='sk-test',
+        model='gpt-5-mini',
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, text=f'data: {json.dumps(event)}\n\n')),
+    )
+    with pytest.raises(LLMError) as err:
+        adapter.complete('synthetic')
+    assert err.value.status_code == expected_status
+    assert isinstance(err.value, LLMAuthError) == expected_auth
+    assert provider_fallback_reason(err.value) == ('auth' if expected_auth else 'rate_limit')
 
 
 @pytest.mark.parametrize('reason', ['auth', 'rate_limit'])

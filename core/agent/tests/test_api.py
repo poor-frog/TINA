@@ -420,12 +420,17 @@ def test_chat_preflight_routes_api_provider_without_deployment_credentials(monke
     assert "own-test-key" not in response.text
 
 
-@pytest.mark.parametrize("mode,default", [("groq", "openai/gpt-oss-20b"), ("deepseek", "deepseek-flash"), ("gemini", "gemini-3.5-flash")])
-def test_models_reports_api_provider_defaults_instead_of_another_deployment_provider(mode, default):
+@pytest.mark.parametrize("mode,chat_default,meeting_default", [
+    ("groq", "openai/gpt-oss-20b", "openai/gpt-oss-20b"),
+    ("deepseek", "deepseek-flash", "deepseek-flash"),
+    ("gemini", "gemini-3.8-flash", "gemini-3.8-flash"),
+    ("openai-api", "gpt-5", "gpt-5-mini"),
+])
+def test_models_reports_api_provider_defaults_instead_of_another_deployment_provider(mode, chat_default, meeting_default):
     client, _runtime = _preflight_client(_FakeModelConfig({"mode": mode}))
     result = client.get("/api/models").json()
-    assert result["agent_model"] == default
-    assert result["meeting_model"] == default
+    assert result["agent_model"] == chat_default
+    assert result["meeting_model"] == meeting_default
 
 
 def test_chat_preflight_fails_open_when_model_config_lookup_errors(monkeypatch):

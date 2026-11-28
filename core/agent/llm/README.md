@@ -127,7 +127,7 @@ flattens it again in follow-up input history. Other namespaces stay omitted; pro
 tool allowlists are unchanged. The bridge advertises read-only MCP annotations so Codex can run
 these reads with its existing automatic tool grant and `approvalPolicy=never`.
 
-Gemini defaults to `gemini-3.5-flash`. Gemini and DeepSeek credential tests also verify native
+Gemini defaults to `gemini-3.8-flash`. Gemini and DeepSeek credential tests also verify native
 function calls and matching results, preserving thought signatures and thinking blocks.
 Bedrock tests use native streaming invocation, including its separate IAM permission, and
 validate complete AWS event-stream frames. The full CLI tool protocols have offline tests

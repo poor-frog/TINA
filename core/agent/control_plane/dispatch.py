@@ -261,7 +261,7 @@ def overlay_model_config(env: dict[str, str], config: dict, *, allowlist: str = 
         # Runtime from restoring another provider's secrets or a deployment model.
         key = (config.get("api_key") or "").strip()
         default_model = {"groq": "openai/gpt-oss-20b", "deepseek": "deepseek-flash",
-                         "gemini": "gemini-3.5-flash"}[mode]
+                         "gemini": "gemini-3.8-flash"}[mode]
         env["TINA_RUNNER"] = {"groq": "codex", "deepseek": "claude-code",
                               "gemini": "antigravity"}[mode]
         env["TINA_CODEX_AUTH_MODE"] = "groq" if mode == "groq" else ""
@@ -361,8 +361,9 @@ def overlay_model_config(env: dict[str, str], config: dict, *, allowlist: str = 
             target = target if _allowlisted(target, allowlist) else ""
             env["TINA_AGENT_MODEL"] = target
             env["TINA_LLM_MODEL"] = target
+            default_meeting = meeting_model or ("gpt-5-mini" if (not model or model == "gpt-5") else target)
             env["TINA_MEETING_MODEL"] = (
-                meeting_model if meeting_model and _allowlisted(meeting_model, allowlist) else target
+                default_meeting if default_meeting and _allowlisted(default_meeting, allowlist) else target
             )
         else:
             from control_plane.openai_auth import ChatGPTAuthError, access_token
@@ -813,11 +814,15 @@ class Dispatcher:
             from control_plane.aws_voice_chatgpt import workspace_access_token, workspace_connected
             from control_plane.openai_auth import ChatGPTAuthError
 
+            meeting_use_default = (
+                is_live_meeting
+                and str((model_config or {}).get("meeting_use_default") or "").strip().lower() == "true"
+            )
             if is_chat and workspace_uses_nova(identity["subject"], model_config or {}):
                 workspace_auth_mode = "bedrock-workspace"
-            elif multi_provider_pilot and _has_workspace_byo_model(model_config or {}):
+            elif multi_provider_pilot and not meeting_use_default and _has_workspace_byo_model(model_config or {}):
                 workspace_auth_mode = "byo"
-            elif workspace_connected(identity["subject"]):
+            elif not meeting_use_default and workspace_connected(identity["subject"]):
                 try:
                     workspace_token = workspace_access_token(identity["subject"], self._settings.redis_url)
                 except ChatGPTAuthError as exc:

@@ -274,13 +274,13 @@ def test_gemini_tests_native_chat_tool_round_trip_and_summary_without_claiming_c
         return 200, _gemini_tool_response(payload)
     result = ct.run_models_test({"mode": "gemini", "api_key": "own-key"}, env={}, post=post)
     assert result["ok"] and result["mode"] == "gemini"
-    assert calls[0][0] == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+    assert calls[0][0] == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
     assert calls[0][1]["tools"][0]["functionDeclarations"][0]["name"] == "tina_connection_check"
     assert calls[0][2] == {"x-goog-api-key": "own-key"}
     assert calls[1][1]["contents"][1]["parts"][0]["thoughtSignature"] == "opaque-signature"
     assert calls[1][1]["contents"][2]["parts"][0]["functionResponse"]["id"] == "probe-call-1"
     assert calls[2] == ("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
-        "model": "gemini-3.5-flash", "messages": [{"role": "user", "content": "Reply with OK."}],
+        "model": "gemini-3.8-flash", "messages": [{"role": "user", "content": "Reply with OK."}],
         "max_tokens": 16,
     }, {"Authorization": "Bearer own-key"})
     assert len(calls) == 3
@@ -510,7 +510,7 @@ def test_run_models_test_builtin_bedrock_default_and_openai_api_defaults():
     assert bedrock_out["mode"] == "bedrock"
     assert "Amazon Bedrock" in bedrock_out["summary"]
 
-    # OpenAI API defaults blank model to gpt-5 (never leaking Bedrock TINA_LLM_MODEL) and tests meeting_model
+    # OpenAI API defaults blank model to gpt-5 and blank meeting_model to gpt-5-mini
     seen = []
 
     def post(url, payload, headers):
@@ -518,7 +518,7 @@ def test_run_models_test_builtin_bedrock_default_and_openai_api_defaults():
         return 200, "{}"
 
     out = ct.run_models_test(
-        {"mode": "openai-api", "api_key": "sk-test-secret", "meeting_model": "gpt-5-mini"},
+        {"mode": "openai-api", "api_key": "sk-test-secret"},
         env={"TINA_LLM_PROVIDER": "bedrock-converse", "TINA_LLM_MODEL": "amazon.nova-lite-v1:0"},
         post=post,
     )
@@ -526,6 +526,16 @@ def test_run_models_test_builtin_bedrock_default_and_openai_api_defaults():
     assert out["mode"] == "openai-api"
     assert [m for _, m, _ in seen] == ["gpt-5", "gpt-5-mini"]
     assert "sk-test-secret" not in json.dumps(out)
+
+    # Explicit non-gpt-5 chat model does not force gpt-5-mini when meeting_model is blank
+    seen.clear()
+    out_custom_chat = ct.run_models_test(
+        {"mode": "openai-api", "api_key": "sk-test-secret", "model": "gpt-4.1"},
+        env={"TINA_LLM_PROVIDER": "bedrock-converse"},
+        post=post,
+    )
+    assert out_custom_chat["ok"] is True
+    assert [m for _, m, _ in seen] == ["gpt-4.1"]
 
     # With meeting_use_default="true", only chat model is probed and summary notes Amazon Bedrock for meetings
     seen.clear()

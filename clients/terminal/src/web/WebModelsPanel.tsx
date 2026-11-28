@@ -73,7 +73,7 @@ const PROVIDERS: readonly ProviderMeta[] = [
     group: "api",
     summary: "Fast Gemini Flash & Pro models",
     keyUrl: "https://aistudio.google.com/apikey",
-    defaultModelHint: "gemini-3.5-flash",
+    defaultModelHint: "gemini-3.8-flash",
   },
   {
     id: "groq",
@@ -275,7 +275,10 @@ export function WebModelsPanel({
       : agentSummary.model || activeProvider.defaultModelHint || activeProvider.name;
   const activeMeetingSummary = meetingUsesBedrockDefault
     ? "Amazon Bedrock (Default)"
-    : agentSummary.meeting_model || agentSummary.model || activeProvider.defaultModelHint || "Same as Chat Agent";
+    : agentSummary.meeting_model ||
+      (activeMode === "openai-api" && (!agentSummary.model || agentSummary.model === "gpt-5")
+        ? "gpt-5-mini"
+        : agentSummary.model || activeProvider.defaultModelHint || "Same as Chat Agent");
 
   return (
     <div className={styles.root}>
@@ -981,7 +984,11 @@ function AgentProviderForm({
                       apiKey={values.api_key}
                       region={values.region}
                       requiresTools={false}
-                      emptyLabel="Same as Chat Agent model"
+                      emptyLabel={
+                        apiProviderInfo?.meetingModel && (!values.model || values.model === apiProviderInfo.model)
+                          ? `Provider default (${apiProviderInfo.meetingModel})`
+                          : "Same as Chat Agent model"
+                      }
                       style={pickerFieldStyle}
                     />
                   ) : (

@@ -121,9 +121,13 @@ class OpenAIResponsesCompletion:
                             text_parts.append(delta)
                     elif event_type in ("response.failed", "error"):
                         detail = event.get("error") or (event.get("response") or {}).get("error")
-                        if (self.plan_usage and isinstance(detail, dict)
-                                and detail.get("code") == "subscription_sharing_usage_limit_exceeded"):
+                        code = detail.get("code") if isinstance(detail, dict) else None
+                        if self.plan_usage and code == "subscription_sharing_usage_limit_exceeded":
                             raise LLMError("ChatGPT plan usage limit reached", status_code=429)
+                        if code in ("rate_limit_exceeded", "insufficient_quota", "too_many_requests"):
+                            raise LLMError(f"OpenAI Responses rate limit: {str(detail)[:300]}", status_code=429)
+                        if code in ("invalid_api_key", "authentication_error", "account_deactivated"):
+                            raise LLMAuthError(f"OpenAI Responses auth error: {str(detail)[:300]}", status_code=401)
                         detail = detail or event.get("message") or "Responses stream failed"
                         raise LLMError(f"OpenAI Responses stream failed: {str(detail)[:300]}")
                     elif event_type == "response.incomplete":

@@ -511,3 +511,91 @@ def test_local_completion_and_background_jobs_fall_back_to_bedrock_on_auth_or_ra
     assert "TINA_ALLOW_FALLBACK_RETRY" not in bg_envs[1]
     assert bg_envs[1]["AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"] == "/v2/creds/staging"
 
+
+def test_live_meeting_copilot_respects_meeting_use_default_override(tmp_path, monkeypatch):
+    """Bug #1: Live Meeting Copilot (trusted_live_meeting=True) stays on Bedrock when meeting_use_default='true'."""
+    from control_plane.dispatch import Dispatcher
+    from shared import units
+    from shared.config import Settings
+
+    monkeypatch.setenv("TINA_WORKSPACE_PILOT_USER_IDS", "*")
+    monkeypatch.setenv("TINA_WORKSPACE_STORAGE", "s3")
+    monkeypatch.setenv("TINA_WORKSPACE_BEDROCK_MODEL", "us.anthropic.claude-sonnet-4-6")
+
+    settings = Settings(
+        workspaces_dir=str(tmp_path),
+        redis_url="redis://127.0.0.1:6379/0",
+        dispatch_signing_key="a" * 32,
+        agent_profile="agent",
+    )
+    spawned = []
+
+    class FakeRuntime:
+        def spawn(self, uid, profile, env):
+            spawned.append((uid, profile, dict(env)))
+            return uid
+
+    class FakeIdentity:
+        def mint(self, *args, **kwargs):
+            return "tok"
+
+    class FakeResolver:
+        def resolve(self, subject):
+            if subject == "8":
+                return {
+                    "mode": "openai-api",
+                    "api_key": "sk-test-secret",
+                    "model": "gpt-5",
+                    "meeting_use_default": "true",
+                }
+            return {
+                "mode": "openai-api",
+                "api_key": "sk-test-secret",
+                "model": "gpt-5",
+            }
+
+    dispatcher = Dispatcher(settings, FakeRuntime(), FakeIdentity(), model_config=FakeResolver())
+
+    # 1. With meeting_use_default="true": live meeting stays on Bedrock, while chat still uses OpenAI API
+    inv_live_default = units.make_dispatch(
+        subject="8", trigger="transcription",
+        start=units.entrypoint(inline="Live copilot brief"),
+        context={"kind": "meeting", "meeting": {
+            "meeting_id": "50", "session_uid": "50", "numeric_meeting_id": "50",
+            "native_id": "abc-defg-hij", "platform": "google_meet",
+        }},
+    )
+    dispatcher.dispatch(inv_live_default, trusted_live_meeting=True)
+    _, _, live_default_env = spawned[-1]
+    assert live_default_env["TINA_LLM_PROVIDER"] == "bedrock-converse"
+    assert live_default_env["CLAUDE_CODE_USE_BEDROCK"] == "1"
+    assert not live_default_env.get("OPENAI_API_KEY")
+
+    inv_chat_byo = units.make_dispatch(
+        subject="8", trigger="message",
+        start=units.entrypoint(inline="Hello chat"),
+        context={"kind": "none", "session": "chat-8"},
+    )
+    dispatcher.dispatch(inv_chat_byo)
+    _, _, chat_byo_env = spawned[-1]
+    assert chat_byo_env["TINA_RUNNER"] == "codex"
+    assert chat_byo_env["TINA_LLM_PROVIDER"] == "openai-responses"
+    assert chat_byo_env["TINA_AGENT_MODEL"] == "gpt-5"
+    assert chat_byo_env["OPENAI_API_KEY"] == "sk-test-secret"
+
+    # 2. Without meeting_use_default: live meeting uses user's OpenAI API with default gpt-5-mini meeting model
+    inv_live_byo = units.make_dispatch(
+        subject="7", trigger="transcription",
+        start=units.entrypoint(inline="Live copilot brief"),
+        context={"kind": "meeting", "meeting": {
+            "meeting_id": "51", "session_uid": "51", "numeric_meeting_id": "51",
+            "native_id": "xyz-defg-hij", "platform": "google_meet",
+        }},
+    )
+    dispatcher.dispatch(inv_live_byo, trusted_live_meeting=True)
+    _, _, live_byo_env = spawned[-1]
+    assert live_byo_env["TINA_LLM_PROVIDER"] == "openai-responses"
+    assert live_byo_env["TINA_MEETING_MODEL"] == "gpt-5-mini"
+    assert live_byo_env["OPENAI_API_KEY"] == "sk-test-secret"
+
+

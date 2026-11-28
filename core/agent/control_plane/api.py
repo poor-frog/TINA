@@ -1529,10 +1529,15 @@ def create_app(
         # overrides deployment defaults, and an explicit workspace meeting pin wins last.
         model_config = dispatcher.resolve_model_config(subject) or {}
         provider_default = {"groq": "openai/gpt-oss-20b", "deepseek": "deepseek-flash",
-                            "gemini": "gemini-3.5-flash"}.get(model_config.get("mode"))
+                            "gemini": "gemini-3.8-flash", "openai-api": "gpt-5"}.get(model_config.get("mode"))
         if provider_default:
             chat_model = model_config.get("model") or provider_default
-            streaming_model = model_config.get("meeting_model") or chat_model
+            if str(model_config.get("meeting_use_default") or "").strip().lower() == "true":
+                streaming_model = settings.meeting_model or settings.llm_model or "default"
+            elif model_config.get("mode") == "openai-api" and not model_config.get("meeting_model") and chat_model == "gpt-5":
+                streaming_model = "gpt-5-mini"
+            else:
+                streaming_model = model_config.get("meeting_model") or chat_model
         else:
             from control_plane.aws_voice_chatgpt import workspace_connected
             from control_plane.system_mounts import pilot_allows
