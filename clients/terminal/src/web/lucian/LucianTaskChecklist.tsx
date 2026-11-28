@@ -29,6 +29,7 @@ export function LucianTaskChecklist({
   doneCount,
   selectedPath,
   togglingPath,
+  readOnly = false,
   onSelect,
   onToggleDone,
 }: {
@@ -37,6 +38,7 @@ export function LucianTaskChecklist({
   doneCount: number;
   selectedPath: string | null;
   togglingPath: string | null;
+  readOnly?: boolean;
   onSelect: (path: string) => void;
   onToggleDone: (path: string, nextDone: boolean) => void;
 }) {
@@ -229,7 +231,7 @@ export function LucianTaskChecklist({
                 aria-checked={task.done}
                 aria-label={task.done ? `Mark "${task.title}" as open` : `Mark "${task.title}" as done`}
                 className="u014-chk-btn"
-                disabled={busy}
+                disabled={busy || readOnly}
                 onClick={(e) => {
                   const nextDone = !task.done;
                   if (nextDone) popBurst(e.currentTarget);

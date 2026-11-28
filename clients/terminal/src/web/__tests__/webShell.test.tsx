@@ -1682,6 +1682,26 @@ describe("WebShell production UI (Option A & Option B)", () => {
     expect(await screen.findByTestId("lucian-task-celebration")).toBeTruthy();
   });
 
+  it("reads and updates task entities in the selected shared workspace", async () => {
+    const { listWorkspaceTree, readWorkspaceFile, readWorkspaceDocument } = await import("../../surfaces/workspaceApi");
+    mockSaveWorkspaceDocument.mockClear();
+    mockEnvironment({ admin: false });
+    render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
+    await screen.findByRole("option", { name: "eng-syncs" });
+    fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "eng-syncs" } });
+
+    const path = "kg/entities/task/follow-up.md";
+    const toggle = await screen.findByRole("checkbox", { name: /Mark "Ship User UI" as done/i });
+    expect(listWorkspaceTree).toHaveBeenCalledWith({ slug: "eng-syncs" });
+    expect(readWorkspaceFile).toHaveBeenCalledWith(path, { slug: "eng-syncs" });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mockSaveWorkspaceDocument).toHaveBeenCalledWith(expect.objectContaining({
+      path, slug: "eng-syncs", expected_sha256: "sha-task-1",
+    })));
+    expect(readWorkspaceDocument).toHaveBeenCalledWith(path, { slug: "eng-syncs" });
+  });
+
   it("renders Lucian Package 3B on AuthGate pre-login Landing: #201 Automation Flow, #214 Bento Grid, #228 Cursor Glow Grid, and #211 Glow CTA", async () => {
     window.localStorage.removeItem("tina.landing.lang");
     vi.mocked(signIn).mockClear();

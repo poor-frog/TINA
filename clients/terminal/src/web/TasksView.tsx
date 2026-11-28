@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WebIcon } from "./Icons";
 import { LucianSlidingTabs } from "./lucian/LucianSlidingTabs";
 import { LucianSkeletonList } from "./lucian/LucianSkeletonCard";
@@ -8,10 +8,13 @@ import { emitWebToast } from "./lucian/webToast";
 import { patchFrontmatterField } from "./knowledgeFriendly";
 import { Markdown } from "../ui-kit/Markdown";
 import {
+  listSharedMemberships,
   listWorkspaceTree,
+  readAttachedWorkspaces,
   readWorkspaceDocument,
   readWorkspaceFile,
   saveWorkspaceDocument,
+  type Membership,
 } from "../surfaces/workspaceApi";
 import { presentError } from "../surfaces/apiClient";
 
@@ -53,6 +56,11 @@ function parseTaskFile(path: string, content: string): TaskItem {
 }
 
 export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "draft") => void }) {
+  const [workspace, setWorkspace] = useState("");
+  const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [workspaceNames, setWorkspaceNames] = useState<Record<string, string>>({});
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const loadVersion = useRef(0);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "open" | "done">("all");
@@ -60,29 +68,51 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
   const [loading, setLoading] = useState(true);
   const [togglingPath, setTogglingPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const writable = !workspace || memberships.some(
+    (member) => member.workspace_id === workspace && (member.role === "owner" || member.role === "contributor"),
+  );
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([listSharedMemberships(), readAttachedWorkspaces().catch(() => null)])
+      .then(([members, attached]) => {
+        if (!active) return;
+        setMemberships(members);
+        setWorkspaceNames(Object.fromEntries(
+          Object.entries(attached?.slots ?? {}).map(([id, slot]) => [id, slot.name || id]),
+        ));
+      })
+      .catch((err) => {
+        if (active) setWorkspaceError(presentError(err).headline);
+      });
+    return () => { active = false; };
+  }, []);
 
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
+    const scope = workspace ? { slug: workspace } : undefined;
     setLoading(true);
     try {
-      const tree = await listWorkspaceTree();
-      const files = tree.filter((f) => f.startsWith("kg/entities/task/"));
+      const tree = scope ? await listWorkspaceTree(scope) : await listWorkspaceTree();
+      const files = tree.filter((f) => /^kg\/entities\/task\/(?!index\.md$|log\.md$)[^/]+\.md$/.test(f));
       const items = (
         await Promise.all(
           files.map(async (path) => {
-            const content = await readWorkspaceFile(path);
+            const content = scope ? await readWorkspaceFile(path, scope) : await readWorkspaceFile(path);
             return content === null ? null : parseTaskFile(path, content);
           }),
         )
       ).filter((x): x is TaskItem => x !== null);
+      if (version !== loadVersion.current) return;
       setTasks(items);
       setSelectedPath((cur) => (cur && items.some((i) => i.path === cur) ? cur : items[0]?.path ?? null));
       setError(null);
     } catch (err) {
-      setError(presentError(err).headline);
+      if (version === loadVersion.current) setError(presentError(err).headline);
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) setLoading(false);
     }
-  }, []);
+  }, [workspace]);
 
   useEffect(() => {
     void load();
@@ -91,13 +121,16 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
       void load();
     };
     window.addEventListener("tina:tasks-changed", onChanged);
-    return () => window.removeEventListener("tina:tasks-changed", onChanged);
+    return () => {
+      loadVersion.current += 1;
+      window.removeEventListener("tina:tasks-changed", onChanged);
+    };
   }, [load]);
 
   const handleToggleDone = useCallback(
     async (path: string, nextDone: boolean) => {
       const target = tasks.find((t) => t.path === path);
-      if (!target || togglingPath === path) return;
+      if (!writable || !target || togglingPath) return;
       const prevState = target.state;
       const nextState = nextDone ? "done" : "open";
 
@@ -106,10 +139,11 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
       setError(null);
 
       try {
-        const doc = await readWorkspaceDocument(path);
+        const doc = workspace ? await readWorkspaceDocument(path, { slug: workspace }) : await readWorkspaceDocument(path);
         const patched = patchFrontmatterField(doc.content, "status", nextState);
         await saveWorkspaceDocument({
           path,
+          ...(workspace ? { slug: workspace } : {}),
           content: patched,
           expected_sha256: doc.sha256,
           commit: false,
@@ -126,7 +160,7 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
         setTogglingPath((cur) => (cur === path ? null : cur));
       }
     },
-    [tasks, togglingPath],
+    [tasks, togglingPath, workspace, writable],
   );
 
   const doneCount = useMemo(() => tasks.filter((t) => isTaskDone(t.state)).length, [tasks]);
@@ -165,7 +199,13 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
             <button
               type="button"
               className="tina-web-btn-primary"
-              onClick={() => onAskTina("Extract and draft action items from my latest meeting as workspace tasks.")}
+              disabled={!writable}
+              onClick={() => onAskTina(
+                `Draft action items from my latest meeting for ${workspace ? `shared workspace "${workspace}"` : "my primary workspace"}. ` +
+                "Show the drafts for review before saving. After approval, create a Markdown file per item at " +
+                "kg/entities/task/<slug>.md with YAML frontmatter id: task/<slug>, type: task, title, and status: open. " +
+                "Only include an assignee or due date if the meeting states it. Report the workspace and path returned by the write operation.",
+              )}
             >
               <WebIcon name="plus" size={14} />
               <span>Draft tasks with Tina</span>
@@ -174,6 +214,20 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 20 }}>
+          <label className="tina-web-field">
+            <span>Workspace</span>
+            <select value={workspace} disabled={!!togglingPath} onChange={(event) => {
+              loadVersion.current += 1;
+              setTasks([]);
+              setSelectedPath(null);
+              setError(null);
+              setLoading(true);
+              setWorkspace(event.target.value);
+            }}>
+              <option value="">My workspace</option>
+              {memberships.map(({ workspace_id: id }) => <option key={id} value={id}>{workspaceNames[id] || id}</option>)}
+            </select>
+          </label>
           <LucianSlidingTabs
             ariaLabel="Task status filter"
             value={filter}
@@ -194,6 +248,7 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
           />
         </div>
 
+        {workspaceError && <p role="alert">Shared workspaces are unavailable. {workspaceError}</p>}
         {error && (
           <div role="alert" style={{ marginTop: 14, padding: "10px 12px", borderRadius: 8, background: "var(--tw-danger-bg)", color: "var(--tw-danger)", fontSize: 13 }}>
             {error}
@@ -224,6 +279,7 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
                 doneCount={doneCount}
                 selectedPath={selected?.path ?? null}
                 togglingPath={togglingPath}
+                readOnly={!writable}
                 onSelect={setSelectedPath}
                 onToggleDone={(path, nextDone) => void handleToggleDone(path, nextDone)}
               />
@@ -238,7 +294,11 @@ export function TasksView({ onAskTina }: { onAskTina: (prompt: string, mode?: "d
                   <button
                     type="button"
                     className="tina-web-btn-ghost"
-                    onClick={() => onAskTina(`Update task @file:${selected.path}: `, "draft")}
+                    disabled={!writable}
+                    onClick={() => onAskTina(
+                      workspace ? `Update task in shared workspace "${workspace}" at ${selected.path}: ` : `Update task @file:${selected.path}: `,
+                      "draft",
+                    )}
                   >
                     Ask Tina to update
                   </button>
