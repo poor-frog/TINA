@@ -38,7 +38,7 @@ import { WebIcon } from "./Icons";
 import { HomeView } from "./HomeView";
 import { MeetingsView } from "./MeetingsView";
 import { MeetingDetailView } from "./MeetingDetailView";
-import { AskTinaView, type AskTinaPrompt } from "./AskTinaView";
+import { AskTinaView, type AskActivityStatus, type AskTinaPrompt } from "./AskTinaView";
 import { KnowledgeView, type KnowledgeDeepLink } from "./KnowledgeView";
 import { TasksView } from "./TasksView";
 import { RoutinesView } from "./RoutinesView";
@@ -130,6 +130,12 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
   const [pendingPrompt, setPendingPrompt] = useState<AskTinaPrompt | null>(null);
   const [pendingKnowledge, setPendingKnowledge] = useState<KnowledgeDeepLink | null>(null);
   const [autoStartBriefId, setAutoStartBriefId] = useState<string | null>(null);
+  const [hasVisitedAsk, setHasVisitedAsk] = useState<boolean>(() => initial.view === "ask");
+  const [askStatus, setAskStatus] = useState<AskActivityStatus>("idle");
+
+  useEffect(() => {
+    if (view === "ask") setHasVisitedAsk(true);
+  }, [view]);
 
   const openCapture = useCallback((mode: CaptureModalMode = "live") => {
     setCaptureMode(mode);
@@ -180,9 +186,9 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
     setUserMenuOpen(false);
     if (typeof window !== "undefined") {
       if (
-        next === "settings" &&
+        (next === "settings" || next === "ask") &&
         window.location.pathname === "/" &&
-        new URLSearchParams(window.location.search).get("nav") === "settings"
+        new URLSearchParams(window.location.search).get("nav") === next
       ) {
         return;
       }
@@ -300,6 +306,7 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
             collapsed={sidebarCollapsed}
             mobileOpen={mobileNavOpen}
             liveCount={liveMeetings.length}
+            askStatus={askStatus}
             meetingsOnly={meetOnly}
             canOpenTerminal={canOpenTerminal}
             terminalHref={terminalHref}
@@ -384,12 +391,20 @@ export function WebShell({ initialMeetingId }: { initialMeetingId?: string }) {
               />
             )}
 
-            {view === "ask" && !meetOnly && (
-              <AskTinaView
-                meetings={meetings}
-                initialPrompt={pendingPrompt}
-                onConsumeInitialPrompt={() => setPendingPrompt(null)}
-              />
+            {hasVisitedAsk && !meetOnly && (
+              <div
+                className="tina-web-keepalive"
+                style={view === "ask" ? undefined : { display: "none" }}
+                aria-hidden={view !== "ask" || undefined}
+              >
+                <AskTinaView
+                  meetings={meetings}
+                  initialPrompt={pendingPrompt}
+                  onConsumeInitialPrompt={() => setPendingPrompt(null)}
+                  isActive={view === "ask"}
+                  onActivityChange={setAskStatus}
+                />
+              </div>
             )}
 
             {view === "knowledge" && !meetOnly && (

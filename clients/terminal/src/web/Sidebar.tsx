@@ -1,6 +1,7 @@
 "use client";
 import { WebAvatar } from "./Avatar";
 import { WebIcon, type WebIconName } from "./Icons";
+import type { AskActivityStatus } from "./AskTinaView";
 import type { WebUser } from "./useWebIdentity";
 
 export type WebNavView = "home" | "ask" | "meetings" | "meeting" | "knowledge" | "tasks" | "routines" | "settings";
@@ -11,6 +12,7 @@ export function WebSidebar({
   collapsed,
   mobileOpen,
   liveCount,
+  askStatus = "idle",
   meetingsOnly,
   canOpenTerminal,
   terminalHref,
@@ -24,6 +26,7 @@ export function WebSidebar({
   collapsed: boolean;
   mobileOpen: boolean;
   liveCount: number;
+  askStatus?: AskActivityStatus;
   meetingsOnly: boolean;
   canOpenTerminal: boolean;
   terminalHref: string;
@@ -38,17 +41,22 @@ export function WebSidebar({
     id: Exclude<WebNavView, "meeting">,
     icon: WebIconName,
     label: string,
-    opts?: { ask?: boolean; badge?: number },
+    opts?: { ask?: boolean; badge?: number; status?: AskActivityStatus },
   ) => {
     const isActive = active === id || (id === "meetings" && active === "meeting");
+    const showStatus = !isActive && opts?.status && opts.status !== "idle";
+    const statusLabel =
+      opts?.status === "approval"
+        ? "Tina needs your approval in Ask Tina"
+        : "Tina is replying in the background";
     return (
       <button
         key={id}
         type="button"
-        className={`tina-web-nav-item ${isActive ? "active" : ""} ${opts?.ask ? "ask" : ""}`}
+        className={`tina-web-nav-item ${isActive ? "active" : ""} ${opts?.ask ? "ask" : ""} ${showStatus ? "has-status" : ""}`}
         aria-label={label}
         aria-current={isActive ? "page" : undefined}
-        title={isCollapsed ? label : undefined}
+        title={showStatus ? `${label} — ${statusLabel}` : isCollapsed ? label : undefined}
         onClick={() => {
           onNavigate(id);
           onCloseMobile();
@@ -56,6 +64,14 @@ export function WebSidebar({
       >
         <WebIcon name={icon} size={16} />
         <span className="tina-web-nav-label">{label}</span>
+        {showStatus ? (
+          <span
+            className={`tina-web-nav-status ${opts.status}`}
+            role="status"
+            aria-label={statusLabel}
+            title={statusLabel}
+          />
+        ) : null}
         {opts?.badge ? <span className="tina-web-nav-badge">{opts.badge}</span> : null}
       </button>
     );
@@ -90,7 +106,7 @@ export function WebSidebar({
 
       <nav className="tina-web-nav" aria-label="Primary navigation">
         {navBtn("home", "home", "Home")}
-        {!meetingsOnly && navBtn("ask", "tinaAsk", "Ask Tina", { ask: true })}
+        {!meetingsOnly && navBtn("ask", "tinaAsk", "Ask Tina", { ask: true, status: askStatus })}
 
         <span className="tina-web-nav-gap" />
 

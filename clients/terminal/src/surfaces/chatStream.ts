@@ -74,6 +74,10 @@ export type ChatStreamCallbacks = {
   onStatus?: (phase: ChatPhase | null) => void;
   /** a chunk was consumed — a hook for autoscroll */
   onProgress?: () => void;
+  /** fired once at turn start with the turn_id nonce (minted or resumed) */
+  onTurnStart?: (turnId: string) => void;
+  /** fired whenever an SSE `id:` cursor arrives so callers can persist resume state across reloads */
+  onCursor?: (eventId: string) => void;
 };
 
 export type ChatStreamRequest = {
@@ -118,6 +122,10 @@ export type ChatStreamOptions = {
   /** injected for tests so a fake clock/no real wait is possible */
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /** reuse an existing turn_id nonce when re-attaching after a page reload */
+  turnId?: string;
+  /** seed the SSE Last-Event-ID cursor when resuming an in-flight turn after a reload */
+  initialLastEventId?: string | null;
 };
 
 export type ChatStreamResult = {
@@ -164,11 +172,12 @@ export async function streamChatTurn(
 
   let sawVisibleOutput = false;
   let terminal = false;
-  let lastEventId: string | null = null;
-  const turnId = mintTurnId();
+  let lastEventId: string | null = opts.initialLastEventId ?? null;
+  const turnId = opts.turnId || mintTurnId();
   const startedAt = now();
   let hardDeadline = startedAt + hardTimeoutMs;
 
+  cb.onTurnStart?.(turnId);
   cb.onStarting();
   cb.onStatus?.("connecting");
 
@@ -252,7 +261,14 @@ export async function streamChatTurn(
       const [lines, remainder] = takeLines(buf);
       buf = remainder;
       for (const line of lines) {
-        if (line.startsWith("id: ")) { lastEventId = line.slice(4).trim() || lastEventId; continue; }
+        if (line.startsWith("id: ")) {
+          const nextId = line.slice(4).trim();
+          if (nextId) {
+            lastEventId = nextId;
+            cb.onCursor?.(nextId);
+          }
+          continue;
+        }
         if (!line.startsWith("data: ")) continue;
         let ev: ChatStreamEvent;
         try { ev = JSON.parse(line.slice(6)); } catch { continue; }

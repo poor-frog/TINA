@@ -12,6 +12,7 @@ import {
 import { signIn } from "next-auth/react";
 import { AuthGate } from "../../app/AuthGate";
 import { WebShell } from "../WebApp";
+import { ACTIVE_ASK_SESSION_KEY, INFLIGHT_ASK_TURN_KEY } from "../askSessionPersistence";
 import { WebModelsPanel } from "../WebModelsPanel";
 import { computeSpeakerStats } from "../SpeakerTalkTime";
 import {
@@ -164,9 +165,10 @@ vi.mock("../../surfaces/routines", () => ({
   RoutinesBoard: () => <div data-testid="real-routines-board">TINA Real Routines</div>,
 }));
 
+type MockChatStreamOpts = { signal?: AbortSignal; turnId?: string; initialLastEventId?: string | null };
 let capturedChatCallbacks: ChatStreamCallbacks | null = null;
 const mockStreamChatTurn = vi.fn(
-  async (_req: unknown, cb: ChatStreamCallbacks) => {
+  async (_req: unknown, cb: ChatStreamCallbacks, _opts?: MockChatStreamOpts) => {
     capturedChatCallbacks = cb;
     cb.onStarting();
     cb.onApprovalRequest?.({
@@ -187,7 +189,8 @@ const mockStreamChatTurn = vi.fn(
 );
 
 vi.mock("../../surfaces/chatStream", () => ({
-  streamChatTurn: (...args: unknown[]) => mockStreamChatTurn(...(args as [unknown, ChatStreamCallbacks])),
+  streamChatTurn: (...args: unknown[]) =>
+    mockStreamChatTurn(...(args as [unknown, ChatStreamCallbacks, MockChatStreamOpts?])),
 }));
 
 const mockListSharedMemberships = vi.fn().mockResolvedValue([
@@ -668,6 +671,7 @@ describe("WebShell production UI (Option A & Option B)", () => {
     window.history.replaceState({}, "", "/");
     document.documentElement.removeAttribute("data-theme");
     localStorage.clear();
+    sessionStorage.clear();
   });
 
   it("commits the selected time before posting a meeting plan", async () => {
@@ -1849,5 +1853,195 @@ describe("WebShell production UI (Option A & Option B)", () => {
     expect(storeLink.tagName).toBe("A");
     expect(storeLink.getAttribute("href")).toBe(storeUrl);
     expect(storeLink.getAttribute("target")).toBe("_blank");
+  });
+
+  it("keeps Ask Tina alive across tab switches with Sidebar status dot, background completion toast, and preserved URL session", async () => {
+    mockEnvironment({ admin: false });
+    let capturedOpts: MockChatStreamOpts | undefined;
+    let resolveTurn!: () => void;
+    mockStreamChatTurn.mockImplementationOnce(async (_req, cb, opts) => {
+      capturedChatCallbacks = cb;
+      capturedOpts = opts;
+      cb.onTurnStart?.("turn-bg-1");
+      cb.onStarting();
+      cb.onStatus?.("working");
+      await new Promise<void>((res) => {
+        resolveTurn = res;
+      });
+      return { sawVisibleOutput: true, terminal: true, aborted: false };
+    });
+
+    render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+    expect(await screen.findByText("Q4 Rollout Checklist")).toBeTruthy();
+
+    const composer = screen.getByLabelText("Message Ask Tina") as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: "Analyze Q4 roadmap" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(capturedOpts?.signal).toBeTruthy();
+      expect(sessionStorage.getItem(ACTIVE_ASK_SESSION_KEY)).toBeTruthy();
+    });
+    const sessionId = sessionStorage.getItem(ACTIVE_ASK_SESSION_KEY)!;
+    expect(new URLSearchParams(window.location.search).get("nav")).toBe("ask");
+    expect(new URLSearchParams(window.location.search).get("session")).toBe(sessionId);
+    expect(JSON.parse(sessionStorage.getItem(INFLIGHT_ASK_TURN_KEY) || "{}").turnId).toBe("turn-bg-1");
+
+    // Switch away to Knowledge and Meetings while Tina is still replying
+    fireEvent.click(screen.getByRole("button", { name: "Knowledge" }));
+    expect(capturedOpts?.signal?.aborted).toBe(false);
+    expect(await screen.findByRole("status", { name: "Tina is replying in the background" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
+    expect(capturedOpts?.signal?.aborted).toBe(false);
+    expect(screen.getByRole("status", { name: "Tina is replying in the background" })).toBeTruthy();
+
+    // Stream completes while user is still on Meetings -> toast fires & status dot clears
+    capturedChatCallbacks?.onCursor?.("5-0");
+    capturedChatCallbacks?.onDelta("Roadmap ");
+    capturedChatCallbacks?.onCursor?.("6-0");
+    capturedChatCallbacks?.onDelta("complete.");
+    resolveTurn();
+
+    expect(await screen.findByText("Tina finished replying in Ask Tina")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByRole("status", { name: "Tina is replying in the background" })).toBeNull();
+      expect(sessionStorage.getItem(INFLIGHT_ASK_TURN_KEY)).toBeNull();
+    });
+
+    // Return to Ask Tina -> exact conversation is immediately present (NOT a blank new chat)
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+    expect(screen.getByText("Analyze Q4 roadmap")).toBeTruthy();
+    expect(screen.getByText("Roadmap complete.")).toBeTruthy();
+    expect(new URLSearchParams(window.location.search).get("session")).toBe(sessionId);
+
+    // Re-clicking Ask Tina while already on Ask Tina preserves ?session=<id>
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+    expect(new URLSearchParams(window.location.search).get("session")).toBe(sessionId);
+  });
+
+  it("shows amber Sidebar approval indicator and toast when Ask Tina needs tool approval in the background", async () => {
+    mockEnvironment({ admin: false });
+    let resolveTurn!: () => void;
+    mockStreamChatTurn.mockImplementationOnce(async (_req, cb) => {
+      capturedChatCallbacks = cb;
+      cb.onTurnStart?.("turn-appr-bg");
+      cb.onStarting();
+      cb.onStatus?.("working");
+      await new Promise<void>((res) => {
+        resolveTurn = res;
+      });
+      return { sawVisibleOutput: true, terminal: true, aborted: false };
+    });
+
+    render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+    expect(await screen.findByText("Q4 Rollout Checklist")).toBeTruthy();
+
+    const composer = screen.getByLabelText("Message Ask Tina") as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: "Schedule follow-up invite" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(capturedChatCallbacks).toBeTruthy());
+
+    // Switch to Meetings before approval request arrives
+    fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
+    expect(await screen.findByRole("status", { name: "Tina is replying in the background" })).toBeTruthy();
+
+    capturedChatCallbacks?.onApprovalRequest?.({
+      type: "tool-approval-request",
+      approval_id: "appr-bg-1",
+      turn_id: "turn-appr-bg",
+      server: "calendar",
+      tool: "create_event",
+      title: "Create background invite",
+      description: "Adds a calendar event",
+      message: "Allow scheduling?",
+      parameters: [],
+      expires_at: Math.floor(Date.now() / 1000) + 120,
+    });
+
+    expect(await screen.findByText("Tina needs your approval in Ask Tina")).toBeTruthy();
+    const approvalDot = await screen.findByRole("status", { name: "Tina needs your approval in Ask Tina" });
+    expect(approvalDot.className).toContain("approval");
+
+    // Return to Ask Tina -> pending approval card is waiting for decision
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+    expect(await screen.findByText("Create background invite")).toBeTruthy();
+    resolveTurn();
+  });
+
+  it("restores Ask Tina session across F5 reload, resumes in-flight SSE with turnId/Last-Event-ID, and resets cleanly on New conversation", async () => {
+    const baseFetch = mockEnvironment({ admin: false });
+    let capturedSession = "";
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (capturedSession && url.includes(`/api/sessions/${encodeURIComponent(capturedSession)}/history`)) {
+        return new Response(JSON.stringify({ turns: [] }), { status: 200 });
+      }
+      return baseFetch(input, init);
+    }) as typeof fetch;
+
+    // 1. Start a turn and receive partial output + cursor
+    let resolveFirst!: () => void;
+    mockStreamChatTurn.mockImplementationOnce(async (_req, cb) => {
+      capturedChatCallbacks = cb;
+      cb.onTurnStart?.("turn-f5-9");
+      cb.onStarting();
+      cb.onCursor?.("9-0");
+      cb.onDelta("First half ");
+      await new Promise<void>((res) => {
+        resolveFirst = res;
+      });
+      return { sawVisibleOutput: true, terminal: false, aborted: true };
+    });
+
+    const first = render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Tina" }));
+    expect(await screen.findByText("Q4 Rollout Checklist")).toBeTruthy();
+
+    const composer = screen.getByLabelText("Message Ask Tina") as HTMLTextAreaElement;
+    fireEvent.change(composer, { target: { value: "Summarize quarterly OKRs" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByText("First half")).toBeTruthy();
+    capturedSession = sessionStorage.getItem(ACTIVE_ASK_SESSION_KEY)!;
+    expect(capturedSession).toBeTruthy();
+    expect(new URLSearchParams(window.location.search).get("session")).toBe(capturedSession);
+
+    // 2. Simulate F5 reload while stream is still in-flight
+    first.unmount();
+    resolveFirst();
+    expect(sessionStorage.getItem(ACTIVE_ASK_SESSION_KEY)).toBe(capturedSession);
+    expect(sessionStorage.getItem(INFLIGHT_ASK_TURN_KEY)).toContain("turn-f5-9");
+
+    // 3. Re-mount WebShell at /?nav=ask&session=<id> -> resumes turn with exact turnId & Last-Event-ID
+    let resumedOpts: MockChatStreamOpts | undefined;
+    mockStreamChatTurn.mockImplementationOnce(async (_req, cb, opts) => {
+      resumedOpts = opts;
+      cb.onTurnStart?.(opts?.turnId || "unexpected");
+      cb.onCursor?.("10-0");
+      cb.onDelta("second half.");
+      return { sawVisibleOutput: true, terminal: true, aborted: false };
+    });
+
+    render(<WebShell />);
+    await waitFor(() => {
+      expect(resumedOpts?.turnId).toBe("turn-f5-9");
+      expect(resumedOpts?.initialLastEventId).toBe("9-0");
+    });
+    expect(await screen.findByText("Summarize quarterly OKRs")).toBeTruthy();
+    expect(await screen.findByText("First half second half.")).toBeTruthy();
+    await waitFor(() => {
+      expect(sessionStorage.getItem(INFLIGHT_ASK_TURN_KEY)).toBeNull();
+    });
+
+    // 4. Explicit "New conversation" clears URL ?session= and sessionStorage and resets to blank chat
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
+    await waitFor(() => {
+      expect(sessionStorage.getItem(ACTIVE_ASK_SESSION_KEY)).toBeNull();
+      expect(new URLSearchParams(window.location.search).get("session")).toBeNull();
+    });
+    expect(screen.getByRole("heading", { name: "Ask Tina" })).toBeTruthy();
   });
 });

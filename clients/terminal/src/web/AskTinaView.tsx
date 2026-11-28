@@ -36,6 +36,15 @@ import {
   type PendingAttachment,
   type UploadedWorkspaceFile,
 } from "./chatComposerUtils";
+import {
+  readAskSessionFromUrl,
+  readInflightAskTurn,
+  readStoredAskSession,
+  syncAskSessionUrl,
+  writeInflightAskTurn,
+  writeStoredAskSession,
+  type InflightAskTurn,
+} from "./askSessionPersistence";
 import { emitWebToast } from "./lucian/webToast";
 import { Markdown } from "../ui-kit/Markdown";
 import { startStreamingDictation, type StreamingDictation } from "../ui-kit/micDictation";
@@ -140,19 +149,27 @@ function agentPhaseLabel(phase: ChatPhase | null, hasText: boolean, lastOp?: str
   return "Thinking…";
 }
 
+export type AskActivityStatus = "idle" | "busy" | "approval";
+
 export function AskTinaView({
   meetings,
   initialPrompt,
   onConsumeInitialPrompt,
+  isActive = true,
+  onActivityChange,
 }: {
   meetings: MeetingMock[];
   initialPrompt: AskTinaPrompt | null;
   onConsumeInitialPrompt: () => void;
+  isActive?: boolean;
+  onActivityChange?: (status: AskActivityStatus) => void;
 }) {
   const starterId = useId();
+  const bootSessionRef = useRef<string | null>(readAskSessionFromUrl() ?? readStoredAskSession());
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionQuery, setSessionQuery] = useState("");
-  const [activeSession, setActiveSession] = useState<string>(() => newSessionId());
+  const [activeSession, setActiveSession] = useState<string>(() => bootSessionRef.current ?? newSessionId());
+  const [sessionPersisted, setSessionPersisted] = useState<boolean>(() => Boolean(bootSessionRef.current));
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [selectedMeetingId, setSelectedMeetingId] = useState<string>("");
@@ -194,6 +211,11 @@ export function AskTinaView({
   attachmentsRef.current = attachments;
   const messagesRef = useRef<ChatMessage[]>(messages);
   messagesRef.current = messages;
+  const isActiveRef = useRef<boolean>(isActive);
+  isActiveRef.current = isActive;
+  const activeSessionRef = useRef<string>(activeSession);
+  activeSessionRef.current = activeSession;
+  const inflightRef = useRef<InflightAskTurn | null>(null);
   const savingMsgIdsRef = useRef<Record<string, boolean>>({});
   const submitComposerRef = useRef<() => void>(() => undefined);
   const sendInstantSlashRef = useRef<(cmd: SlashCommandDef) => void>(() => undefined);
@@ -368,6 +390,8 @@ export function AskTinaView({
     onInstantSlash: (cmd) => sendInstantSlashRef.current(cmd),
     onSubmit: () => submitComposerRef.current(),
   });
+  const closePickersRef = useRef(pickers.closePickers);
+  closePickersRef.current = pickers.closePickers;
 
   const addPendingFiles = useCallback((incoming: File[]) => {
     if (incoming.length === 0) return;
@@ -476,6 +500,231 @@ export function AskTinaView({
     [activeConversationTitle, setTransientFeedback],
   );
 
+  const runChatStream = useCallback(
+    async (params: {
+      session: string;
+      agentId: string;
+      prompt: string;
+      displayPrompt: string;
+      active: unknown;
+      context?: Parameters<typeof streamChatTurn>[0]["context"];
+      research?: boolean;
+      priorTurnCount: number;
+      initialPartialText?: string;
+      initialOps?: string[];
+      resumeTurnId?: string;
+      initialLastEventId?: string | null;
+    }) => {
+      const {
+        session,
+        agentId,
+        prompt,
+        displayPrompt,
+        active,
+        context,
+        research,
+        priorTurnCount,
+        initialPartialText = "",
+        initialOps = [],
+        resumeTurnId,
+        initialLastEventId = null,
+      } = params;
+      setBusy(true);
+      setPhase(resumeTurnId ? "reconnecting" : "connecting");
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      let sawTurnError = false;
+      const persistInflight = (patch: Partial<InflightAskTurn>) => {
+        if (controller.signal.aborted || abortRef.current !== controller) return;
+        const base = inflightRef.current;
+        if (!base) return;
+        const next: InflightAskTurn = {
+          ...base,
+          ...patch,
+          partialText: (patch.partialText ?? base.partialText).slice(0, 120_000),
+          ops: (patch.ops ?? base.ops).slice(0, 64),
+        };
+        inflightRef.current = next;
+        writeInflightAskTurn(next);
+      };
+
+      try {
+        await streamChatTurn(
+          {
+            prompt,
+            session,
+            active,
+            research,
+            context,
+          },
+          {
+            onTurnStart: (turnId) => {
+              if (controller.signal.aborted || abortRef.current !== controller) return;
+              const snapshot: InflightAskTurn = {
+                session,
+                turnId,
+                lastEventId: initialLastEventId,
+                prompt,
+                displayPrompt,
+                active,
+                context,
+                research,
+                priorTurnCount,
+                partialText: initialPartialText,
+                ops: [...initialOps],
+                startedAt: Date.now(),
+              };
+              inflightRef.current = snapshot;
+              writeInflightAskTurn(snapshot);
+            },
+            onCursor: (eventId) => {
+              persistInflight({ lastEventId: eventId });
+            },
+            onStarting: () => {
+              if (!controller.signal.aborted) setPhase("connecting");
+            },
+            onStatus: (nextPhase) => {
+              if (!controller.signal.aborted) setPhase(nextPhase);
+            },
+            onDelta: (chunk) => {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === agentId ? { ...m, text: m.text + chunk } : m)),
+              );
+              if (inflightRef.current) {
+                persistInflight({ partialText: inflightRef.current.partialText + chunk });
+              }
+            },
+            onReply: (replyText) => {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === agentId ? { ...m, text: replyText } : m)),
+              );
+              persistInflight({ partialText: replyText });
+            },
+            onMeetingGrounding: (grounding) => {
+              setMessages((prev) => prev.map((m) => (m.id === agentId ? { ...m, grounding } : m)));
+            },
+            onTool: (tool) => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === agentId ? { ...m, ops: [...(m.ops ?? []), tool] } : m,
+                ),
+              );
+              if (inflightRef.current) {
+                persistInflight({ ops: [...inflightRef.current.ops, tool] });
+              }
+            },
+            onApprovalRequest: (request) => {
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (m.id !== agentId) return m;
+                  if (m.approvals?.some((a) => a.approval_id === request.approval_id)) return m;
+                  return {
+                    ...m,
+                    approvals: [...(m.approvals ?? []), { ...request, status: "pending" }],
+                  };
+                }),
+              );
+              if (!isActiveRef.current) {
+                emitWebToast({ message: "Tina needs your approval in Ask Tina", tone: "info" });
+              }
+            },
+            onApprovalResolved: (resolved) => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === agentId
+                    ? {
+                        ...m,
+                        approvals: m.approvals?.map((a) =>
+                          a.approval_id === resolved.approval_id
+                            ? { ...a, status: resolved.outcome, error: undefined }
+                            : a,
+                        ),
+                      }
+                    : m,
+                ),
+              );
+              emitWebToast({
+                message:
+                  resolved.outcome === "approved"
+                    ? "Tool action approved"
+                    : resolved.outcome === "denied"
+                      ? "Tool action denied"
+                      : `Tool approval ${resolved.outcome}`,
+                tone: resolved.outcome === "approved" ? "success" : "info",
+              });
+            },
+            onCommit: (sha) => {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === agentId ? { ...m, commit: sha || "saved" } : m)),
+              );
+              window.dispatchEvent(new Event("tina:tasks-changed"));
+            },
+            onRejected: () => {
+              sawTurnError = true;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === agentId
+                    ? { ...m, error: "Workspace governance rejected changes from this turn." }
+                    : m,
+                ),
+              );
+            },
+            onModelFailure: (reply) => {
+              sawTurnError = true;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === agentId
+                    ? { ...m, error: reply || "Model inference failed. Check Settings → Models." }
+                    : m,
+                ),
+              );
+            },
+            onError: (msg) => {
+              sawTurnError = true;
+              setMessages((prev) =>
+                prev.map((m) => (m.id === agentId ? { ...m, error: msg } : m)),
+              );
+            },
+          },
+          {
+            signal: controller.signal,
+            turnId: resumeTurnId,
+            initialLastEventId,
+          },
+        );
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          sawTurnError = true;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === agentId ? { ...m, error: presentError(err).headline } : m,
+            ),
+          );
+        }
+      } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+          inflightRef.current = null;
+          writeInflightAskTurn(null);
+          setBusy(false);
+          setPhase(null);
+          loadSessionList();
+          if (!controller.signal.aborted && !isActiveRef.current) {
+            emitWebToast({
+              message: sawTurnError
+                ? "Ask Tina encountered an error"
+                : "Tina finished replying in Ask Tina",
+              tone: sawTurnError ? "error" : "success",
+            });
+          }
+        }
+      }
+    },
+    [loadSessionList],
+  );
+
   const sendMessage = useCallback(
     async (
       rawPrompt: string,
@@ -505,6 +754,11 @@ export function AskTinaView({
       });
       if (compiled.kind === "instant") {
         if (compiled.commandId === "new") {
+          inflightRef.current = null;
+          writeInflightAskTurn(null);
+          writeStoredAskSession(null);
+          if (isActiveRef.current) syncAskSessionUrl(null);
+          setSessionPersisted(false);
           setActiveSession(newSessionId());
           setMessages([]);
           setSessionError(null);
@@ -570,8 +824,12 @@ export function AskTinaView({
           }
         : focusOverride;
       const effectiveFocus: FocusPayload | null = meetingContext ?? mentionCtx.fallbackFocus ?? null;
+      const priorTurnCount = messagesRef.current.length;
       const userId = `u-${Date.now()}`;
       const agentId = `a-${Date.now() + 1}`;
+      setSessionPersisted(true);
+      writeStoredAskSession(activeSession);
+      if (isActiveRef.current) syncAskSessionUrl(activeSession);
       setMessages((prev) => [
         ...prev,
         {
@@ -584,11 +842,6 @@ export function AskTinaView({
         },
         { id: agentId, role: "agent", text: "", ops: [], approvals: [] },
       ]);
-      setBusy(true);
-      setPhase("connecting");
-
-      const controller = new AbortController();
-      abortRef.current = controller;
 
       const effectiveIncludeSchedule = includeSchedule || mentionCtx.includeSchedule;
       const isPrep =
@@ -596,138 +849,27 @@ export function AskTinaView({
         meetingContext?.status === "idle" ||
         meetingContext?.status === "scheduled";
 
-      try {
-        await streamChatTurn(
-          {
-            prompt: wirePrompt,
-            session: activeSession,
-            active: effectiveFocus ?? undefined,
-            research: compiled.research || undefined,
-            context: {
-              tz,
-              surface: meetingContext
-                ? { list: "meetings", tab: { kind: isPrep ? "meetingPrep" : "meeting" } }
-                : effectiveFocus?.kind === "file"
-                  ? { list: "files", tab: { kind: "doc" } }
-                  : { list: "ask" },
-              focus: effectiveFocus,
-              ...(effectiveIncludeSchedule ? { include: { schedule: true } } : {}),
-            },
-          },
-          {
-            onStarting: () => {
-              if (!controller.signal.aborted) setPhase("connecting");
-            },
-            onStatus: (nextPhase) => {
-              if (!controller.signal.aborted) setPhase(nextPhase);
-            },
-            onDelta: (chunk) => {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === agentId ? { ...m, text: m.text + chunk } : m)),
-              );
-            },
-            onReply: (replyText) => {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === agentId ? { ...m, text: replyText } : m)),
-              );
-            },
-            onMeetingGrounding: (grounding) => {
-              setMessages((prev) => prev.map((m) => m.id === agentId ? { ...m, grounding } : m));
-            },
-            onTool: (tool) => {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === agentId ? { ...m, ops: [...(m.ops ?? []), tool] } : m,
-                ),
-              );
-            },
-            onApprovalRequest: (request) => {
-              setMessages((prev) =>
-                prev.map((m) => {
-                  if (m.id !== agentId) return m;
-                  if (m.approvals?.some((a) => a.approval_id === request.approval_id)) return m;
-                  return {
-                    ...m,
-                    approvals: [...(m.approvals ?? []), { ...request, status: "pending" }],
-                  };
-                }),
-              );
-            },
-            onApprovalResolved: (resolved) => {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === agentId
-                    ? {
-                        ...m,
-                        approvals: m.approvals?.map((a) =>
-                          a.approval_id === resolved.approval_id
-                            ? { ...a, status: resolved.outcome, error: undefined }
-                            : a,
-                        ),
-                      }
-                    : m,
-                ),
-              );
-              emitWebToast({
-                message:
-                  resolved.outcome === "approved"
-                    ? "Tool action approved"
-                    : resolved.outcome === "denied"
-                      ? "Tool action denied"
-                      : `Tool approval ${resolved.outcome}`,
-                tone: resolved.outcome === "approved" ? "success" : "info",
-              });
-            },
-            onCommit: (sha) => {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === agentId ? { ...m, commit: sha || "saved" } : m)),
-              );
-              window.dispatchEvent(new Event("tina:tasks-changed"));
-            },
-            onRejected: () => {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === agentId
-                    ? { ...m, error: "Workspace governance rejected changes from this turn." }
-                    : m,
-                ),
-              );
-            },
-            onModelFailure: (reply) => {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === agentId
-                    ? { ...m, error: reply || "Model inference failed. Check Settings → Models." }
-                    : m,
-                ),
-              );
-            },
-            onError: (msg) => {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === agentId ? { ...m, error: msg } : m)),
-              );
-            },
-          },
-          { signal: controller.signal },
-        );
-      } catch (err) {
-        if (!controller.signal.aborted) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === agentId ? { ...m, error: presentError(err).headline } : m,
-            ),
-          );
-        }
-      } finally {
-        if (abortRef.current === controller) {
-          abortRef.current = null;
-          setBusy(false);
-          setPhase(null);
-          loadSessionList();
-        }
-      }
+      await runChatStream({
+        session: activeSession,
+        agentId,
+        prompt: wirePrompt,
+        displayPrompt,
+        active: effectiveFocus ?? undefined,
+        research: compiled.research || undefined,
+        priorTurnCount,
+        context: {
+          tz,
+          surface: meetingContext
+            ? { list: "meetings", tab: { kind: isPrep ? "meetingPrep" : "meeting" } }
+            : effectiveFocus?.kind === "file"
+              ? { list: "files", tab: { kind: "doc" } }
+              : { list: "ask" },
+          focus: effectiveFocus,
+          ...(effectiveIncludeSchedule ? { include: { schedule: true } } : {}),
+        },
+      });
     },
-    [activeSession, clearAttachments, includeSchedule, loadSessionList, meetings, saveMessageToKnowledge, selectedMeetingId],
+    [activeSession, clearAttachments, includeSchedule, meetings, runChatStream, saveMessageToKnowledge, selectedMeetingId],
   );
 
   const respondToApproval = async (approvalId: string, decision: ToolApprovalDecision) => {
@@ -795,18 +937,29 @@ export function AskTinaView({
     }
   }, [initialPrompt, onConsumeInitialPrompt, sendMessage, busy, historyLoading]);
 
-  const switchSession = (sessionId: string) => {
+  const switchSession = useCallback((sessionId: string, opts?: { persist?: boolean }) => {
+    const persist = opts?.persist ?? false;
+    inflightRef.current = null;
+    writeInflightAskTurn(null);
     abortRef.current?.abort();
     abortRef.current = null;
     historyRef.current?.abort();
     historyRef.current = null;
     setActiveSession(sessionId);
+    setSessionPersisted(persist);
+    if (persist) {
+      writeStoredAskSession(sessionId);
+      if (isActiveRef.current) syncAskSessionUrl(sessionId);
+    } else {
+      writeStoredAskSession(null);
+      if (isActiveRef.current) syncAskSessionUrl(null);
+    }
     setMessages([]);
     setSessionError(null);
     setBusy(false);
     setPhase(null);
     setHistoryLoading(false);
-  };
+  }, []);
 
   const handleDeleteSession = async (sessionId: string) => {
     if (deletingSessions[sessionId] || clearingAll) return;
@@ -873,8 +1026,8 @@ export function AskTinaView({
     }
   };
 
-  const openSession = async (sessionId: string) => {
-    switchSession(sessionId);
+  const openSession = useCallback(async (sessionId: string) => {
+    switchSession(sessionId, { persist: true });
     const controller = new AbortController();
     historyRef.current = controller;
     setHistoryLoading(true);
@@ -897,7 +1050,7 @@ export function AskTinaView({
         setHistoryLoading(false);
       }
     }
-  };
+  }, [switchSession]);
 
   const cancelMic = useCallback(() => {
     if (!dictRef.current) {
@@ -909,6 +1062,151 @@ export function AskTinaView({
     setDictating(false);
     active.cancel();
   }, []);
+
+  // Sync persisted session ID with URL (?nav=ask&session=...) & sessionStorage whenever active
+  useEffect(() => {
+    if (sessionPersisted) {
+      writeStoredAskSession(activeSession);
+      if (isActive) syncAskSessionUrl(activeSession);
+    } else {
+      writeStoredAskSession(null);
+      if (isActive) syncAskSessionUrl(null);
+    }
+  }, [activeSession, sessionPersisted, isActive]);
+
+  // Pause mic/popovers when navigating away; restore scroll when returning to Ask Tina
+  useEffect(() => {
+    if (!isActive) {
+      cancelMic();
+      setScopeMenuOpen(false);
+      closePickersRef.current();
+    } else if (isNearBottomRef.current) {
+      endRef.current?.scrollIntoView?.({ block: "end" });
+    }
+  }, [isActive, cancelMic]);
+
+  // Report background reply / pending tool-approval status to WebSidebar
+  const hasPendingApproval = useMemo(
+    () =>
+      messages.some(
+        (m) =>
+          m.role === "agent" &&
+          m.approvals?.some((a) => a.status === "pending" || a.status === "submitting"),
+      ),
+    [messages],
+  );
+  const activityStatus: AskActivityStatus = hasPendingApproval ? "approval" : busy ? "busy" : "idle";
+  useEffect(() => {
+    onActivityChange?.(activityStatus);
+  }, [activityStatus, onActivityChange]);
+
+  // Restore saved session on mount (e.g. after F5 reload or ?nav=ask&session=...) and resume any in-flight turn
+  useEffect(() => {
+    const bootSession = bootSessionRef.current;
+    if (!bootSession) return;
+    const savedInflight = readInflightAskTurn();
+    const matchingInflight = savedInflight && savedInflight.session === bootSession ? savedInflight : null;
+    const cameFromUrl = readAskSessionFromUrl() === bootSession;
+
+    const controller = new AbortController();
+    historyRef.current = controller;
+    setHistoryLoading(true);
+    void (async () => {
+      let mapped: ChatMessage[] = [];
+      let historyFailed = false;
+      let notFound = false;
+      try {
+        const hist = await sessionHistory(bootSession, controller.signal);
+        if (controller.signal.aborted) return;
+        mapped = hist.turns.map((t, idx) => ({
+          id: `${bootSession}-${idx}`,
+          role: t.role === "user" ? "user" : "agent",
+          text: stripContextBlocks(t.text || ""),
+          commit: typeof t.commit === "string" ? t.commit : undefined,
+        }));
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        historyFailed = true;
+        notFound = err instanceof ApiError && err.status === 404;
+      } finally {
+        if (historyRef.current === controller) {
+          historyRef.current = null;
+          setHistoryLoading(false);
+        }
+      }
+      if (controller.signal.aborted) return;
+
+      if (matchingInflight) {
+        const lastTurn = mapped[mapped.length - 1];
+        const completedInHistory =
+          mapped.length >= matchingInflight.priorTurnCount + 2 &&
+          lastTurn?.role === "agent" &&
+          Boolean(lastTurn.text.trim());
+        if (completedInHistory) {
+          setMessages(mapped);
+          writeInflightAskTurn(null);
+          return;
+        }
+        const hasTrailingUser =
+          mapped.length >= matchingInflight.priorTurnCount + 1 &&
+          mapped[mapped.length - 1]?.role === "user";
+        const initialPartialText = matchingInflight.lastEventId ? matchingInflight.partialText : "";
+        const initialOps = matchingInflight.lastEventId ? [...matchingInflight.ops] : [];
+        const agentId = `a-resume-${Date.now()}`;
+        const resumedMessages: ChatMessage[] = [
+          ...mapped,
+          ...(hasTrailingUser
+            ? []
+            : [{ id: `u-resume-${Date.now()}`, role: "user" as const, text: matchingInflight.displayPrompt }]),
+          {
+            id: agentId,
+            role: "agent",
+            text: initialPartialText,
+            ops: [...initialOps],
+            approvals: [],
+          },
+        ];
+        setMessages(resumedMessages);
+        void runChatStream({
+          session: bootSession,
+          agentId,
+          prompt: matchingInflight.prompt,
+          displayPrompt: matchingInflight.displayPrompt,
+          active: matchingInflight.active,
+          context: matchingInflight.context,
+          research: matchingInflight.research,
+          priorTurnCount: matchingInflight.priorTurnCount,
+          initialPartialText,
+          initialOps,
+          resumeTurnId: matchingInflight.turnId,
+          initialLastEventId: matchingInflight.lastEventId,
+        });
+        return;
+      }
+
+      if (mapped.length > 0) {
+        setMessages(mapped);
+      } else if (notFound || (!cameFromUrl && !historyFailed)) {
+        writeStoredAskSession(null);
+        if (isActiveRef.current) syncAskSessionUrl(null);
+        setSessionPersisted(false);
+        setActiveSession(newSessionId());
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Follow browser Back/Forward navigation across ?nav=ask&session=...
+  useEffect(() => {
+    const onPopState = () => {
+      const urlSession = readAskSessionFromUrl();
+      if (urlSession && urlSession !== activeSessionRef.current) {
+        void openSession(urlSession);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [openSession]);
 
   const toggleMic = async () => {
     if (dictRef.current) {
@@ -1854,7 +2152,11 @@ export function AskTinaView({
                   <button
                     type="button"
                     className="tina-web-ask-stop-btn"
-                    onClick={() => abortRef.current?.abort()}
+                    onClick={() => {
+                      inflightRef.current = null;
+                      writeInflightAskTurn(null);
+                      abortRef.current?.abort();
+                    }}
                   >
                     <WebIcon name="stop" size={12} />
                     <span>Stop</span>

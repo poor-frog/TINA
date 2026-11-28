@@ -482,3 +482,37 @@ describe('research reconnect budget', () => {
     expect(calls).toBe(research ? 2 : 1);
   });
 });
+
+describe("streamChatTurn — F5 reload resume options", () => {
+  it("sends caller-supplied turnId and initialLastEventId on the initial request and emits onTurnStart/onCursor", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(sseResponse([
+      ev({ type: "message-delta", text: "second half" }, "13-0"),
+      ev({ type: "turn-complete" }, "14-0"),
+    ]));
+    const { state, cb } = recorder();
+    const started: string[] = [];
+    const cursors: string[] = [];
+    cb.onTurnStart = (id) => started.push(id);
+    cb.onCursor = (id) => cursors.push(id);
+
+    const result = await streamChatTurn(
+      { prompt: "hi", session: "s-resume", active: undefined },
+      cb,
+      {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        signal: new AbortController().signal,
+        turnId: "resume-turn-42",
+        initialLastEventId: "12-0",
+        ...noWait,
+      },
+    );
+
+    expect(started).toEqual(["resume-turn-42"]);
+    expect(cursors).toEqual(["13-0", "14-0"]);
+    expect(state.text).toBe("second half");
+    expect(result.terminal).toBe(true);
+    const reqInit = fetchImpl.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(reqInit.body as string).turn_id).toBe("resume-turn-42");
+    expect((reqInit.headers as Record<string, string>)["Last-Event-ID"]).toBe("12-0");
+  });
+});
