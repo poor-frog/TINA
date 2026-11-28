@@ -354,3 +354,43 @@ async def test_malformed_lookup_response_is_not_an_empty_or_transient_result(res
         return {'tool_calls': [{'name': 'search_meeting', 'query': 'demo'}]} if operation == 'plan' else result
     async def answer(request): pytest.fail('Malformed data cannot answer')
     with pytest.raises(ValueError): await run_rag({}, agent, answer, lambda: True)
+
+
+async def test_plan_complete_and_single_shot_tools_skip_second_plan_round():
+    # 1. Single-hop lookup returning plan_complete=True goes straight to answer (no round-2 plan).
+    plans, lookups = [], []
+    async def agent_complete(request, operation, lookup=None):
+        if operation == 'plan':
+            plans.append(operation)
+            return {'tool_calls': [{'name': 'search_meeting', 'query': 'demo'}]}
+        lookups.append(lookup)
+        return {'source_count': 1, 'plan_complete': True}
+    async def answer_ok(request): return {'text': 'Lan phụ trách demo.'}
+    assert await run_rag({}, agent_complete, answer_ok, lambda: True) == {'text': 'Lan phụ trách demo.'}
+    assert len(plans) == 1 and len(lookups) == 1
+
+    # 2. Terminal single-shot tools (search_web, draft_task, draft_decision, open_source) never trigger round-2 plan.
+    for tool_name, query in (('search_web', 'gold price'), ('draft_task', 'demo'),
+                             ('draft_decision', 'launch'), ('open_source', 'ctx-' + 'a' * 64)):
+        plans.clear(); lookups.clear()
+        async def agent_single(request, operation, lookup=None, name=tool_name, q=query):
+            if operation == 'plan':
+                plans.append(operation)
+                return {'tool_calls': [{'name': name, 'query': q}]}
+            lookups.append(lookup)
+            return {'source_count': 1}
+        assert await run_rag({}, agent_single, answer_ok, lambda: True) == {'text': 'Lan phụ trách demo.'}
+        assert len(plans) == 1 and len(lookups) == 1
+
+    # 3. Parallel batch where one lookup is empty still runs round-2 plan.
+    plans.clear(); lookups.clear()
+    async def agent_partial(request, operation, lookup=None):
+        if operation == 'plan':
+            plans.append(operation)
+            return {'tool_calls': ([{'name': 'search_meeting', 'query': 'demo'},
+                                    {'name': 'search_shared_documents', 'query': 'demo'}]
+                                   if len(plans) == 1 else [])}
+        lookups.append(lookup)
+        return {'source_count': 1, 'plan_complete': True} if lookup['name'] == 'search_meeting' else {'source_count': 0}
+    assert await run_rag({}, agent_partial, answer_ok, lambda: True) == {'text': 'Lan phụ trách demo.'}
+    assert len(plans) == 2 and len(lookups) == 2

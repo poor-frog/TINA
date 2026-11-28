@@ -32,7 +32,7 @@ export interface PreparedSpeech {
   ready: Promise<boolean>;
   readonly timing?: Readonly<SpeechTiming>;
   readonly failedBeforePlayback?: boolean;
-  play(onStarted?: (timing?: Readonly<SpeechTiming>) => void): Promise<PlaybackOutcome>;
+  play(onStarted?: (timing?: Readonly<SpeechTiming>) => void, keepOpen?: boolean): Promise<PlaybackOutcome>;
   cancel(): void;
 }
 export interface TtsPlayback {
@@ -66,12 +66,14 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
   const spawnProcess = options.spawnProcess ?? (() => spawn('paplay', PAPLAY_ARGS, { stdio: ['pipe', 'pipe', 'pipe'] }));
   const handles = new Map<PreparedSpeech, () => Promise<void>>();
   let active: PreparedSpeech | undefined;
+  let sinkUnmuted = false;
   function prepare(text: string, voice = 'auto', timeoutMs?: number): PreparedSpeech {
     const timing: SpeechTiming = { requestedAtMs: Date.now() };
     const buffer = new PassThrough({ highWaterMark });
     let request: ClientRequest | undefined, response: IncomingMessage | undefined, proc: ChildProcess | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined, settled = false, ended = false, bytes = 0, playing = false;
     let failedBeforePlayback = false;
+    let keepSinkOpen = false;
     let readyResolve!: (ready: boolean) => void, doneResolve!: (outcome: PlaybackOutcome) => void;
     const ready = new Promise<boolean>(resolve => { readyResolve = resolve; });
     const done = new Promise<PlaybackOutcome>(resolve => { doneResolve = resolve; });
@@ -83,6 +85,11 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
       try { proc?.stdin?.destroy(); proc?.kill('SIGKILL'); } catch { /* Cleanup must settle cancellation. */ }
       if (active === handle || !active) {
         active = undefined;
+        if (outcome === 'completed' && keepSinkOpen && sinkUnmuted && handles.size > 0) {
+          doneResolve(outcome);
+          return Promise.resolve();
+        }
+        sinkUnmuted = false;
         return mute(true).then(muted => {
           if (!muted && outcome === 'completed') outcome = 'failed';
           doneResolve(outcome);
@@ -96,15 +103,18 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
       get timing() { return {...timing}; },
       get failedBeforePlayback() { return failedBeforePlayback; },
       cancel: () => { void finish('stopped'); },
-      async play(onStarted) {
+      async play(onStarted, keepOpen = false) {
         await ready;
         if (settled) return done;
         if (playing) return done;
         if (active && active !== handle) { await finish('failed'); return done; }
-        playing = true; active = handle;
-        const unmuted = await mute(false);
-        if (settled) return done;
-        if (!unmuted) { await finish('failed'); return done; }
+        playing = true; active = handle; keepSinkOpen = !!keepOpen;
+        if (!sinkUnmuted) {
+          const unmuted = await mute(false);
+          if (settled) return done;
+          if (!unmuted) { await finish('failed'); return done; }
+          sinkUnmuted = true;
+        }
         try { proc = spawnProcess(); } catch { await finish('failed'); return done; }
         const player = proc;
         player.stderr?.on('data', () => { log('[tts] player diagnostic'); });
@@ -182,6 +192,7 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
     return handle;
   }
   const stop = (): Promise<void> => {
+    sinkUnmuted = false;
     let muted = false;
     const cancellations: Promise<void>[] = [];
     for (const [handle, cancel] of [...handles]) {

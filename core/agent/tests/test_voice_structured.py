@@ -547,8 +547,225 @@ def test_voice_completion_falls_back_to_bedrock_on_external_auth_or_rate_limit(m
     assert 'Bedrock reply' in out
     assert len(attempts) == 2
     assert attempts[0]['TINA_LLM_PROVIDER'] == 'openai-responses'
+    assert attempts[0]['TINA_ALLOW_FALLBACK_RETRY'] == '1'
     assert 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI' not in attempts[0]
     assert attempts[1]['TINA_LLM_PROVIDER'] == 'bedrock-converse'
+    assert 'TINA_ALLOW_FALLBACK_RETRY' not in attempts[1]
     assert attempts[1]['TINA_LLM_MODEL'] == 'amazon.nova-lite-v1:0'
     assert attempts[1]['AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'] == '/v2/credentials/staging'
+
+
+@pytest.mark.parametrize('allow_retry', [True, False])
+def test_voice_verify_rerank_and_web_propagate_provider_fallback_only_when_retry_allowed(monkeypatch, allow_retry):
+    from llm.errors import LLMAuthError, LLMError, PROVIDER_FALLBACK_MARKER
+    from shared.voice_knowledge import VERIFY_SYSTEM
+    from shared.voice_rerank import RERANK_SYSTEM
+    from worker import engine
+
+    class FakeStream:
+        def __init__(self):
+            self.events = []
+
+        def xadd(self, _topic, fields):
+            self.events.append(json.loads(fields['event']))
+
+        def expire(self, _topic, _ttl):
+            pass
+
+    def run_knowledge(req_id: str, source_body: dict, provider_factory):
+        stream = FakeStream()
+        markers = []
+        monkeypatch.setenv('TINA_CHAT_SESSION', f'meeting-knowledge-{req_id}')
+        if allow_retry:
+            monkeypatch.setenv('TINA_ALLOW_FALLBACK_RETRY', '1')
+        else:
+            monkeypatch.delenv('TINA_ALLOW_FALLBACK_RETRY', raising=False)
+        monkeypatch.setattr(engine, 'completion_from_env', provider_factory)
+        monkeypatch.setattr(
+            'llm.errors.os.write',
+            lambda fd, data: markers.append((fd, data.decode('ascii', errors='replace'))) or len(data),
+        )
+        inline = PREFIX + json.dumps({'request_id': req_id, 'text': json.dumps(source_body, ensure_ascii=False)})
+        engine._run_meeting_knowledge(stream, 'out', {'entrypoint': {'inline': inline}})
+        deltas = [e['text'] for e in stream.events if e.get('type') == 'message-delta']
+        return deltas, [text for fd, text in markers if fd == 2]
+
+    # 1. Rate-limit (429) during VERIFY_SYSTEM
+    class VerifyRateLimitProvider:
+        def complete_structured(self, prompt, *, system='', schema=None):
+            if system == VERIFY_SYSTEM:
+                raise LLMError('rate limited', status_code=429)
+            return SimpleNamespace(text=json.dumps({'claims': [{'text': 'Lan phụ trách demo.', 'source_ids': ['s0']}]}))
+
+        def complete(self, prompt, *, system=''):
+            return self.complete_structured(prompt, system=system)
+
+    deltas, markers = run_knowledge(
+        'verify-429',
+        {
+            'mode': 'voice',
+            'question': 'Ai phụ trách demo?',
+            'sources': [{'id': 's0', 'kind': 'transcript', 'quote': 'Lan phụ trách demo.'}],
+        },
+        lambda **_: VerifyRateLimitProvider(),
+    )
+    if allow_retry:
+        assert deltas == []
+        assert f'{PROVIDER_FALLBACK_MARKER}rate_limit\n' in markers
+    else:
+        assert len(deltas) == 1
+        assert json.loads(deltas[0])['reason'] == 'verification_unavailable'
+        assert markers == []
+
+    # 2. Rate-limit (429) during RERANK_SYSTEM (>8 sources)
+    class RerankRateLimitProvider:
+        def complete_structured(self, prompt, *, system='', schema=None):
+            if system == RERANK_SYSTEM:
+                raise LLMError('rate limited', status_code=429)
+            if system == VERIFY_SYSTEM:
+                return SimpleNamespace(text=json.dumps({'approved': True}))
+            return SimpleNamespace(text=json.dumps({'claims': [{'text': 'Lan phụ trách demo.', 'source_ids': ['s0']}]}))
+
+        def complete(self, prompt, *, system=''):
+            return self.complete_structured(prompt, system=system)
+
+    many_sources = [{'id': f's{i}', 'kind': 'transcript', 'quote': f'Lan phụ trách demo {i}.'} for i in range(9)]
+    deltas, markers = run_knowledge(
+        'rerank-429',
+        {'mode': 'voice', 'question': 'Ai phụ trách demo?', 'sources': many_sources},
+        lambda **_: RerankRateLimitProvider(),
+    )
+    if allow_retry:
+        assert deltas == []
+        assert f'{PROVIDER_FALLBACK_MARKER}rate_limit\n' in markers
+    else:
+        assert len(deltas) == 1
+        assert json.loads(deltas[0])['claims'][0]['source_ids'] == ['s0']
+        assert markers == []
+
+    # 3. Auth failure (401) during voice_web completion
+    monkeypatch.setenv('TINA_AGENT_REACH_URL', 'http://reach.test:8080')
+    monkeypatch.setattr(
+        'llm.agent_reach.query',
+        lambda *_a, **_kw: {
+            'ok': True,
+            'items': [{'title': 'Public page', 'url': 'https://example.com/a', 'text': 'Public fact 42.'}],
+        },
+    )
+
+    class WebAuthFailProvider:
+        def complete_structured(self, prompt, *, system='', schema=None):
+            raise LLMAuthError('invalid key', status_code=401)
+
+        def complete(self, prompt, *, system=''):
+            raise LLMAuthError('invalid key', status_code=401)
+
+    deltas, markers = run_knowledge(
+        'web-401',
+        {'mode': 'voice_web', 'question': 'What is the public fact?'},
+        lambda **_: WebAuthFailProvider(),
+    )
+    if allow_retry:
+        assert deltas == []
+        assert f'{PROVIDER_FALLBACK_MARKER}auth\n' in markers
+    else:
+        assert len(deltas) == 1
+        assert json.loads(deltas[0])['reason'] == 'llm_unavailable'
+        assert markers == []
+
+
+def test_warm_voice_worker_pool_reuses_process_isolates_credentials_and_clears_session():
+    import os
+    from pathlib import Path
+    from control_plane.meeting_voice_completion import _WarmVoicePool
+
+    agent_root = str(Path(__file__).resolve().parents[1])
+    pool = _WarmVoicePool(max_idle=4, idle_ttl=60.0)
+    base_env = {
+        'PATH': os.environ.get('PATH', ''),
+        'PYTHONPATH': agent_root,
+        'HOME': '/tmp',
+        'TINA_LLM_PROVIDER': 'openai-compat',
+        'TINA_LLM_MODEL': 'gpt-5-mini',
+        'TINA_LLM_API_KEY': 'sk-user-a',
+    }
+    try:
+        # 1. Two calls with the same credential fingerprint reuse the exact same warm worker PID.
+        r1 = pool.run(
+            {'request_id': 'warm-1', 'text': json.dumps({'mode': 'voice_web', 'question': 'Ping 1'})},
+            base_env | {'TINA_CHAT_SESSION': 'meeting-knowledge-warm-1'},
+            timeout=10.0,
+        )
+        assert r1.returncode == 0 and json.loads(r1.stdout) == {'reason': 'web_unavailable'}
+        assert len(pool._idle) == 1
+        key_a = next(iter(pool._idle))
+        pid_a = pool._idle[key_a][0].proc.pid
+
+        r2 = pool.run(
+            {'request_id': 'warm-2', 'text': json.dumps({'mode': 'voice_web', 'question': 'Ping 2'})},
+            base_env | {'TINA_CHAT_SESSION': 'meeting-knowledge-warm-2'},
+            timeout=10.0,
+        )
+        assert r2.returncode == 0 and json.loads(r2.stdout) == {'reason': 'web_unavailable'}
+        assert pool._idle[key_a][0].proc.pid == pid_a
+
+        # 2. A different API key spawns a separate isolated process (never shares credential env).
+        r3 = pool.run(
+            {'request_id': 'warm-3', 'text': json.dumps({'mode': 'voice_web', 'question': 'Ping 3'})},
+            base_env | {'TINA_LLM_API_KEY': 'sk-user-b', 'TINA_CHAT_SESSION': 'meeting-knowledge-warm-3'},
+            timeout=10.0,
+        )
+        assert r3.returncode == 0 and json.loads(r3.stdout) == {'reason': 'web_unavailable'}
+        assert len(pool._idle) == 2
+        key_b = next(k for k in pool._idle if k != key_a)
+        assert pool._idle[key_b][0].proc.pid != pid_a
+
+        # 3. Session mismatch error captures stderr for that request without poisoning the next request.
+        r_err = pool.run(
+            {'request_id': 'warm-bad', 'text': json.dumps({'mode': 'voice_web', 'question': 'Bad'})},
+            base_env | {'TINA_CHAT_SESSION': 'meeting-knowledge-other'},
+            timeout=10.0,
+        )
+        assert r_err.stdout == '' and 'ValueError' in r_err.stderr
+        r4 = pool.run(
+            {'request_id': 'warm-4', 'text': json.dumps({'mode': 'voice_web', 'question': 'Ping 4'})},
+            base_env | {'TINA_CHAT_SESSION': 'meeting-knowledge-warm-4'},
+            timeout=10.0,
+        )
+        assert r4.returncode == 0 and json.loads(r4.stdout) == {'reason': 'web_unavailable'}
+        assert 'ValueError' not in r4.stderr
+    finally:
+        pool.shutdown()
+
+
+def test_bedrock_client_cache_reuses_same_key_and_isolates_credentials(monkeypatch):
+    import sys
+    from types import ModuleType
+    from llm import bedrock_converse
+
+    created = []
+    fake_boto3 = ModuleType('boto3')
+    fake_boto3.client = lambda service, **kw: (created.append((service, kw)), object())[1]
+    fake_botocore_cfg = ModuleType('botocore.config')
+    fake_botocore_cfg.Config = lambda **kw: kw
+    monkeypatch.setitem(sys.modules, 'boto3', fake_boto3)
+    monkeypatch.setitem(sys.modules, 'botocore.config', fake_botocore_cfg)
+    bedrock_converse._CLIENT_CACHE.clear()
+    try:
+        monkeypatch.setenv('AWS_REGION', 'us-east-1')
+        monkeypatch.delenv('AWS_BEARER_TOKEN_BEDROCK', raising=False)
+        c1 = bedrock_converse._cached_bedrock_client(10.0)
+        c2 = bedrock_converse._cached_bedrock_client(10.0)
+        assert c1 is c2 and len(created) == 1
+
+        # Changing bearer token or region creates a separate client
+        monkeypatch.setenv('AWS_BEARER_TOKEN_BEDROCK', 'bearer-user-a')
+        c3 = bedrock_converse._cached_bedrock_client(10.0)
+        assert c3 is not c1 and len(created) == 2
+
+        monkeypatch.setenv('AWS_REGION', 'us-west-2')
+        c4 = bedrock_converse._cached_bedrock_client(10.0)
+        assert c4 is not c3 and len(created) == 3
+    finally:
+        bedrock_converse._CLIENT_CACHE.clear()
 

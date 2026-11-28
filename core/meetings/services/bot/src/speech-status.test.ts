@@ -445,3 +445,48 @@ test('async setMute keeps event loop responsive and stop during in-flight unmute
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
 });
+
+test('consecutive sentences with keepOpen skip inter-sentence sink mute and mute cleanly on final sentence or stop', async () => {
+  const previous = process.env.TTS_SERVICE_URL;
+  const server = createServer((req, res) => { req.resume(); req.once('end', () => res.end(Buffer.alloc(8000))); });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  process.env.TTS_SERVICE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const mutes: boolean[] = [];
+  const makePlayer = () => {
+    const p = new EventEmitter() as unknown as ChildProcess;
+    Object.assign(p, {
+      stdin: new PassThrough(),
+      stderr: new PassThrough(),
+      kill() { p.emit('exit', null); return true; },
+    });
+    p.stdin!.on('finish', () => setImmediate(() => p.emit('exit', 0)));
+    setImmediate(() => p.emit('spawn'));
+    return p;
+  };
+  const playback = createTtsPlayback(() => {}, { setMute(muted) { mutes.push(muted); }, spawnProcess: makePlayer });
+  try {
+    const s1 = playback.prepare!('first');
+    const s2 = playback.prepare!('second');
+    assert.equal(await s1.ready, true);
+    assert.equal(await s2.ready, true);
+    assert.equal(await s1.play(undefined, true), 'completed');
+    assert.deepEqual(mutes, [false], 'sink must stay unmuted between consecutive sentences');
+    assert.equal(await s2.play(undefined, false), 'completed');
+    assert.deepEqual(mutes, [false, true], 'sink must mute cleanly once the final sentence completes');
+
+    // Stop after keepOpen=true before sentence 2 plays must still mute the sink.
+    mutes.length = 0;
+    const a1 = playback.prepare!('one');
+    const a2 = playback.prepare!('two');
+    assert.equal(await a1.ready, true);
+    assert.equal(await a2.ready, true);
+    assert.equal(await a1.play(undefined, true), 'completed');
+    assert.deepEqual(mutes, [false]);
+    await playback.stop();
+    assert.deepEqual(mutes, [false, true]);
+  } finally {
+    await playback.stop();
+    if (previous === undefined) delete process.env.TTS_SERVICE_URL; else process.env.TTS_SERVICE_URL = previous;
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});

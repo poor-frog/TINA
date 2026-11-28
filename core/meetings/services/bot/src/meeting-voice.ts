@@ -158,6 +158,7 @@ function safeErrorCode(err: unknown): string {
 export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetch): VoiceApi {
   let speechProfile:string|undefined;
   let agent: {baseUrl:string;token:string;revision:number} | undefined, currentId: string | undefined;
+  let turnAgent: {baseUrl:string;token:string;revision:number;requestId:string} | undefined;
   async function call(path: string, method: string, body?: object, signal?: AbortSignal, speakerKey?: string, base = url) {
     const response = await fetchImpl(base + path, { method, headers: {
       Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-TINA-Voice-Runtime':'livekit-v1',
@@ -172,13 +173,14 @@ export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetc
   const cancelledIds = new Set<string>();
   const cancelTurn = async (requestId:string) => {
     if(currentId===requestId)currentId=undefined;
+    const target=agent ?? (turnAgent?.requestId===requestId ? turnAgent : undefined);
     cancelledIds.add(requestId);
     if(cancelledIds.size>64) cancelledIds.delete(cancelledIds.values().next().value!);
-    const target=agent;
     const result=target
       ?await call('/turn','DELETE',{request_id:requestId},AbortSignal.timeout(15_000),undefined,target.baseUrl)
       :await call('/state','POST',{state:'QUIET',request_id:requestId},AbortSignal.timeout(5000));
     if(result[target?'stopped':'accepted']!==true)throw new Error('Voice cancellation was not confirmed');
+    if(turnAgent?.requestId===requestId)turnAgent=undefined;
   };
   return {
     config: async signal => {
@@ -200,13 +202,16 @@ export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetc
     },
     answer: (question, requestId, revision, signal, speakerKey) => {
       currentId=requestId;
+      turnAgent=agent?{...agent,requestId}:undefined;
       return call('/answer','POST',{question,request_id:requestId,revision},signal,speakerKey,agent?.baseUrl);
     },
     state: async (state, requestId, diagnostic, audio, kws) => {
       if(requestId && ['CAPTURING','THINKING','SPEAKING'].includes(state)) { currentId=requestId; cancelledIds.delete(requestId); }
-      if(agent && requestId && ['QUIET','OFF'].includes(state) && !cancelledIds.has(requestId)) {
+      const target=agent ?? (requestId && turnAgent?.requestId===requestId ? turnAgent : undefined);
+      if(target && requestId && ['QUIET','OFF'].includes(state) && !cancelledIds.has(requestId)) {
         void cancelTurn(requestId).catch(()=>{});
       }
+      if(state==='LISTENING') turnAgent=undefined;
       await call('/state','POST',{state,request_id:requestId,
         ...(diagnostic?{diagnostic}:{}),...(audio?{audio}:{}),...(kws?{kws}:{})});
     },
@@ -813,7 +818,7 @@ export class MeetingVoice {
     const live = () => !this.closed && this.generation === generation;
     let completed = false;
     try {
-      const config = await this.api.config(this.abort.signal);
+      const config = await this.api.config(AbortSignal.any([this.abort.signal, AbortSignal.timeout(5000)]));
       if (!live()) return;
       if (!config.enabled || !config.ready || config.revision !== this.revision) throw new Error('Voice policy changed');
       const outcome = await this.speak.speak(this.nextNotice('wake'), 'auto', timing => { if (live()) this.markSpeechTiming('ack',timing,true); }, ACK_TIMEOUT_MS);
@@ -867,6 +872,8 @@ export class MeetingVoice {
     const live = () => !this.closed && this.generation === generation;
     let ack = Promise.resolve();
     let prepared: PreparedSpeech | undefined, pending: PreparedSpeech | undefined;
+    let progressReport = Promise.resolve();
+    let keptOpen = false;
     let outcome = 'failed';
     let answerReceived = false;
     const noticeAbort = new AbortController();
@@ -915,7 +922,7 @@ export class MeetingVoice {
         for (let attempt = 0; attempt < (prefetched ? 2 : 1); attempt++) {
           let configCheckedAt = 0;
           if (!prepared) {
-            const current = await this.api.config(this.abort.signal);
+            const current = await this.api.config(AbortSignal.any([this.abort.signal, AbortSignal.timeout(5000)]));
             if (!live() || !current.enabled || !current.ready || current.revision !== this.revision) { if (live()) this.diagnose('policy_changed'); return; }
             configCheckedAt = Date.now();
             prepared = this.speak.prepare?.(sentence, 'auto');
@@ -926,7 +933,7 @@ export class MeetingVoice {
             if (!live()) return;
             if (index === 0) this.markSpeechTiming('answer',prepared.timing);
             if (!configCheckedAt || Date.now() - configCheckedAt >= 200) {
-              const fresh = await this.api.config(this.abort.signal);
+              const fresh = await this.api.config(AbortSignal.any([this.abort.signal, AbortSignal.timeout(5000)]));
               if (!live() || !fresh.enabled || !fresh.ready || fresh.revision !== this.revision) { if (live()) this.diagnose('policy_changed'); return; }
             }
           }
@@ -937,9 +944,12 @@ export class MeetingVoice {
             if (!didStart && live()) { didStart = true; this.playbackStarted=true;this.markSpeechTiming('answer',timing,true); started = this.report(id, 'started'); void started.catch(() => {}); }
           };
           this.speakingText=sentence;
-          const playback = prepared ? prepared.play(onStarted) : this.speak.speak(sentence, 'auto', onStarted);
-          if (index + 1 < sentences.length) pending = this.speak.prepare?.(sentences[index + 1], 'auto');
+          const hasNext = index + 1 < sentences.length;
+          if (hasNext) pending = this.speak.prepare?.(sentences[index + 1], 'auto');
+          const keepOpen = hasNext && Boolean(pending);
+          const playback = prepared ? prepared.play(onStarted, keepOpen) : this.speak.speak(sentence, 'auto', onStarted);
           const result = await playback;
+          keptOpen = keepOpen && result === 'completed';
           if (!live()) return;
           await started;
           if (result === 'failed' && prefetched && attempt === 0 && !sentenceStarted
@@ -948,14 +958,26 @@ export class MeetingVoice {
             prepared?.cancel(); pending?.cancel(); prepared = undefined; pending = undefined;
             continue;
           }
-          if (result !== 'completed') { this.diagnose('playback_failed');this.idleDiagnostic='playback_failed'; await this.report(id, result ?? 'failed'); return; }
+          if (result !== 'completed') {
+            this.diagnose('playback_failed'); this.idleDiagnostic = 'playback_failed';
+            await progressReport;
+            await this.report(id, result ?? 'failed');
+            return;
+          }
           this.interruption?.observePlayback(sentence);
-          this.playedText=(this.playedText+' '+sentence).trim();this.speakingText='';
-          await this.report(id,'started',this.playedText);
+          this.playedText = (this.playedText + ' ' + sentence).trim(); this.speakingText = '';
+          if (hasNext) {
+            const snapshot = this.playedText;
+            progressReport = progressReport.then(() => this.report(id, 'started', snapshot)).catch(() => {});
+          } else {
+            await progressReport;
+            await this.report(id, 'started', this.playedText);
+          }
           if(!live())return;
           break;
         }
       }
+      await progressReport;
       await this.report(id, 'completed');
       if (!live()) return;
       outcome = answer.clarification ? 'clarification' : serviceFailure ? 'answer_failed' : unanswered ? 'no_evidence' : 'completed';
@@ -989,6 +1011,7 @@ export class MeetingVoice {
       noticeAbort.abort();
       clearTimeout(ackTimer);
       prepared?.cancel(); pending?.cancel();
+      if (keptOpen) { keptOpen = false; await this.speak.stop().catch(() => {}); }
       await ack.catch(() => {});
       clearTimeout(timeout);
       if (live()) { this.interruption=undefined;this.turnCaller=undefined;this.turnQuestion=undefined;this.speakingText='';this.playbackStarted=false;

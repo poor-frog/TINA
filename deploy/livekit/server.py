@@ -221,7 +221,7 @@ def create_app(client=None, room_connector=connect_room):
         if lock is None: opening[key] = lock = asyncio.Lock()
         return lock
 
-    async def config(mid, session, token, revision=None):
+    async def config(mid, session, token, revision=None, *, require_active=True):
         if mid <= 0 or len(session) > 128:
             raise HTTPException(422, 'Invalid meeting session')
         try: UUID(session)
@@ -240,7 +240,9 @@ def create_app(client=None, room_connector=connect_room):
             raise HTTPException(503, 'TINA is unavailable')
         try: value = r.json()
         except ValueError: raise HTTPException(503,'Invalid TINA configuration response') from None
-        if not isinstance(value,dict) or value.get('enabled') is not True or value.get('engine') != 'livekit' or revision is not None and value.get('revision') != revision:
+        if not isinstance(value,dict):
+            raise HTTPException(409, 'Voice runtime policy changed')
+        if require_active and (value.get('enabled') is not True or value.get('engine') != 'livekit' or revision is not None and value.get('revision') != revision):
             raise HTTPException(409, 'Voice runtime policy changed')
         return value
 
@@ -562,6 +564,8 @@ def create_app(client=None, room_connector=connect_room):
             except SourceAccessChanged:
                 access_changed = True
                 raise HTTPException(409,'TINA source or session access changed') from None
+            except TimeoutError:
+                raise HTTPException(504,'TINA agent operation timed out') from None
             except (RuntimeError, ValueError, httpx.HTTPError):
                 raise HTTPException(503,'TINA agent operation failed') from None
             finally:
@@ -677,7 +681,7 @@ def create_app(client=None, room_connector=connect_room):
 
     @app.delete('/bots/{mid}/{session}/turn')
     async def stop(mid:int,session:str,body:Stop,authorization:str=Header(default='')):
-        await config(mid,session,authorization)
+        await config(mid,session,authorization,require_active=False)
         row=rows.get((mid,session));rid=str(body.request_id)
         stopped.append((mid,session,rid))
         def interrupt_current(target):

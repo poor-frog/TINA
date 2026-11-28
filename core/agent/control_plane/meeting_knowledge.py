@@ -534,7 +534,8 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
         if any(p not in documents for p in body.get('documents', [])): raise HTTPException(409, 'A profile document is unavailable')
         return {'documents': list(documents)}
 
-    def voice_context(request, meeting_id, *, with_canonical=True, source_policy=None):
+    def voice_context(request, meeting_id, *, with_canonical=True, source_policy=None,
+                      with_documents=True, meeting_row=None, base=None):
         expected = os.environ.get('TINA_INTERNAL_API_SECRET', '')
         supplied = request.headers.get('x-internal-secret', '')
         if not expected or not hmac.compare_digest(expected.encode(), supplied.encode()):
@@ -547,7 +548,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
         request.scope['headers'] = headers + [(b'x-gateway-verified', b'meeting-voice-internal')]
         # Starlette's cached Headers is reconstructed by a fresh Request.
         request = Request(request.scope)
-        row = meeting_get(meeting_api_url, subject, meeting_id, f'/meetings/{meeting_id}')
+        row = meeting_row if meeting_row is not None else meeting_get(meeting_api_url, subject, meeting_id, f'/meetings/{meeting_id}')
         if str(row.get('user_id')) != subject:
             raise HTTPException(404, 'Meeting unavailable')
         policy = source_policy if source_policy is not None else (row.get('data') or {}).get('voice_assistant') or {}
@@ -560,14 +561,15 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
                         'allow_general_knowledge', 'allow_web_search', 'shared_meeting_ids', 'documents', 'source_profile_id'))):
                 raise HTTPException(409, 'ChatGPT plan pilot requires the current transcript only')
             request.state.chatgpt_voice_pilot = True
-        base = read_target(request, None)
+        if base is None:
+            base = read_target(request, None)
         paths = resolve_profile(base, subject, policy)
         need_canonical = with_canonical and policy.get('include_transcript') is True
         base, canonical, documents = load(request, meeting_id, with_canonical=need_canonical,
             preferred=policy.get('documents', []), profile_documents=paths,
             include_workspace_wiki=policy.get('include_workspace_wiki') is True,
-            meeting_row=row, base=base)
-        if policy.get('source_profile_id') and any(p not in documents for p in policy.get('documents', [])):
+            meeting_row=row, transcript_only=not with_documents, base=base)
+        if with_documents and policy.get('source_profile_id') and any(p not in documents for p in policy.get('documents', [])):
             raise HTTPException(409, 'A selected project document is unavailable')
         return request, row, base, canonical, documents
 
@@ -664,7 +666,102 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
         return {'sources': [dict({k:s[k] for k in fields if k in s}, id=context_handle(s)) for s in selected],
                 'unavailable': len(body.sources) - len(selected)}
 
-    def authorized_voice(request,meeting_id,body):
+    turn_snapshots = {}
+    turn_snapshots_lock = threading.Lock()
+    _TURN_SNAPSHOT_TTL = 30.0
+    _COMPOUND_QUESTION_RE = re.compile(
+        r'so sánh|đối chiếu|khác nhau|chênh lệch|\b(?:compare|comparison|versus|vs\.?|difference)\b'
+        r'|(?:\bvà\b|\band\b|\bwith\b|\bcòn\b).*(?:khi nào|bao giờ|hạn|deadline|ai\b|ở đâu|bao nhiêu|trạng thái|như thế nào|when|who|where|how much|status)'
+        r'|\b(?:tính|cộng|trừ|nhân|chia|tổng|hiệu|calculate|sum|total)\b',
+        re.I,
+    )
+
+    def _is_compound_question(question: str) -> bool:
+        return question.count('?') >= 2 or bool(_COMPOUND_QUESTION_RE.search(question))
+
+    def _capture_doc_stats(base: Path, documents: dict, policy: dict, meeting_id: int) -> dict[str, tuple[int, int] | None]:
+        stats: dict[str, tuple[int, int] | None] = {}
+        for rel in documents:
+            target = content_path(base, rel)
+            if target is not None:
+                try:
+                    st = target.stat()
+                    stats[rel] = (st.st_mtime_ns, st.st_size)
+                except OSError:
+                    stats[rel] = None
+        if policy.get('include_approved_actions'):
+            draft_dir = reader._workspace_child(base, f'.meeting-knowledge/{meeting_id}/voice-drafts')
+            if draft_dir is not None:
+                try:
+                    st = draft_dir.stat()
+                    stats[f'__dir__:.meeting-knowledge/{meeting_id}/voice-drafts'] = (st.st_mtime_ns, st.st_size)
+                except OSError:
+                    stats[f'__dir__:.meeting-knowledge/{meeting_id}/voice-drafts'] = None
+        if policy.get('include_workspace_wiki'):
+            for root_name in ('kg', 'wiki', 'notes', 'docs', 'sources', 'concepts'):
+                root_dir = base / root_name
+                try:
+                    st = root_dir.stat()
+                    stats[f'__dir__:{root_name}'] = (st.st_mtime_ns, st.st_size)
+                except OSError:
+                    stats[f'__dir__:{root_name}'] = None
+        return stats
+
+    def _doc_stats_match(base: Path, stats: dict[str, tuple[int, int] | None]) -> bool:
+        for rel, expected in stats.items():
+            if rel.startswith('__dir__:'):
+                target = base / rel[len('__dir__:'):]
+            else:
+                target = content_path(base, rel)
+                if target is None:
+                    return False
+            try:
+                st = target.stat()
+                actual: tuple[int, int] | None = (st.st_mtime_ns, st.st_size)
+            except OSError:
+                actual = None
+            if actual != expected:
+                return False
+        return True
+
+    def authorized_voice(request, meeting_id, body, *, use_turn_cache=True):
+        turn_id = request.headers.get('x-tina-voice-request-id') if use_turn_cache else None
+        if turn_id:
+            request, row, base, _, _ = voice_context(request, meeting_id, with_canonical=False, with_documents=False)
+            policy = (row.get('data') or {}).get('voice_assistant') or {}
+            if (row.get('status') != 'active' or row.get('platform') != 'google_meet'
+                    or not policy.get('enabled') or policy.get('revision') != body.revision):
+                raise HTTPException(409, 'Voice sharing policy changed')
+            if (row.get('data') or {}).get('artifact_deletion'):
+                raise HTTPException(404, 'Meeting artifacts were deleted')
+            if not policy.get('shared_meeting_ids'):
+                snap_key = (subject_of(request), meeting_id, turn_id, digest(policy), str(base))
+                now = time.monotonic()
+                with turn_snapshots_lock:
+                    for key, item in list(turn_snapshots.items()):
+                        if now - item['stamp'] > _TURN_SNAPSHOT_TTL:
+                            turn_snapshots.pop(key, None)
+                    snap = turn_snapshots.get(snap_key)
+                if snap is not None and _doc_stats_match(base, snap['doc_stats']):
+                    return request, row, base, policy, list(snap['candidates'])
+            request, row, base, canonical, documents = voice_context(
+                request, meeting_id, meeting_row=row, base=base)
+            paths = policy.get('documents', [])
+            if any(path not in documents for path in paths):
+                raise HTTPException(409, 'A shared source is no longer linked')
+            candidates = voice_candidates(request, row, base, canonical, documents)
+            if not policy.get('shared_meeting_ids'):
+                snap_key = (subject_of(request), meeting_id, turn_id, digest(policy), str(base))
+                doc_stats = _capture_doc_stats(base, documents, policy, meeting_id)
+                with turn_snapshots_lock:
+                    if len(turn_snapshots) >= 64:
+                        turn_snapshots.pop(next(iter(turn_snapshots)), None)
+                    turn_snapshots[snap_key] = {
+                        'candidates': tuple(candidates),
+                        'doc_stats': doc_stats,
+                        'stamp': time.monotonic(),
+                    }
+            return request, row, base, policy, candidates
         request, row, base, canonical, documents = voice_context(request, meeting_id)
         policy = (row.get('data') or {}).get('voice_assistant') or {}
         if (row.get('status') != 'active' or row.get('platform') != 'google_meet'
@@ -866,11 +963,21 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
                                       'verification':answer.get('verification',[])}}
             else:
                 selected,trace=lookup_voice_sources(candidates,[],[lookup],now_ms,semantic=semantic_for(row,policy),dictionary=domain_dictionary(base))
+                plan_complete = (
+                    trace[0]['source_count'] > 0
+                    and not body.lookups
+                    and lookup['name'] in ('get_recent_transcript', 'search_meeting', 'search_shared_documents',
+                                           'search_approved_actions', 'search_shared_meetings')
+                    and not _is_compound_question(body.question)
+                    and not pending_clarification(history, now_ms)
+                )
                 result={'tool':lookup['name'],'source_count':trace[0]['source_count'],
                         'sources':[s|{'context_handle':context_handle(s)} for s in selected],
                         'evidence_pack':evidence_pack(selected,available=len(candidates)),
-                        'context_handles':[context_handle(s) for s in selected]}
-        _,fresh_row,fresh_base,_,_=voice_context(request,meeting_id,with_canonical=False)
+                        'context_handles':[context_handle(s) for s in selected],
+                        **({'plan_complete': True} if plan_complete else {})}
+        _,fresh_row,fresh_base,_,_=voice_context(request,meeting_id,with_canonical=False,
+                                                 with_documents=bool(policy.get('source_profile_id')))
         if fresh_base!=base or (fresh_row.get('data') or {}).get('voice_assistant')!=policy:
             raise HTTPException(409,'Voice sharing policy changed')
         return result
@@ -920,7 +1027,8 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
             create_draft(directory,request_id=turn_id,meeting_id=meeting_id,owner=row['user_id'],
                 policy_revision=policy['revision'],kind='task',title=state.title,details=details)
             result={'text':readback('task',state.title),'sources':[],'answer_kind':'assistant','reason':'answered','clarification':False}
-        _,fresh_row,fresh_base,_,_=voice_context(request,meeting_id,with_canonical=False)
+        _,fresh_row,fresh_base,_,_=voice_context(request,meeting_id,with_canonical=False,
+                                                 with_documents=bool(policy.get('source_profile_id')))
         if fresh_base!=base or (fresh_row.get('data') or {}).get('voice_assistant')!=policy:
             raise HTTPException(409,'Voice sharing policy changed')
         return result
@@ -992,7 +1100,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
                 details+='\n'+str(source.get('path') or source.get('segment_id') or proof.key)[:512]+'\n> '+proof.quote+'\n'
             details+='\nLời yêu cầu (trích đoạn, không phải bằng chứng đồng thuận):\n'+'\n'.join(state.utterances)[-4000:]
             result={'text':readback('decision',state.title),'sources':used,'answer_kind':'assistant','reason':'answered','clarification':False}
-        _,fresh_row,fresh_base,fresh_policy,fresh_sources=authorized_voice(request,meeting_id,body)
+        _,fresh_row,fresh_base,fresh_policy,fresh_sources=authorized_voice(request,meeting_id,body,use_turn_cache=False)
         if fresh_base!=base or fresh_policy!=policy or stale({'sources':used},fresh_sources):
             raise HTTPException(409,'Decision sources changed')
         if body.operation=='finish':
@@ -1090,7 +1198,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
                     if value.get('current') is not True: raise HTTPException(409, 'Summary turn was stopped')
             def summary_complete(payload):
                 scoped_request = Request({**request.scope, 'state': {}})
-                _,fresh_row,fresh_base,fresh_policy,fresh_sources = authorized_voice(scoped_request,meeting_id,body)
+                _,fresh_row,fresh_base,fresh_policy,fresh_sources = authorized_voice(scoped_request,meeting_id,body,use_turn_cache=False)
                 if fresh_base!=base or fresh_policy!=policy or stale({'sources':summary_sources},fresh_sources):
                     raise HTTPException(409,'Summary sources changed')
                 current_turn()

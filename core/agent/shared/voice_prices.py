@@ -5,6 +5,7 @@ import json
 import re
 
 from jsonschema import Draft202012Validator
+from shared.voice_knowledge import ProviderFallbackError
 from shared.voice_numbers import numeric_facts
 from shared.voice_tools import object_schema
 
@@ -172,6 +173,8 @@ def price_answer(question,sources,complete,review,repair,current,today=None):
             checks.append('contradiction')
         except (ValueError,TypeError,KeyError):
             checks.append('unsupported_claim')
+        except ProviderFallbackError:
+            raise
         except Exception:
             current()
             return {'reason':'verification_unavailable','verification':(checks+['unavailable'])[-2:]}

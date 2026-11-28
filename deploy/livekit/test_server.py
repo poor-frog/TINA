@@ -1199,3 +1199,47 @@ def test_staging_voice_template_defines_bounded_container_resources():
         assert 0 < c['MemoryReservation'] <= c['Memory'] <= task_mem
     env_names = {e['Name'] for e in defs['agent']['Environment']}
     assert 'LIVEKIT_MAX_ROOMS' in env_names
+
+
+@pytest.mark.parametrize('change', [{'enabled': False}, {'engine': 'tina'}])
+async def test_stop_interrupts_inflight_turn_even_after_voice_disabled_or_engine_switched(service, change):
+    client, calls, state, app = service
+    gate = asyncio.Event()
+    app.state.blocked[0] = gate
+    body = question()
+    task = asyncio.create_task(client.post(URL + '/answer', headers=HEADERS, json=body))
+    try:
+        await asyncio.wait_for(app.state.entered.wait(), 2)
+        state.update(change)
+        stop_resp = await client.request('DELETE', URL + '/turn', headers=HEADERS, json={'request_id': body['request_id']})
+        assert stop_resp.status_code == 200 and stop_resp.json() == {'stopped': True}
+        ans_resp = await asyncio.wait_for(task, 2)
+        assert ans_resp.status_code == 409
+        assert any(r.url.path.endswith('/state') for r in calls)
+        # Capability / session authorization is still enforced on DELETE /turn
+        bad_auth = await client.request('DELETE', URL + '/turn', headers={'Authorization': 'Bearer wrong-token'},
+                                        json={'request_id': body['request_id']})
+        assert bad_auth.status_code == 403
+    finally:
+        gate.set()
+        if not task.done():
+            task.cancel()
+            with suppress(BaseException):
+                await task
+
+
+async def test_answer_timeout_returns_504_and_cancels_turn(service, monkeypatch):
+    client, calls, state, app = service
+    body = question()
+
+    async def timeout_wait_for(coro, _timeout):
+        if hasattr(coro, 'close'):
+            coro.close()
+        raise TimeoutError('synthetic livekit answer timeout')
+
+    monkeypatch.setattr(server.asyncio, 'wait_for', timeout_wait_for)
+    resp = await client.post(URL + '/answer', headers=HEADERS, json=body)
+    assert resp.status_code == 504
+    assert any(r.url.path.endswith('/state') for r in calls)
+    row = app.state.rows[(1, SESSION)]
+    assert row.failed is True

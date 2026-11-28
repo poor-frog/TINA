@@ -1262,3 +1262,47 @@ async def test_config_readiness_uses_short_negative_cache_ttl_for_faster_recover
         assert res.json()['ready'] is False
         assert res.json()['unavailable_reason'] == 'sources_unavailable'
         assert 0 < await redis.ttl('meeting:voice:1:current:ready:1') <= 5
+
+
+async def test_config_caches_successful_tts_warmup_and_retries_failed_warmup(setup, monkeypatch):
+    _, repo, redis, *_ = setup
+    monkeypatch.setenv('ADMIN_API_URL', 'http://identity.test')
+    monkeypatch.setenv('TINA_TTS_PROFILE_KEY', 'synthetic-profile-key-' + 'x' * 32)
+    warm_calls = 0
+    warm_ready = [False]
+
+    async def upstream(request):
+        nonlocal warm_calls
+        if request.url.host == 'identity.test':
+            return httpx.Response(200, json={'voice': {'speech_voice': 'Mai Anh', 'pronunciations': {'TINA': 'ti na'}}})
+        if request.url.host == 'tts.test' and request.url.path == '/v1/voices/warm':
+            warm_calls += 1
+            return httpx.Response(200, json={'ready': warm_ready[0]})
+        if request.url.host == 'tts.test' and request.url.path == '/ready':
+            return httpx.Response(200, json={'status': 'ok'})
+        return httpx.Response(200, json={'documents': ['wiki/shared.md']})
+
+    app = FastAPI()
+    app.include_router(build_voice_router(
+        repo, redis, redis,
+        client_factory=lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(upstream), **kw),
+    ))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+        # 1. Failed warm is NOT cached so the next poll retries immediately
+        r1 = await client.get('/bots/voice/1/current/config', headers=headers())
+        assert r1.status_code == 200
+        assert r1.json()['ready'] is False and r1.json()['unavailable_reason'] == 'tts_unavailable'
+        assert warm_calls == 1
+
+        # 2. Successful warm is cached in Redis with bounded TTL (<= 15s)
+        warm_ready[0] = True
+        r2 = await client.get('/bots/voice/1/current/config', headers=headers())
+        assert r2.status_code == 200 and r2.json()['ready'] is True
+        assert warm_calls == 2
+
+        # 3. Repeated /config polls reuse the warm cache without hitting /v1/voices/warm again
+        r3 = await client.get('/bots/voice/1/current/config', headers=headers())
+        r4 = await client.get('/bots/voice/1/current/config', headers=headers())
+        assert r3.status_code == 200 and r3.json()['ready'] is True
+        assert r4.status_code == 200 and r4.json()['ready'] is True
+        assert warm_calls == 2

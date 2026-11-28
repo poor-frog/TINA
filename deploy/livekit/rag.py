@@ -11,6 +11,7 @@ TOOLS = TOOL_NAMES
 # Context reads, calculations, navigation and drafts retain their sequential dependency/side-effect rules.
 PARALLEL_READS = frozenset(('get_recent_transcript', 'search_meeting', 'search_shared_meetings',
                           'search_shared_documents', 'search_approved_actions'))
+SINGLE_SHOT_TOOLS = frozenset(('search_web', 'draft_task', 'draft_decision', 'open_source'))
 
 
 class SourceAccessChanged(RuntimeError):
@@ -28,6 +29,7 @@ class RagState(TypedDict):
     result: dict
     has_evidence: bool
     unavailable: bool
+    plan_complete: bool
     next: str
 
 
@@ -76,7 +78,7 @@ async def run_rag(request, agent, answer, is_current):
                     if result.get('lookup_status', outcome) != outcome: raise ValueError('Conflicting TINA lookup status')
                     metrics['lookup_outcome'] = outcome
             current()
-            return outcome
+            return outcome, bool(isinstance(result, dict) and result.get('plan_complete') is True)
         calls = state['calls']
         parallel = len(calls) > 1 and all(call['name'] in PARALLEL_READS for call in calls)
         with voice_span('rag_lookup_batch') as metrics:
@@ -90,18 +92,22 @@ async def run_rag(request, agent, answer, is_current):
                     if matched is not None:
                         raise SourceAccessChanged('TINA parallel lookup failed: source access changed') from None
                     raise RuntimeError('TINA parallel lookup failed') from None
-                outcomes = [task.result() for task in tasks]
+                results = [task.result() for task in tasks]
             else:
-                outcomes = [await execute(call) for call in calls]
+                results = [await execute(call) for call in calls]
         current()
+        outcomes = [outcome for outcome, _ in results]
+        single_shot = bool(calls) and all(call['name'] in SINGLE_SHOT_TOOLS for call in calls)
+        all_complete = bool(results) and all(outcome == 'found' and done for outcome, done in results)
         return {'executed': state['executed'] + state['calls'],
                 'has_evidence': state['has_evidence'] or 'found' in outcomes,
-                'unavailable': state['unavailable'] or 'unavailable' in outcomes}
+                'unavailable': state['unavailable'] or 'unavailable' in outcomes,
+                'plan_complete': state['plan_complete'] or single_shot or all_complete}
 
     def assess(state):
         current()
         route = ('answer' if state['has_evidence'] else 'unavailable') if state['unavailable'] else (
-            'plan' if state['rounds'] < 2 else 'answer')
+            'answer' if state['plan_complete'] or state['rounds'] >= 2 else 'plan')
         with voice_span('rag_assess') as metrics:
             metrics['lookup_outcome'] = ('partial' if state['has_evidence'] else 'unavailable') if state['unavailable'] else (
                 'found' if state['has_evidence'] else 'empty')
@@ -136,6 +142,6 @@ async def run_rag(request, agent, answer, is_current):
     # No checkpoints or external traces: credentials and verified text stay within this turn.
     with tracing_context(enabled=False), voice_span('rag_total', request.get('body', {}).get('request_id')):
         state = await graph.compile().ainvoke({'rounds': 0, 'calls': [], 'executed': [], 'result': {},
-            'has_evidence': False, 'unavailable': False, 'next': ''},
+            'has_evidence': False, 'unavailable': False, 'plan_complete': False, 'next': ''},
             config={'recursion_limit': 10, 'callbacks': []})
     return state['result']

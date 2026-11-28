@@ -1624,6 +1624,7 @@ export function createSpeakController(
   let speechGeneration = 0;
   let micUncertain = false;
   let micTouched = false;
+  let micOpen = false;
   const setMic = async (on: boolean): Promise<boolean> => {
     const generation = speechGeneration;
     const operation = micQueue.then(async () => {
@@ -1648,28 +1649,49 @@ export function createSpeakController(
     } finally { clearTimeout(timer); }
   };
 
-  const play = async (run: () => Promise<PlaybackOutcome | void>, ready?: Promise<boolean>): Promise<PlaybackOutcome> => {
+  const play = async (
+    run: () => Promise<PlaybackOutcome | void>,
+    ready?: Promise<boolean>,
+    keepOpen = false,
+  ): Promise<PlaybackOutcome> => {
       if (!enabled) { console.error('[bot] speak ignored: voiceAgentEnabled is false'); return 'failed'; }
       const generation = ++speechGeneration;
       if (ready) {
         const buffered = await ready;
         if (generation !== speechGeneration) return 'stopped';
-        if (!buffered) return await run() ?? 'failed';
+        if (!buffered) {
+          if (micOpen) {
+            micOpen = false;
+            await setMic(false);
+          }
+          return await run() ?? 'failed';
+        }
       }
       micTouched = true; // Even a failed/timed-out unmute must retain the strict Stop mute check.
-      const verified = await setMic(true);                   // (a) unmute the meeting-UI mic button
-      if (generation !== speechGeneration) return 'stopped';
+      let verified = micOpen;
+      if (!verified) {
+        verified = await setMic(true);                   // (a) unmute the meeting-UI mic button
+        if (generation !== speechGeneration) return 'stopped';
+        if (verified) micOpen = true;
+      }
       // (b) synthesize via the TTS service + stream PCM to tts_sink → virtual_mic (the bot's mic).
+      let outcome: PlaybackOutcome = 'failed';
       try {
         if (!verified) return 'failed';
-        return await run() ?? 'failed';
+        outcome = await run() ?? 'failed';
+        return outcome;
       } catch (e) {
         console.error(`[bot] speak: tts failed: ${String(e)}`);
         return 'failed';
       } finally {
         if (generation === speechGeneration) {
-          const muted = await setMic(false);
-          if (!muted) return 'failed';
+          if (!(keepOpen && outcome === 'completed')) {
+            micOpen = false;
+            const muted = await setMic(false);
+            if (!muted) return 'failed';
+          }
+        } else if (micOpen) {
+          micOpen = false;
         }
       }
   };
@@ -1679,7 +1701,7 @@ export function createSpeakController(
       return { ready: pending.ready, cancel: () => pending.cancel(),
         get timing() { return pending.timing; },
         get failedBeforePlayback() { return pending.failedBeforePlayback; },
-        play: onStarted => play(() => pending.play(onStarted), pending.ready).finally(() => pending.cancel()) };
+        play: (onStarted, keepOpen) => play(() => pending.play(onStarted, keepOpen), pending.ready, keepOpen).finally(() => pending.cancel()) };
     } } : {}),
     async speak(text: string, voice?: string, onStarted?: (timing?: Readonly<SpeechTiming>) => void, timeoutMs?: number): Promise<PlaybackOutcome> {
       console.log(`[bot] speak request: ${text.length} characters`);
@@ -1693,6 +1715,7 @@ export function createSpeakController(
     async stop(): Promise<void> {
       if (!enabled) return;
       speechGeneration++;
+      micOpen = false;
       await tts.stop();                                       // barge-in: kill playback + re-mute tts_sink
       if (!micTouched) return; // A pre-admission failure has no meeting microphone to manipulate.
       if (!await setMic(false)) throw new Error('Meeting microphone mute could not be verified');

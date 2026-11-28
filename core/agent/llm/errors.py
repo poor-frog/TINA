@@ -144,6 +144,9 @@ PROVIDER_FALLBACK_MARKER = "TINA_PROVIDER_FALLBACK_ELIGIBLE:"
 
 def provider_fallback_reason(exc: Exception) -> str | None:
     """Return 'auth' or 'rate_limit' when an external provider error should fall back to Bedrock."""
+    fallback = getattr(exc, "fallback_reason", None)
+    if fallback in ("auth", "rate_limit"):
+        return fallback
     code = completion_failure_code(exc)
     return code if code in ("auth", "rate_limit") else None
 

@@ -661,7 +661,7 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
         PREFIX, RECAP_SYSTEM, SYSTEM, recap_schema, validate_answer, validate_recap_answer,
     )
     from shared.voice_knowledge import (VOICE_SYSTEM, VOICE_TOOLS, VOICE_PLAN_SYSTEM, VOICE_INTENT_SYSTEM, VOICE_SOURCE_SYSTEM, VOICE_REPAIR_SYSTEM, VOICE_FORMAT_SYSTEM, GENERAL_SYSTEM, VERIFY_SYSTEM,
-        normalize_empty_voice_answer, validate_voice_answer, verify_voice_reply, voice_tool_calls)
+        ProviderFallbackError, normalize_empty_voice_answer, validate_voice_answer, verify_voice_reply, voice_tool_calls)
     from shared.voice_summary import MAP_SYSTEM, SELECT_SYSTEM
     from shared.voice_task_flow import TASK_FLOW_SYSTEM, TaskPatch
     from shared.voice_decision_flow import DECISION_SYSTEM, EVIDENCE_SYSTEM, DecisionPatch, EvidenceVerdict, checked_evidence
@@ -715,25 +715,33 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
             check_current()
             return normalize_empty_voice_answer(result) if mode == 'voice' and len(result) <= 50000 else result
         def generate_text(provider, prompt, system, schema, *, use_harness=True):
-            if use_harness and source.get('use_sandbox_agent') is True and mode in (
-                    'voice_plan', 'voice', 'voice_general', 'voice_web', 'voice_summary_map') and system not in (
-                    VERIFY_SYSTEM, VOICE_REPAIR_SYSTEM, VOICE_FORMAT_SYSTEM, RERANK_SYSTEM):
-                from worker.voice_sandbox import complete as sandbox_complete
-                with voice_span('sandbox_agent', trace_id):
-                    return sandbox_complete(prompt, system, schema, timeout=voice_deadline-time.monotonic(), current=check_current)
-            structured = getattr(provider, 'complete_structured', None)
-            if schema is not None and structured is not None:
-                try:
-                    return structured(prompt, system=system, schema=schema).text
-                except LLMStructuredOutputUnsupported:
-                    if system == RERANK_SYSTEM: raise
-                    # Older compatible endpoints retain validation and the existing one-repair limit.
-                    log.info('voice schema unsupported; using validated completion')
-                    remaining = voice_deadline - time.monotonic()
-                    if remaining < 1: raise TimeoutError('Voice completion budget exhausted')
-                    fallback_timeout = 35 if mode == 'post_meeting_recap' else 10
-                    provider = completion_from_env(timeout=min(fallback_timeout, remaining))
-            return provider.complete(prompt, system=system).text
+            try:
+                if use_harness and source.get('use_sandbox_agent') is True and mode in (
+                        'voice_plan', 'voice', 'voice_general', 'voice_web', 'voice_summary_map') and system not in (
+                        VERIFY_SYSTEM, VOICE_REPAIR_SYSTEM, VOICE_FORMAT_SYSTEM, RERANK_SYSTEM):
+                    from worker.voice_sandbox import complete as sandbox_complete
+                    with voice_span('sandbox_agent', trace_id):
+                        return sandbox_complete(prompt, system, schema, timeout=voice_deadline-time.monotonic(), current=check_current)
+                structured = getattr(provider, 'complete_structured', None)
+                if schema is not None and structured is not None:
+                    try:
+                        return structured(prompt, system=system, schema=schema).text
+                    except LLMStructuredOutputUnsupported:
+                        if system == RERANK_SYSTEM: raise
+                        # Older compatible endpoints retain validation and the existing one-repair limit.
+                        log.info('voice schema unsupported; using validated completion')
+                        remaining = voice_deadline - time.monotonic()
+                        if remaining < 1: raise TimeoutError('Voice completion budget exhausted')
+                        fallback_timeout = 35 if mode == 'post_meeting_recap' else 10
+                        provider = completion_from_env(timeout=min(fallback_timeout, remaining))
+                return provider.complete(prompt, system=system).text
+            except Exception as exc:
+                if os.environ.get('TINA_ALLOW_FALLBACK_RETRY') == '1':
+                    from llm.errors import provider_fallback_reason
+                    reason = provider_fallback_reason(exc)
+                    if reason is not None:
+                        raise ProviderFallbackError(reason) from exc
+                raise
         def checked_completion(prompt, system):
             remaining = voice_deadline - time.monotonic()
             if remaining < 1: raise TimeoutError('Voice completion budget exhausted')
@@ -859,6 +867,8 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                                 'Use only the supplied public question and excerpts; never add private context or credentials.',refining=True),
                             current=check_current, deadline=voice_deadline)
                     text = json.dumps(public, ensure_ascii=False)
+                except ProviderFallbackError:
+                    raise
                 except Exception:
                     text = json.dumps({'reason': 'web_unavailable'})
             else:

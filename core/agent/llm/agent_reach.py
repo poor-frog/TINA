@@ -72,7 +72,7 @@ def public_request(question):
 
 
 def answer_public(question, complete, review, *, repair=None, refine=None, current=lambda: True, deadline=None):
-    from shared.voice_knowledge import validate_voice_answer, verify_voice_reply
+    from shared.voice_knowledge import ProviderFallbackError, validate_voice_answer, verify_voice_reply
     from shared.voice_prices import gold_request, price_answer, CLARIFICATION
     from shared.voice_trace import voice_span, voice_trace_id, log as voice_log
     deadline = min(deadline if deadline is not None else float('inf'), time.monotonic() + 50)
@@ -167,6 +167,8 @@ def answer_public(question, complete, review, *, repair=None, refine=None, curre
         if sources_for_answer:
             prompt = json.dumps({'question': question, 'sources': sources}, ensure_ascii=False)
             try: raw = complete(prompt)
+            except ProviderFallbackError:
+                raise
             except Exception:
                 return result_for('llm_unavailable')
             remaining()

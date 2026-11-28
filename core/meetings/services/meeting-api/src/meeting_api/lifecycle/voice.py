@@ -819,13 +819,18 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                     task.add_done_callback(_cleanup_ready)
                 ready, reason = await asyncio.shield(task)
         if ready and speech_profile:
-            try:
-                async with client_factory(timeout=4,follow_redirects=False) as client:
-                    response=await client.post(os.environ.get('TTS_SERVICE_URL','').rstrip('/')+'/v1/voices/warm',
-                        headers={'X-API-Key':os.environ.get('TTS_API_TOKEN','')},json={'profile':speech_profile,'meeting_id':mid})
-                    ready=response.status_code==200 and response.json().get('ready') is True
-            except (httpx.HTTPError,ValueError):ready=False
-            if not ready:reason='tts_unavailable'
+            warm_key = f'meeting:voice:{mid}:{session}:warm:{hashlib.sha256(speech_profile.encode()).hexdigest()[:16]}'
+            if not await redis.get(warm_key):
+                try:
+                    async with client_factory(timeout=4,follow_redirects=False) as client:
+                        response=await client.post(os.environ.get('TTS_SERVICE_URL','').rstrip('/')+'/v1/voices/warm',
+                            headers={'X-API-Key':os.environ.get('TTS_API_TOKEN','')},json={'profile':speech_profile,'meeting_id':mid})
+                        ready=response.status_code==200 and response.json().get('ready') is True
+                except (httpx.HTTPError,ValueError):ready=False
+                if ready:
+                    await redis.set(warm_key,'1',ex=15)
+                else:
+                    reason='tts_unavailable'
         current_progress = None
         if ready and policy.enabled:
             raw_progress, held = await redis.mget(f'meeting:voice:{mid}:progress', f'meeting:voice:{mid}:lock')

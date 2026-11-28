@@ -1,8 +1,10 @@
 """CompletionPort using the AWS credential chain and Bedrock Converse."""
 
+import hashlib
 import json
 import os
 import re
+import threading
 
 from llm.errors import (
     LLMAuthError,
@@ -14,6 +16,43 @@ from llm.errors import (
 from llm.ports import CompletionResult, schema_system
 
 _STRUCTURED_TOOL_NAME = "tina_structured_output"
+_CLIENT_CACHE: dict[tuple, object] = {}
+_CLIENT_CACHE_LOCK = threading.Lock()
+_MAX_CACHED_CLIENTS = 16
+
+
+def _cached_bedrock_client(timeout: float):
+    connect_timeout = round(min(3.0, float(timeout)), 2)
+    read_timeout = round(float(timeout), 2)
+    bearer = os.environ.get("AWS_BEARER_TOKEN_BEDROCK") or ""
+    bearer_hash = hashlib.sha256(bearer.encode("utf-8")).hexdigest()[:16] if bearer else ""
+    key = (
+        connect_timeout,
+        read_timeout,
+        os.environ.get("AWS_REGION") or "",
+        os.environ.get("AWS_DEFAULT_REGION") or "",
+        os.environ.get("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") or "",
+        bearer_hash,
+    )
+    with _CLIENT_CACHE_LOCK:
+        cached = _CLIENT_CACHE.get(key)
+        if cached is not None:
+            return cached
+    try:
+        import boto3
+        from botocore.config import Config
+    except ImportError as exc:
+        raise LLMConfigError("Bedrock Converse requires the AWS SDK") from exc
+    client = boto3.client("bedrock-runtime", config=Config(
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        retries={"total_max_attempts": 1},
+    ))
+    with _CLIENT_CACHE_LOCK:
+        if len(_CLIENT_CACHE) >= _MAX_CACHED_CLIENTS:
+            _CLIENT_CACHE.pop(next(iter(_CLIENT_CACHE)), None)
+        _CLIENT_CACHE[key] = client
+    return client
 
 
 def _bedrock_structured_unsupported(exc: Exception) -> bool:
@@ -36,15 +75,7 @@ class BedrockConverseCompletion:
 
     def __init__(self, *, model=None, timeout=120.0, client=None):
         if client is None:
-            try:
-                import boto3
-                from botocore.config import Config
-            except ImportError as exc:
-                raise LLMConfigError("Bedrock Converse requires the AWS SDK") from exc
-            client = boto3.client("bedrock-runtime", config=Config(
-                connect_timeout=min(3, timeout), read_timeout=timeout,
-                retries={"total_max_attempts": 1},
-            ))
+            client = _cached_bedrock_client(timeout)
         self.client = client
         self.model = (model or "").strip() or os.environ.get("TINA_LLM_MODEL", "")
 

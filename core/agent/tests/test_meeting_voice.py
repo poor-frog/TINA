@@ -1028,3 +1028,56 @@ def test_gold_clarification_and_fixed_public_followup_survive_lookup_and_final(v
     plan=client.post(path,headers=HEADERS,json=follow|{'operation':'plan'})
     assert plan.status_code==200,plan.text
     assert all(c['name']!='search_web' for c in plan.json()['tool_calls'])
+
+
+def test_turn_snapshot_cache_reuses_canonical_within_turn_and_marks_simple_lookup_plan_complete(voice, monkeypatch):
+    client, row, root, prompts, mutate = voice
+    row['data']['voice_assistant'].update(engine='livekit', include_transcript=True)
+    canonical_fetches = 0
+    orig_get = api.meeting_get
+
+    def counting_get(base, subject, mid, path):
+        nonlocal canonical_fetches
+        if path.endswith('/canonical'):
+            canonical_fetches += 1
+        return orig_get(base, subject, mid, path)
+
+    monkeypatch.setattr(api, 'meeting_get', counting_get)
+    turn_headers = HEADERS | {'X-Tina-Voice-Request-Id': '00000000-0000-4000-8000-000000000777'}
+    agent_path = '/api/internal/meeting-voice/1/agent'
+    simple_q = {'question': 'What is the approved budget?', 'revision': 1}
+
+    # 1. context -> plan -> lookup inside the same voice turn fetch canonical transcript ONCE.
+    assert client.post(agent_path, headers=turn_headers, json=simple_q | {'operation': 'context'}).status_code == 200
+    assert canonical_fetches == 1
+    plan = client.post(agent_path, headers=turn_headers, json=simple_q | {'operation': 'plan'})
+    assert plan.status_code == 200 and canonical_fetches == 1
+    lookup = client.post(agent_path, headers=turn_headers, json=simple_q | {
+        'operation': 'lookup', 'lookup': plan.json()['tool_calls'][0]})
+    assert lookup.status_code == 200 and canonical_fetches == 1
+    assert lookup.json().get('plan_complete') is True
+
+    # 2. Compound / comparison question does NOT mark plan_complete so round-2 planning stays available.
+    compound_q = {'question': 'Compare the budget against the shared document', 'revision': 1}
+    compound_lookup = client.post(agent_path, headers=turn_headers, json=compound_q | {
+        'operation': 'lookup', 'lookup': {'name': 'search_shared_documents', 'query': 'budget'}})
+    assert compound_lookup.status_code == 200
+    assert 'plan_complete' not in compound_lookup.json()
+
+    # 3. Editing a workspace document invalidates the turn snapshot cache immediately via stat check.
+    (root / 'wiki/shared.md').write_text('The approved budget is 200 and verified.')
+    lookup_after_edit = client.post(agent_path, headers=turn_headers, json=simple_q | {
+        'operation': 'lookup', 'lookup': {'name': 'search_shared_documents', 'query': 'budget'}})
+    assert lookup_after_edit.status_code == 200 and canonical_fetches == 2
+    assert '200' in lookup_after_edit.json()['sources'][0]['quote']
+
+    # 4. Final answer still runs a fresh post-inference check and rejects mid-turn edits with 409.
+    before_answer = canonical_fetches
+    def edit_and_cite():
+        (root / 'wiki/shared.md').write_text('Budget edited mid-answer.')
+        doc_id = next(s['id'] for s in prompts[-1]['sources'] if s.get('path') == 'wiki/shared.md')
+        return json.dumps({'claims': [{'text': 'The approved budget is 200.', 'source_ids': [doc_id]}]})
+    mutate[0] = edit_and_cite
+    resp = client.post(URL, headers=turn_headers, json=simple_q | {'lookups': [{'name': 'search_shared_documents', 'query': 'budget'}]})
+    assert resp.status_code == 409
+    assert canonical_fetches == before_answer + 1

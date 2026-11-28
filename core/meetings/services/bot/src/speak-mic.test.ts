@@ -111,3 +111,54 @@ test('Google Meet remote participant mute controls cannot establish the bot micr
     await controller.stop();assert.equal(localClicks,2);
   }finally{(globalThis as any).document=previous;}
 });
+
+test('consecutive prepared sentences with keepOpen hold meeting mic open without toggling between sentences', async () => {
+  const micTransitions: boolean[] = [];
+  const page = { async evaluate(_fn: unknown, arg: { desiredOn: boolean }) { micTransitions.push(arg.desiredOn); return arg.desiredOn; } };
+  const controller = createSpeakController(
+    page as never,
+    { platform: 'google_meet', voiceAgentEnabled: true } as never,
+    () => ({
+      async speak() { return 'completed'; },
+      stop() {},
+      prepare() {
+        return {
+          ready: Promise.resolve(true),
+          cancel() {},
+          async play(onStarted) { onStarted?.(); return 'completed'; },
+        };
+      },
+    }),
+  );
+  const s1 = controller.prepare!('Câu một.');
+  const s2 = controller.prepare!('Câu hai.');
+  assert.equal(await s1.play(undefined, true), 'completed');
+  assert.deepEqual(micTransitions, [true], 'mic stays open between consecutive sentences');
+  assert.equal(await s2.play(undefined, false), 'completed');
+  assert.deepEqual(micTransitions, [true, false], 'mic closes cleanly after final sentence');
+
+  // If sentence 2 fails before playback after keepOpen=true, mic is cleanly muted.
+  micTransitions.length = 0;
+  let calls = 0;
+  const controller2 = createSpeakController(
+    page as never,
+    { platform: 'google_meet', voiceAgentEnabled: true } as never,
+    () => ({
+      async speak() { return 'completed'; },
+      stop() {},
+      prepare() {
+        const idx = ++calls;
+        return {
+          ready: Promise.resolve(idx === 1),
+          cancel() {},
+          async play() { return idx === 1 ? 'completed' : 'failed'; },
+        };
+      },
+    }),
+  );
+  const a1 = controller2.prepare!('Câu một.');
+  const a2 = controller2.prepare!('Câu hai lỗi.');
+  assert.equal(await a1.play(undefined, true), 'completed');
+  assert.equal(await a2.play(undefined, false), 'failed');
+  assert.deepEqual(micTransitions, [true, false]);
+});

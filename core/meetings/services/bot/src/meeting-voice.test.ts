@@ -1730,3 +1730,136 @@ test('third consecutive transient poll failure aborts THINKING, and authoritativ
     }
   }
 });
+
+test('voiceApi still sends LiveKit DELETE /turn after config disables voice or switches engine', async () => {
+  const requests: Array<{url: string; method: string; body?: string}> = [];
+  let configPayload: Record<string, unknown> = {
+    enabled: true, ready: true, revision: 1, engine: 'livekit', agent_url: 'http://agent.test/bots/1/session',
+  };
+  const api = voiceApi('http://core.test/bots/voice/1/session', 'synthetic', async (url, init) => {
+    requests.push({url: String(url), method: init?.method || 'GET', body: init?.body as string | undefined});
+    if (String(url).endsWith('/config')) return Response.json(configPayload);
+    if (String(url).endsWith('/answer')) return Response.json({text: 'Lan phụ trách demo.'});
+    if (String(url).endsWith('/turn')) return Response.json({stopped: true});
+    return Response.json({accepted: true});
+  });
+  await api.config();
+  await api.answer('ai phụ trách?', 'turn-lk-1', 1);
+  // Owner disables voice / switches to tina before cancelTurn runs
+  configPayload = {enabled: false, ready: true, revision: 2, engine: 'tina'};
+  await api.config();
+  await api.cancelTurn!('turn-lk-1');
+  const deletes1 = requests.filter(r => r.method === 'DELETE' && r.url === 'http://agent.test/bots/1/session/turn');
+  assert.equal(deletes1.length, 1);
+  assert.deepEqual(JSON.parse(deletes1[0].body!), {request_id: 'turn-lk-1'});
+
+  // Same behavior when state('QUIET', requestId) triggers auto-cancel after engine switch
+  configPayload = {enabled: true, ready: true, revision: 3, engine: 'livekit', agent_url: 'http://agent.test/bots/1/session'};
+  await api.config();
+  await api.answer('câu hỏi 2?', 'turn-lk-2', 3);
+  configPayload = {enabled: true, ready: true, revision: 4, engine: 'tina'};
+  await api.config();
+  await api.state('QUIET', 'turn-lk-2');
+  await tick(10);
+  const deletes2 = requests.filter(r => r.method === 'DELETE' && r.url === 'http://agent.test/bots/1/session/turn');
+  assert.equal(deletes2.length, 2);
+  assert.deepEqual(JSON.parse(deletes2[1].body!), {request_id: 'turn-lk-2'});
+});
+
+test('acknowledge and answer pass bounded timeout signals to api.config', async () => {
+  const configSignals: Array<AbortSignal | undefined> = [];
+  const f = fixture(async () => ({text: 'Lan phụ trách demo.'}));
+  const origConfig = f.api.config;
+  f.api.config = async signal => {
+    configSignals.push(signal);
+    return origConfig(signal);
+  };
+  try {
+    await f.voice.start();
+    clearTimeout((f.voice as any).pollTimer);
+    configSignals.length = 0;
+    // Trigger acknowledge path (name only)
+    f.emit({event: 'state', state: 'LISTENING'});
+    const start1 = Date.now() + 1;
+    await tick(5);
+    f.voice.hypothesis({channel: 0, speakerKey: 'ch-0:1', startMs: start1, endMs: start1 + 10, text: 'Tina ơi', final: true});
+    f.emit({event: 'activity', channel: 0, speech: false, endMs: start1 + 10, stamp: start1 + 20});
+    await tick(450);
+    const abortSignal = (f.voice as any).abort.signal;
+    assert(configSignals.length >= 1, 'acknowledge should check config');
+    assert(configSignals.every(s => s !== undefined && s !== abortSignal), 'acknowledge config must compose a per-call timeout signal');
+
+    // Trigger answer path
+    configSignals.length = 0;
+    await f.capture('Tina ơi, ai phụ trách demo?');
+    await tick(50);
+    const answerAbortSignal = (f.voice as any).abort.signal;
+    assert(configSignals.length >= 1, 'answer should check config before speech');
+    assert(configSignals.every(s => s !== undefined && s !== answerAbortSignal), 'answer config must compose a per-call timeout signal');
+  } finally {
+    await f.voice.stop();
+  }
+});
+
+test('multi-sentence answer passes keepOpen for non-final sentences and starts next sentence without awaiting progress report', async () => {
+  const keepOpenFlags: Array<boolean | undefined> = [];
+  const playedSentences: string[] = [];
+  const gate = deferred<void>();
+  const events: string[] = [];
+  const api: VoiceApi = {
+    config: async () => ({enabled: true, ready: true, revision: 1, wake_variants: []}),
+    answer: async () => ({text: 'Lan phụ trách demo. Hạn là thứ Sáu.'}),
+    state: async () => {},
+  };
+  const player: SpeakController = {
+    async speak() { return 'completed'; },
+    async stop() {},
+    prepare(text: string) {
+      return {
+        ready: Promise.resolve(true),
+        cancel() {},
+        async play(onStarted, keepOpen) {
+          keepOpenFlags.push(keepOpen);
+          playedSentences.push(text);
+          events.push(`play:${playedSentences.length}`);
+          onStarted?.();
+          return 'completed';
+        },
+      };
+    },
+  };
+  let emit!: (v: Record<string, unknown>) => void;
+  const voice = new MeetingVoice(
+    api,
+    player,
+    async (_id, state, text) => {
+      if (state === 'started' && text === 'Lan phụ trách demo.') {
+        events.push('report_s1_start');
+        await gate.promise;
+        events.push('report_s1_done');
+      } else if (state === 'completed') {
+        events.push('report_completed');
+      }
+    },
+    cb => { emit = cb; return {send: () => true, close() {}}; },
+  );
+  try {
+    await voice.start();
+    emit({event: 'state', state: 'LISTENING', generation: 0});
+    const start = Date.now() + 1;
+    await tick(5);
+    voice.hypothesis({channel: 0, speakerKey: 'ch-0:1', startMs: start, endMs: start + 10, text: 'Tina ơi, ai phụ trách demo?', final: true});
+    emit({event: 'activity', channel: 0, speech: false, endMs: start + 10, stamp: start + 20, generation: 0});
+    await tick(450);
+    // Sentence 2 must have started and played even while sentence 1's started-progress report is still pending!
+    assert.deepEqual(playedSentences, ['Lan phụ trách demo.', 'Hạn là thứ Sáu.']);
+    assert.deepEqual(keepOpenFlags, [true, false]);
+    assert(events.includes('play:2') && !events.includes('report_completed'));
+    gate.resolve();
+    await tick(20);
+    assert(events.indexOf('report_s1_done') < events.indexOf('report_completed'));
+  } finally {
+    gate.resolve();
+    await voice.stop();
+  }
+});

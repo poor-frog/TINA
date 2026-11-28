@@ -1,13 +1,18 @@
 """Run lease-checked voice completions without provisioning a task per model call."""
 
+import atexit
+import hashlib
 import json
 import logging
 import os
 import re
+import selectors
 import subprocess
 import sys
+import threading
 import time
 from threading import BoundedSemaphore
+from types import SimpleNamespace
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -16,6 +21,9 @@ from shared.voice_trace import log as voice_trace_log
 log = logging.getLogger(__name__)
 _DEFAULT_SLOTS = 4
 _SLOT_WAIT_SECONDS = 2.0
+_ORIG_SUBPROCESS_RUN = subprocess.run
+_WARM_WORKER_IDLE_TTL = 180.0
+_WARM_RESPONSE_MAX_BYTES = 1_048_576
 
 
 def _configured_slots() -> int:
@@ -33,6 +41,213 @@ def _configured_slots() -> int:
 _slots = BoundedSemaphore(_configured_slots())
 _SAFE_ERROR_RE = re.compile(r"^([A-Z][A-Za-z0-9_]*(?:Error|Exception))\b")
 _LOG_ERROR_FIELD_RE = re.compile(r"\berror=([A-Z][A-Za-z0-9_]*(?:Error|Exception))\b")
+
+
+class _WarmVoiceWorker:
+    """Persistent subprocess running worker.meeting_voice_local --daemon for one credential fingerprint."""
+
+    def __init__(self, env_key: str, worker_env: dict[str, str]):
+        self.env_key = env_key
+        self.last_used = time.monotonic()
+        self.proc = subprocess.Popen(
+            [sys.executable, "-m", "worker.meeting_voice_local", "--daemon"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            cwd="/tmp",
+            env=worker_env,
+            bufsize=0,
+        )
+        self._buf = bytearray()
+
+    def alive(self) -> bool:
+        return self.proc.poll() is None
+
+    def close(self) -> None:
+        proc = self.proc
+        try:
+            if proc.stdin is not None:
+                proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=1.0)
+        except OSError:
+            pass
+        try:
+            if proc.stdout is not None:
+                proc.stdout.close()
+        except OSError:
+            pass
+
+    def kill(self) -> None:
+        proc = self.proc
+        try:
+            proc.kill()
+            proc.wait(timeout=1.0)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        for stream in (proc.stdin, proc.stdout):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+
+    def request(self, payload: dict, session: str, *, timeout: float) -> SimpleNamespace:
+        if self.proc.stdin is None or self.proc.stdout is None or not self.alive():
+            raise BrokenPipeError("Warm voice worker is not running")
+        line = (json.dumps({"payload": payload, "session": session}, ensure_ascii=False) + "\n").encode("utf-8")
+        self.proc.stdin.write(line)
+        self.proc.stdin.flush()
+        deadline = time.monotonic() + max(0.05, float(timeout))
+        fd = self.proc.stdout.fileno()
+        with selectors.DefaultSelector() as sel:
+            sel.register(fd, selectors.EVENT_READ)
+            while True:
+                nl = self._buf.find(b"\n")
+                if nl != -1:
+                    raw = bytes(self._buf[:nl])
+                    del self._buf[:nl + 1]
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(cmd="worker.meeting_voice_local", timeout=timeout)
+                events = sel.select(timeout=remaining)
+                if not events:
+                    raise subprocess.TimeoutExpired(cmd="worker.meeting_voice_local", timeout=timeout)
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    raise EOFError("Warm voice worker exited before replying")
+                self._buf.extend(chunk)
+                if len(self._buf) > _WARM_RESPONSE_MAX_BYTES:
+                    raise ValueError("Warm voice worker response exceeded bound")
+        self.last_used = time.monotonic()
+        body = json.loads(raw.decode("utf-8"))
+        return SimpleNamespace(
+            returncode=int(body.get("returncode", 1)),
+            stdout=str(body.get("stdout") or ""),
+            stderr=str(body.get("stderr") or ""),
+        )
+
+
+class _WarmVoicePool:
+    """Credential-isolated pool of warm voice completion worker processes."""
+
+    def __init__(self, *, max_idle: int | None = None, idle_ttl: float = _WARM_WORKER_IDLE_TTL):
+        self._lock = threading.Lock()
+        self._idle: dict[str, list[_WarmVoiceWorker]] = {}
+        self._max_idle = max_idle or max(_configured_slots() * 2, 8)
+        self._idle_ttl = idle_ttl
+
+    @staticmethod
+    def _env_key(worker_env: dict[str, str]) -> str:
+        return hashlib.sha256(
+            json.dumps(sorted(worker_env.items()), ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+
+    def _evict_locked(self, now: float) -> list[_WarmVoiceWorker]:
+        stale: list[_WarmVoiceWorker] = []
+        for key in list(self._idle):
+            kept: list[_WarmVoiceWorker] = []
+            for worker in self._idle[key]:
+                if not worker.alive() or now - worker.last_used > self._idle_ttl:
+                    stale.append(worker)
+                else:
+                    kept.append(worker)
+            if kept:
+                self._idle[key] = kept
+            else:
+                self._idle.pop(key, None)
+        total = sum(len(items) for items in self._idle.values())
+        while total > self._max_idle:
+            oldest_key = min(self._idle, key=lambda k: self._idle[k][0].last_used)
+            stale.append(self._idle[oldest_key].pop(0))
+            if not self._idle[oldest_key]:
+                self._idle.pop(oldest_key, None)
+            total -= 1
+        return stale
+
+    def _checkout(self, env_key: str, worker_env: dict[str, str]) -> tuple[_WarmVoiceWorker, bool]:
+        with self._lock:
+            stale = self._evict_locked(time.monotonic())
+            bucket = self._idle.get(env_key)
+            worker = bucket.pop() if bucket else None
+            if bucket is not None and not bucket:
+                self._idle.pop(env_key, None)
+        for old in stale:
+            old.close()
+        if worker is not None and worker.alive():
+            return worker, True
+        if worker is not None:
+            worker.close()
+        return _WarmVoiceWorker(env_key, worker_env), False
+
+    def _checkin(self, worker: _WarmVoiceWorker) -> None:
+        if not worker.alive():
+            worker.close()
+            return
+        with self._lock:
+            self._idle.setdefault(worker.env_key, []).append(worker)
+            stale = self._evict_locked(time.monotonic())
+        for old in stale:
+            old.close()
+
+    def run(self, payload: dict, env: dict[str, str], *, timeout: float) -> SimpleNamespace:
+        session = env["TINA_CHAT_SESSION"]
+        worker_env = {k: v for k, v in env.items() if k != "TINA_CHAT_SESSION"}
+        env_key = self._env_key(worker_env)
+        deadline = time.monotonic() + max(0.05, float(timeout))
+        for attempt in range(2):
+            worker, reused = self._checkout(env_key, worker_env)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                worker.kill()
+                raise subprocess.TimeoutExpired(cmd="worker.meeting_voice_local", timeout=timeout)
+            try:
+                result = worker.request(payload, session, timeout=remaining)
+            except subprocess.TimeoutExpired:
+                worker.kill()
+                raise
+            except (BrokenPipeError, EOFError, OSError, ValueError):
+                worker.kill()
+                if reused and attempt == 0 and deadline - time.monotonic() > 0.5:
+                    continue
+                return SimpleNamespace(returncode=1, stdout="", stderr="RuntimeError: warm worker unavailable\n")
+            self._checkin(worker)
+            return result
+        return SimpleNamespace(returncode=1, stdout="", stderr="RuntimeError: warm worker unavailable\n")
+
+    def shutdown(self) -> None:
+        with self._lock:
+            workers = [w for items in self._idle.values() for w in items]
+            self._idle.clear()
+        for worker in workers:
+            worker.close()
+
+
+_warm_pool = _WarmVoicePool()
+_WARM_POOL_ENABLED = True
+atexit.register(_warm_pool.shutdown)
+
+
+def _exec_worker(payload: dict, env: dict[str, str], *, timeout: float):
+    """Execute one voice completion, using warm credential-isolated workers unless patched/disabled."""
+    if not _WARM_POOL_ENABLED or subprocess.run is not _ORIG_SUBPROCESS_RUN:
+        return subprocess.run(
+            [sys.executable, "-m", "worker.meeting_voice_local"],
+            input=json.dumps(payload, ensure_ascii=False), text=True, encoding="utf-8",
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cwd="/tmp", env=env,
+            timeout=timeout,
+        )
+    return _warm_pool.run(payload, env, timeout=timeout)
 
 
 def _stderr_error_kind(stderr: str | bytes | None) -> str:
@@ -227,16 +442,12 @@ def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,
                     env[key] = value
             if env.get("TINA_LLM_PROVIDER") != "bedrock-converse":
                 env.pop("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", None)
+            if fallback_eligible:
+                env["TINA_ALLOW_FALLBACK_RETRY"] = "1"
         remaining = deadline - time.time()
         if remaining <= 0:
             raise HTTPException(504, "Voice retrieval timed out")
-        result = subprocess.run(
-            [sys.executable, "-m", "worker.meeting_voice_local"],
-            input=json.dumps(payload, ensure_ascii=False), text=True, encoding="utf-8",
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            cwd="/tmp", env=env,
-            timeout=remaining,
-        )
+        result = _exec_worker(payload, env, timeout=remaining)
         if fallback_eligible and (result.returncode or not result.stdout):
             reason = fallback_reason_from_stderr(result.stderr)
             if reason is not None:
@@ -247,13 +458,7 @@ def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,
                         "Voice completion external provider failed reason=%s; falling back to Amazon Bedrock",
                         reason,
                     )
-                    result = subprocess.run(
-                        [sys.executable, "-m", "worker.meeting_voice_local"],
-                        input=json.dumps(payload, ensure_ascii=False), text=True, encoding="utf-8",
-                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                        cwd="/tmp", env=dict(base_env),
-                        timeout=fallback_remaining,
-                    )
+                    result = _exec_worker(payload, dict(base_env), timeout=fallback_remaining)
     except subprocess.TimeoutExpired as exc:
         _log_worker_timings(exc.stderr)
         raise HTTPException(504, "Voice completion timed out") from exc
