@@ -1812,6 +1812,15 @@ def create_app(
         supplied = request.headers.get("x-internal-secret", "")
         if not secret or not hmac.compare_digest(secret.encode(), supplied.encode()):
             raise HTTPException(403, "internal secret required")
+        if not (request.headers.get("x-user-id") or "").strip():
+            raise HTTPException(401, "missing X-User-Id")
+        # Flows calls this internal route directly with X-Internal-Secret + X-User-Id (not via
+        # the gateway). Once the shared secret is verified, stamp the internal identity marker so
+        # subject_of(request) succeeds both here and inside _transcript_completion when
+        # TINA_REQUIRE_GATEWAY_IDENTITY=1 is enabled.
+        headers = [(k, v) for k, v in request.scope["headers"] if k != b"x-gateway-verified"]
+        request.scope["headers"] = headers + [(b"x-gateway-verified", b"post-meeting-internal")]
+        request = Request(request.scope)
         subject = subject_of(request)
         base = settings.meeting_api_url
 
