@@ -1081,3 +1081,44 @@ def test_turn_snapshot_cache_reuses_canonical_within_turn_and_marks_simple_looku
     resp = client.post(URL, headers=turn_headers, json=simple_q | {'lookups': [{'name': 'search_shared_documents', 'query': 'budget'}]})
     assert resp.status_code == 409
     assert canonical_fetches == before_answer + 1
+
+
+def test_public_and_social_routes_skip_canonical_and_document_reads(voice, monkeypatch):
+    client, row, root, prompts, mutate = voice
+    row['data']['voice_assistant'].update(engine='livekit', include_transcript=True,
+                                          allow_general_knowledge=True, allow_web_search=True)
+    canonical_fetches = 0
+    orig_get = api.meeting_get
+
+    def counting_get(base, subject, mid, path):
+        nonlocal canonical_fetches
+        if path.endswith('/canonical'):
+            canonical_fetches += 1
+        return orig_get(base, subject, mid, path)
+
+    monkeypatch.setattr(api, 'meeting_get', counting_get)
+
+    # 1. Social greeting skips canonical/document reads completely.
+    r_social = client.post(URL, headers=HEADERS, json={'question': 'Xin chào', 'revision': 1})
+    assert r_social.status_code == 200 and r_social.json()['answer_kind'] == 'assistant'
+    assert canonical_fetches == 0
+
+    # 2. General knowledge question skips canonical/document reads completely.
+    mutate[0] = lambda: json.dumps({'text': 'ASR là nhận dạng giọng nói tự động.'})
+    r_gen = client.post(URL, headers=HEADERS, json={'question': 'ASR là gì?', 'revision': 1})
+    assert r_gen.status_code == 200 and r_gen.json()['answer_kind'] == 'general'
+    assert canonical_fetches == 0
+
+    # 3. LiveKit context + plan for explicit web search skip canonical/document reads.
+    agent_path = '/api/internal/meeting-voice/1/agent'
+    assert client.post(agent_path, headers=HEADERS, json={'question': 'Tìm trên web về Redis', 'revision': 1, 'operation': 'context'}).status_code == 200
+    assert client.post(agent_path, headers=HEADERS, json={'question': 'Tìm trên web về Redis', 'revision': 1, 'operation': 'plan'}).status_code == 200
+    assert canonical_fetches == 0
+
+    # 4. Policy change during a fast-path general answer still rejects with 409.
+    def disable_mid_turn():
+        row['data']['voice_assistant']['enabled'] = False
+        return json.dumps({'text': 'Should be fenced.'})
+    mutate[0] = disable_mid_turn
+    assert client.post(URL, headers=HEADERS, json={'question': 'ASR là gì?', 'revision': 1}).status_code == 409
+    assert canonical_fetches == 0

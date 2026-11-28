@@ -109,6 +109,7 @@ async def test_reply_audio_synthesizes_with_meeting_profile_and_caches_wav_in_st
             assert body['profile'] == pinned
             assert body['meeting_id'] == 42
             assert tts_requests[0].headers['X-API-Key'] == 'secret-tts-token-12345678901234567890'
+            assert tts_requests[0].headers['X-TTS-Priority'] == 'low'
 
             # Second play: served directly from storage cache with ZERO additional VieNeu calls
             r2 = await client.get(f'/meetings/42/voice-assistant/audio/{rid}', headers={'X-User-Id': '7'})

@@ -633,7 +633,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                     async with client.stream(
                         'POST',
                         url + '/v1/audio/speech',
-                        headers={'X-API-Key': token},
+                        headers={'X-API-Key': token, 'X-TTS-Priority': 'low'},
                         json=payload,
                     ) as response:
                         if response.status_code != 200:

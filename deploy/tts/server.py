@@ -13,7 +13,8 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from engine import Engine, MODEL, SAMPLE_RATE, FIXED_TEXTS, PRESET_VOICE, preset_voices,selected_voice
+from engine import Engine, MODEL, SAMPLE_RATE, FIXED_TEXTS, PRESET_VOICE, preset_voices, selected_voice
+from speech_text import spoken_text
 from voice_profile import resolve_profile
 
 MAX_BODY = 20000
@@ -31,6 +32,7 @@ class SpeechServer(ThreadingHTTPServer):
         self.token = token.encode("ascii")
         self.busy = threading.Lock()
         self.queue = deque()
+        self._queue_seq = 0
         self.queue_condition = threading.Condition()
         self.max_waiters = max_waiters
         self.queue_timeout = queue_timeout
@@ -62,27 +64,30 @@ class SpeechServer(ThreadingHTTPServer):
         threading.Thread(target=prepare,daemon=True).start()
         return False
 
-    def acquire_synthesis(self, connection):
+    def acquire_synthesis(self, connection, *, priority: int = 0):
         ticket = object()
         deadline = time.monotonic() + self.queue_timeout
         with self.queue_condition:
             if len(self.queue) >= self.max_waiters:
                 return False
-            self.queue.append(ticket)
+            self._queue_seq += 1
+            entry = (priority, self._queue_seq, ticket)
+            self.queue.append(entry)
             try:
                 while True:
                     # Disconnected/cancelled queued requests must never start native inference.
                     readable, _, _ = select.select([connection], [], [], 0)
                     if readable and connection.recv(1, socket.MSG_PEEK) == b'':
                         return False
-                    if self.queue[0] is ticket and self.busy.acquire(blocking=False):
+                    head = min(self.queue, key=lambda item: (item[0], item[1]))
+                    if head is entry and self.busy.acquire(blocking=False):
                         return True
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         return False
                     self.queue_condition.wait(min(remaining, .1))
             finally:
-                self.queue.remove(ticket)
+                self.queue.remove(entry)
                 self.queue_condition.notify_all()
 
     def release_synthesis(self):
@@ -218,12 +223,19 @@ class Handler(BaseHTTPRequestHandler):
         options={}
         if voice!=PRESET_VOICE:options['voice']=voice
         if pronunciations:options['pronunciations']=pronunciations
-        cached = self.server.engine.cached_public(text.strip(),**({'voice':voice} if voice!=PRESET_VOICE else {}))
+        stripped = text.strip()
+        custom_fixed = (
+            bool(pronunciations)
+            and stripped in FIXED_TEXTS
+            and spoken_text(stripped, {k.casefold(): v for k, v in pronunciations.items()}) != stripped
+        )
+        cached = None if custom_fixed else self.server.engine.cached_public(stripped, **({'voice': voice} if voice != PRESET_VOICE else {}))
         if cached is not None:
             return self.send_bytes(200, cached, 'audio/pcm', {
                 'X-Audio-Sample-Rate': str(SAMPLE_RATE), 'X-Audio-Channels': '1',
                 'Server-Timing': 'synthesis;dur=0'})
-        if not self.server.acquire_synthesis(self.connection):
+        priority = 1 if self.headers.get("X-TTS-Priority", "").strip().lower() == "low" else 0
+        if not self.server.acquire_synthesis(self.connection, priority=priority):
             return self.error(503, "Speech queue is full, cancelled or timed out")
         started = time.monotonic()
         streaming = False

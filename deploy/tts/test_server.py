@@ -73,6 +73,62 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(self.call({'input':'TINA','meeting_id':15,'profile':profile})[0],422)
             self.assertEqual(self.call({'input':'TINA','meeting_id':14,'profile':profile+'x'})[0],422)
         self.assertEqual(self.call({'input':'TINA','pronunciations':{'TINA':'ti na'}})[0],422)
+
+    def test_live_meeting_speech_takes_priority_over_low_priority_ui_replay(self):
+        entered, release = threading.Event(), threading.Event()
+        order = []
+        def blocked(text):
+            order.append(text)
+            if len(order) == 1:
+                entered.set()
+                release.wait(3)
+            return b"\x01\x00" * 10
+        self.engine.synthesize = blocked
+        statuses = {}
+        first = threading.Thread(target=lambda: statuses.setdefault('first', self.call({'input': 'active live'})[0]))
+        low = threading.Thread(target=lambda: statuses.setdefault('low', self.call({'input': 'ui replay'}, extra_headers={'X-TTS-Priority': 'low'})[0]))
+        live = threading.Thread(target=lambda: statuses.setdefault('live', self.call({'input': 'live urgent'})[0]))
+        try:
+            first.start(); self.assertTrue(entered.wait(1))
+            low.start()
+            deadline = time.monotonic() + 1
+            while len(self.server.queue) < 1 and time.monotonic() < deadline:
+                time.sleep(.01)
+            live.start()
+            while len(self.server.queue) < 2 and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertEqual(len(self.server.queue), 2)
+        finally:
+            release.set()
+            for t in (first, low, live):
+                if t.ident is not None:
+                    t.join(3)
+        self.assertEqual(statuses, {'first': 200, 'low': 200, 'live': 200})
+        self.assertEqual(order, ['active live', 'live urgent', 'ui replay'])
+
+    def test_custom_pronunciation_bypasses_fixed_cache_only_when_matching(self):
+        import base64, hmac
+        from engine import ACK_TEXT
+        error_notice = "Em chưa lấy được câu trả lời lúc này. Bạn có thể xem trạng thái trên TINA Terminal."
+        synthesized = []
+        self.engine.synthesize = lambda text, **kwargs: (synthesized.append((text, kwargs)), b'\x02\x00' * 10)[1]
+        self.engine.cached_public = lambda text, **kwargs: b'\x01\x00' * 10 if text in (ACK_TEXT, error_notice) else None
+        body = {'voice': 'Trúc Ly', 'pronunciations': {'TINA': 'ti na'}, 'meeting_id': 14, 'session': 'synthetic'}
+        payload = base64.urlsafe_b64encode(json.dumps(body).encode()).decode().rstrip('=')
+        key = 'synthetic-profile-key-' + 'x' * 32
+        profile = payload + '.' + hmac.new(key.encode(), b'tina-speech.v1:' + payload.encode(), 'sha256').hexdigest()
+        with patch.dict('os.environ', {'TINA_TTS_PROFILE_KEY': key}):
+            # Fixed notice without "TINA" still uses 0ms cached_public
+            code1, _, pcm1 = self.call({'input': ACK_TEXT, 'meeting_id': 14, 'profile': profile})
+            self.assertEqual(code1, 200)
+            self.assertEqual(pcm1, b'\x01\x00' * 10)
+            self.assertEqual(synthesized, [])
+            # Fixed notice containing "TINA" bypasses shared cache so custom pronunciation applies
+            code2, _, pcm2 = self.call({'input': error_notice, 'meeting_id': 14, 'profile': profile})
+            self.assertEqual(code2, 200)
+            self.assertEqual(pcm2, b'\x02\x00' * 10)
+            self.assertEqual(len(synthesized), 1)
+            self.assertEqual(synthesized[0][1]['pronunciations'], {'TINA': 'ti na'})
     def setUp(self):
         self.calls = []
         def synthesize(text):
@@ -90,10 +146,10 @@ class ServerTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join(2)
 
-    def call(self, body=None, *, token=TOKEN, raw=None, path="/v1/audio/speech"):
+    def call(self, body=None, *, token=TOKEN, raw=None, path="/v1/audio/speech", extra_headers=None):
         data = raw if raw is not None else json.dumps(body or {"input": "Xin chào"}).encode()
-        request = urllib.request.Request(self.url + path, data=data,
-            headers={"X-API-Key": token, "Content-Type": "application/json"})
+        headers = {"X-API-Key": token, "Content-Type": "application/json", **(extra_headers or {})}
+        request = urllib.request.Request(self.url + path, data=data, headers=headers)
         try:
             response = self.opener.open(request, timeout=3)
         except urllib.error.HTTPError as exc:
@@ -369,6 +425,16 @@ class AudioTests(unittest.TestCase):
         self.assertEqual(engine.tts.infer.call_count, len(FIXED_TEXTS) + 2)
         engine._fixed_pcm['Private meeting response'] = b'not public'
         self.assertIsNone(engine.cached_public('Private meeting response'))
+
+        # Custom pronunciation overriding a word in a fixed notice must synthesize spoken_text without polluting _fixed_pcm.
+        error_notice = "Em chưa lấy được câu trả lời lúc này. Bạn có thể xem trạng thái trên TINA Terminal."
+        base_pcm = engine.cached_public(error_notice)
+        before_calls = engine.tts.infer.call_count
+        engine.synthesize(error_notice, pronunciations={'TINA': 'ti na'})
+        self.assertEqual(engine.tts.infer.call_count, before_calls + 1)
+        spoken_arg = engine.tts.infer.call_args[0][0]
+        self.assertIn('ti na', spoken_arg)
+        self.assertEqual(engine.cached_public(error_notice), base_pcm)
 
     def test_real_resampler_outputs_24k_little_endian_mono(self):
         import numpy as np

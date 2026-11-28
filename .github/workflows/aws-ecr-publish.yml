@@ -12,7 +12,9 @@ on:
       - core/meetings/**
       - core/identity/**
       - deploy/livekit/**
+      - deploy/tts/**
       - deploy/aws/bot-patch.Dockerfile
+      - deploy/aws/vieneu-patch.Dockerfile
       - behavior/**
       - packages/**
       - .github/workflows/aws-ecr-publish.yml
@@ -34,6 +36,7 @@ on:
           - admin-api
           - bot
           - livekit-agent
+          - vieneu
 
 permissions: {}
 
@@ -165,6 +168,15 @@ jobs:
                   "build_args": "TINA_BOT_IMAGE=${ECR_REGISTRY}/tina-foundation/bot@sha256:27f527453c8ec2aa10bcb08ad1804f499da6a00f5f6346d9b0726828e8f6a700",
                   "paths": ("deploy/livekit/", "core/agent/shared/voice_trace.py", "core/agent/shared/voice_tools.py"),
                   "smoke_cmd": "python -B -c 'import server, adapters, rag, task_flow; from tina_ns import NativeNs; p=NativeNs(); p.close()'",
+              },
+              "vieneu": {
+                  "name": "vieneu",
+                  "repo": "tina-staging/vieneu",
+                  "context": ".",
+                  "dockerfile": "deploy/aws/vieneu-patch.Dockerfile",
+                  "build_args": "VIENEU_BASE=${ECR_REGISTRY}/tina-staging/vieneu@sha256:3125f2585de0f63376e814719a8f7f98f5312042a1965ea245a8007880d58eb5",
+                  "paths": ("deploy/tts/", "deploy/aws/vieneu-patch.Dockerfile"),
+                  "smoke_cmd": "python -B -c 'from pathlib import Path; import engine, server, speech_text, voice_profile; engine.verify_assets(Path(\"/models\")); assert hasattr(engine, \"_custom_fixed_override\") and hasattr(server.SpeechServer, \"acquire_synthesis\")'",
               },
           }
 

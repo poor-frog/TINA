@@ -701,20 +701,20 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
             if type(deadline) is not int: raise ValueError('Invalid retrieval deadline')
             voice_deadline = min(voice_deadline, time.monotonic() + deadline / 1000 - time.time())
             if voice_deadline <= time.monotonic(): raise TimeoutError('Voice retrieval budget exhausted')
-        def generate(provider, prompt, system, schema=None, *, use_harness=True):
+        def generate(provider, prompt, system, schema=None, *, use_harness=True, model=None):
             check_current()
             if not str(mode).startswith('voice'):
-                result = generate_text(provider, prompt, system, schema, use_harness=use_harness)
+                result = generate_text(provider, prompt, system, schema, use_harness=use_harness, model=model)
             else:
                 stage = {VERIFY_SYSTEM: 'verify', VOICE_REPAIR_SYSTEM: 'repair',
                          VOICE_FORMAT_SYSTEM: 'format_repair', VOICE_PLAN_SYSTEM: 'plan',
                          VOICE_INTENT_SYSTEM: 'intent', VOICE_SOURCE_SYSTEM: 'source_routing',
                          RERANK_SYSTEM: 'rerank'}.get(system, 'generation')
                 with voice_span(stage, trace_id):
-                    result = generate_text(provider, prompt, system, schema, use_harness=use_harness)
+                    result = generate_text(provider, prompt, system, schema, use_harness=use_harness, model=model)
             check_current()
             return normalize_empty_voice_answer(result) if mode == 'voice' and len(result) <= 50000 else result
-        def generate_text(provider, prompt, system, schema, *, use_harness=True):
+        def generate_text(provider, prompt, system, schema, *, use_harness=True, model=None):
             try:
                 if use_harness and source.get('use_sandbox_agent') is True and mode in (
                         'voice_plan', 'voice', 'voice_general', 'voice_web', 'voice_summary_map') and system not in (
@@ -722,10 +722,11 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                     from worker.voice_sandbox import complete as sandbox_complete
                     with voice_span('sandbox_agent', trace_id):
                         return sandbox_complete(prompt, system, schema, timeout=voice_deadline-time.monotonic(), current=check_current)
+                model_kw = {'model': model} if model and getattr(provider, 'name', None) == 'bedrock-converse' else {}
                 structured = getattr(provider, 'complete_structured', None)
                 if schema is not None and structured is not None:
                     try:
-                        return structured(prompt, system=system, schema=schema).text
+                        return structured(prompt, system=system, schema=schema, **model_kw).text
                     except LLMStructuredOutputUnsupported:
                         if system == RERANK_SYSTEM: raise
                         # Older compatible endpoints retain validation and the existing one-repair limit.
@@ -734,7 +735,8 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                         if remaining < 1: raise TimeoutError('Voice completion budget exhausted')
                         fallback_timeout = 35 if mode == 'post_meeting_recap' else 10
                         provider = completion_from_env(timeout=min(fallback_timeout, remaining))
-                return provider.complete(prompt, system=system).text
+                        model_kw = {'model': model} if model and getattr(provider, 'name', None) == 'bedrock-converse' else {}
+                return provider.complete(prompt, system=system, **model_kw).text
             except Exception as exc:
                 if os.environ.get('TINA_ALLOW_FALLBACK_RETRY') == '1':
                     from llm.errors import provider_fallback_reason
@@ -884,10 +886,11 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                     dialogue = source.get('dialogue_context')
                     intent = json.dumps({'question': source['question'], 'pending_clarification': pending,
                         'dialogue_context':dialogue}, ensure_ascii=False) if pending or dialogue else source['question']
+                    fast_model = payload.get('voice_fast_model') if isinstance(payload.get('voice_fast_model'), str) else None
                     ranked, outcome = rerank_voice_sources(intent, source['sources'],
                         source.get('history', []), source.get('recent_source_ids', []),
                         lambda prompt: generate(completion_from_env(timeout=4), prompt, RERANK_SYSTEM,
-                                                voice_schema('rerank', source['sources'])))
+                                                voice_schema('rerank', source['sources']), model=fast_model))
                     metrics.update(input_sources=len(source['sources']), output_sources=len(ranked), outcome=outcome)
                 empty_rank = outcome == 'empty'
                 if empty_rank: answer_sources = ranked

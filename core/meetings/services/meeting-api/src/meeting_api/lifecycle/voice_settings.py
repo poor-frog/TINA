@@ -107,7 +107,7 @@ def build_voice_settings_router(redis, client_factory=httpx.AsyncClient, repo=No
             raise HTTPException(429, 'Vui lòng đợi vài giây trước khi nghe thử lại.')
         try:
             async with client_factory(timeout=35, follow_redirects=False) as client:
-                async with client.stream('POST', url + '/v1/audio/speech', headers={'X-API-Key':token},
+                async with client.stream('POST', url + '/v1/audio/speech', headers={'X-API-Key': token, 'X-TTS-Priority': 'low'},
                     json={'model':'tts-1','voice':voice,'response_format':'pcm','input':sample,
                           **({'profile':profile} if profile else {})}) as response:
                     if response.status_code != 200: raise ValueError('TTS unavailable')

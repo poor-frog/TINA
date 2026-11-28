@@ -874,7 +874,23 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
     @app.post('/api/internal/meeting-voice/{meeting_id}/agent',include_in_schema=False)
     @trace_voice_request('agent')
     def voice_agent(request:Request,meeting_id:int,body:VoiceAgentQuery):
-        request,row,base,policy,candidates=authorized_voice(request,meeting_id,body)
+        fast_public = (
+            body.operation in ('context', 'plan')
+            and not body.history
+            and not body.lookups
+            and voice_route(body.question)[0] in ('assistant', 'general', 'web')
+        )
+        if fast_public:
+            request,row,base,_,_=voice_context(request,meeting_id,with_canonical=False,with_documents=False)
+            policy=(row.get('data') or {}).get('voice_assistant') or {}
+            if (row.get('status')!='active' or row.get('platform')!='google_meet'
+                    or not policy.get('enabled') or policy.get('revision')!=body.revision):
+                raise HTTPException(409,'Voice sharing policy changed')
+            if (row.get('data') or {}).get('artifact_deletion'):
+                raise HTTPException(404,'Meeting artifacts were deleted')
+            candidates=[]
+        else:
+            request,row,base,policy,candidates=authorized_voice(request,meeting_id,body)
         if policy.get('engine')!='livekit': raise HTTPException(409,'LiveKit room policy required')
         now_ms=int(time.time()*1000)
         candidates=with_calculations(candidates,body.question,body.lookups)
@@ -1115,7 +1131,22 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
     @app.post('/api/internal/meeting-voice/{meeting_id}/answer', include_in_schema=False)
     @trace_voice_request('answer')
     def voice_answer(request: Request, meeting_id: int, body: VoiceQuestion):
-        request,row,base,policy,candidates=authorized_voice(request,meeting_id,body)
+        fast_public = (
+            not body.history
+            and not body.lookups
+            and voice_route(body.question)[0] in ('assistant', 'general', 'web')
+        )
+        if fast_public:
+            request, row, base, _, _ = voice_context(request, meeting_id, with_canonical=False, with_documents=False)
+            policy = (row.get('data') or {}).get('voice_assistant') or {}
+            if (row.get('status') != 'active' or row.get('platform') != 'google_meet'
+                    or not policy.get('enabled') or policy.get('revision') != body.revision):
+                raise HTTPException(409, 'Voice sharing policy changed')
+            if (row.get('data') or {}).get('artifact_deletion'):
+                raise HTTPException(404, 'Meeting artifacts were deleted')
+            candidates = []
+        else:
+            request,row,base,policy,candidates=authorized_voice(request,meeting_id,body)
         candidates=with_calculations(candidates,body.question,body.lookups)
         documents_allowed=bool(policy.get('documents')) or policy.get('include_workspace_wiki') is True
         history = current_history([t.model_dump() for t in body.history], candidates, int(time.time()*1000))
@@ -1275,22 +1306,28 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete, li
                     answer = voice_failure('llm_unavailable')
         if answer and answer.get('clarification') and clarification_attempts(history)>=3:
             answer=voice_failure('clarification_exhausted',kind='assistant')|{'clarification':False}
-        _, fresh_row, fresh_base, fresh, fresh_docs = voice_context(request, meeting_id)
-        if fresh_base != base or (fresh_row.get('data') or {}).get('voice_assistant') != policy:
-            raise HTTPException(409, 'Voice sharing policy changed')
-        latest_sources = with_calculations(voice_candidates(request,fresh_row,fresh_base,fresh,fresh_docs),body.question,body.lookups)
-        # Keep original operand evidence alongside derived results for inspection and revocation.
-        for source in list(answer.get('sources',[])):
-            if source['kind']!='calculation': continue
-            _,parents=calculate_source(source['calculation_query'],body.question,candidates)
-            for parent in parents:
-                if len(answer['sources'])<32 and not any(s['key']==parent['key'] for s in answer['sources']):
-                    answer['sources'].append(parent)
-        history_ids = {identifier for turn in conversation for identifier in turn['source_ids']}
-        checked = selected if answer.get('clarification') or answer.get('follow_up') else answer['sources'] + [s for s in selected if s['id'] in history_ids]
-        if summary_sources is not None: checked = summary_sources
-        if stale({'sources': checked}, latest_sources):
-            raise HTTPException(409, 'Shared evidence changed during the answer')
+        if fast_public and not answer.get('sources') and not selected and summary_sources is None:
+            _, fresh_row, fresh_base, _, _ = voice_context(request, meeting_id, with_canonical=False, with_documents=False)
+            if (fresh_base != base or (fresh_row.get('data') or {}).get('voice_assistant') != policy
+                    or (fresh_row.get('data') or {}).get('artifact_deletion')):
+                raise HTTPException(409, 'Voice sharing policy changed')
+        else:
+            _, fresh_row, fresh_base, fresh, fresh_docs = voice_context(request, meeting_id)
+            if fresh_base != base or (fresh_row.get('data') or {}).get('voice_assistant') != policy:
+                raise HTTPException(409, 'Voice sharing policy changed')
+            latest_sources = with_calculations(voice_candidates(request,fresh_row,fresh_base,fresh,fresh_docs),body.question,body.lookups)
+            # Keep original operand evidence alongside derived results for inspection and revocation.
+            for source in list(answer.get('sources',[])):
+                if source['kind']!='calculation': continue
+                _,parents=calculate_source(source['calculation_query'],body.question,candidates)
+                for parent in parents:
+                    if len(answer['sources'])<32 and not any(s['key']==parent['key'] for s in answer['sources']):
+                        answer['sources'].append(parent)
+            history_ids = {identifier for turn in conversation for identifier in turn['source_ids']}
+            checked = selected if answer.get('clarification') or answer.get('follow_up') else answer['sources'] + [s for s in selected if s['id'] in history_ids]
+            if summary_sources is not None: checked = summary_sources
+            if stale({'sources': checked}, latest_sources):
+                raise HTTPException(409, 'Shared evidence changed during the answer')
         if draft_query is not None:
             turn_id = request.headers.get('x-tina-voice-request-id')
             try: turn_id = str(uuid.UUID(turn_id))

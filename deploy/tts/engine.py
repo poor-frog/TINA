@@ -87,39 +87,52 @@ class Engine:
         self.tts = Vieneu(mode="v3turbo", backend="onnx", device="cpu", threads=threads,
                           backbone_repo=str(backbone), onnx_dir=str(backbone / "onnx_update"))
 
-    def cached_public(self, text: str,voice='auto') -> bytes | None:
-        return getattr(self, '_fixed_pcm', {}).get((selected_voice(voice),text)) if text in FIXED_TEXTS else None
+    @staticmethod
+    def _custom_fixed_override(text: str, pronunciations=None) -> bool:
+        if not pronunciations or text not in FIXED_TEXTS:
+            return False
+        custom = {k.casefold(): v for k, v in pronunciations.items()}
+        return spoken_text(text, custom) != text
 
-    def synthesize(self, text: str, meeting_id: int | None = None,voice='auto',pronunciations=None) -> bytes:
+    def cached_public(self, text: str, voice='auto', pronunciations=None) -> bytes | None:
+        if self._custom_fixed_override(text, pronunciations):
+            return None
+        return getattr(self, '_fixed_pcm', {}).get((selected_voice(voice), text)) if text in FIXED_TEXTS else None
+
+    def synthesize(self, text: str, meeting_id: int | None = None, voice='auto', pronunciations=None) -> bytes:
         # Preset voice only: never accept an audio reference or user model path.
         cache = getattr(self, '_fixed_pcm', {})
-        voice=selected_voice(voice);cached = self.cached_public(text,voice)
+        custom_fixed = self._custom_fixed_override(text, pronunciations)
+        voice = selected_voice(voice)
+        cached = None if custom_fixed else self.cached_public(text, voice)
         if cached is not None:
             return cached
         glossary = getattr(self, 'pronunciations', default_pronunciations()).for_meeting(meeting_id)
-        if pronunciations:glossary.update({k.casefold():v for k,v in pronunciations.items()})
-        speech_text = text if text in FIXED_TEXTS else spoken_text(text, glossary)
+        if pronunciations: glossary.update({k.casefold(): v for k, v in pronunciations.items()})
+        speech_text = text if (text in FIXED_TEXTS and not custom_fixed) else spoken_text(text, glossary)
         audio = self.tts.infer(speech_text, voice=voice, apply_watermark=False)
         pcm = pcm24(audio, self.tts.sample_rate)
-        if text in FIXED_TEXTS:
-            cache[(voice,text)] = pcm; self._fixed_pcm = cache
+        if text in FIXED_TEXTS and not custom_fixed:
+            cache[(voice, text)] = pcm; self._fixed_pcm = cache
         return pcm
 
-    def stream(self, text: str, meeting_id: int | None = None,voice='auto',pronunciations=None):
-        import numpy as np
-        import soxr
-        voice=selected_voice(voice);cached = self.cached_public(text,voice)
+    def stream(self, text: str, meeting_id: int | None = None, voice='auto', pronunciations=None):
+        custom_fixed = self._custom_fixed_override(text, pronunciations)
+        voice = selected_voice(voice)
+        cached = None if custom_fixed else self.cached_public(text, voice)
         if cached is not None:
             yield cached
             return
+        import numpy as np
+        import soxr
         glossary = self.pronunciations.for_meeting(meeting_id)
-        if pronunciations:glossary.update({k.casefold():v for k,v in pronunciations.items()})
-        speech = text if text in FIXED_TEXTS else spoken_text(text, glossary)
+        if pronunciations: glossary.update({k.casefold(): v for k, v in pronunciations.items()})
+        speech = text if (text in FIXED_TEXTS and not custom_fixed) else spoken_text(text, glossary)
         rate = self.tts.sample_rate
         resampler = soxr.ResampleStream(rate, SAMPLE_RATE, 1, dtype='float32', quality='HQ') if rate != SAMPLE_RATE else None
         chunks = self.tts.infer_stream(speech, voice=voice, apply_watermark=False)
         samples = 0
-        public=[] if text in FIXED_TEXTS else None
+        public = [] if (text in FIXED_TEXTS and not custom_fixed) else None
         try:
             for chunk in chunks:
                 audio = np.asarray(chunk, dtype=np.float32)

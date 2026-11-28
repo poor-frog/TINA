@@ -769,3 +769,78 @@ def test_bedrock_client_cache_reuses_same_key_and_isolates_credentials(monkeypat
     finally:
         bedrock_converse._CLIENT_CACHE.clear()
 
+
+def test_heavy_bedrock_model_routes_aux_stages_and_rerank_to_fast_default_model(monkeypatch):
+    from control_plane import meeting_voice_completion
+    from shared.voice_knowledge import VERIFY_SYSTEM
+    from shared.voice_rerank import RERANK_SYSTEM
+    from worker import engine
+
+    assert meeting_voice_completion._DEFAULT_SLOTS == 8
+
+    monkeypatch.setenv('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI', '/v2/credentials/staging')
+    monkeypatch.setenv('TINA_LLM_PROVIDER', 'bedrock-converse')
+    monkeypatch.setenv('TINA_LLM_MODEL', 'amazon.nova-lite-v1:0')
+
+    sonnet_env = meeting_voice_completion.resolve_voice_model_env({'model': 'us.anthropic.claude-sonnet-4-6'})
+    openai_env = meeting_voice_completion.resolve_voice_model_env({'mode': 'openai-api', 'api_key': 'sk-test', 'model': 'gpt-5'})
+    seen = []
+
+    def fake_run(*_, input, env, **kwargs):
+        seen.append((json.loads(input), dict(env)))
+        return SimpleNamespace(stderr='', stdout='{"ok":true}', returncode=0)
+
+    monkeypatch.setattr(meeting_voice_completion.subprocess, 'run', fake_run)
+    payload = {'request_id': 'fast-aux-1', 'voice_turn': {'meeting_id': 1, 'holder': 's:1'}}
+
+    # 1. Auxiliary stages under built-in Bedrock Sonnet 4.6 route to fast default Nova Lite.
+    for aux_mode in ('voice_plan', 'voice_intent', 'voice_source_intent'):
+        seen.clear()
+        meeting_voice_completion.complete(payload, {'mode': aux_mode}, 'redis://fixture', model_env=sonnet_env)
+        assert seen[0][1]['TINA_LLM_MODEL'] == 'amazon.nova-lite-v1:0'
+        assert 'TINA_ALLOW_FALLBACK_RETRY' not in seen[0][1]
+
+    # 2. Main voice answer stays on Sonnet 4.6 and forwards voice_fast_model for rerank.
+    seen.clear()
+    meeting_voice_completion.complete(payload, {'mode': 'voice'}, 'redis://fixture', model_env=sonnet_env)
+    assert seen[0][1]['TINA_LLM_MODEL'] == 'us.anthropic.claude-sonnet-4-6'
+    assert seen[0][0]['voice_fast_model'] == 'amazon.nova-lite-v1:0'
+
+    # 3. External BYO providers keep their selected provider for aux stages (never silently cross providers).
+    seen.clear()
+    meeting_voice_completion.complete(payload, {'mode': 'voice_plan'}, 'redis://fixture', model_env=openai_env)
+    assert seen[0][1]['TINA_LLM_PROVIDER'] == 'openai-responses'
+    assert 'voice_fast_model' not in seen[0][0]
+
+    # 4. Worker engine uses voice_fast_model ONLY for RERANK_SYSTEM on bedrock-converse, keeping generation & verify on Sonnet.
+    called_models = []
+
+    class FakeBedrockProvider:
+        name = 'bedrock-converse'
+
+        def complete_structured(self, prompt, *, system='', schema=None, model=None):
+            called_models.append((system, model))
+            if system == RERANK_SYSTEM:
+                return SimpleNamespace(text=json.dumps({'source_ids': ['s0']}))
+            if system == VERIFY_SYSTEM:
+                return SimpleNamespace(text=json.dumps({'approved': True}))
+            return SimpleNamespace(text=json.dumps({'claims': [{'text': 'Lan phụ trách demo.', 'source_ids': ['s0']}]}))
+
+        def complete(self, prompt, *, system='', model=None):
+            return self.complete_structured(prompt, system=system, model=model)
+
+    events = []
+    stream = SimpleNamespace(xadd=lambda _, f: events.append(json.loads(f['event'])), expire=lambda *_: None)
+    monkeypatch.setenv('TINA_CHAT_SESSION', 'meeting-knowledge-rerank-fast')
+    monkeypatch.setattr(engine, 'completion_from_env', lambda **_: FakeBedrockProvider())
+    many_sources = [{'id': f's{i}', 'kind': 'transcript', 'quote': f'Lan phụ trách demo {i}.'} for i in range(9)]
+    inline = PREFIX + json.dumps({
+        'request_id': 'rerank-fast',
+        'voice_fast_model': 'amazon.nova-lite-v1:0',
+        'text': json.dumps({'mode': 'voice', 'question': 'Ai phụ trách demo?', 'sources': many_sources}, ensure_ascii=False),
+    })
+    engine._run_meeting_knowledge(stream, 'out', {'entrypoint': {'inline': inline}})
+    assert any(sys_p == RERANK_SYSTEM and m == 'amazon.nova-lite-v1:0' for sys_p, m in called_models)
+    assert any(sys_p == VERIFY_SYSTEM and m is None for sys_p, m in called_models)
+    assert any(sys_p not in (RERANK_SYSTEM, VERIFY_SYSTEM) and m is None for sys_p, m in called_models)
+

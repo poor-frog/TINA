@@ -19,8 +19,9 @@ from fastapi import HTTPException
 from shared.voice_trace import log as voice_trace_log
 
 log = logging.getLogger(__name__)
-_DEFAULT_SLOTS = 4
+_DEFAULT_SLOTS = 8
 _SLOT_WAIT_SECONDS = 2.0
+_FAST_AUX_VOICE_MODES = frozenset({"voice_source_intent", "voice_intent", "voice_plan"})
 _ORIG_SUBPROCESS_RUN = subprocess.run
 _WARM_WORKER_IDLE_TTL = 180.0
 _WARM_RESPONSE_MAX_BYTES = 1_048_576
@@ -397,6 +398,21 @@ def can_fallback_to_bedrock(model_env: dict[str, str] | None) -> bool:
     return bool(selected_model and default_model and selected_model != default_model)
 
 
+def is_heavy_builtin_bedrock(model_env: dict[str, str] | None) -> bool:
+    """True when selecting a non-default built-in Bedrock model (e.g. Claude Sonnet 4.6 over Nova Lite)."""
+    if not model_env:
+        return False
+    if (os.environ.get("TINA_LLM_PROVIDER") or "").strip() != "bedrock-converse":
+        return False
+    if (model_env.get("TINA_LLM_PROVIDER") or "").strip() != "bedrock-converse":
+        return False
+    if (model_env.get("AWS_BEARER_TOKEN_BEDROCK") or "").strip():
+        return False
+    selected_model = (model_env.get("TINA_LLM_MODEL") or "").strip()
+    default_model = (os.environ.get("TINA_LLM_MODEL") or "").strip()
+    return bool(selected_model and default_model and selected_model != default_model)
+
+
 def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,
              model_env: dict[str, str] | None = None) -> str:
     if not payload.get("voice_turn"):
@@ -422,7 +438,13 @@ def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,
     if source.get("mode") == "voice_web" and not chatgpt_plan and os.environ.get("TINA_AGENT_REACH_URL"):
         base_env["TINA_AGENT_REACH_URL"] = os.environ["TINA_AGENT_REACH_URL"]
     env = dict(base_env)
-    fallback_eligible = not chatgpt_plan and can_fallback_to_bedrock(model_env)
+    heavy_bedrock = not chatgpt_plan and is_heavy_builtin_bedrock(model_env)
+    use_fast_aux = heavy_bedrock and source.get("mode") in _FAST_AUX_VOICE_MODES
+    effective_model_env = None if use_fast_aux else model_env
+    fallback_eligible = not chatgpt_plan and can_fallback_to_bedrock(effective_model_env)
+    run_payload = payload
+    if heavy_bedrock and source.get("mode") == "voice" and base_env.get("TINA_LLM_MODEL"):
+        run_payload = {**payload, "voice_fast_model": base_env["TINA_LLM_MODEL"]}
     try:
         if chatgpt_plan:
             from control_plane.aws_voice_chatgpt import access_token
@@ -436,8 +458,8 @@ def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,
             env.update(ACCESS_TOKEN=token, TINA_LLM_PROVIDER="chatgpt-plan", TINA_CHATGPT_VOICE_PILOT="1",
                        TINA_LLM_MODEL=os.environ["TINA_CHATGPT_VOICE_MODEL"])
             env.pop("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", None)
-        elif model_env:
-            for key, value in model_env.items():
+        elif effective_model_env:
+            for key, value in effective_model_env.items():
                 if key in _VOICE_MODEL_ENV_KEYS and value:
                     env[key] = value
             if env.get("TINA_LLM_PROVIDER") != "bedrock-converse":
@@ -447,7 +469,7 @@ def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,
         remaining = deadline - time.time()
         if remaining <= 0:
             raise HTTPException(504, "Voice retrieval timed out")
-        result = _exec_worker(payload, env, timeout=remaining)
+        result = _exec_worker(run_payload, env, timeout=remaining)
         if fallback_eligible and (result.returncode or not result.stdout):
             reason = fallback_reason_from_stderr(result.stderr)
             if reason is not None:
