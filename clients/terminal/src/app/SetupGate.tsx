@@ -183,7 +183,7 @@ function ModelsStep({ onNext }: { onNext: (state: StepState) => void }) {
   const canContinue = (choice === "subscription" && detected) || res?.ok === true
     || (choice === "antigravity" && antigravityAcknowledged && antigravitySaved);
   const selectedProvider = providers.find((provider) => provider.value === choice)!;
-  const selectedApiProvider = apiModelProvider(choice);
+  const selectedApiProvider = choice === "openai-api" ? null : apiModelProvider(choice);
 
   return (
     <>

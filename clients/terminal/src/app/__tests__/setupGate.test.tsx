@@ -132,6 +132,7 @@ describe("SetupGate", () => {
     fireEvent.change(screen.getByPlaceholderText(`${label} API key`), { target: { value: "synthetic-provider-key" } });
     fireEvent.change(screen.getByLabelText(`${label} model`), { target: { value: "explicit-model" } });
     fireEvent.click(screen.getByRole("radio", { name: "OpenAI API key" }));
+    expect(screen.getAllByRole("button", { name: "Save & test" })).toHaveLength(1);
     expect((screen.getByPlaceholderText("OpenAI API key") as HTMLInputElement).value).toBe("");
     expect((screen.getByPlaceholderText("OpenAI API model ID") as HTMLInputElement).value).toBe("");
     fireEvent.click(screen.getByRole("radio", { name: `${label} API key` }));
