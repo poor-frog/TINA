@@ -464,11 +464,17 @@ describe("chatComposerPickers — component integration", () => {
     expect(textarea.value).toBe("");
 
     // 4. Send turn with @page + file, then Retry replays BOTH @file grounding and uploaded file
+    // Verify a pending rAF from atomic Backspace above cannot close the newly opened mention popover.
     fireEvent.change(textarea, { target: { value: "Check @page:arch", selectionStart: 16 } });
-    await screen.findByTestId("lucian-mention-popover");
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+    await waitFor(() => {
+      expect(screen.getByTestId("lucian-mention-popover").className).toContain("is-open");
+    });
     fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(textarea.value).toContain("@Architecture ");
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(fileInput, { target: { files: [new File(["pdf"], "spec.pdf", { type: "application/pdf" })] } });
+    expect(await screen.findByText("spec.pdf")).toBeTruthy();
     fireEvent.submit(textarea.closest("form")!);
 
     await waitFor(() => expect(mockStreamChatTurn).toHaveBeenCalledTimes(1));

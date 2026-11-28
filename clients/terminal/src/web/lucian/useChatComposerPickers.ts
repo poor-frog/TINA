@@ -5,8 +5,10 @@
  *  `/` template insertion, and `@` chip ↔ textarea synchronization. */
 import {
   useCallback,
+  useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type FocusEvent,
@@ -86,15 +88,41 @@ export function useChatComposerPickers({
   const mentionOpen = Boolean(mentionMatch && filteredMentions.length > 0);
   const slashOpen = Boolean(!mentionOpen && slashMatch && filteredSlashCommands.length > 0);
 
+  const caretRafRef = useRef<number | null>(null);
+  const cancelPendingCaret = useCallback(() => {
+    if (caretRafRef.current !== null) {
+      window.cancelAnimationFrame(caretRafRef.current);
+      caretRafRef.current = null;
+    }
+  }, []);
+
+  const scheduleCaret = useCallback(
+    (expectedValue: string, pos: number, focus = false, preventScroll = false) => {
+      cancelPendingCaret();
+      caretRafRef.current = window.requestAnimationFrame(() => {
+        caretRafRef.current = null;
+        const node = textareaRef.current;
+        if (!node || node.value !== expectedValue) return;
+        if (focus) node.focus(preventScroll ? { preventScroll: true } : undefined);
+        node.setSelectionRange(pos, pos);
+      });
+    },
+    [cancelPendingCaret, textareaRef],
+  );
+
+  useEffect(() => cancelPendingCaret, [cancelPendingCaret]);
+
   const closePickers = useCallback(() => {
+    cancelPendingCaret();
     setMentionMatch(null);
     setSlashMatch(null);
     setSlashDismissed(false);
     setMentionDismissedAnchor(-1);
-  }, []);
+  }, [cancelPendingCaret]);
 
   const syncPickers = useCallback(
     (nextValue: string, cursorPos: number) => {
+      cancelPendingCaret();
       const mMatch = detectMentionAtCursor(nextValue, cursorPos);
       if (mMatch) {
         setSlashMatch(null);
@@ -124,7 +152,7 @@ export function useChatComposerPickers({
         });
       }
     },
-    [mentionDismissedAnchor, slashDismissed],
+    [cancelPendingCaret, mentionDismissedAnchor, slashDismissed],
   );
 
   const pickMention = useCallback(
@@ -143,14 +171,9 @@ export function useChatComposerPickers({
       setMentionedTargets((prev) => (prev.some((x) => x.id === target.id) ? prev : [...prev, target]));
       onPickMentionExtra?.(target);
 
-      window.requestAnimationFrame(() => {
-        const node = textareaRef.current;
-        if (!node) return;
-        node.focus();
-        node.setSelectionRange(nextPos, nextPos);
-      });
+      scheduleCaret(nextValue, nextPos, true);
     },
-    [mentionMatch, onPickMentionExtra, setMentionedTargets, setValue, textareaRef, value],
+    [mentionMatch, onPickMentionExtra, scheduleCaret, setMentionedTargets, setValue, textareaRef, value],
   );
 
   const pickSlashCommand = useCallback(
@@ -178,14 +201,9 @@ export function useChatComposerPickers({
       const caretPos = afterToken ? cmd.command.length + 1 : nextValue.length;
       setValue(nextValue);
 
-      window.requestAnimationFrame(() => {
-        const node = textareaRef.current;
-        if (!node) return;
-        node.focus();
-        node.setSelectionRange(caretPos, caretPos);
-      });
+      scheduleCaret(nextValue, caretPos, true);
     },
-    [onInstantSlash, setValue, slashMatch, textareaRef, value],
+    [onInstantSlash, scheduleCaret, setValue, slashMatch, value],
   );
 
   const triggerMention = useCallback(() => {
@@ -217,13 +235,8 @@ export function useChatComposerPickers({
     setMentionActiveIdx(0);
     setMentionMatch({ anchor: nextPos - 1, query: "" });
     el?.focus({ preventScroll: true });
-    window.requestAnimationFrame(() => {
-      const node = textareaRef.current;
-      if (!node) return;
-      node.focus({ preventScroll: true });
-      node.setSelectionRange(nextPos, nextPos);
-    });
-  }, [mentionMatch, mentionOpen, setValue, textareaRef, value]);
+    scheduleCaret(nextValue, nextPos, true, true);
+  }, [mentionMatch, mentionOpen, scheduleCaret, setValue, textareaRef, value]);
 
   const triggerSlash = useCallback(() => {
     const el = textareaRef.current;
@@ -244,12 +257,7 @@ export function useChatComposerPickers({
       setSlashActiveIdx(0);
       setSlashMatch({ anchor: leadingSpaces, query });
       el?.focus({ preventScroll: true });
-      window.requestAnimationFrame(() => {
-        const node = textareaRef.current;
-        if (!node) return;
-        node.focus({ preventScroll: true });
-        node.setSelectionRange(caretPos, caretPos);
-      });
+      scheduleCaret(value, caretPos, true, true);
       return;
     }
     const nextValue = trimmedStart ? `/ ${trimmedStart}` : "/";
@@ -258,13 +266,8 @@ export function useChatComposerPickers({
     setSlashActiveIdx(0);
     setSlashMatch({ anchor: 0, query: "" });
     el?.focus({ preventScroll: true });
-    window.requestAnimationFrame(() => {
-      const node = textareaRef.current;
-      if (!node) return;
-      node.focus({ preventScroll: true });
-      node.setSelectionRange(1, 1);
-    });
-  }, [setValue, slashOpen, textareaRef, value]);
+    scheduleCaret(nextValue, 1, true, true);
+  }, [scheduleCaret, setValue, slashOpen, textareaRef, value]);
 
   const removeMentionChip = useCallback(
     (id: string) => {
@@ -362,12 +365,8 @@ export function useChatComposerPickers({
               setMentionedTargets((prev) => prev.filter((t) => t.label !== strippedLabel));
               for (const item of removed) onRemoveMentionExtra?.(item);
             }
-            window.requestAnimationFrame(() => {
-              const node = textareaRef.current;
-              if (!node) return;
-              node.setSelectionRange(nextPos, nextPos);
-              syncPickers(nextValue, nextPos);
-            });
+            syncPickers(nextValue, nextPos);
+            scheduleCaret(nextValue, nextPos);
             return;
           }
         }
@@ -390,12 +389,12 @@ export function useChatComposerPickers({
       onSubmit,
       pickMention,
       pickSlashCommand,
+      scheduleCaret,
       setMentionedTargets,
       setValue,
       slashActiveIdx,
       slashOpen,
       syncPickers,
-      textareaRef,
       value,
     ],
   );
