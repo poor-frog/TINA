@@ -12,20 +12,33 @@ set -u
 
 export DISPLAY="${DISPLAY:-:99}"
 
-echo "[entrypoint] Starting Xvfb on ${DISPLAY}..."
+echo "[entrypoint] Starting Xvfb on ${DISPLAY} and PulseAudio in parallel..."
 Xvfb "${DISPLAY}" -screen 0 1920x1080x24 >/tmp/xvfb.log 2>&1 &
-# Give Xvfb a moment to create the socket before anything attaches.
-for _ in 1 2 3 4 5 6 7 8 9 10; do
+XVFB_PID=$!
+pulseaudio --start --exit-idle-time=-1 --log-target=syslog 2>/dev/null &
+PA_PID=$!
+
+# Poll X11 socket every 50ms (max 3s) instead of coarse 300ms sleeps.
+i=0
+while [ "$i" -lt 60 ]; do
   [ -e "/tmp/.X11-unix/X${DISPLAY#:}" ] && break
-  sleep 0.3
+  kill -0 "${XVFB_PID}" 2>/dev/null || break
+  sleep 0.05
+  i=$((i + 1))
 done
 
 echo "[entrypoint] Starting fluxbox..."
 fluxbox >/tmp/fluxbox.log 2>&1 &
 
-echo "[entrypoint] Starting PulseAudio (no idle exit)..."
-pulseaudio --start --exit-idle-time=-1 --log-target=syslog 2>/dev/null || true
-sleep 1
+# Wait for pulseaudio --start to finish and daemon socket to accept pactl (max 2s)
+# instead of an unconditional 1s sleep.
+wait "${PA_PID}" 2>/dev/null || true
+i=0
+while [ "$i" -lt 40 ]; do
+  pactl info >/dev/null 2>&1 && break
+  sleep 0.05
+  i=$((i + 1))
+done
 # Voice/capture audio graph (best-effort; only the speak path strictly needs it).
 pactl load-module module-null-sink sink_name=meeting_rx \
   sink_properties=device.description="MeetingAudioReceive" 2>/dev/null || true

@@ -16,7 +16,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, watch } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { syncBrowserDataToS3, syncBrowserDataFromS3, syncBrowserDataFromS3Async, SessionSyncError, type S3Config } from './session-store';
+import { syncBrowserDataToS3, syncBrowserDataToS3Async, syncBrowserDataFromS3, syncBrowserDataFromS3Async, SessionSyncError, type S3Config } from './session-store';
 
 const fails: string[] = [];
 const check = (cond: boolean, msg: string) => { if (!cond) fails.push(msg); };
@@ -163,6 +163,97 @@ async function verifyAsyncRestoreAbort(): Promise<void> {
   watcher.close();
 }
 
+// ── 5. Native SigV4 S3 sync (TINA_S3_NATIVE=1): parallel restore, exclude filter, ECS creds, write-back ──
+async function verifyNativeS3Sync(): Promise<void> {
+  const prevNative = process.env.TINA_S3_NATIVE;
+  const prevRelUri = process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI;
+  const prevAwsKey = process.env.AWS_ACCESS_KEY_ID;
+  const prevAwsSecret = process.env.AWS_SECRET_ACCESS_KEY;
+  process.env.TINA_S3_NATIVE = '1';
+  process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI = '/v2/credentials/test-role';
+  delete process.env.AWS_ACCESS_KEY_ID;
+  delete process.env.AWS_SECRET_ACCESS_KEY;
+
+  const nativeDir = mkdtempSync(join(tmpdir(), 'native-s3-restore-'));
+  const seenUrls: string[] = [];
+  const uploadedKeys: string[] = [];
+
+  const mockFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    seenUrls.push(`${init?.method ?? 'GET'} ${url}`);
+    if (url === 'http://169.254.170.2/v2/credentials/test-role') {
+      return new Response(JSON.stringify({
+        AccessKeyId: 'ASIA-TEST-KEY',
+        SecretAccessKey: 'test-secret-value',
+        Token: 'test-session-token',
+      }), { status: 200 });
+    }
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    const auth = headers.Authorization ?? '';
+    if (!auth.startsWith('AWS4-HMAC-SHA256 Credential=ASIA-TEST-KEY/') || headers['x-amz-security-token'] !== 'test-session-token') {
+      return new Response('Forbidden', { status: 403 });
+    }
+    if ((init?.method ?? 'GET') === 'PUT') {
+      uploadedKeys.push(new URL(url).pathname);
+      return new Response('', { status: 200 });
+    }
+    if (url.includes('list-type=2')) {
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+        <ListBucketResult>
+          <IsTruncated>false</IsTruncated>
+          <Contents><Key>userdata/staging-bot-1/browser-data/Default/Cookies</Key></Contents>
+          <Contents><Key>userdata/staging-bot-1/browser-data/Default/Login Data For Account</Key></Contents>
+          <Contents><Key>userdata/staging-bot-1/browser-data/Default/Cache/junk.bin</Key></Contents>
+          <Contents><Key>userdata/staging-bot-1/browser-data/SingletonLock</Key></Contents>
+        </ListBucketResult>`;
+      return new Response(xml, { status: 200, headers: { 'Content-Type': 'application/xml' } });
+    }
+    if (url.endsWith('/Default/Cookies')) return new Response('cookie-data', { status: 200 });
+    if (url.endsWith('/Default/Login%20Data%20For%20Account')) return new Response('login-data', { status: 200 });
+    return new Response('NotFound', { status: 404 });
+  }) as unknown as typeof fetch;
+
+  try {
+    const ecsConfig: S3Config = {
+      userdataS3Path: 'userdata/staging-bot-1',
+      s3Endpoint: 'https://s3.us-east-1.amazonaws.com',
+      s3Bucket: 'tina-staging',
+    };
+    await syncBrowserDataFromS3Async(ecsConfig, nativeDir, { fetchImpl: mockFetch, timeoutMs: 5000 });
+    check(readFileSync(join(nativeDir, 'Default', 'Cookies'), 'utf8') === 'cookie-data',
+      'native S3 restore downloads Default/Cookies using ECS task role creds');
+    check(readFileSync(join(nativeDir, 'Default', 'Login Data For Account'), 'utf8') === 'login-data',
+      'native S3 restore properly URI-encodes keys with spaces');
+    check(!existsSync(join(nativeDir, 'Default', 'Cache', 'junk.bin')) && !existsSync(join(nativeDir, 'SingletonLock')),
+      'native S3 restore excludes Cache/* and SingletonLock');
+
+    const count = await syncBrowserDataToS3Async(ecsConfig, nativeDir, { fetchImpl: mockFetch });
+    check(count === 2, `native S3 save should upload 2 auth-essential files, got ${count}`);
+    check(uploadedKeys.some((k) => k.endsWith('/Default/Login%20Data%20For%20Account')),
+      `native S3 save must upload encoded space keys (got ${uploadedKeys.join(', ')})`);
+
+    // HTTP failure surfaces as typed SessionSyncError
+    const failingFetch = (async (input: string | URL | Request) => {
+      if (String(input).startsWith('http://169.254.170.2/')) {
+        return new Response(JSON.stringify({ AccessKeyId: 'A', SecretAccessKey: 'B' }), { status: 200 });
+      }
+      return new Response('AccessDenied', { status: 403 });
+    }) as unknown as typeof fetch;
+    let err: unknown;
+    try {
+      await syncBrowserDataFromS3Async(ecsConfig, nativeDir, { fetchImpl: failingFetch, timeoutMs: 5000 });
+    } catch (e) { err = e; }
+    check(err instanceof SessionSyncError && err.step === 'session-restore',
+      'native S3 restore HTTP 403 must throw typed SessionSyncError(session-restore)');
+  } finally {
+    rmSync(nativeDir, { recursive: true, force: true });
+    if (prevNative === undefined) delete process.env.TINA_S3_NATIVE; else process.env.TINA_S3_NATIVE = prevNative;
+    if (prevRelUri === undefined) delete process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI; else process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI = prevRelUri;
+    if (prevAwsKey !== undefined) process.env.AWS_ACCESS_KEY_ID = prevAwsKey;
+    if (prevAwsSecret !== undefined) process.env.AWS_SECRET_ACCESS_KEY = prevAwsSecret;
+  }
+}
+
 // ── verdict ─────────────────────────────────────────────────────────────────
 const finish = (): void => {
   process.env.PATH = realPath;
@@ -173,10 +264,10 @@ const finish = (): void => {
     for (const f of fails) console.error(`  ✗ ${f}`);
     process.exit(1);
   }
-  console.log('session-store.test OK — write-back dataDir honored; restore fail-loud + typed; async restore is interruptible.');
+  console.log('session-store.test OK — write-back dataDir honored; restore fail-loud + typed; async restore is interruptible; native SigV4 S3 sync verified.');
 };
 
-void verifyAsyncRestoreAbort().then(finish, (error: unknown) => {
-  fails.push(`async restore abort test threw: ${String(error)}`);
+void verifyAsyncRestoreAbort().then(verifyNativeS3Sync).then(finish, (error: unknown) => {
+  fails.push(`async restore test threw: ${String(error)}`);
   finish();
 });

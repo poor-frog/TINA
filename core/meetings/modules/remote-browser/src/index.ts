@@ -22,6 +22,7 @@ export {
   syncBrowserDataFromS3,
   syncBrowserDataFromS3Async,
   syncBrowserDataToS3,
+  syncBrowserDataToS3Async,
   saveSessionLocal,
   loadSessionLocal,
   cleanStaleLocks,

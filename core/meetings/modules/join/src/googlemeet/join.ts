@@ -53,7 +53,19 @@ export function resolveUiInteractionMode(botConfig: BotConfig): "humanized" | "s
 }
 
 /** Poll cadence for the ordered selector resolvers. */
-const SELECTOR_POLL_MS = 300;
+const SELECTOR_POLL_MS = 150;
+
+/** Routine happy-path full-page screenshots cost ~250-400ms each on Fargate ephemeral disk.
+ *  Keep them opt-in via BOT_DEBUG_SCREENSHOTS=1; failure/refusal screenshots remain always-on. */
+function isDebugScreenshotsEnabled(): boolean {
+  return process.env.BOT_DEBUG_SCREENSHOTS === "1";
+}
+
+async function takeDebugScreenshot(page: Page, path: string, label: string): Promise<void> {
+  if (!isDebugScreenshotsEnabled()) return;
+  await page.screenshot({ path, fullPage: true });
+  log(`📸 Screenshot taken: ${label}`);
+}
 /** The structural CTA scan runs every Nth poll — it is a full-document walk. */
 const CTA_SCAN_EVERY_POLLS = 5;
 /** The scan only starts once the lobby SPA has had time to finish rendering:
@@ -360,17 +372,17 @@ export async function joinGoogleMeeting(
   await page.goto(navUrl, { waitUntil: "domcontentloaded" });
   await page.bringToFront();
 
-  // Take screenshot after navigation
-  await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-0-after-navigation.png', fullPage: true });
-  log("📸 Screenshot taken: After navigation to meeting URL");
+  // Routine checkpoint screenshot (opt-in via BOT_DEBUG_SCREENSHOTS=1)
+  await takeDebugScreenshot(
+    page,
+    '/app/storage/screenshots/bot-checkpoint-0-after-navigation.png',
+    'After navigation to meeting URL',
+  );
 
   // --- Call joining callback to notify meeting-api that bot is joining ---
   // Fix 2: Propagate JOINING callback failure — bot must NOT proceed if server rejected
   await callJoiningCallback(botConfig);
   log("Joining callback sent successfully");
-
-  // Brief wait for page elements to settle (networkidle already ensures page loaded)
-  await page.waitForTimeout(1000);
 
   // Record the resolved UI locale on the SUCCESS path too (#856): the locale used
   // to be invisible until a failure. observedPageContext reads navigator.language
@@ -432,36 +444,9 @@ export async function joinGoogleMeeting(
     // Authenticated flow: browser is logged into Google, skip name input
     log("Authenticated mode: skipping name input (using Google account identity)");
 
-    // Wait for the lobby to fully load (SPA needs time after domcontentloaded)
-    log("Waiting for lobby to load...");
-    await page.waitForTimeout(5000);
-
-    // Diagnostic screenshot to see what the lobby shows
-    await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-auth-lobby.png', fullPage: true });
-    log("📸 Diagnostic screenshot: auth lobby state");
-
-    // Mute mic and camera if visible
-    try {
-      const micHandle = await page.waitForSelector(googleMicrophoneButtonSelectors[0], { timeout: 3000 });
-      if (micHandle) { await clickHandle(micHandle, "microphone", 1500); log("Microphone muted."); }
-    } catch (e) {
-      log("Microphone already muted or not found.");
-    }
-
-    try {
-      const cameraHandle = await page.waitForSelector(googleCameraButtonSelectors[0], { timeout: 3000 });
-      if (cameraHandle) { await clickHandle(cameraHandle, "camera", 1500); log("Camera turned off."); }
-    } catch (e) {
-      log("Camera already off or not found.");
-    }
-
-    // Authenticated lobby: one primary CTA — "Join now" (standard join),
-    // "Switch here" (same account already in the call) or "Ask to join"
-    // (host approval required) — or any localized equivalent. The CTA is
-    // located by the ordered selector list (googleAuthJoinCtaSelectors, exact
-    // text first now the UI locale is pinned — #856). The structural scan runs
-    // diagnostic-only and never clicks; waitForLobbyCta fails LOUD (screenshot +
-    // selector list + observed locale) if no CTA appears.
+    // Wait directly for the lobby primary CTA to mount instead of a hardcoded 5s sleep.
+    // Once the CTA is visible, the Meet lobby SPA (including mic/cam toggles and any
+    // signed-out name field) is already rendered.
     const { handle: ctaHandle, selector: ctaSelector } = await waitForLobbyCta(
       page,
       googleAuthJoinCtaSelectors,
@@ -469,11 +454,15 @@ export async function joinGoogleMeeting(
       "authenticated join CTA"
     );
 
+    await takeDebugScreenshot(
+      page,
+      '/app/storage/screenshots/bot-checkpoint-auth-lobby.png',
+      'auth lobby state',
+    );
+
     // Signed-out guard: a guest lobby (name input rendered) means the persisted
-    // browser profile is signed out — fail closed with a typed error instead of
-    // silently joining as an anonymous guest. The probe is structural, so the
-    // guard holds on non-English lobbies too. A signed-in account that is
-    // merely not pre-admitted shows no name input and proceeds to knock.
+    // browser profile is signed out — fail closed with a typed error before touching
+    // any lobby controls instead of silently joining as an anonymous guest.
     if (await isGoogleSignedOutLobby(page)) {
       await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-auth-signed-out.png', fullPage: true });
       log("📸 Screenshot: authenticated mode but browser profile is signed out (guest lobby).");
@@ -482,11 +471,34 @@ export async function joinGoogleMeeting(
       );
     }
 
-    await clickHandle(ctaHandle, "authenticated_join");
-    log(`Bot clicked the authenticated join CTA (via ${ctaSelector}).`);
+    // Mute mic and camera if visible (lobby SPA is already mounted, so 1.5s cap is ample)
+    try {
+      const micHandle = await page.waitForSelector(googleMicrophoneButtonSelectors[0], { timeout: 1500 });
+      if (micHandle) { await clickHandle(micHandle, "microphone", 1500); log("Microphone muted."); }
+    } catch (e) {
+      log("Microphone already muted or not found.");
+    }
 
-    await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-0-after-join-now.png', fullPage: true });
-    log("📸 Screenshot taken: After join click (authenticated)");
+    try {
+      const cameraHandle = await page.waitForSelector(googleCameraButtonSelectors[0], { timeout: 1500 });
+      if (cameraHandle) { await clickHandle(cameraHandle, "camera", 1500); log("Camera turned off."); }
+    } catch (e) {
+      log("Camera already off or not found.");
+    }
+
+    // Re-check CTA handle in case Meet re-rendered the button after mic/camera toggles
+    const activeCta = (await ctaHandle.isVisible().catch(() => false))
+      ? { handle: ctaHandle, selector: ctaSelector }
+      : await waitForLobbyCta(page, googleAuthJoinCtaSelectors, 5000, "authenticated join CTA");
+
+    await clickHandle(activeCta.handle, "authenticated_join");
+    log(`Bot clicked the authenticated join CTA (via ${activeCta.selector}).`);
+
+    await takeDebugScreenshot(
+      page,
+      '/app/storage/screenshots/bot-checkpoint-0-after-join-now.png',
+      'After join click (authenticated)',
+    );
   } else {
     // Anonymous flow: enter bot name and ask to join
     log("Attempting to find name input field...");
@@ -498,7 +510,11 @@ export async function joinGoogleMeeting(
     );
     log("Name input field found.");
 
-    await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-0-name-field-found.png', fullPage: true });
+    await takeDebugScreenshot(
+      page,
+      '/app/storage/screenshots/bot-checkpoint-0-name-field-found.png',
+      'Name input field found',
+    );
 
     await fillField(nameHandle!, nameFieldSelector, botName, "name");
 
@@ -526,7 +542,10 @@ export async function joinGoogleMeeting(
     await clickHandle(joinHandle!, "ask_to_join");
     log("Bot clicked Ask to join. Waiting for Google Meet to confirm the request.");
 
-    await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-0-after-ask-to-join.png', fullPage: true });
-    log("📸 Screenshot taken: After clicking 'Ask to join'");
+    await takeDebugScreenshot(
+      page,
+      '/app/storage/screenshots/bot-checkpoint-0-after-ask-to-join.png',
+      "After clicking 'Ask to join'",
+    );
   }
 }

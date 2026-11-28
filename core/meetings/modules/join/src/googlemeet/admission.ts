@@ -357,10 +357,13 @@ export async function waitForGoogleMeetingAdmission(
 ): Promise<boolean> {
   try {
     log("Waiting for Google Meet meeting admission...");
-    
-    // Take screenshot at start of admission check
-    await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-1-admission-start.png', fullPage: true });
-    log("📸 Screenshot taken: Start of admission check");
+    const debugScreenshots = process.env.BOT_DEBUG_SCREENSHOTS === "1";
+
+    // Take screenshot at start of admission check (opt-in via BOT_DEBUG_SCREENSHOTS=1)
+    if (debugScreenshots) {
+      await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-1-admission-start.png', fullPage: true });
+      log("📸 Screenshot taken: Start of admission check");
+    }
     await throwIfGoogleAdmissionRejected(page, "initial admission check");
     
     // FIRST: Check if bot is already admitted (no waiting room needed)
@@ -374,8 +377,10 @@ export async function waitForGoogleMeetingAdmission(
       log(`Found Google Meet admission indicator: visible meeting controls - Bot is already admitted to the meeting!`);
       
       // Take screenshot when already admitted
-      await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-2-admitted.png', fullPage: true });
-      log("📸 Screenshot taken: Bot confirmed already admitted to meeting");
+      if (debugScreenshots) {
+        await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-2-admitted.png', fullPage: true });
+        log("📸 Screenshot taken: Bot confirmed already admitted to meeting");
+      }
       
       // --- Call awaiting admission callback even for immediate admission ---
       try {
@@ -411,8 +416,10 @@ export async function waitForGoogleMeetingAdmission(
       log(`Found Google Meet waiting room indicator - Bot is still in waiting room`);
       
       // Take screenshot when waiting room indicator found
-      await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-4-waiting-room.png', fullPage: true });
-      log("📸 Screenshot taken: Bot confirmed in waiting room");
+      if (debugScreenshots) {
+        await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-4-waiting-room.png', fullPage: true });
+        log("📸 Screenshot taken: Bot confirmed in waiting room");
+      }
       
       // --- Call awaiting admission callback to notify meeting-api that bot is waiting ---
       try {
@@ -429,8 +436,9 @@ export async function waitForGoogleMeetingAdmission(
     if (stillInWaitingRoom) {
       log(`Bot is in Google Meet waiting room. Waiting for ${timeout}ms for admission...`);
 
-      const checkInterval = 2000; // Check every 2 seconds for faster detection
+      const checkInterval = 500; // Check every 500ms for snappy admission detection
       const startTime = Date.now();
+      let lastLogAt = startTime;
       let unknownStateDuration = 0;
       const effectiveTimeout = () => timeout + getEscalationExtensionMs();
 
@@ -468,7 +476,11 @@ export async function waitForGoogleMeetingAdmission(
 
         // Wait before next check
         await page.waitForTimeout(checkInterval);
-        log(`Still in Google Meet waiting room... ${Math.round((Date.now() - startTime) / 1000)}s elapsed`);
+        const now = Date.now();
+        if (now - lastLogAt >= 2000) {
+          lastLogAt = now;
+          log(`Still in Google Meet waiting room... ${Math.round((now - startTime) / 1000)}s elapsed`);
+        }
       }
       
       // After waiting, check if we're still in waiting room using visibility
@@ -480,8 +492,9 @@ export async function waitForGoogleMeetingAdmission(
     } else {
       // Not in waiting room and not admitted yet: actively poll during the timeout
       log(`No waiting room detected. Polling for admission for up to ${timeout}ms...`);
-      const checkInterval = 2000;
+      const checkInterval = 500;
       const startTime = Date.now();
+      let lastPollLogAt = startTime;
       let unknownStateDuration2 = 0;
       let joinCtaSince: number | undefined;
       const effectiveTimeout2 = () => timeout + getEscalationExtensionMs();
@@ -544,12 +557,16 @@ export async function waitForGoogleMeetingAdmission(
         }
 
         await page.waitForTimeout(checkInterval);
-        log(`Polling for Google Meet admission... ${Math.round((Date.now() - startTime) / 1000)}s elapsed`);
+        const now2 = Date.now();
+        if (now2 - lastPollLogAt >= 2000) {
+          lastPollLogAt = now2;
+          log(`Polling for Google Meet admission... ${Math.round((now2 - startTime) / 1000)}s elapsed`);
+        }
       }
 
       if (stillInWaitingRoom) {
         // Re-run the waiting room loop with the remaining time
-        const checkInterval = 2000;
+        const checkInterval = 500;
         const startTime2 = Date.now();
         while (Date.now() - startTime2 < timeout) {
           await throwIfGoogleAdmissionRejected(page, "late waiting-room polling");
@@ -569,8 +586,10 @@ export async function waitForGoogleMeetingAdmission(
     const finalAdmissionFound = await checkForGoogleAdmissionIndicators(page);
     const finalLobbyVisible = await checkForWaitingRoomIndicators(page);
     if (finalAdmissionFound && !finalLobbyVisible) {
-      await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-2-admitted.png', fullPage: true });
-      log("📸 Screenshot taken: Bot confirmed admitted to meeting");
+      if (debugScreenshots) {
+        await page.screenshot({ path: '/app/storage/screenshots/bot-checkpoint-2-admitted.png', fullPage: true });
+        log("📸 Screenshot taken: Bot confirmed admitted to meeting");
+      }
       log("Successfully admitted to the Google Meet meeting");
       return true;
     }

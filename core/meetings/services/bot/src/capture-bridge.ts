@@ -27,7 +27,7 @@
 import {
   launchPersistentBrowser,
   syncBrowserDataFromS3Async,
-  syncBrowserDataToS3,
+  syncBrowserDataToS3Async,
   cleanStaleLocks,
   getAuthenticatedBrowserArgs,
   makeEphemeralProfileDir,
@@ -750,7 +750,7 @@ export async function launchBrowser(
           console.log('[bot] skipping session write-back (meeting did not complete signed-in)');
         } else {
           try {
-            syncBrowserDataToS3(s3Config, dataDir);
+            await syncBrowserDataToS3Async(s3Config, dataDir);
           } catch (e) {
             console.error(`[bot] session write-back failed (durable copy stays at last restore): ${String(e)}`);
           }

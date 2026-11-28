@@ -146,13 +146,16 @@ jobs:
                   "context": ".",
                   "dockerfile": "deploy/aws/bot-patch.Dockerfile",
                   "build_args": "BOT_BASE=${ECR_REGISTRY}/tina-foundation/bot@sha256:27f527453c8ec2aa10bcb08ad1804f499da6a00f5f6346d9b0726828e8f6a700\nTINA_IMAGE_VERSION=${TAG}",
+                  "soci": True,
                   "paths": (
                       "core/meetings/services/bot/",
                       "core/meetings/modules/gmeet-capture/",
                       "core/meetings/modules/record-chunker/",
+                      "core/meetings/modules/join/",
+                      "core/meetings/modules/remote-browser/",
                       "deploy/aws/bot-patch.Dockerfile",
                   ),
-                  "smoke_cmd": "node -e \"Promise.resolve().then(async()=>{const m=await import('/app/core/meetings/services/bot/dist/meeting-voice.js');if(typeof m.MeetingVoice!=='function')process.exit(1);const fs=await import('node:fs');const s=fs.readFileSync('/app/browser-utils.global.js','utf8');if(!s.includes('resolvedSpeaker')||!s.includes('dynamically attached late stream'))process.exit(2)}).catch(e=>{console.error(e);process.exit(1)})\"",
+                  "smoke_cmd": "set -eu; test \"$TINA_S3_NATIVE\" = 1; command -v Xvfb fluxbox pulseaudio pactl xdotool xclip node >/dev/null; cd /app/core/meetings/modules/remote-browser && node -e \"const {chromium}=require('playwright'); const fs=require('fs'); const rb=require('./dist/index.js'); if(!fs.existsSync(chromium.executablePath())) process.exit(1); if(typeof rb.syncBrowserDataToS3Async!=='function') process.exit(2);\"; node -e \"Promise.resolve().then(async()=>{const m=await import('/app/core/meetings/services/bot/dist/meeting-voice.js');if(typeof m.MeetingVoice!=='function')process.exit(1);const fs=await import('node:fs');const s=fs.readFileSync('/app/browser-utils.global.js','utf8');if(!s.includes('resolvedSpeaker')||!s.includes('dynamically attached late stream'))process.exit(2)}).catch(e=>{console.error(e);process.exit(1)})\"; /opt/tina-voice/bin/python -c 'from pathlib import Path; from tina_meeting_voice.assets import verify_vad; from tina_meeting_voice.kws_shadow import verify; root = Path(\"/models/meeting-voice\"); verify_vad(root); verify(root / \"livekit-tina-v1\")'",
               },
               "livekit-agent": {
                   "name": "livekit-agent",
@@ -225,6 +228,7 @@ jobs:
           DOCKERFILE: ${{ runner.temp }}/tina-source/${{ matrix.dockerfile }}
           BUILD_ARGS: ${{ matrix.build_args }}
           SMOKE_CMD: ${{ matrix.smoke_cmd }}
+          ENABLE_SOCI: ${{ matrix.soci && 'true' || 'false' }}
           REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -246,11 +250,40 @@ jobs:
             docker run --rm --network none --entrypoint sh "$IMAGE" -c "$SMOKE_CMD"
           fi
 
-          docker push "$IMAGE"
-          DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE")"
+          if [[ "$ENABLE_SOCI" == "true" ]]; then
+            echo "Building SOCI v2 index (standalone ARM64) for ${IMAGE}..."
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends skopeo >/dev/null
+            SOCI_VER="0.16.1"
+            SOCI_TAR="soci-snapshotter-${SOCI_VER}-linux-arm64-static.tar.gz"
+            curl -fsSL "https://github.com/awslabs/soci-snapshotter/releases/download/v${SOCI_VER}/${SOCI_TAR}" -o "/tmp/${SOCI_TAR}"
+            curl -fsSL "https://github.com/awslabs/soci-snapshotter/releases/download/v${SOCI_VER}/${SOCI_TAR}.sha256sum" -o "/tmp/${SOCI_TAR}.sha256sum"
+            (cd /tmp && sha256sum -c "${SOCI_TAR}.sha256sum")
+            sudo tar -C /usr/local/bin -xzf "/tmp/${SOCI_TAR}" soci
+            rm -f "/tmp/${SOCI_TAR}" "/tmp/${SOCI_TAR}.sha256sum"
+            soci --version
+
+            skopeo copy "docker-daemon:${IMAGE}" "oci-archive:${RUNNER_TEMP}/source.tar"
+            soci convert --standalone --min-layer-size 5242880 "${RUNNER_TEMP}/source.tar" "${RUNNER_TEMP}/soci.tar"
+            aws ecr get-login-password | skopeo login --username AWS --password-stdin "${ECR_REGISTRY}"
+            skopeo copy --all "oci-archive:${RUNNER_TEMP}/soci.tar" "docker://${IMAGE}"
+            rm -f "${RUNNER_TEMP}/source.tar" "${RUNNER_TEMP}/soci.tar"
+
+            DIGEST_SHA="$(aws ecr describe-images --repository-name "${REPO}" --image-ids "imageTag=${TAG}" --query 'imageDetails[0].imageDigest' --output text)"
+            DIGEST="${ECR_REGISTRY}/${REPO}@${DIGEST_SHA}"
+            MEDIA_TYPE="$(aws ecr describe-images --repository-name "${REPO}" --image-ids "imageTag=${TAG}" --query 'imageDetails[0].imageManifestMediaType' --output text)"
+            IMAGE_BYTES="$(aws ecr describe-images --repository-name "${REPO}" --image-ids "imageTag=${TAG}" --query 'imageDetails[0].imageSizeInBytes' --output text)"
+            echo "Published SOCI v2 image: digest=${DIGEST} mediaType=${MEDIA_TYPE} bytes=${IMAGE_BYTES}"
+          else
+            docker push "$IMAGE"
+            DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE")"
+          fi
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
           {
             echo "### Published \`${REPO}\`"
             echo "- Tag: \`${IMAGE}\`"
             echo "- Digest: \`${DIGEST}\`"
+            if [[ "$ENABLE_SOCI" == "true" ]]; then
+              echo "- SOCI v2: enabled"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
