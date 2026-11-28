@@ -28,6 +28,15 @@ export type ChatStreamEvent = {
   ok?: boolean;
   reply?: string;
   message?: string;
+  meeting_id?: string;
+  title?: string;
+  source?: string;
+};
+
+export type MeetingGrounding = {
+  meetingId: string;
+  title: string;
+  source: "processed" | "transcript" | "saved" | "empty" | "prep";
 };
 
 /** The live phase of a turn, surfaced so the pane is VERBOSE about what's happening instead of going
@@ -42,6 +51,8 @@ export type ChatStreamCallbacks = {
   onDelta: (text: string) => void;
   /** Authoritative final text, including resolved citation links. */
   onReply?: (text: string) => void;
+  /** Evidence the server selected for this turn, after checking access. */
+  onMeetingGrounding?: (grounding: MeetingGrounding) => void;
   /** a tool-call step to show as an operation */
   onTool: (tool: string) => void;
   /** the turn committed to the workspace (terminal) */
@@ -246,6 +257,13 @@ export async function streamChatTurn(
         let ev: ChatStreamEvent;
         try { ev = JSON.parse(line.slice(6)); } catch { continue; }
         switch (ev.type) {
+          case "meeting-grounding":
+            if (typeof ev.meeting_id === "string" && typeof ev.title === "string" &&
+                (ev.source === "processed" || ev.source === "transcript" || ev.source === "saved" ||
+                 ev.source === "empty" || ev.source === "prep")) {
+              cb.onMeetingGrounding?.({ meetingId: ev.meeting_id, title: ev.title, source: ev.source });
+            }
+            break;
           // The worker's liveness ack — emitted the moment a turn is picked up (warm or cold), long
           // before the first model token. Flips the heartbeat "Starting agent" → "Working"
           // honestly: the agent IS working, it just hasn't produced output yet.

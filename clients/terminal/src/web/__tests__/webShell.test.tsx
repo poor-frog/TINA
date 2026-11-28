@@ -1439,6 +1439,7 @@ describe("WebShell production UI (Option A & Option B)", () => {
 
     // Custom meeting scope popover grounds conversation and shows removable topbar chip
     fireEvent.click(screen.getByRole("button", { name: "Ground on meeting" }));
+    expect(screen.getByRole("option", { name: /Design Review/i }).querySelector("small")?.textContent).toBeTruthy();
     fireEvent.click(screen.getByRole("option", { name: /Product Weekly Sync/i }));
     expect(screen.getByRole("button", { name: "Clear meeting focus" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Clear meeting focus" }));
@@ -1550,6 +1551,9 @@ describe("WebShell production UI (Option A & Option B)", () => {
     const thinking = await screen.findByTestId("lucian-thinking-text");
     expect(thinking).toBeTruthy();
     expect(thinking.textContent).toContain("Reading your workspace…");
+    expect(screen.queryByText(/Grounded on meeting:/)).toBeNull();
+    capturedChatCallbacks?.onMeetingGrounding?.({ meetingId: "101", title: "Product Weekly Sync", source: "saved" });
+    expect(await screen.findByText("Grounded on meeting: Product Weekly Sync")).toBeTruthy();
     // Expand thinking disclosure panel
     const thinkBtn = thinking.querySelector("button")!;
     fireEvent.click(thinkBtn);

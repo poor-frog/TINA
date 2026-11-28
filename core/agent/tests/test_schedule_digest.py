@@ -147,5 +147,6 @@ def test_find_row_by_id_then_native_prefers_active():
     ]
     assert sd.find_row(rows, meeting_id=10)["id"] == 10
     assert sd.find_row(rows, meeting_id="11")["id"] == 11
+    assert sd.find_row(rows, meeting_id=999, native_id="abc-defg-hij") is None
     assert sd.find_row(rows, native_id="abc-defg-hij")["id"] == 11  # non-terminal wins
     assert sd.find_row(rows, meeting_id=None, native_id="zzz") is None

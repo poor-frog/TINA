@@ -254,8 +254,7 @@ def build_schedule_digest(rows: "list[dict]", *, tz: "str | None" = None,
 
 def find_row(rows: "list[dict]", *, meeting_id=None, platform: "str | None" = None,
              native_id: "str | None" = None) -> "Optional[dict]":
-    """Locate the focused meeting's SERVER row (for the focus-enrichment fix): by row id first,
-    else by (platform, native) among non-terminal rows — mirrors the meetings-domain identity."""
+    """Find the exact row, or resolve a native link for legacy clients without a row ID."""
     if meeting_id is not None:
         try:
             mid = int(meeting_id)
@@ -265,6 +264,7 @@ def find_row(rows: "list[dict]", *, meeting_id=None, platform: "str | None" = No
             for r in rows:
                 if r.get("id") == mid:
                     return r
+        return None
     if native_id:
         candidates = [r for r in rows
                       if str(r.get("native_meeting_id") or "") == str(native_id)

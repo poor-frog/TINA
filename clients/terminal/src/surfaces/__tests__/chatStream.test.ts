@@ -60,6 +60,23 @@ function recorder() {
 const noWait = { now: () => 0, sleep: async () => {}, reconnectBackoffMs: 0 };
 
 describe("streamChatTurn — cold start & resume", () => {
+  it("reports confirmed meeting evidence before delivering the answer", async () => {
+    const onMeetingGrounding = vi.fn();
+    const { cb, state } = recorder();
+    const fetchImpl = vi.fn().mockResolvedValue(sseResponse([
+      ev({ type: "meeting-grounding", meeting_id: "72", title: "Earlier run", source: "saved" }),
+      ev({ type: "message-delta", text: "Approved Friday" }, "1-0"),
+      ev({ type: "turn-complete" }, "2-0"),
+    ]));
+    await streamChatTurn({ prompt: "When?", session: "meeting", active: undefined },
+      { ...cb, onMeetingGrounding },
+      { fetchImpl: fetchImpl as unknown as typeof fetch, signal: new AbortController().signal, ...noWait });
+    expect(onMeetingGrounding).toHaveBeenCalledExactlyOnceWith({
+      meetingId: "72", title: "Earlier run", source: "saved",
+    });
+    expect(state.text).toBe("Approved Friday");
+  });
+
   it("replaces streamed citation markers with the final sourced reply after reconnect", async () => {
     const finalReply = 'Verified. [Python docs](https://docs.python.org/3/library/pathlib.html)';
     const fetchImpl = vi.fn()

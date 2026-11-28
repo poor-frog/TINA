@@ -1927,11 +1927,15 @@ def test_chat_accepts_context_bundle_and_folds_digest_into_prompt():
     assert start.endswith("what's my next meeting?")
 
 
-def test_chat_doc_surface_stays_lean_and_legacy_active_still_grounds():
+def test_chat_doc_surface_stays_lean_and_legacy_active_still_grounds(monkeypatch):
     runtime = _FakeRuntime()
+    row = {"id": 51, "status": "scheduled", "platform": "google_meet",
+           "native_meeting_id": "abc", "data": {"title": "Legacy"}, "segments": []}
+    monkeypatch.setattr("control_plane.meeting_knowledge.meeting_get",
+                        lambda base, subject, mid, suffix, **kwargs: row if mid == 51 else None)
     c = TestClient(create_app(
         Dispatcher(load_settings(), runtime, _FakeIdentity()), stream_reader=_FakeReader(),
-        schedule_source=lambda subject: [],
+        schedule_source=lambda subject: [row],
     ))
     # doc surface → no digest
     r = c.post("/api/chat", headers={"X-User-Id": "u_jane"}, json={
@@ -1940,7 +1944,7 @@ def test_chat_doc_surface_stays_lean_and_legacy_active_still_grounds():
     })
     assert r.status_code == 200
     assert "<schedule" not in runtime.spawned[-1][2]["TINA_START"]  # JSON-encoded, substring still valid
-    # legacy body (active only, no context) → prep grounding from client fields, as before
+    # Legacy body resolves an accessible, unambiguous row before grounding.
     r = c.post("/api/chat", headers={"X-User-Id": "u_jane"}, json={
         "prompt": "hi", "session": "s-legacy",
         "active": {"kind": "meeting", "native_id": "abc", "platform": "google_meet",
@@ -1949,6 +1953,7 @@ def test_chat_doc_surface_stays_lean_and_legacy_active_still_grounds():
     assert r.status_code == 200
     start = runtime.spawned[-1][2]["TINA_START"]
     assert "PREPARE" in start and "Legacy" in start and "<schedule" not in start
+    assert '"source": "prep"' in r.text
 
 
 # ── the 'Reconnecting' hang fixes (incident, user 28): attach-gap + no-cursor retry + keepalives ──

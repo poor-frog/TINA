@@ -20,6 +20,8 @@ def _soon(hours=2):
     return (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 from control_plane.api import ChatBody, ChatContextBody, _ambient_gated, _context_grounding
+from fastapi import HTTPException
+import pytest
 
 
 def _body(prompt="hi", active=None, context=None):
@@ -27,11 +29,13 @@ def _body(prompt="hi", active=None, context=None):
                     context=ChatContextBody(**context) if context is not None else None)
 
 
-def _ground(body, *, rows=None, mounts=None):
+def _ground(body, *, rows=None, mounts=None, meeting_document=None, on_meeting_source=None):
     return _context_grounding(
         body, "s1", None,
         schedule_rows=lambda: rows or [],
         workspace_mounts=lambda: mounts or [],
+        meeting_document=meeting_document or (lambda mid: next((r for r in rows or [] if r["id"] == mid), None)),
+        on_meeting_source=on_meeting_source,
     )
 
 
@@ -123,12 +127,46 @@ def test_client_status_loses_to_server_row():
     assert "PREPARE" in prompt
 
 
-def test_meeting_focus_without_rows_falls_back_to_client_fields():
-    focus = {"kind": "meeting", "native_id": "abc-defg-hij", "platform": "google_meet",
-             "status": "scheduled", "title": "Client title"}
+def test_unavailable_exact_row_never_reads_redis_or_substitutes_a_reused_link(monkeypatch):
+    from control_plane import api
+    lookup_ids = []
+    def lookup(mid):
+        lookup_ids.append(mid)
+        raise HTTPException(404, "Meeting unavailable")
+    def unexpected(*args, **kwargs):
+        pytest.fail("Unverified meeting must not reach Redis")
+    monkeypatch.setattr(api, "_fold_meeting_transcript", unexpected)
+    monkeypatch.setattr(api, "_fold_meeting_processed", unexpected)
+    focus = {"kind": "meeting", "meeting_id": "999", "native_id": "abc-defg-hij",
+             "platform": "google_meet", "status": "completed"}
     body = _body(context={"focus": focus})
-    _c, _t, prompt = _ground(body, rows=[])
-    assert "PREPARE" in prompt and "Client title" in prompt
+    with pytest.raises(HTTPException) as exc:
+        _ground(body, rows=[_sched_row()], meeting_document=lookup)
+    assert exc.value.status_code == 404 and lookup_ids == [999]
+
+
+def test_exact_meeting_loads_saved_transcript_when_redis_is_empty():
+    focus = {"kind": "meeting", "meeting_id": "72", "native_id": "abc-defg-hij", "title": "Client title"}
+    notices = []
+    doc = _sched_row(rid=72, status="completed", title="Earlier run")
+    doc["segments"] = [{"speaker": "Minh", "text": "Approved for Friday"}]
+    body = _body(context={"focus": focus})
+    _, _, prompt = _ground(body, rows=[_sched_row()], meeting_document=lambda mid: doc if mid == 72 else None,
+                           on_meeting_source=notices.append)
+    assert "Minh: Approved for Friday" in prompt and "saved transcript" in prompt
+    assert "Client title" not in prompt
+    assert notices == [{"type": "meeting-grounding", "meeting_id": "72", "title": "Earlier run", "source": "saved"}]
+
+    doc["segments"] = []
+    _ground(body, meeting_document=lambda _mid: doc, on_meeting_source=notices.append)
+    assert notices[-1]["source"] == "empty"
+
+
+def test_legacy_room_code_with_multiple_sessions_requires_exact_selection():
+    body = _body(active={"kind": "meeting", "native_id": "abc-defg-hij"})
+    with pytest.raises(HTTPException) as exc:
+        _ground(body, rows=[_sched_row(), _sched_row(rid=52)])
+    assert exc.value.status_code == 404
 
 
 # ── workspace focus ───────────────────────────────────────────────────────────────────
@@ -179,7 +217,7 @@ def test_legacy_active_only_body_unchanged():
     active = {"kind": "meeting", "native_id": "abc", "platform": "google_meet",
               "status": "scheduled", "title": "Legacy"}
     body = _body(active=active)               # no context at all
-    _c, _t, prompt = _ground(body, rows=[])
+    _c, _t, prompt = _ground(body, rows=[_sched_row(title="Legacy", native="abc")])
     assert "PREPARE" in prompt and "Legacy" in prompt
     assert "<schedule" not in prompt          # legacy clients never get the digest
 

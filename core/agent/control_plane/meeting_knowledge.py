@@ -190,10 +190,12 @@ class DecisionFlowQuestion(VoiceQuestion):
     recover_prompt:StrictBool=False
 
 
-def meeting_get(base, subject, meeting_id, suffix):
+def meeting_get(base, subject, meeting_id, suffix, *, workspace_ids=()):
     if not base:
         raise HTTPException(503, 'Meeting service is not configured')
     headers = {'X-User-Id': subject}
+    if workspace_ids:
+        headers['X-User-Workspaces'] = ','.join(workspace_ids)
     if suffix.startswith('/internal/meeting-voice/'):
         secret = os.environ.get('TINA_INTERNAL_API_SECRET', '')
         if not secret: raise HTTPException(503, 'Internal voice credential is missing')

@@ -2690,6 +2690,19 @@
   white-space: nowrap;
 }
 
+.tina-web-ask-scope-option-text > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tina-web-ask-scope-option-text > small {
+  display: block;
+  color: var(--tw-text-2);
+  font-size: 11px;
+  font-weight: 400;
+}
+
 .tina-web-ask-bar-right {
   display: inline-flex;
   align-items: center;

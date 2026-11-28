@@ -40,7 +40,7 @@ import { Markdown } from "../ui-kit/Markdown";
 import { startStreamingDictation, type StreamingDictation } from "../ui-kit/micDictation";
 import { deleteSession, listSessions, sessionHistory, type SessionSummary } from "../surfaces/sessionsApi";
 import { listWorkspaceTree, readActiveSet } from "../surfaces/workspaceApi";
-import { streamChatTurn, type ChatPhase } from "../surfaces/chatStream";
+import { streamChatTurn, type ChatPhase, type MeetingGrounding } from "../surfaces/chatStream";
 import { stripContextBlocks } from "../surfaces/chat";
 import { ApiError, presentError } from "../surfaces/apiClient";
 import type { FocusPayload, MeetingFocus } from "../surfaces/chatContext";
@@ -57,6 +57,15 @@ interface ChatMessage {
   error?: string;
   mentions?: MentionTarget[];
   uploadedFiles?: UploadedWorkspaceFile[];
+  meetingFocus?: MeetingFocus;
+  grounding?: MeetingGrounding;
+}
+
+const scopeDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+function meetingScopeDate(meeting: MeetingMock): string {
+  const time = Date.parse(meeting.start_time ?? meeting.scheduled_at ?? meeting.end_time ?? "");
+  return Number.isFinite(time) ? scopeDate.format(time) : `Session #${meeting.id}`;
 }
 
 export type AskTinaPrompt = {
@@ -539,6 +548,22 @@ export function AskTinaView({
         compiled.displayPrompt ||
         `Attached files: ${uploadedFiles.map((f) => f.name).join(", ")}`;
 
+      const meetingContext: MeetingFocus | undefined = effectiveMeetingId
+        ? {
+            ...(focusOverride?.meeting_id === effectiveMeetingId ? focusOverride : undefined),
+            kind: "meeting",
+            meeting_id: effectiveMeetingId,
+            native_id: meeting?.native_id || effectiveMeetingId,
+            title: meeting?.title_custom || meeting?.title || focusOverride?.title,
+            ...(meeting ? {
+              platform: meeting.platform === "Google Meet" ? "google_meet" : meeting.platform.toLowerCase(),
+              status: meeting.live_status,
+              scheduled_at: meeting.scheduled_at,
+              workspace_id: meeting.workspace_id,
+            } : {}),
+          }
+        : focusOverride;
+      const effectiveFocus: FocusPayload | null = meetingContext ?? mentionCtx.fallbackFocus ?? null;
       const userId = `u-${Date.now()}`;
       const agentId = `a-${Date.now() + 1}`;
       setMessages((prev) => [
@@ -549,6 +574,7 @@ export function AskTinaView({
           text: displayPrompt,
           mentions: opts?.mentions?.length ? opts.mentions : undefined,
           uploadedFiles: uploadedFiles.length ? uploadedFiles : undefined,
+          meetingFocus: meetingContext,
         },
         { id: agentId, role: "agent", text: "", ops: [], approvals: [] },
       ]);
@@ -558,20 +584,6 @@ export function AskTinaView({
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const meetingContext: MeetingFocus | undefined = meeting
-        ? {
-            kind: "meeting",
-            meeting_id: meeting.id,
-            platform: meeting.platform === "Google Meet" ? "google_meet" : meeting.platform.toLowerCase(),
-            native_id: meeting.native_id || meeting.id,
-            status: meeting.live_status,
-            title: meeting.title_custom || meeting.title,
-            ...(meeting.scheduled_at ? { scheduled_at: meeting.scheduled_at } : {}),
-            ...(meeting.workspace_id ? { workspace_id: meeting.workspace_id } : {}),
-            ...(focusOverride ?? {}),
-          }
-        : focusOverride;
-      const effectiveFocus: FocusPayload | null = meetingContext ?? mentionCtx.fallbackFocus ?? null;
       const effectiveIncludeSchedule = includeSchedule || mentionCtx.includeSchedule;
       const isPrep =
         (meeting ? meetingPhase(meeting) === "prep" : false) ||
@@ -612,6 +624,9 @@ export function AskTinaView({
               setMessages((prev) =>
                 prev.map((m) => (m.id === agentId ? { ...m, text: replyText } : m)),
               );
+            },
+            onMeetingGrounding: (grounding) => {
+              setMessages((prev) => prev.map((m) => m.id === agentId ? { ...m, grounding } : m));
             },
             onTool: (tool) => {
               setMessages((prev) =>
@@ -954,7 +969,7 @@ export function AskTinaView({
       for (let i = agentIndex - 1; i >= 0; i--) {
         const userMsg = messages[i];
         if (userMsg?.role === "user") {
-          void sendMessage(userMsg.text, undefined, undefined, {
+          void sendMessage(userMsg.text, userMsg.meetingFocus?.meeting_id, userMsg.meetingFocus, {
             mentions: userMsg.mentions,
             uploadedFiles: userMsg.uploadedFiles,
           });
@@ -1444,6 +1459,15 @@ export function AskTinaView({
                     </div>
 
                     <div className="tina-web-agent-content">
+                      {msg.grounding && (
+                        <div className="tina-web-msg-context-row" aria-label="Meeting evidence">
+                          <span className="tina-web-msg-context-pill">
+                            {msg.grounding.source === "prep" ? "Meeting preparation"
+                              : msg.grounding.source === "empty" ? "No transcript available"
+                              : "Grounded on meeting"}: {msg.grounding.title}
+                          </span>
+                        </div>
+                      )}
                       <div className="tina-web-msg-bubble">
                         {msg.ops && msg.ops.length > 0 && (
                           <AgentActivitySteps
@@ -1467,9 +1491,6 @@ export function AskTinaView({
                                   : "Thinking…"
                             }
                             lines={[
-                              selectedMeeting
-                                ? `Grounded on meeting: ${selectedMeeting.title_custom || selectedMeeting.title}`
-                                : "Searching across meetings & knowledge spaces",
                               phase === "reconnecting"
                                 ? "Restoring stream connection…"
                                 : "Preparing response & verifying context",
@@ -1785,7 +1806,8 @@ export function AskTinaView({
                               >
                                 <WebIcon name="video" size={13} />
                                 <span className="tina-web-ask-scope-option-text">
-                                  {m.title_custom || m.title}
+                                  <span>{m.title_custom || m.title}</span>
+                                  <small>{meetingScopeDate(m)}</small>
                                 </span>
                                 {isSelected && <WebIcon name="check" size={13} />}
                               </button>

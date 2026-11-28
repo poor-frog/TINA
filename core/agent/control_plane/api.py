@@ -695,7 +695,9 @@ def _fold_meeting_processed(redis_url: "str | None", stream_key: str, *, limit: 
 
 
 def _meeting_grounding(
-    active: "dict | None", session: str, prompt: str, redis_url: "str | None"
+    active: "dict | None", session: str, prompt: str, redis_url: "str | None", *,
+    saved_segments: "list[dict] | None" = None,
+    on_source: "Callable[[dict], None] | None" = None,
 ) -> "tuple[dict, list[str], str]":
     """Cookbook #1 — chat grounding in the terminal's ACTIVE meeting, branched by the meeting's
     LIFECYCLE PHASE (design-spec meeting-lifecycle-v2, W4; steering templates + the _global override
@@ -709,9 +711,8 @@ def _meeting_grounding(
                                        the raw transcript; if neither exists say so plainly (fail loud,
                                        never fabricate).
 
-    The transcript reaches the agent the SAME way the live copilot gets it: the meeting's redis Stream
-    (the meetings⊥agent seam) — NOT a file, NOT a cross-domain HTTP call, NO token. Returns the plain
-    (none-context, no tools, prompt) when the active tab isn't a meeting."""
+    The caller resolves access and the exact row before invoking this helper. Returns
+    plain chat context when the active tab isn't a meeting."""
     a = active or {}
     if a.get("kind") != "meeting":
         return ({"kind": "none", "session": session}, [], prompt)
@@ -736,7 +737,20 @@ def _meeting_grounding(
         "native": str(native),
     }
 
+    def report(source: str):
+        if on_source is not None:
+            on_source({"type": "meeting-grounding", "meeting_id": stream_key,
+                       "title": fields["title"], "source": source})
+
+    def saved_text() -> str:
+        lines = []
+        for segment in (saved_segments or [])[-MEETING_CHAT_TRANSCRIPT_SEGMENTS:]:
+            if isinstance(segment, dict) and isinstance(segment.get("text"), str) and segment["text"].strip():
+                lines.append(f'{segment.get("speaker") or "Speaker"}: {segment["text"].strip()}')
+        return "\n".join(lines)
+
     if phase == "prep":
+        report("prep")
         when = str(m.get("scheduled_at") or "").strip()
         fields["when"] = f", scheduled for {when}" if when else " (no time set yet)"
         workspace = str(m.get("workspace_id") or "").strip()
@@ -760,16 +774,29 @@ def _meeting_grounding(
         else:
             folded = _fold_meeting_transcript(redis_url, stream_key, limit=MEETING_CHAT_TRANSCRIPT_SEGMENTS)
             fields["source"] = "raw transcript"
+        source = "processed" if fields["source"].startswith("processed") else "transcript"
         if not folded:
+            folded = saved_text()
+            fields["source"] = "saved transcript"
+            source = "saved"
+        if not folded:
+            report("empty")
             return (ctx, [], meeting_steering.NO_RECORD_POST.format(**fields) + prompt)
+        report(source)
         fields["transcript"] = folded
         return (ctx, [], meeting_steering.render("post", fields) + prompt)
 
     transcript = _fold_meeting_transcript(redis_url, stream_key, limit=MEETING_CHAT_TRANSCRIPT_SEGMENTS)
+    source = "transcript"
+    if not transcript:
+        transcript = saved_text()
+        source = "saved"
     if transcript:
+        report(source)
         fields["transcript"] = transcript
         preamble = meeting_steering.render("live", fields)
     else:
+        report("empty")
         preamble = meeting_steering.NO_TRANSCRIPT_LIVE.format(platform=platform, native=native)
     return (ctx, [], preamble + prompt)
 
@@ -842,37 +869,46 @@ def _fold_workspace_grounding(mounts: "list", slug: str) -> str:
     return meeting_steering.render("workspace_focus", fields)
 
 
-def _enriched_meeting_focus(focus: dict, rows: "list[dict]") -> dict:
-    """Overlay the SERVER row's truth onto the client-sent meeting focus — status/title/
-    scheduled_at/workspace_id come from the meetings domain when the row is found; the client's
-    values remain only as the fallback (legacy clients / row not fetched)."""
-    nid = focus.get("native_id") or focus.get("ref")
-    row = schedule_digest_mod.find_row(
-        rows, meeting_id=focus.get("meeting_id"), platform=focus.get("platform"), native_id=nid)
-    if row is None and nid is not None:
-        # The terminal's tab param is the ROW id for planned meetings without a link (native is
-        # NULL there) — it rides in native_id, so retry it as the row id before giving up.
-        row = schedule_digest_mod.find_row(rows, meeting_id=nid)
-    if row is None:
-        return focus
+def _authorized_meeting_focus(focus, rows, meeting_document):
+    client = focus.get("meeting") or focus
+    if not isinstance(client, dict):
+        raise HTTPException(422, "Invalid meeting selection")
+    row_id = client.get("meeting_id")
+    if row_id is None:
+        native = client.get("native_id") or client.get("ref")
+        if native and re.fullmatch(r"[1-9]\d*", str(native), re.ASCII):
+            row_id = native
+        elif native:
+            # Older clients sent only the room code. Reused links need an exact selection.
+            matches = [row for row in rows if row.get("native_meeting_id") == native
+                       and (not client.get("platform") or row.get("platform") == client["platform"])]
+            if len(matches) == 1:
+                row_id = matches[0].get("id")
+    if not re.fullmatch(r"[1-9]\d{0,18}", str(row_id), re.ASCII):
+        raise HTTPException(404, "Select an accessible meeting before sending")
+    if meeting_document is None:
+        raise HTTPException(503, "Meeting access is temporarily unavailable")
+    row = meeting_document(int(row_id))
+    if not isinstance(row, dict) or str(row.get("id")) != str(row_id):
+        raise HTTPException(404, "Selected meeting is unavailable")
     data = row.get("data") or {}
-    merged = dict(focus)
-    merged["meeting_id"] = row.get("id", focus.get("meeting_id"))
-    merged["status"] = row.get("status") or focus.get("status")
-    if row.get("platform") and row.get("platform") != "unknown":
-        merged["platform"] = row["platform"]
-    if row.get("native_meeting_id"):
-        merged["native_id"] = row["native_meeting_id"]
-    for src_key, dst_key in (("title", "title"), ("scheduled_at", "scheduled_at"), ("workspace_id", "workspace_id")):
-        if data.get(src_key):
-            merged[dst_key] = data[src_key]
-    return merged
+    platform = row.get("platform") or "unknown"
+    native_id = row.get("native_meeting_id") or str(row_id)
+    label = "Google Meet" if platform == "google_meet" else platform
+    return {
+        "kind": "meeting", "meeting_id": row["id"], "status": row.get("status"),
+        "platform": platform, "native_id": native_id,
+        "title": data.get("title") or f"{label} · {native_id}",
+        "scheduled_at": data.get("scheduled_at"), "workspace_id": data.get("workspace_id"),
+    }, row.get("segments") or []
 
 
 def _context_grounding(
     body: "ChatBody", session: str, redis_url: "str | None", *,
     schedule_rows: "Callable[[], list[dict]]",
     workspace_mounts: "Callable[[], list]",
+    meeting_document: "Callable[[int], dict] | None" = None,
+    on_meeting_source: "Callable[[dict], None] | None" = None,
 ) -> "tuple[dict, list[str], str]":
     """Assemble the turn's grounding from the context bundle (or the legacy ``active``).
     ``schedule_rows`` / ``workspace_mounts`` are LAZY — fetched only for the branches that
@@ -884,7 +920,9 @@ def _context_grounding(
 
     ambient = _ambient_gated(context)
     kind = (focus or {}).get("kind")
-    need_rows = ambient or kind in ("meeting", "today")
+    client_meeting = (focus.get("meeting") or focus) if kind == "meeting" else {}
+    need_rows = ambient or kind == "today" or (isinstance(client_meeting, dict)
+                                               and kind == "meeting" and client_meeting.get("meeting_id") is None)
     rows: "list[dict]" = []
     if need_rows:
         try:
@@ -906,8 +944,10 @@ def _context_grounding(
             preamble = digest + meeting_steering.render("schedule", {})
 
     if kind == "meeting":
-        enriched = _enriched_meeting_focus(dict(focus), rows) if rows else dict(focus)
-        _c, _t, folded_prompt = _meeting_grounding(enriched, session, prompt, redis_url)
+        verified, segments = _authorized_meeting_focus(focus, rows, meeting_document)
+        _c, _t, folded_prompt = _meeting_grounding(
+            verified, session, prompt, redis_url, saved_segments=segments, on_source=on_meeting_source,
+        )
         return (_c, _t, preamble + folded_prompt if preamble else folded_prompt)
 
     if kind == "workspace" and (focus or {}).get("slug"):
@@ -2268,17 +2308,30 @@ def create_app(
         # A reconnect carries Last-Event-ID (the last Stream cursor the client rendered). On resume we
         # DON'T re-dispatch — we re-attach to the existing warm unit and read from the cursor onward.
         resume = request.headers.get("last-event-id") or None
-        # Ground the chat in the terminal's ACTIVE meeting (if any): agent-api folds the live transcript
-        # from the meeting's redis Stream (tc:meeting:{native} — the SAME stream the copilot tails) into
-        # the prompt, fresh on every turn. The transcript stays inside the trusted control plane and
-        # rides the prompt to the worker — no file, no cross-domain HTTP, no user key in the worker (P15).
+        from control_plane.meeting_knowledge import meeting_get
         from control_plane.voice_handoff import grounding as handoff_grounding
+        base = settings.meeting_api_url if settings else ""
+        meeting_source = []
+
+        def read_meeting(meeting_id: int):
+            # Like the schedule, the workspace grants come from Identity, never from the focus payload.
+            try:
+                membership = mindex.list(subject)
+            except Exception:  # noqa: BLE001 — an unavailable index grants no workspace access
+                membership = []
+            workspace_ids = [m["workspace_id"] for m in membership or []
+                             if isinstance(m, dict) and isinstance(m.get("workspace_id"), str)]
+            return meeting_get(base, subject, meeting_id, f"/transcripts/by-id/{meeting_id}",
+                               workspace_ids=workspace_ids)
+
         handoff = handoff_grounding(settings.meeting_api_url if settings else '',subject,session,body.prompt)
         ctx, tools, prompt = handoff if handoff is not None else _context_grounding(
             body, session, redis_url,
             schedule_rows=lambda: _schedule_source(subject),
             workspace_mounts=lambda: (active_workspaces(wsr.root, subject)
                                       + shared_active_mounts(wsr.root, subject, mindex.list(subject))),
+            meeting_document=read_meeting,
+            on_meeting_source=meeting_source.append,
         )
         tools = list(dict.fromkeys([*tools, *_configured_chat_toolbelt()]))
         if body.research or research_command:
@@ -2304,6 +2357,7 @@ def create_app(
             start=units.entrypoint(inline=prompt), context=ctx, tools=tools,
             principal={"name": _email} if _email else None,
         )
+        fresh_dispatch = False
         if resume:
             # Re-attach only — the warm unit id is deterministic from (subject, session); resume reads
             # its durable output Stream from the cursor. No new turn, no session re-title.
@@ -2353,8 +2407,15 @@ def create_app(
                 if body.turn_id and start is not None:
                     _record_chat_turn_head(redis_url, unit_id, body.turn_id, start)
                 resume = start
+                fresh_dispatch = True
+
+        def stream():
+            if fresh_dispatch:
+                yield from _sse(meeting_source)
+            yield from _sse(stream_reader.read(unit_id, resume=resume))
+
         return StreamingResponse(
-            _sse(stream_reader.read(unit_id, resume=resume)),
+            stream(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
                      "X-Unit-Id": unit_id, "X-Chat-Session": session},
