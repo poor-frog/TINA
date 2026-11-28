@@ -432,3 +432,83 @@ def test_interrupted_prefix_is_intent_only_and_source_guard_revocation_discards_
     assert current_history([turn],[ref],NOW)==[turn]
     assert current_history([turn],[],NOW)==[]
     assert current_history([turn],[ref|{'fingerprint':'b'*64}],NOW)==[]
+
+
+def test_normalize_empty_voice_answer_strips_blank_optional_fields_and_empty_tool_calls():
+    from shared.voice_knowledge import normalize_empty_voice_answer, voice_tool_calls
+
+    raw = json.dumps({
+        'claims': [{'text': 'Lan phụ trách demo.', 'source_ids': ['s0']}],
+        'clarification': '   ',
+        'follow_up': '',
+        'tool_calls': [],
+    })
+    normalized = normalize_empty_voice_answer(raw)
+    assert voice_tool_calls(normalized) is None
+    result = validate_voice_answer(normalized, [{'id': 's0', 'quote': 'Lan phụ trách demo.'}])
+    assert result['claims'] == [{'text': 'Lan phụ trách demo.', 'source_ids': ['s0']}]
+    assert 'clarification' not in result and 'follow_up' not in result
+
+    # Non-empty tool_calls alongside claims must never be silently stripped.
+    bad = json.dumps({
+        'claims': [{'text': 'Lan phụ trách demo.', 'source_ids': ['s0']}],
+        'tool_calls': [{'name': 'search_meeting', 'arguments': {'query': 'demo'}}],
+    })
+    assert normalize_empty_voice_answer(bad) == bad
+
+
+def test_direct_voice_format_repair_receives_validation_error_and_emits_typed_format_failure(monkeypatch):
+    """Regression: when Direct LLM (e.g., Bedrock Nova Lite) emits >3 claims or fails format
+    validation, format_repair receives an actionable validation_error hint; if repair still
+    fails, Direct LLM emits generation_format_invalid instead of crashing into llm_unavailable."""
+    from types import SimpleNamespace
+    from worker import engine
+    from shared.meeting_knowledge import PREFIX
+    from shared.voice_knowledge import VOICE_FORMAT_SYSTEM, VERIFY_SYSTEM
+
+    sources = [{'id': f's{i}', 'quote': f'Đoạn {i}'} for i in range(5)]
+    too_many_claims = json.dumps({
+        'claims': [{'text': f'Đoạn {i}.', 'source_ids': [f's{i}']} for i in range(5)],
+        'clarification': None, 'follow_up': None, 'tool_calls': None,
+    }, ensure_ascii=False)
+
+    # Case 1: format_repair gets a spoken-budget validation_error hint and recovers cleanly.
+    seen_prompts = []
+    calls = iter([
+        too_many_claims,
+        json.dumps({'claims': [{'text': 'Bạn đã nhắc đến đoạn 0 và đoạn 1.', 'source_ids': ['s0', 's1']}]}, ensure_ascii=False),
+        '{"approved": true}',
+    ])
+
+    def complete_recover(prompt, **kwargs):
+        seen_prompts.append((kwargs.get('system'), json.loads(prompt)))
+        return SimpleNamespace(text=next(calls))
+
+    monkeypatch.setenv('TINA_CHAT_SESSION', 'meeting-knowledge-budget-recover')
+    monkeypatch.setattr(engine, 'completion_from_env', lambda **_: SimpleNamespace(complete=complete_recover))
+    events = []
+    stream = SimpleNamespace(xadd=lambda _, e: events.append(json.loads(e['event'])), expire=lambda *_: None)
+    payload = {'mode': 'voice', 'question': 'tôi đã nói những gì', 'sources': sources, 'tools_remaining': 0}
+    engine._run_meeting_knowledge(stream, 'out', {'entrypoint': {'inline': PREFIX + json.dumps({
+        'request_id': 'budget-recover', 'text': json.dumps(payload)})}})
+
+    repair_prompts = [body for sys_prompt, body in seen_prompts if sys_prompt == VOICE_FORMAT_SYSTEM]
+    assert len(repair_prompts) == 1
+    assert 'at most 3' in repair_prompts[0]['validation_error']
+    assert '800' in repair_prompts[0]['validation_error']
+    deltas = [json.loads(e['text']) for e in events if e['type'] == 'message-delta']
+    assert len(deltas) == 1 and deltas[0]['verification'] == ['approved']
+    assert any(sys_prompt == VERIFY_SYSTEM for sys_prompt, _ in seen_prompts)
+
+    # Case 2: if format_repair STILL violates format in Direct LLM mode, emit generation_format_invalid.
+    calls_fail = iter([too_many_claims, too_many_claims])
+    monkeypatch.setenv('TINA_CHAT_SESSION', 'meeting-knowledge-budget-fail')
+    monkeypatch.setattr(engine, 'completion_from_env',
+                        lambda **_: SimpleNamespace(complete=lambda prompt, **kw: SimpleNamespace(text=next(calls_fail))))
+    events_fail = []
+    stream_fail = SimpleNamespace(xadd=lambda _, e: events_fail.append(json.loads(e['event'])), expire=lambda *_: None)
+    engine._run_meeting_knowledge(stream_fail, 'out', {'entrypoint': {'inline': PREFIX + json.dumps({
+        'request_id': 'budget-fail', 'text': json.dumps(payload)})}})
+    deltas_fail = [json.loads(e['text']) for e in events_fail if e['type'] == 'message-delta']
+    assert deltas_fail == [{'claims': [], 'reason': 'generation_format_invalid'}]
+    assert events_fail[-1] == {'type': 'turn-complete'}

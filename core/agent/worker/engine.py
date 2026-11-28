@@ -892,25 +892,45 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
             if len(raw) > 50000:
                 raise ValueError('Knowledge answer too large')
             if mode == 'voice':
+                def _voice_format_hint(exc: Exception, source_count: int) -> str:
+                    msg = str(exc)
+                    if source_count == 0:
+                        return ('No supplied sources are available (sources is empty). '
+                                'Return {"claims":[]} with no claims and no follow_up, or one short clarification ending with "?".')
+                    if 'spoken budget' in msg:
+                        return ('Too many claims or characters. Merge related facts into at most 3 short claims '
+                                'totaling at most 800 characters; each claim may cite up to 6 valid source_ids.')
+                    if 'Invalid citation' in msg:
+                        return ('Every claim must include 1 to 6 valid source_ids from sources. '
+                                'Never use an empty source_ids list; return {"claims":[]} if unsupported.')
+                    if 'clarification' in msg:
+                        return ('clarification must be used only when claims is empty, be at most 200 characters, '
+                                'and end with "?".')
+                    if 'follow-up' in msg:
+                        return ('follow_up must be used only when claims is non-empty, be at most 200 characters, '
+                                'and end with "?".')
+                    if 'tool' in msg.lower():
+                        return 'Do not call tools; set tool_calls to null and return final claims, clarification, or {"claims":[]}.'
+                    return ('Return one valid JSON object matching the required schema with at most 3 short claims '
+                            '(<= 800 chars total) and 1 to 6 valid source_ids per claim.')
                 try:
                     calls = voice_tool_calls(raw)
                     if calls is None:
                         validate_voice_answer(raw, answer_sources)
                     elif not source.get('tools_remaining', 0):
                         raise ValueError('No voice tools remaining')
-                except (ValueError, TypeError, AttributeError):
+                except (ValueError, TypeError, AttributeError) as format_exc:
                     raw = checked_completion(json.dumps({'question': source['question'],
                         'sources': answer_sources, 'history': source.get('history', []),
                         'dialogue_context':source.get('dialogue_context'),
+                        'validation_error': _voice_format_hint(format_exc, len(answer_sources)),
                         'invalid_output': raw}, ensure_ascii=False), VOICE_FORMAT_SYSTEM)
                     try:
                         validate_voice_answer(raw, answer_sources)
-                        if source.get('use_sandbox_agent') is True and voice_tool_calls(raw) is not None:
+                        if voice_tool_calls(raw) is not None:
                             raise ValueError('Format repair must produce a final answer')
                     except (ValueError, TypeError, AttributeError):
-                        if source.get('use_sandbox_agent') is True:
-                            raise VoiceOutputFormatError('Invalid voice answer') from None
-                        raise
+                        raise VoiceOutputFormatError('Invalid voice answer') from None
                     log.info('voice response format regenerated')
             if mode == 'voice_general':
                 text = raw

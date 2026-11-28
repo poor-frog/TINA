@@ -32,6 +32,7 @@ def _configured_slots() -> int:
 
 _slots = BoundedSemaphore(_configured_slots())
 _SAFE_ERROR_RE = re.compile(r"^([A-Z][A-Za-z0-9_]*(?:Error|Exception))\b")
+_LOG_ERROR_FIELD_RE = re.compile(r"\berror=([A-Z][A-Za-z0-9_]*(?:Error|Exception))\b")
 
 
 def _stderr_error_kind(stderr: str | bytes | None) -> str:
@@ -39,7 +40,8 @@ def _stderr_error_kind(stderr: str | bytes | None) -> str:
         stderr = stderr.decode("utf-8", errors="replace")
     found = "unknown"
     for line in (stderr or "").splitlines():
-        match = _SAFE_ERROR_RE.match(line.strip())
+        stripped = line.strip()
+        match = _SAFE_ERROR_RE.match(stripped) or _LOG_ERROR_FIELD_RE.search(stripped)
         if match:
             found = match.group(1)
     return found

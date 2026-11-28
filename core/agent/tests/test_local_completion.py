@@ -398,6 +398,11 @@ def test_voice_completion_waits_for_slot_and_logs_safe_stderr_error_kind(monkeyp
     assert "returncode=2" in caplog.text and "error=RuntimeError" in caplog.text
     assert "PRIVATE_MEETING_TRANSCRIPT" not in caplog.text
 
+    # Structured warning log lines (`error=ValueError`) are also extracted without leaking message text.
+    assert meeting_voice_completion._stderr_error_kind(
+        "WARNING:worker.engine:meeting knowledge failed error=ValueError\n"
+    ) == "ValueError"
+
 
 def test_local_completion_and_background_jobs_fall_back_to_bedrock_on_auth_or_rate_limit(monkeypatch):
     from llm.errors import PROVIDER_FALLBACK_MARKER
