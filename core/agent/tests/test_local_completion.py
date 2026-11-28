@@ -599,3 +599,96 @@ def test_live_meeting_copilot_respects_meeting_use_default_override(tmp_path, mo
     assert live_byo_env["OPENAI_API_KEY"] == "sk-test-secret"
 
 
+def test_builtin_bedrock_dropdown_switches_between_nova_lite_and_claude_sonnet(tmp_path, monkeypatch):
+    from control_plane.dispatch import Dispatcher
+    from shared import units
+    from shared.config import Settings
+
+    monkeypatch.setenv("TINA_LOCAL_COMPLETION_POOL", "1")
+    monkeypatch.setenv("TINA_WORKSPACE_PILOT_USER_IDS", "*")
+    monkeypatch.setenv("TINA_WORKSPACE_STORAGE", "s3")
+    monkeypatch.setenv("TINA_WORKSPACE_BEDROCK_OWNER", "*")
+    monkeypatch.setenv("TINA_WORKSPACE_BEDROCK_MODEL", "us.anthropic.claude-sonnet-4-6")
+    monkeypatch.setenv("TINA_LLM_PROVIDER", "bedrock-converse")
+    monkeypatch.setenv("TINA_LLM_MODEL", "amazon.nova-lite-v1:0")
+
+    settings = Settings(
+        workspaces_dir=str(tmp_path),
+        redis_url="redis://127.0.0.1:6379/0",
+        dispatch_signing_key="a" * 32,
+        agent_profile="agent",
+    )
+    spawned = []
+    bg_calls = []
+
+    class FakeRuntime:
+        def spawn(self, uid, profile, env):
+            spawned.append((uid, profile, dict(env)))
+            return uid
+
+    class FakeIdentity:
+        def mint(self, *args, **kwargs):
+            return "tok"
+
+    class FakeResolver:
+        def resolve(self, subject):
+            if subject == "9":
+                return {"model": "us.anthropic.claude-sonnet-4-6"}
+            return {"model": "amazon.nova-lite-v1:0"}
+
+    monkeypatch.setattr(
+        local_completion, "dispatch_background_meeting_job",
+        lambda **kw: (bg_calls.append(kw), kw["unit_id"])[1],
+    )
+    dispatcher = Dispatcher(settings, FakeRuntime(), FakeIdentity(), model_config=FakeResolver())
+
+    # 1. Sonnet 4.6 selected under built-in Bedrock: Chat uses claude-code on Bedrock, background uses Sonnet 4.6, draft passes TINA_LLM_MODEL
+    inv_chat = units.make_dispatch(
+        subject="9", trigger="message",
+        start=units.entrypoint(inline="Hello Sonnet"),
+        context={"kind": "none", "session": "sonnet-chat-1"},
+    )
+    dispatcher.dispatch(inv_chat)
+    assert spawned[-1][2]["TINA_RUNNER"] == "claude-code"
+    assert spawned[-1][2]["CLAUDE_CODE_USE_BEDROCK"] == "1"
+    assert spawned[-1][2]["TINA_AGENT_MODEL"] == "us.anthropic.claude-sonnet-4-6"
+
+    inv_notes = units.make_dispatch(
+        subject="9", trigger="transcription",
+        start=units.entrypoint(inline=units.CANONICAL_NOTES_PREFIX + '{"meeting_id":60}'),
+        context={"kind": "meeting", "meeting": {"meeting_id": "60", "session_uid": "sonnet-notes", "platform": "google_meet"}},
+    )
+    dispatcher.dispatch(inv_notes, trusted_canonical_notes=True)
+    assert bg_calls[-1]["model_env"] == {
+        "TINA_LLM_PROVIDER": "bedrock-converse",
+        "TINA_LLM_MODEL": "us.anthropic.claude-sonnet-4-6",
+    }
+
+    inv_draft = units.make_dispatch(
+        subject="9", trigger="message",
+        start=units.entrypoint(inline=units.MEETING_KNOWLEDGE_PREFIX + '{"request_id":"r1","text":"{}"}'),
+        context={"kind": "none", "session": "meeting-knowledge-0123456789abcdef0123456789abcdef"},
+    )
+    dispatcher.dispatch(inv_draft, trusted_post_meeting_draft=True)
+    assert spawned[-1][2]["TINA_LLM_MODEL"] == "us.anthropic.claude-sonnet-4-6"
+
+    # 2. Nova Lite selected under built-in Bedrock: Chat uses bedrock-workspace (Nova), draft keeps default 4 keys
+    inv_nova_chat = units.make_dispatch(
+        subject="10", trigger="message",
+        start=units.entrypoint(inline="Hello Nova"),
+        context={"kind": "none", "session": "nova-chat-10"},
+    )
+    dispatcher.dispatch(inv_nova_chat)
+    assert spawned[-1][2]["TINA_RUNNER"] == "bedrock-workspace"
+    assert spawned[-1][2]["TINA_AGENT_MODEL"] == "amazon.nova-lite-v1:0"
+
+    inv_nova_draft = units.make_dispatch(
+        subject="10", trigger="message",
+        start=units.entrypoint(inline=units.MEETING_KNOWLEDGE_PREFIX + '{"request_id":"r2","text":"{}"}'),
+        context={"kind": "none", "session": "meeting-knowledge-fedcba9876543210fedcba9876543210"},
+    )
+    dispatcher.dispatch(inv_nova_draft, trusted_post_meeting_draft=True)
+    assert "TINA_LLM_MODEL" not in spawned[-1][2]
+
+
+

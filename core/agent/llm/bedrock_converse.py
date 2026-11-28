@@ -34,7 +34,7 @@ def _bedrock_structured_unsupported(exc: Exception) -> bool:
 class BedrockConverseCompletion:
     name = "bedrock-converse"
 
-    def __init__(self, *, timeout=120.0, client=None):
+    def __init__(self, *, model=None, timeout=120.0, client=None):
         if client is None:
             try:
                 import boto3
@@ -46,7 +46,7 @@ class BedrockConverseCompletion:
                 retries={"total_max_attempts": 1},
             ))
         self.client = client
-        self.model = os.environ.get("TINA_LLM_MODEL", "")
+        self.model = (model or "").strip() or os.environ.get("TINA_LLM_MODEL", "")
 
     def _target_model(self, model=None):
         target = (model or "").strip() or self.model

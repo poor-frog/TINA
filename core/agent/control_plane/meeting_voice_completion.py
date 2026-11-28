@@ -107,7 +107,21 @@ def resolve_voice_model_env(model_config: dict | None, *, allowlist: str = "", s
     if str(model_config.get("meeting_use_default") or "").strip().lower() == "true":
         return {}
     mode = (model_config.get("mode") or "").strip()
-    if not mode or mode in ("openai-subscription", "antigravity"):
+    if not mode:
+        from control_plane.dispatch import BUILTIN_BEDROCK_MODELS, _allowlisted, builtin_bedrock_model
+        chosen = builtin_bedrock_model(model_config)
+        if not chosen:
+            meeting_choice = (model_config.get("meeting_model") or "").strip()
+            if meeting_choice in BUILTIN_BEDROCK_MODELS:
+                chosen = meeting_choice
+        if (
+            chosen
+            and (os.environ.get("TINA_LLM_PROVIDER") or "").strip() == "bedrock-converse"
+            and _allowlisted(chosen, allowlist)
+        ):
+            return {"TINA_LLM_PROVIDER": "bedrock-converse", "TINA_LLM_MODEL": chosen}
+        return {}
+    if mode in ("openai-subscription", "antigravity"):
         return {}
     from control_plane.dispatch import overlay_model_config
     staged: dict[str, str] = {}
@@ -154,13 +168,18 @@ def fallback_reason_from_stderr(stderr: str | bytes | None) -> str | None:
 
 
 def can_fallback_to_bedrock(model_env: dict[str, str] | None) -> bool:
-    """True when an external/custom model_env can fall back to deployment-default Amazon Bedrock."""
+    """True when an external/custom model_env (or non-default Bedrock model like Sonnet 4.6)
+    can fall back to deployment-default Amazon Bedrock (e.g. Nova Lite) on 401/403/429."""
     if not model_env:
         return False
     if (os.environ.get("TINA_LLM_PROVIDER") or "").strip() != "bedrock-converse":
         return False
     provider = (model_env.get("TINA_LLM_PROVIDER") or "").strip()
-    return provider != "bedrock-converse" or bool((model_env.get("AWS_BEARER_TOKEN_BEDROCK") or "").strip())
+    if provider != "bedrock-converse" or bool((model_env.get("AWS_BEARER_TOKEN_BEDROCK") or "").strip()):
+        return True
+    selected_model = (model_env.get("TINA_LLM_MODEL") or "").strip()
+    default_model = (os.environ.get("TINA_LLM_MODEL") or "").strip()
+    return bool(selected_model and default_model and selected_model != default_model)
 
 
 def complete(payload: dict, source: dict, redis_url: str, *, chatgpt_plan=False,

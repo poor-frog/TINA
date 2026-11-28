@@ -468,6 +468,55 @@ def test_openai_responses_stream_failure_preserves_rate_limit_and_auth_codes(cod
     assert provider_fallback_reason(err.value) == ('auth' if expected_auth else 'rate_limit')
 
 
+def test_builtin_bedrock_sonnet_resolves_and_falls_back_to_nova_lite_on_throttling(monkeypatch):
+    from control_plane import meeting_voice_completion
+    from llm.bedrock_converse import BedrockConverseCompletion
+    from llm.errors import PROVIDER_FALLBACK_MARKER
+
+    monkeypatch.setenv('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI', '/v2/credentials/staging')
+    monkeypatch.setenv('TINA_LLM_PROVIDER', 'bedrock-converse')
+    monkeypatch.setenv('TINA_LLM_MODEL', 'amazon.nova-lite-v1:0')
+
+    # BedrockConverseCompletion accepts explicit model= kwarg cleanly
+    comp = BedrockConverseCompletion(model='us.anthropic.claude-sonnet-4-6', client=SimpleNamespace())
+    assert comp.model == 'us.anthropic.claude-sonnet-4-6'
+
+    sonnet_env = meeting_voice_completion.resolve_voice_model_env({'model': 'us.anthropic.claude-sonnet-4-6'})
+    assert sonnet_env == {
+        'TINA_LLM_PROVIDER': 'bedrock-converse',
+        'TINA_LLM_MODEL': 'us.anthropic.claude-sonnet-4-6',
+    }
+    assert meeting_voice_completion.can_fallback_to_bedrock(sonnet_env) is True
+    # Nova Lite (same as deployment default) does not retry onto itself
+    nova_env = meeting_voice_completion.resolve_voice_model_env({'model': 'amazon.nova-lite-v1:0'})
+    assert meeting_voice_completion.can_fallback_to_bedrock(nova_env) is False
+    # Arbitrary non-allowlisted Bedrock model IDs under mode='' are ignored
+    assert meeting_voice_completion.resolve_voice_model_env({'model': 'us.anthropic.claude-opus-4-6'}) == {}
+
+    attempts = []
+
+    def fake_run(*_, env, **kwargs):
+        attempts.append(dict(env))
+        if len(attempts) == 1:
+            return SimpleNamespace(
+                stderr=f'{PROVIDER_FALLBACK_MARKER}rate_limit\nLLMError: ThrottlingException\n',
+                stdout='',
+                returncode=1,
+            )
+        return SimpleNamespace(stderr='', stdout='{"claims":[{"text":"Nova fallback","source_ids":["s0"]}]}', returncode=0)
+
+    monkeypatch.setattr(meeting_voice_completion.subprocess, 'run', fake_run)
+    payload = {'request_id': 'sonnet-429-fallback', 'voice_turn': {'meeting_id': 1, 'holder': 's:1'}}
+    out = meeting_voice_completion.complete(payload, {'mode': 'voice'}, 'redis://fixture', model_env=sonnet_env)
+    assert 'Nova fallback' in out
+    assert len(attempts) == 2
+    assert attempts[0]['TINA_LLM_MODEL'] == 'us.anthropic.claude-sonnet-4-6'
+    assert attempts[0]['AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'] == '/v2/credentials/staging'
+    assert attempts[1]['TINA_LLM_MODEL'] == 'amazon.nova-lite-v1:0'
+    assert attempts[1]['AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'] == '/v2/credentials/staging'
+
+
+
 @pytest.mark.parametrize('reason', ['auth', 'rate_limit'])
 def test_voice_completion_falls_back_to_bedrock_on_external_auth_or_rate_limit(monkeypatch, reason):
     from control_plane import meeting_voice_completion

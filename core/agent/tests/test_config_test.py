@@ -510,6 +510,15 @@ def test_run_models_test_builtin_bedrock_default_and_openai_api_defaults():
     assert bedrock_out["mode"] == "bedrock"
     assert "Amazon Bedrock" in bedrock_out["summary"]
 
+    # Built-in Amazon Bedrock with Claude Sonnet 4.6 selected reports Sonnet 4.6
+    bedrock_sonnet = ct.run_models_test(
+        {"model": "us.anthropic.claude-sonnet-4-6"},
+        env={"TINA_LLM_PROVIDER": "bedrock-converse", "TINA_LLM_MODEL": "amazon.nova-lite-v1:0"},
+    )
+    assert bedrock_sonnet["ok"] is True
+    assert bedrock_sonnet["mode"] == "bedrock"
+    assert "us.anthropic.claude-sonnet-4-6" in bedrock_sonnet["summary"]
+
     # OpenAI API defaults blank model to gpt-5 and blank meeting_model to gpt-5-mini
     seen = []
 

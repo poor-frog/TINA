@@ -472,10 +472,14 @@ def run_models_test(config: dict, env: Optional[dict] = None,
         )
         out["mode"] = "antigravity"
     elif not mode and (env.get("TINA_LLM_PROVIDER") or "").strip() == "bedrock-converse":
-        bedrock_model = (env.get("TINA_LLM_MODEL") or "Amazon Bedrock").strip()
+        from control_plane.dispatch import builtin_bedrock_model
+        bedrock_model = (
+            builtin_bedrock_model(config)
+            or (env.get("TINA_LLM_MODEL") or "Amazon Bedrock").strip()
+        )
         out = _result(
             True,
-            f"Built-in Amazon Bedrock deployment default is active ({bedrock_model}). No personal API key required.",
+            f"Built-in Amazon Bedrock is active ({bedrock_model}). No personal API key required.",
             status=200,
         )
         out["mode"] = "bedrock"

@@ -1231,10 +1231,25 @@ describe("WebShell production UI (Option A & Option B)", () => {
       });
     });
 
-    // Switch back to Amazon Bedrock (Default) -> hides API key input and explains built-in Bedrock default
+    // Switch back to Amazon Bedrock (Default) -> hides API key input and shows single 2-option Bedrock dropdown
     fireEvent.click(screen.getByRole("radio", { name: /Amazon Bedrock/i }));
     expect(screen.queryByLabelText("Credential")).toBeNull();
     expect(screen.getByText(/No personal API key required/i)).toBeTruthy();
+    const bedrockSelect = screen.getByLabelText("Amazon Bedrock model") as HTMLSelectElement;
+    expect(bedrockSelect.value).toBe("amazon.nova-lite-v1:0");
+    fireEvent.change(bedrockSelect, { target: { value: "us.anthropic.claude-sonnet-4-6" } });
+    expect(bedrockSelect.value).toBe("us.anthropic.claude-sonnet-4-6");
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    await waitFor(() => {
+      const sonnetPut = fetchMock.mock.calls.filter(
+        ([url, init]) => String(url) === "/api/user/models" && init?.method === "PUT",
+      ).at(-1);
+      expect(sonnetPut).toBeTruthy();
+      expect(JSON.parse(String(sonnetPut![1]!.body))).toMatchObject({
+        mode: "",
+        model: "us.anthropic.claude-sonnet-4-6",
+      });
+    });
   });
 
   it("unlocks Ask Tina in WebShell for authorized workspace-pilot users while keeping /terminal restricted to admins", async () => {

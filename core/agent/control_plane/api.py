@@ -1541,23 +1541,29 @@ def create_app(
                 streaming_model = model_config.get("meeting_model") or chat_model
         else:
             from control_plane.aws_voice_chatgpt import workspace_connected
+            from control_plane.dispatch import builtin_bedrock_model
             from control_plane.system_mounts import pilot_allows
 
-            pilot_fallback = None
-            if pilot_allows(subject) and not model_config.get("mode"):
-                if workspace_connected(subject):
-                    pilot_fallback = "gpt-6-luna"
-                elif (os.getenv("TINA_WORKSPACE_BEDROCK_MODEL") or "").strip():
-                    pilot_fallback = os.getenv("TINA_WORKSPACE_BEDROCK_MODEL", "").strip()
-            chat_model = model_config.get("model") or pilot_fallback or settings.agent_model or settings.llm_model or "default"
-            streaming_model = (
-                model_config.get("meeting_model")
-                or model_config.get("model")
-                or settings.meeting_model
-                or settings.llm_model
-                or default_meeting_model()
-                or "default"
-            )
+            chosen_builtin = builtin_bedrock_model(model_config)
+            if chosen_builtin:
+                chat_model = chosen_builtin
+                streaming_model = chosen_builtin
+            else:
+                pilot_fallback = None
+                if pilot_allows(subject) and not model_config.get("mode"):
+                    if workspace_connected(subject):
+                        pilot_fallback = "gpt-6-luna"
+                    elif (os.getenv("TINA_WORKSPACE_BEDROCK_MODEL") or "").strip():
+                        pilot_fallback = os.getenv("TINA_WORKSPACE_BEDROCK_MODEL", "").strip()
+                chat_model = model_config.get("model") or pilot_fallback or settings.agent_model or settings.llm_model or "default"
+                streaming_model = (
+                    model_config.get("meeting_model")
+                    or model_config.get("model")
+                    or settings.meeting_model
+                    or settings.llm_model
+                    or default_meeting_model()
+                    or "default"
+                )
         try:
             # A workspace-pinned model (free string) wins; an unpinned workspace ("" — deployment
             # default) must NOT blank the label out.

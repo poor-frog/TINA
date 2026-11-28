@@ -332,8 +332,14 @@ class ECSBackend:
                            TINA_WORKSPACE_STREAM_SIDECAR="1", TINA_UNIT_TOOLS="[]")
         elif env.get("TINA_POST_MEETING_DRAFT") == "1":
             required = {"TINA_POST_MEETING_DRAFT", "TINA_START", "TINA_CHAT_SESSION", "TINA_UNIT_OUT_TOPIC"}
+            optional = {"TINA_LLM_MODEL"}
+            allowed_draft_models = {"amazon.nova-lite-v1:0", "us.anthropic.claude-sonnet-4-6"}
+            extra_keys = set(env.keys()) - required
             if (not self.draft_task_definition or runnable.image != self.draft_image
-                    or runnable.command != ["python", "-m", "worker"] or env.keys() != required
+                    or runnable.command != ["python", "-m", "worker"]
+                    or not required.issubset(env.keys())
+                    or not extra_keys.issubset(optional)
+                    or ("TINA_LLM_MODEL" in env and env["TINA_LLM_MODEL"] not in allowed_draft_models)
                     or env["TINA_UNIT_OUT_TOPIC"] != f"unit:{workload_id}:out"
                     or not re.fullmatch(r"meeting-knowledge-[0-9a-f]{32}", env["TINA_CHAT_SESSION"])
                     or not workload_id.endswith("-chat-" + env["TINA_CHAT_SESSION"])

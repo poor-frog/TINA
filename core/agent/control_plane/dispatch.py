@@ -175,6 +175,16 @@ def _s3_workspace_enabled(subject: str) -> bool:
 
 
 WORKSPACE_NOVA_MODEL = "amazon.nova-lite-v1:0"
+WORKSPACE_BEDROCK_SONNET_MODEL = "us.anthropic.claude-sonnet-4-6"
+BUILTIN_BEDROCK_MODELS = frozenset({WORKSPACE_NOVA_MODEL, WORKSPACE_BEDROCK_SONNET_MODEL})
+
+
+def builtin_bedrock_model(config: dict | None) -> str:
+    """Return the selected built-in Bedrock model when mode is deployment default ('')."""
+    if not isinstance(config, dict) or (config.get("mode") or "").strip():
+        return ""
+    chosen = (config.get("model") or "").strip()
+    return chosen if chosen in BUILTIN_BEDROCK_MODELS else ""
 
 
 def workspace_uses_nova(subject: str, config: dict) -> bool:
@@ -182,8 +192,14 @@ def workspace_uses_nova(subject: str, config: dict) -> bool:
     if not pilot_allows(subject, owner_env) or not pilot_allows(subject) or not _s3_workspace_enabled(subject):
         return False
     mode = (config.get("mode") or "").strip()
-    if mode == "bedrock" and config.get("model") == WORKSPACE_NOVA_MODEL and not config.get("api_key"):
+    chosen_model = (config.get("model") or "").strip()
+    if mode == "bedrock" and chosen_model == WORKSPACE_NOVA_MODEL and not config.get("api_key"):
         return True
+    if not mode:
+        if chosen_model == WORKSPACE_NOVA_MODEL:
+            return True
+        if chosen_model == WORKSPACE_BEDROCK_SONNET_MODEL:
+            return False
     from control_plane.aws_voice_chatgpt import workspace_connected
     return not mode and not workspace_connected(subject)
 
@@ -734,12 +750,16 @@ class Dispatcher:
             if not is_meeting_knowledge(invocation):
                 raise ValueError("Expected an authorized meeting knowledge draft")
             uid = dispatch_id(invocation)
-            return self._runtime.spawn(uid, self._settings.agent_profile, {
+            draft_env = {
                 "TINA_POST_MEETING_DRAFT": "1",
                 "TINA_START": json.dumps(invocation["start"]),
                 "TINA_CHAT_SESSION": chat_session(invocation),
                 "TINA_UNIT_OUT_TOPIC": output_topic(uid),
-            })
+            }
+            draft_cfg = self.resolve_model_config(invocation["identity"]["subject"])
+            if builtin_bedrock_model(draft_cfg) == WORKSPACE_BEDROCK_SONNET_MODEL:
+                draft_env["TINA_LLM_MODEL"] = WORKSPACE_BEDROCK_SONNET_MODEL
+            return self._runtime.spawn(uid, self._settings.agent_profile, draft_env)
         if is_private_transcript_job(invocation):
             observed = dict(invocation)
             observed["start"] = {"entrypoint": {"inline": "[dictation text redacted]"}}
@@ -818,8 +838,11 @@ class Dispatcher:
                 is_live_meeting
                 and str((model_config or {}).get("meeting_use_default") or "").strip().lower() == "true"
             )
+            chosen_builtin_bedrock = builtin_bedrock_model(model_config)
             if is_chat and workspace_uses_nova(identity["subject"], model_config or {}):
                 workspace_auth_mode = "bedrock-workspace"
+            elif multi_provider_pilot and chosen_builtin_bedrock == WORKSPACE_BEDROCK_SONNET_MODEL:
+                workspace_auth_mode = "bedrock"
             elif multi_provider_pilot and not meeting_use_default and _has_workspace_byo_model(model_config or {}):
                 workspace_auth_mode = "byo"
             elif not meeting_use_default and workspace_connected(identity["subject"]):
@@ -846,7 +869,14 @@ class Dispatcher:
                 env.update(TINA_RUNNER="bedrock-workspace", TINA_LLM_PROVIDER="bedrock-converse",
                            TINA_LLM_MODEL=WORKSPACE_NOVA_MODEL, TINA_AGENT_MODEL=WORKSPACE_NOVA_MODEL)
             elif workspace_auth_mode == "bedrock":
-                _apply_workspace_bedrock_defaults(env, allowlist=self._settings.model_allowlist)
+                preferred_bedrock = (
+                    WORKSPACE_BEDROCK_SONNET_MODEL
+                    if builtin_bedrock_model(model_config) == WORKSPACE_BEDROCK_SONNET_MODEL
+                    else ""
+                )
+                _apply_workspace_bedrock_defaults(
+                    env, model=preferred_bedrock, allowlist=self._settings.model_allowlist,
+                )
             if _s3_workspace_enabled(identity["subject"]):
                 env["TINA_WORKSPACE_STORAGE"] = "s3"
                 env["HOME"] = f"{self._settings.workspaces_dir}/_system/{identity['subject']}"

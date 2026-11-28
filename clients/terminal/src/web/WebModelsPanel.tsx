@@ -147,6 +147,19 @@ const PROVIDER_GROUPS: Array<{ id: ProviderGroup; label: string; hint: string; c
   { id: "api", label: "Bring your own API key", hint: "Connect OpenAI, Google Gemini, or Groq for Chat & Voice Agent", cols: 3 },
 ];
 
+const BUILTIN_BEDROCK_MODELS = [
+  {
+    id: "amazon.nova-lite-v1:0",
+    label: "Amazon Nova Lite (Default · Fast & Cost-Effective)",
+    shortLabel: "Amazon Nova Lite",
+  },
+  {
+    id: "us.anthropic.claude-sonnet-4-6",
+    label: "Claude Sonnet 4.6 (Bedrock · Higher Reasoning Quality)",
+    shortLabel: "Claude Sonnet 4.6",
+  },
+] as const;
+
 const API_KEY_MODES = new Set([
   "openai-api",
   "groq",
@@ -267,18 +280,23 @@ export function WebModelsPanel({
   const activeMode = agentSummary.mode ?? "";
   const meetingUsesBedrockDefault =
     activeMode === "" || agentSummary.meeting_use_default === "true";
+  const selectedBuiltinBedrock =
+    BUILTIN_BEDROCK_MODELS.find((m) => m.id === agentSummary.model) ?? BUILTIN_BEDROCK_MODELS[0];
   const activeChatSummary =
     activeMode === ""
-      ? chatGptStatus.connected
+      ? !agentSummary.model && chatGptStatus.connected
         ? "ChatGPT Plan (OAuth)"
-        : agentSummary.model || "Amazon Bedrock (Default)"
+        : selectedBuiltinBedrock.shortLabel
       : agentSummary.model || activeProvider.defaultModelHint || activeProvider.name;
-  const activeMeetingSummary = meetingUsesBedrockDefault
-    ? "Amazon Bedrock (Default)"
-    : agentSummary.meeting_model ||
-      (activeMode === "openai-api" && (!agentSummary.model || agentSummary.model === "gpt-5")
-        ? "gpt-5-mini"
-        : agentSummary.model || activeProvider.defaultModelHint || "Same as Chat Agent");
+  const activeMeetingSummary =
+    activeMode === ""
+      ? selectedBuiltinBedrock.shortLabel
+      : meetingUsesBedrockDefault
+        ? "Amazon Nova Lite (Default)"
+        : agentSummary.meeting_model ||
+          (activeMode === "openai-api" && (!agentSummary.model || agentSummary.model === "gpt-5")
+            ? "gpt-5-mini"
+            : agentSummary.model || activeProvider.defaultModelHint || "Same as Chat Agent");
 
   return (
     <div className={styles.root}>
@@ -916,11 +934,46 @@ function AgentProviderForm({
         </div>
 
         {mode === "" ? (
-          <div className={styles.managedNote}>
-            <WebIcon name="sparkleSmall" size={15} />
-            <span>
-              Chat Agent, Voice Agent, Live Translation, and Meeting Notes automatically use TINA&apos;s Amazon Bedrock deployment defaults.
-            </span>
+          <div className={styles.fieldGrid}>
+            <div className={`${styles.field} ${styles.fieldFull}`}>
+              <label className={styles.fieldLabel} htmlFor={`tina-bedrock-model-${scope}`}>
+                Amazon Bedrock model (Chat, Voice &amp; Meeting)
+              </label>
+              <select
+                id={`tina-bedrock-model-${scope}`}
+                aria-label="Amazon Bedrock model"
+                className={styles.input}
+                style={pickerFieldStyle}
+                value={
+                  values.model === "us.anthropic.claude-sonnet-4-6"
+                    ? "us.anthropic.claude-sonnet-4-6"
+                    : "amazon.nova-lite-v1:0"
+                }
+                onChange={(e) => {
+                  const chosen = e.target.value;
+                  const next = {
+                    ...values,
+                    model: chosen,
+                    meeting_model: "",
+                    meeting_use_default: "",
+                  };
+                  setSaved(false);
+                  setTestResult(null);
+                  setTestError(null);
+                  setValues(next);
+                  onValues?.(next);
+                }}
+              >
+                {BUILTIN_BEDROCK_MODELS.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <p className={styles.fieldHint}>
+                Applies to Chat Agent, Voice Agent, Live Translation, Notes, and Meeting Summaries. If Claude Sonnet 4.6 is rate-limited (429) during a meeting, TINA automatically falls back to Amazon Nova Lite.
+              </p>
+            </div>
           </div>
         ) : (
           <>
