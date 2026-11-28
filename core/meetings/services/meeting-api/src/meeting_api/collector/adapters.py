@@ -1435,6 +1435,36 @@ class SqlAlchemyTranscriptStore:
             await db.commit()
             return workspace_id
 
+    async def set_finished_workspace(self, user_id, meeting_id, workspace_id, expected_workspace_id):
+        from sqlalchemy import select
+
+        from .models import Meeting
+
+        async with self._session_factory() as db:
+            meeting = await db.scalar(select(Meeting).where(
+                Meeting.id == meeting_id, Meeting.user_id == user_id,
+            ).with_for_update())
+            if meeting is None:
+                return None
+            data = dict(meeting.data) if isinstance(meeting.data, dict) else {}
+            if data.get("artifact_deletion"):
+                return None
+            if meeting.status not in ("completed", "stopped"):
+                return {"error": "unfinished"}
+            current = data.get("workspace_id")
+            if current != workspace_id:
+                if current != expected_workspace_id:
+                    return {"error": "conflict"}
+                # Preserve the original series setting for future calendar occurrences.
+                data.setdefault("workspace_series_id", current)
+                if workspace_id is None:
+                    data.pop("workspace_id", None)
+                else:
+                    data["workspace_id"] = workspace_id
+                meeting.data = data
+                await db.commit()
+            return {"workspace_id": workspace_id}
+
     async def _mint_share_on(self, stmt, *, mode, allowed_emails, expires_in_sec, include_recordings=False) -> "Optional[dict]":
         """Mint a grant onto whichever ONE row ``stmt`` selects. The two public mints differ only in
         how they address the meeting; everything after the row is identical."""

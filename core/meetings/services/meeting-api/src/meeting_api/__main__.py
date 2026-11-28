@@ -252,6 +252,30 @@ def build_production_app():
             return None, True
         return await lookup_google_meet_attendees(user_id, meeting, configs)
 
+    async def _workspace_write_allowed(user_id: int, workspace_id: str) -> bool | None:
+        import httpx
+
+        identity_url = (os.getenv("ADMIN_API_URL") or "").rstrip("/")
+        secret = os.getenv("INTERNAL_API_SECRET") or ""
+        if not (identity_url and secret):
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    f"{identity_url}/internal/users/{user_id}/memberships",
+                    headers={"X-Internal-Secret": secret},
+                )
+            response.raise_for_status()
+            memberships = response.json().get("memberships")
+            if isinstance(memberships, list):
+                return any(isinstance(item, dict)
+                           and item.get("workspace_id") == workspace_id
+                           and item.get("role") in ("owner", "contributor")
+                           for item in memberships)
+        except (httpx.HTTPError, ValueError, AttributeError):
+            pass
+        return None
+
     app = create_app(
         transcript_store=transcript_store,
         redis=segment_bus,
@@ -271,6 +295,7 @@ def build_production_app():
         calendar_sync_now=_calendar_sync_now,
         calendar_sync_status=_calendar_sync_status,
         attendee_email_lookup=_attendee_email_lookup,
+        workspace_write_allowed=_workspace_write_allowed,
     )
 
     _attach_background_loops(

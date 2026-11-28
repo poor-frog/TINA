@@ -108,6 +108,7 @@ CALENDAR_SOURCE_LIST_KEYS = frozenset({
 # (``webhooks.delivery._INTERNAL_DATA_KEYS``) and how ``GET /user/webhook`` reports the config
 # (``webhook_secret_set`` + a masked value, never the value).
 SENSITIVE_OMIT_KEYS = frozenset({
+    "workspace_series_id",  # Previous calendar-series workspace, used only by sync.
     "voice_replies",  # Owner-only dedicated voice endpoint; never leak approved-document answers through transcript shares.
     "live_assist",
     "canonical_transcript", "meeting_memory", "canonical_notes", "stt_replicas", "stt_foundation", "stt_instance_id",
@@ -151,6 +152,7 @@ OWNER_ONLY_KEYS = frozenset({
     # The reader roster — every user id that can read this meeting. A share recipient enumerating it
     # learns who ELSE the owner shared with, which is other people's material, not theirs.
     "transcript_viewers",
+    "recordings",  # Shared recording readers use the independently authorized recordings routes.
 })
 
 # What a NON-OWNER's response drops explicitly: both tiers. Kept as one name because that is the

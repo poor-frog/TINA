@@ -185,6 +185,7 @@ def create_app(
     calendar_sync_status: Optional["object"] = None,
     # Google Meet participant email lookup; only the production composition root wires OAuth I/O.
     attendee_email_lookup: Optional["object"] = None,
+    workspace_write_allowed: Optional["object"] = None,
 ) -> FastAPI:
     """Build the unified meeting-api app from the injected ports.
 
@@ -324,6 +325,7 @@ def create_app(
                                             calendar_sync_now=calendar_sync_now,
                                             calendar_sync_status=calendar_sync_status,
                                             attendee_email_lookup=attendee_email_lookup,
+                                            workspace_write_allowed=workspace_write_allowed,
                                             artifact_object_deleter=_delete_recording_objects,
                                             voice_artifact_deleter=_delete_voice_reply_objects))
 

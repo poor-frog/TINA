@@ -56,6 +56,7 @@ import { useMeetingTranslation, type TranscriptLanguage } from "../canvas/Meetin
 import type { MeetingAudioFragment, MeetingAudioPosition } from "../canvas/MeetingAudioPlayer";
 import { streamChatTurn } from "../surfaces/chatStream";
 import { presentError, readApiFailure } from "../surfaces/apiClient";
+import { canSetMeetingWorkspace, MeetingWorkspaceDialog } from "./MeetingWorkspaceDialog";
 import { terminalMeetingPath } from "../app/meetingRoute";
 import { meetingDurationMins } from "./meetingsFilter";
 import type { WebUser } from "./useWebIdentity";
@@ -342,6 +343,7 @@ export function MeetingDetailView({
 
   // ── Rename / Delete / Copy / Process states ──
   const [renameOpen, setRenameOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
@@ -410,6 +412,7 @@ export function MeetingDetailView({
     setFullscreenDoc(false);
     setFullscreenSide(false);
     setRenameOpen(false);
+    setWorkspaceOpen(false);
     setPlaybackActive(false);
     setPlaybackPosition(null);
   }, [meetingId]);
@@ -1597,6 +1600,16 @@ export function MeetingDetailView({
                   <WebIcon name="link" size={14} />
                   <span>Copy meeting link</span>
                 </button>
+                {!meetingsOnly && m && canSetMeetingWorkspace(m) && (
+                  <button type="button" role="menuitem" className={styles.menuItem}
+                    onClick={() => {
+                      setMoreMenuOpen(false);
+                      setWorkspaceOpen(true);
+                    }}>
+                    <WebIcon name="folder" size={14} />
+                    <span>{m.workspace_id ? "Change workspace" : "Add to workspace"}</span>
+                  </button>
+                )}
                 {phase !== "prep" && (
                   <>
                     <div className={styles.menuDivider} />
@@ -2437,6 +2450,13 @@ export function MeetingDetailView({
         </>
       )}
 
+      {workspaceOpen && m && (
+        <MeetingWorkspaceDialog key={m.id} meeting={m} onClose={() => setWorkspaceOpen(false)} onSaved={() => {
+          refreshMeetings();
+          if (needsDetail) setDetailAttempt((attempt) => attempt + 1);
+          setWorkspaceOpen(false);
+        }} />
+      )}
       {/* Inline Rename Modal */}
       {renameOpen && (
         <div

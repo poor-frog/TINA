@@ -2780,6 +2780,41 @@
   overflow: hidden;
 }
 
+.tina-web-meeting-workspace-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(480px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  overflow: auto;
+  color: var(--tw-text);
+}
+
+.tina-web-meeting-workspace-dialog:not([open]) {
+  display: none;
+}
+
+.tina-web-meeting-workspace-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.tina-web-meeting-workspace-dialog p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tina-web-meeting-workspace-dialog select:focus-visible {
+  outline: 2px solid var(--tw-mint);
+  outline-offset: 2px;
+}
+
+.tina-web-meeting-workspace-dialog .tina-web-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .tina-web-backdrop-schedule {
   padding-block: 20px;
 }

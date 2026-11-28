@@ -80,6 +80,7 @@ CASES = [
      "/meetings/{platform}/{native_meeting_id}/annotate"),
     ("POST", "/meetings/42/annotate", "/meetings/{meeting_id}/annotate"),
     ("POST", "/meetings/42/share", "/meetings/{meeting_id}/share"),
+    ("PUT", "/meetings/42/workspace", "/meetings/{meeting_id}/workspace"),
     ("POST", "/meetings/google_meet/abc-defg-hij/share",
      "/meetings/{platform}/{native_meeting_id}/share"),
     ("POST", "/meetings/google_meet/abc-defg-hij/workspace",

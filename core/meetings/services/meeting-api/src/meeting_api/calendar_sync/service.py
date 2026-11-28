@@ -680,11 +680,12 @@ async def sync_user(store, user_id: int, parsed: dict, *, auto_join_default: boo
         uid = source.get("uid") if source else (
             data.get("calendar_uid") if not sources and (not calendar_id or legacy) else None
         )
-        if uid and (data.get("workspace_id") or data.get("workspace_unbound")):
+        series_workspace = data.get("workspace_series_id", data.get("workspace_id"))
+        if uid and (series_workspace or data.get("workspace_unbound")):
             stamp = str(row.get("start_time") or _row_occurrence(data, uid, calendar_id) or "")
             if uid not in series_stamp or stamp >= series_stamp[uid]:
                 series_stamp[uid] = stamp
-                series_ws[uid] = None if data.get("workspace_unbound") else data.get("workspace_id")
+                series_ws[uid] = None if data.get("workspace_unbound") else series_workspace
         if row.get("status") in _TERMINAL:
             # A terminal row is past — it never matches, adopts, or gets touched. What it leaves
             # behind depends on how the run ENDED, and the two answers are opposites.

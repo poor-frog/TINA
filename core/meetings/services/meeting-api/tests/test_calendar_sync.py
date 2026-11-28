@@ -506,11 +506,14 @@ async def test_sync_stores_and_updates_complete_event_metadata_per_calendar_sour
 async def test_sync_new_occurrence_inherits_series_workspace():
     store = InMemoryTranscriptStore()
     # last week's occurrence of the series ran and completed, bound to the series room
-    store.seed_meeting(
+    finished = store.seed_meeting(
         user_id=USER, platform="google_meet", native_meeting_id="abc-defg-hij",
         status="completed", start_time="2026-07-01T15:00:00Z",
         data={"calendar_uid": "uid-1", "workspace_id": "oenb-1424e3"},
     )
+    assert await store.set_finished_workspace(USER, finished, "retrospectives", "oenb-1424e3") == {
+        "workspace_id": "retrospectives",
+    }
     result = await sync_user(store, USER, parse_ics(_ics(_event()), now=NOW))
     assert result["counts"]["created"] == 1
     new = next(r for r in await store.list_meetings(USER) if r["status"] in ("idle", "scheduled"))

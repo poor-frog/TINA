@@ -59,3 +59,57 @@ def test_unbound_meeting_is_owner_only():
     client, _ = _client()  # never bound
     assert _authz(client, OWNER)["authorized"]                      # owner still fine
     assert not _authz(client, MEMBER, ["team-notes"])["authorized"] # nobody rides in without a binding
+
+
+def test_finished_workspace_change_targets_one_record_and_changes_transcript_visibility():
+    store = InMemoryTranscriptStore()
+    old = store.seed_meeting(user_id=OWNER, platform=PLAT, native_meeting_id=NID, status="completed",
+                             data={"recordings": [{"id": 42, "storage_path": "private-recording"}]})
+    newest = store.seed_meeting(user_id=OWNER, platform=PLAT, native_meeting_id=NID, status="active")
+
+    async def workspace_write_allowed(user_id, workspace_id):
+        return workspace_id in {"team-notes", "other-team"}
+
+    client = TestClient(create_app(store, redis=None, workspace_write_allowed=workspace_write_allowed))
+
+    def assign(meeting_id, workspace_id, expected_workspace_id, user=OWNER):
+        return client.put(f"/meetings/{meeting_id}/workspace", headers={"x-user-id": str(user)},
+                          json={"workspace_id": workspace_id, "expected_workspace_id": expected_workspace_id})
+
+    def transcript_lookup(user, workspaces):
+        return client.get(f"/transcripts/by-id/{old}", headers={
+            "x-user-id": str(user), "x-user-workspaces": workspaces,
+        }).status_code
+
+    assert assign(old, "team-notes", None, MEMBER).status_code == 404
+    assert assign(old, "viewer-only", None).status_code == 403
+    assert assign(newest, "team-notes", None).status_code == 409
+    assert transcript_lookup(MEMBER, "team-notes") == 404
+    assert assign(old, "team-notes", None).json() == {"workspace_id": "team-notes"}
+    assert assign(old, "team-notes", None).status_code == 200
+    assert transcript_lookup(MEMBER, "team-notes") == 200
+    shared_detail = client.get(f"/meetings/{old}", headers={
+        "x-user-id": str(MEMBER), "x-user-workspaces": "team-notes",
+    }).json()["data"]
+    assert shared_detail["workspace_id"] == "team-notes"
+    assert "recordings" not in shared_detail and "workspace_series_id" not in shared_detail
+    assert client.get(f"/meetings/{old}", headers={"x-user-id": str(OWNER)}).json()["data"]["recordings"]
+    assert client.get(f"/transcripts/by-id/{newest}", headers={
+        "x-user-id": str(MEMBER), "x-user-workspaces": "team-notes",
+    }).status_code == 404
+    assert assign(old, "other-team", None).status_code == 409
+    assert assign(old, "other-team", "team-notes").json() == {"workspace_id": "other-team"}
+    assert transcript_lookup(MEMBER, "team-notes") == 404
+    assert transcript_lookup(MEMBER, "other-team") == 200
+    assert assign(old, None, "other-team").json() == {"workspace_id": None}
+    assert transcript_lookup(MEMBER, "other-team") == 404
+    assert transcript_lookup(OWNER, "") == 200
+
+
+def test_finished_workspace_fails_closed_when_identity_is_unavailable():
+    store = InMemoryTranscriptStore()
+    mid = store.seed_meeting(user_id=OWNER, platform=PLAT, native_meeting_id=NID, status="completed")
+    client = TestClient(create_app(store, redis=None))
+    response = client.put(f"/meetings/{mid}/workspace", headers={"x-user-id": str(OWNER)},
+                          json={"workspace_id": "team-notes", "expected_workspace_id": None})
+    assert response.status_code == 503

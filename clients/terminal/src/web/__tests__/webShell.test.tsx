@@ -2,7 +2,7 @@
  *  upgraded `AuthGate`, Personal/Team `SettingsView`, `SpeakerTalkTime`, Live Assist in
  *  `MeetingDetailView`, Meetings Notebook (`meetingsFilter`, date grouping, multi-filter, rename/•••,
  *  split-button Capture ▾), Ask Tina (MCP Tool Approval, Copy/Share, chat search), and Dev/Admin gating. */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import {
   isTerminalOwnedPath,
@@ -579,6 +579,9 @@ describe("WebShell production UI (Option A & Option B)", () => {
       if (url.includes("/api/meetings/") && url.includes("/annotate") && init?.method === "POST") {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
+      if (url === "/api/meetings/102/workspace" && init?.method === "PUT") {
+        return Response.json({ workspace_id: "eng-syncs" });
+      }
       if (url.includes("/api/user/models")) {
         if (init?.method === "PUT") {
           const patch = JSON.parse(String(init.body || "{}")) as Record<string, string>;
@@ -732,6 +735,46 @@ describe("WebShell production UI (Option A & Option B)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create share link" }));
     const shareLinkInput = (await screen.findByLabelText("Session share link")) as HTMLInputElement;
     expect(shareLinkInput.value).toContain("tshare=tshare_xyz789");
+  });
+
+  it("adds a recorded meeting to a writable workspace using its row ID", async () => {
+    // jsdom has a dialog element but does not implement the native modal methods.
+    const proto = HTMLDialogElement.prototype;
+    const showModal = Object.getOwnPropertyDescriptor(proto, "showModal");
+    const close = Object.getOwnPropertyDescriptor(proto, "close");
+    Object.defineProperty(proto, "showModal", {
+      configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); },
+    });
+    Object.defineProperty(proto, "close", {
+      configurable: true, value(this: HTMLDialogElement) { this.removeAttribute("open"); },
+    });
+    onTestFinished(() => {
+      cleanup();
+      if (showModal) Object.defineProperty(proto, "showModal", showModal);
+      else Reflect.deleteProperty(proto, "showModal");
+      if (close) Object.defineProperty(proto, "close", close);
+      else Reflect.deleteProperty(proto, "close");
+      mockListSharedMemberships.mockResolvedValue([{ workspace_id: "eng-syncs", role: "owner" }]);
+    });
+    const fetchMock = mockEnvironment({ admin: false });
+    mockListSharedMemberships.mockResolvedValue([
+      { workspace_id: "eng-syncs", role: "owner" },
+      { workspace_id: "read-only", role: "viewer" },
+    ]);
+    render(<WebShell />);
+    fireEvent.click(screen.getByRole("button", { name: "Meetings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "More actions for Design Review" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add to workspace" }));
+    expect(await screen.findByRole("option", { name: "eng-syncs" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "read-only" })).toBeNull();
+    expect(screen.getByText(/Recording access is managed separately/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Shared workspace"), { target: { value: "eng-syncs" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/meetings/102/workspace", expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ workspace_id: "eng-syncs", expected_workspace_id: null }),
+    })));
+    expect(await screen.findByText(/Meeting added to/)).toBeTruthy();
   });
 
   it("offers the latest recording in Ask Tina and lets the user finish a routine draft", async () => {

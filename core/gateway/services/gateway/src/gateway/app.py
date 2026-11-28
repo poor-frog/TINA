@@ -815,6 +815,10 @@ def create_app(
     async def mint_transcript_share(platform: str, native_meeting_id: str, request: Request):
         return await _forward("POST", _meeting(f"/meetings/{platform}/{native_meeting_id}/share"), request)
 
+    @app.put("/meetings/{meeting_id}/workspace")
+    async def set_finished_meeting_workspace(meeting_id: int, request: Request):
+        return await _forward("PUT", _meeting(f"/meetings/{meeting_id}/workspace"), request)
+
     # Bind a meeting to a shared workspace (owner) — Lane A (optional convenience).
     @app.post("/meetings/{platform}/{native_meeting_id}/workspace")
     async def bind_meeting_workspace(platform: str, native_meeting_id: str, request: Request):

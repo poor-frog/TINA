@@ -161,6 +161,13 @@
       ]
     },
     {
+      "method": "PUT",
+      "path": "/meetings/{meeting_id}/workspace",
+      "scopes": [
+        "tx"
+      ]
+    },
+    {
       "method": "POST",
       "path": "/meetings/{platform}/{native_meeting_id}/workspace",
       "scopes": [

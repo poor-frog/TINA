@@ -131,6 +131,7 @@ def build_router(
     calendar_sync_now: Optional[Callable] = None,
     calendar_sync_status: Optional[Callable] = None,
     attendee_email_lookup: Optional[Callable] = None,
+    workspace_write_allowed: Optional[Callable] = None,
     artifact_object_deleter: Optional[Callable] = None,
     voice_artifact_deleter: Optional[Callable] = None,
     refiner=None,
@@ -1287,6 +1288,37 @@ def build_router(
         )
         return JSONResponse(content={"workspace_id": bound})
 
+    @router.put("/meetings/{meeting_id}/workspace")
+    async def set_finished_workspace(meeting_id: int, request: Request,
+                                     x_user_id: Optional[str] = Header(default=None)):
+        user_id = _resolve_user_id(x_user_id)
+        try:
+            payload = await request.json()
+        except ValueError:
+            raise HTTPException(422, "Invalid JSON body") from None
+        if not isinstance(payload, dict) or not {"workspace_id", "expected_workspace_id"} <= payload.keys():
+            raise HTTPException(422, "Workspace and current workspace are required")
+        target, expected = payload["workspace_id"], payload["expected_workspace_id"]
+        if (target is not None and (not isinstance(target, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}", target))
+                or expected is not None and (not isinstance(expected, str) or not 0 < len(expected) <= 512)):
+            raise HTTPException(422, "Invalid workspace identifier")
+        if target is not None:
+            allowed = await workspace_write_allowed(user_id, target) if workspace_write_allowed else None
+            if allowed is None:
+                raise HTTPException(503, "Workspace permissions are temporarily unavailable")
+            if not allowed:
+                raise HTTPException(403, "Contributor or owner access to the destination workspace is required")
+        result = await store.set_finished_workspace(user_id, meeting_id, target, expected)
+        if result is None:
+            raise HTTPException(404, "Meeting not found")
+        if result.get("error") == "unfinished":
+            raise HTTPException(409, "Only finished meetings can be added to a workspace")
+        if result.get("error") == "conflict":
+            raise HTTPException(409, "The meeting workspace changed. Reopen the meeting and try again.")
+        log_event("meeting_workspace_updated", audience="user", span="meetings.workspace.bind",
+                  user_id=user_id, meeting_id=str(meeting_id), fields={"workspace_id": target})
+        return result
+
     def _recording_share_payload(payload, mode) -> bool:
         if not isinstance(payload, dict):
             return False
@@ -1670,6 +1702,7 @@ def create_app(
     trace_middleware: type = _DefaultTraceMiddleware,
     calendar_sync_now: Optional[Callable] = None,
     calendar_sync_status: Optional[Callable] = None,
+    workspace_write_allowed: Optional[Callable] = None,
 ) -> FastAPI:
     """Build the STANDALONE collector FastAPI app over the injected ports.
 
@@ -1694,5 +1727,6 @@ def create_app(
 
     app.include_router(build_router(store, redis, log_event=log_event,
                                     calendar_sync_now=calendar_sync_now,
-                                    calendar_sync_status=calendar_sync_status))
+                                    calendar_sync_status=calendar_sync_status,
+                                    workspace_write_allowed=workspace_write_allowed))
     return app

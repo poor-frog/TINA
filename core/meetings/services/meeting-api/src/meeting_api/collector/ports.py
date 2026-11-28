@@ -136,6 +136,12 @@ class TranscriptStore(Protocol):
         subscribe to the live feed. Returns the bound id, or ``None`` when the user owns no such meeting."""
         ...
 
+    async def set_finished_workspace(
+        self, user_id: int, meeting_id: int, workspace_id: Optional[str], expected_workspace_id: Optional[str]
+    ) -> Optional[dict]:
+        """Change one owned finished row, with a compare-and-set on its current workspace."""
+        ...
+
     async def mint_transcript_share(
         self, user_id: int, platform: str, native_meeting_id: str, *,
         mode: str = "open", allowed_emails: "Optional[list]" = None, expires_in_sec: int = 86400,

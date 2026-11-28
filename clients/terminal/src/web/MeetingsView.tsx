@@ -23,6 +23,7 @@ import {
 import { meetingPhase, type MeetingMock } from "../surfaces/meetingModel";
 import { useOwnBriefIndex } from "./useOwnBriefIndex";
 import { actionsFor, presentMeetingActionFailure } from "../surfaces/meeting";
+import { canSetMeetingWorkspace, MeetingWorkspaceDialog } from "./MeetingWorkspaceDialog";
 import { refreshMeetings } from "../surfaces/liveMeetings";
 import { presentError, readApiFailure } from "../surfaces/apiClient";
 import {
@@ -125,6 +126,7 @@ export function MeetingsView({
     | { type: "rename"; meeting: MeetingMock; title: string }
     | { type: "delete"; meeting: MeetingMock }
     | { type: "share"; meeting: MeetingMock }
+    | { type: "workspace"; meeting: MeetingMock }
     | null
   >(null);
   const [dialogBusy, setDialogBusy] = useState(false);
@@ -799,6 +801,16 @@ export function MeetingsView({
                               </button>
                             )}
 
+                            {!meetingsOnly && canSetMeetingWorkspace(m) && (
+                              <button type="button" role="menuitem" className="tina-web-row-menu-item"
+                                onClick={() => {
+                                  setOpenMenuId(null);
+                                  setDialog({ type: "workspace", meeting: m });
+                                }}>
+                                <WebIcon name="folder" size={14} />
+                                <span>{m.workspace_id ? "Change workspace" : "Add to workspace"}</span>
+                              </button>
+                            )}
                             {menuActions.length > 0 && <div className="tina-web-dropdown-divider" />}
                             {menuActions.map((act) => (
                               <button
@@ -966,6 +978,13 @@ export function MeetingsView({
         </div>
       )}
 
+      {dialog?.type === "workspace" && (
+        <MeetingWorkspaceDialog meeting={dialog.meeting} onClose={() => setDialog(null)} onSaved={(label) => {
+          refreshMeetings();
+          setDialog(null);
+          showNotice(label ? `Meeting added to “${label}”.` : "Meeting removed from the workspace.");
+        }} />
+      )}
       {dialog?.type === "share" && (
         <ShareMeetingModal
           meeting={dialog.meeting}

@@ -594,6 +594,24 @@ class InMemoryTranscriptStore:
         self._meetings[mid]["data"]["workspace_id"] = workspace_id
         return workspace_id
 
+    async def set_finished_workspace(self, user_id, meeting_id, workspace_id, expected_workspace_id):
+        meeting = self._meetings.get(meeting_id)
+        if not meeting or meeting["user_id"] != user_id or meeting["data"].get("artifact_deletion"):
+            return None
+        if meeting["status"] not in ("completed", "stopped"):
+            return {"error": "unfinished"}
+        data = meeting["data"]
+        current = data.get("workspace_id")
+        if current != workspace_id:
+            if current != expected_workspace_id:
+                return {"error": "conflict"}
+            data.setdefault("workspace_series_id", current)
+            if workspace_id is None:
+                data.pop("workspace_id", None)
+            else:
+                data["workspace_id"] = workspace_id
+        return {"workspace_id": workspace_id}
+
     def _mint_share_on(self, mid, mode, allowed_emails, expires_in_sec, include_recordings=False):
         """The grant, once, for both address shapes — mirrors the SqlAlchemy store's ``_mint_share_on``."""
         from .adapters import _build_share_grant
