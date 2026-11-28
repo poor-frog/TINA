@@ -11,6 +11,8 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // Multi-step jsdom + Testing Library role queries can exceed 5s under CI CPU contention.
+    testTimeout: 15_000,
     // Use jsdom's origin-scoped Storage rather than Node's process-level Web Storage globals.
     execArgv: ["--no-experimental-webstorage"],
     include: ["src/**/__tests__/**/*.test.ts", "src/**/__tests__/**/*.test.tsx"],
