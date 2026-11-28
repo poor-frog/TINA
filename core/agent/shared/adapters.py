@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import datetime
 import hashlib
 import hmac
 import json
@@ -46,12 +47,29 @@ def render_entity(write: WorkspaceWrite) -> str:
     return f"---\n{fm}\n---\n{write.body}"
 
 
+def _normalize_frontmatter_value(value):
+    """Normalize YAML 1.1 implicit date/datetime values to ISO strings for JSON Schema validation."""
+    if isinstance(value, datetime.datetime):
+        return value.isoformat().replace("+00:00", "Z")
+    if isinstance(value, datetime.date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _normalize_frontmatter_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_normalize_frontmatter_value(v) for v in value]
+    return value
+
+
 def parse_entity(text: str) -> tuple[dict, str]:
     """Inverse of ``render_entity`` — return (frontmatter, body) from a frontmatter markdown doc."""
-    m = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.DOTALL)
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    m = re.match(r"^---\n(.*?)\n---(?:\n(.*)|\s*)$", normalized, re.DOTALL)
     if not m:
         return {}, text
-    return yaml.safe_load(m.group(1)) or {}, m.group(2)
+    loaded = yaml.safe_load(m.group(1))
+    if not isinstance(loaded, dict):
+        return {}, m.group(2) or ""
+    return _normalize_frontmatter_value(loaded), m.group(2) or ""
 
 
 # ── git helpers ──────────────────────────────────────────────────────────────

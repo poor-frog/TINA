@@ -300,11 +300,17 @@ export function formatYamlScalar(value: string): string {
   const clean = value.replace(/\r?\n/g, " ").trim();
   if (!clean) return '""';
   const needsQuotes =
-    /[:#[\]{}&*!|>'"%@`?]/.test(clean) ||
+    /[:#[\]{}&*!|>'"%@`?,]/.test(clean) ||
     clean.startsWith("-") ||
+    clean.startsWith("~") ||
     clean.startsWith(" ") ||
     clean.endsWith(" ") ||
-    /^(true|false|null|yes|no|on|off)$/i.test(clean);
+    // YAML 1.1 booleans, nulls, numbers, inf/nan, and ISO dates/timestamps that PyYAML safe_load parses as non-strings
+    /^(~|null|true|false|yes|no|on|off|y|n)$/i.test(clean) ||
+    /^[+-]?(\d[\d_]*(\.[\d_]*)?|\.\d[\d_]*)([eE][+-]?\d+)?$/.test(clean) ||
+    /^[+-]?(0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+)$/i.test(clean) ||
+    /^[+-]?(\.inf|\.nan)$/i.test(clean) ||
+    /^\d{4}-\d{1,2}-\d{1,2}(?:[tT\s].*)?$/.test(clean);
   return needsQuotes ? JSON.stringify(clean) : clean;
 }
 
@@ -427,9 +433,9 @@ export function updateCleanDocumentTitle(raw: string, path: string, nextTitle: s
 
   if (parsed.hasFrontmatter) {
     updated = patchFrontmatterField(updated, "title", cleanTitle || parsed.displayTitle);
-    const today = new Date().toISOString().slice(0, 10);
+    const nowIso = new Date().toISOString();
     if (parsed.fieldMap.updated !== undefined) {
-      updated = patchFrontmatterField(updated, "updated", today);
+      updated = patchFrontmatterField(updated, "updated", nowIso);
     }
     if (parsed.hasLeadingH1) {
       const fmMatch = updated.match(FRONTMATTER_RE);
@@ -476,24 +482,24 @@ export type NewPageKind = "wiki" | "notes" | "project" | "person" | "task";
 export function buildNewPageTemplate(kind: NewPageKind, title: string): { path: string; content: string } {
   const cleanTitle = title.trim() || "Untitled";
   const slug = slugifyTitle(cleanTitle);
-  const today = new Date().toISOString().slice(0, 10);
+  const nowIso = formatYamlScalar(new Date().toISOString());
 
   if (kind === "person") {
     return {
       path: `kg/entities/person/${slug}.md`,
-      content: `---\nid: person/${slug}\ntype: person\ntitle: ${formatYamlScalar(cleanTitle)}\nupdated: ${today}\n---\n\n# ${cleanTitle}\n\n## Role & Team\n\n## Notes & Context\n`,
+      content: `---\nid: ${formatYamlScalar(`person/${slug}`)}\ntype: person\ntitle: ${formatYamlScalar(cleanTitle)}\nupdated: ${nowIso}\n---\n\n# ${cleanTitle}\n\n## Role & Team\n\n## Notes & Context\n`,
     };
   }
   if (kind === "project") {
     return {
       path: `kg/entities/project/${slug}.md`,
-      content: `---\nid: project/${slug}\ntype: project\ntitle: ${formatYamlScalar(cleanTitle)}\nstatus: active\nupdated: ${today}\n---\n\n# ${cleanTitle}\n\n## Goals\n\n## Key Decisions\n\n## Next Steps\n- [ ] \n`,
+      content: `---\nid: ${formatYamlScalar(`project/${slug}`)}\ntype: project\ntitle: ${formatYamlScalar(cleanTitle)}\nstatus: active\nupdated: ${nowIso}\n---\n\n# ${cleanTitle}\n\n## Goals\n\n## Key Decisions\n\n## Next Steps\n- [ ] \n`,
     };
   }
   if (kind === "task") {
     return {
       path: `kg/entities/task/${slug}.md`,
-      content: `---\nid: task/${slug}\ntype: task\ntitle: ${formatYamlScalar(cleanTitle)}\nstatus: open\nupdated: ${today}\n---\n\n# ${cleanTitle}\n\n## Details\n\n## Checklist\n- [ ] \n`,
+      content: `---\nid: ${formatYamlScalar(`task/${slug}`)}\ntype: task\ntitle: ${formatYamlScalar(cleanTitle)}\nstatus: open\nupdated: ${nowIso}\n---\n\n# ${cleanTitle}\n\n## Details\n\n## Checklist\n- [ ] \n`,
     };
   }
   if (kind === "notes") {
@@ -506,6 +512,51 @@ export function buildNewPageTemplate(kind: NewPageKind, title: string): { path: 
     path: `wiki/${slug}.md`,
     content: `# ${cleanTitle}\n\n`,
   };
+}
+
+/** Ensure any document moving into `kg/entities/<type>/<slug>.md` carries valid workspace.v1 frontmatter
+ *  (`id`, `type`, `title`, quoted ISO `updated`) so moving plain Pages/Notes into People/Projects/Tasks succeeds. */
+export function ensureEntityFrontmatterForPath(
+  content: string,
+  destinationPath: string,
+  titleHint?: string,
+): string {
+  const cleanDest = destinationPath.replace(/^\/+/, "");
+  const match = /^kg\/entities\/([^/]+)\/([^/]+)\.md$/i.exec(cleanDest);
+  if (!match) return content;
+  const entityType = match[1].toLowerCase();
+  const slug = match[2];
+  if (slug.toLowerCase() === "index" || slug.toLowerCase() === "log") return content;
+
+  const parsed = parseDocumentClean(content, cleanDest);
+  const title = (titleHint?.trim() || parsed.explicitTitle || humanizeSlug(slug)).trim();
+  const nowIso = new Date().toISOString();
+
+  if (parsed.hasFrontmatter) {
+    let updated = content;
+    if (!parsed.fieldMap.id) {
+      updated = patchFrontmatterField(updated, "id", `${entityType}/${slug}`);
+    }
+    updated = patchFrontmatterField(updated, "type", entityType);
+    if (!parsed.fieldMap.title) {
+      updated = patchFrontmatterField(updated, "title", title);
+    }
+    if (parsed.fieldMap.updated !== undefined) {
+      updated = patchFrontmatterField(updated, "updated", nowIso);
+    }
+    return updated;
+  }
+
+  const body = content.replace(/^\r?\n/, "");
+  const headerLines = [
+    "---",
+    `id: ${formatYamlScalar(`${entityType}/${slug}`)}`,
+    `type: ${formatYamlScalar(entityType)}`,
+    `title: ${formatYamlScalar(title)}`,
+    `updated: ${formatYamlScalar(nowIso)}`,
+    "---",
+  ];
+  return `${headerLines.join("\n")}\n\n${body}`;
 }
 
 /** Build a friendly destination path when a non-tech user renames or moves a page by Section + Name. */
@@ -536,6 +587,11 @@ export function visibleHumanMetadata(fieldMap: Record<string, string>): Array<{ 
   if (fieldMap.role) result.push({ label: "Role", value: fieldMap.role });
   if (fieldMap.owner) result.push({ label: "Owner", value: fieldMap.owner });
   if (fieldMap.date) result.push({ label: "Date", value: fieldMap.date });
-  if (fieldMap.updated) result.push({ label: "Updated", value: fieldMap.updated });
+  if (fieldMap.updated) {
+    const cleanUpdated = /^\d{4}-\d{2}-\d{2}T/.test(fieldMap.updated)
+      ? fieldMap.updated.slice(0, 10)
+      : fieldMap.updated;
+    result.push({ label: "Updated", value: cleanUpdated });
+  }
   return result;
 }

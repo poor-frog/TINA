@@ -1,14 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import { KnowledgeView } from "../KnowledgeView";
 import {
+  buildNewPageTemplate,
   categorizePath,
+  ensureEntityFrontmatterForPath,
+  formatYamlScalar,
   friendlyPageTitle,
   parseDocumentClean,
   slugifyTitle,
   stripUploadHash,
   updateCleanDocumentBody,
   updateCleanDocumentTitle,
+  visibleHumanMetadata,
 } from "../knowledgeFriendly";
 import { describeAgentTool, normalizeAgentToolName } from "../AgentActivitySteps";
 import {
@@ -225,6 +229,48 @@ describe("knowledgeFriendly helpers", () => {
     expect(withNewBody).toContain("title: Alice T. Nguyen");
     expect(withNewBody).toContain("tags:\n  - design\n  - q4");
     expect(withNewBody).toContain("Updated body.");
+  });
+
+  it("quotes YAML dates, numbers, and YAML 1.1 scalars in entity templates, title edits, and moves", () => {
+    expect(formatYamlScalar("2026")).toBe('"2026"');
+    expect(formatYamlScalar("3.14")).toBe('"3.14"');
+    expect(formatYamlScalar("2026-11-28")).toBe('"2026-11-28"');
+    expect(formatYamlScalar("2026-11-28T05:07:03.000Z")).toBe('"2026-11-28T05:07:03.000Z"');
+    expect(formatYamlScalar("y")).toBe('"y"');
+    expect(formatYamlScalar("~")).toBe('"~"');
+    expect(formatYamlScalar("TQuang")).toBe("TQuang");
+
+    // Person, Project, and Task templates emit quoted ISO date-time for `updated`
+    for (const kind of ["person", "project", "task"] as const) {
+      const tpl = buildNewPageTemplate(kind, "TQuang");
+      expect(tpl.path).toBe(`kg/entities/${kind}/tquang.md`);
+      expect(tpl.content).toMatch(/^updated: "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"$/m);
+    }
+
+    // Numeric page title is quoted so PyYAML keeps it as a string
+    const numericPerson = buildNewPageTemplate("person", "2026");
+    expect(numericPerson.content).toContain('title: "2026"');
+
+    // Editing title keeps `updated` quoted as ISO date-time
+    const edited = updateCleanDocumentTitle(numericPerson.content, numericPerson.path, "2027");
+    expect(edited).toContain('title: "2027"');
+    expect(edited).toMatch(/^updated: "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"$/m);
+
+    // visibleHumanMetadata displays clean YYYY-MM-DD even when `updated` is a full ISO timestamp
+    expect(visibleHumanMetadata({ updated: "2026-11-28T05:07:03.000Z" })).toEqual([
+      { label: "Updated", value: "2026-11-28" },
+    ]);
+
+    // Moving a plain wiki page without frontmatter into kg/entities/person/ synthesizes valid frontmatter
+    const upgraded = ensureEntityFrontmatterForPath("# TQuang\n\nProfile notes.", "kg/entities/person/tquang.md", "TQuang");
+    expect(upgraded).toContain("id: person/tquang");
+    expect(upgraded).toContain("type: person");
+    expect(upgraded).toContain("title: TQuang");
+    expect(upgraded).toMatch(/^updated: "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"$/m);
+    expect(upgraded).toContain("Profile notes.");
+
+    // Moving a plain page to another non-entity folder leaves content untouched
+    expect(ensureEntityFrontmatterForPath("# Plain", "notes/plain.md")).toBe("# Plain");
   });
 
   it("builds Constellation graph with pages, markdown links, #tags (ignoring hex colors), and deterministic physics", () => {
@@ -556,5 +602,44 @@ describe("KnowledgeView v3 (Notion-Style Non-Tech Knowledge Hub)", () => {
     await waitFor(() => {
       expect(screen.getByText(/\+new/)).toBeTruthy();
     });
+  });
+
+  it("creates a Person page with valid quoted ISO frontmatter and shows duplicate errors inside the Create Page modal", async () => {
+    const savedPayloads: Array<Record<string, unknown>> = [];
+    vi.restoreAllMocks();
+    mockFetchRoutes((p) => savedPayloads.push(p));
+
+    render(<KnowledgeView onAskTina={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "My Space" })).toBeTruthy();
+    });
+
+    // Open "Create a new page" modal
+    fireEvent.click(screen.getByRole("button", { name: /^New page$/i }));
+    const dialog = await screen.findByRole("dialog", { name: /Create new page/i });
+
+    // Select Person template and try an already-existing person ("Alice") -> inline error INSIDE dialog
+    fireEvent.click(within(dialog).getByRole("button", { name: /Person/i }));
+    const titleInput = within(dialog).getByLabelText("Page title");
+    fireEvent.change(titleInput, { target: { value: "Alice" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /Create page/i }));
+
+    expect(await within(dialog).findByRole("alert")).toBeTruthy();
+    expect(within(dialog).getByRole("alert").textContent).toContain("already exists");
+
+    // Change title to "TQuang" -> clears inline error and submits valid workspace.v1 frontmatter
+    fireEvent.change(titleInput, { target: { value: "TQuang" } });
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: /Create page/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Create new page/i })).toBeNull();
+    });
+    const payload = savedPayloads.find((p) => p.path === "kg/entities/person/tquang.md");
+    expect(payload).toBeTruthy();
+    expect(String(payload?.content)).toContain("id: person/tquang");
+    expect(String(payload?.content)).toContain("type: person");
+    expect(String(payload?.content)).toContain("title: TQuang");
+    expect(String(payload?.content)).toMatch(/^updated: "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"$/m);
   });
 });

@@ -28,6 +28,7 @@ import {
   buildFriendlyMovePath,
   buildNewPageTemplate,
   categorizePath,
+  ensureEntityFrontmatterForPath,
   fileExtensionBadge,
   friendlyPageTitle,
   friendlyRoleLabel,
@@ -48,7 +49,7 @@ import {
   type DocNavigate,
 } from "../ui-kit/docLinks";
 import { MeetingWikiSourceStatus } from "../surfaces/MeetingKnowledge";
-import { presentError } from "../surfaces/apiClient";
+import { ApiError, presentError } from "../surfaces/apiClient";
 import {
   activateWorkspace,
   archiveWorkspace,
@@ -310,6 +311,7 @@ export function KnowledgeView({
   const [createWsOpen, setCreateWsOpen] = useState(false);
   const [newWsName, setNewWsName] = useState("");
   const [newWsShared, setNewWsShared] = useState(false);
+  const [createWsError, setCreateWsError] = useState<string | null>(null);
 
   // ── Library & Unified Search state ───────────────────────────────────
   const [files, setFiles] = useState<string[]>([]);
@@ -350,6 +352,7 @@ export function KnowledgeView({
   const [newDocKind, setNewDocKind] = useState<NewPageKind>("wiki");
   const [newDocTitle, setNewDocTitle] = useState("");
   const [newDocCustomPath, setNewDocCustomPath] = useState("");
+  const [newDocError, setNewDocError] = useState<string | null>(null);
 
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveName, setMoveName] = useState("");
@@ -357,6 +360,7 @@ export function KnowledgeView({
   const [moveDest, setMoveDest] = useState("");
   const [moveUpdateLinks, setMoveUpdateLinks] = useState(true);
   const [movePreview, setMovePreview] = useState<DocumentMovePreview | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
 
   // ── Activity, Settings & Advanced GitHub Sync state ──────────────────
   const [gitState, setGitState] = useState<GitState | null>(null);
@@ -384,6 +388,17 @@ export function KnowledgeView({
   useEffect(() => {
     if (devView) setAdvancedSyncOpen(true);
   }, [devView]);
+
+  // Reset modal-local errors whenever a modal opens or closes
+  useEffect(() => {
+    setNewDocError(null);
+  }, [newDocOpen]);
+  useEffect(() => {
+    setMoveError(null);
+  }, [moveOpen]);
+  useEffect(() => {
+    setCreateWsError(null);
+  }, [createWsOpen]);
 
   // Close popovers on Escape or outside click
   useEffect(() => {
@@ -937,10 +952,15 @@ export function KnowledgeView({
     const tpl = buildNewPageTemplate(newDocKind, newDocTitle);
     const targetPath = (devView && newDocCustomPath.trim() ? newDocCustomPath.trim() : tpl.path).replace(/^\/+/, "");
     if (!targetPath.endsWith(".md")) {
-      setError("Page path must end with .md");
+      setNewDocError("Page path must end with .md");
+      return;
+    }
+    if (files.includes(targetPath)) {
+      setNewDocError("A page with this name already exists in this section. Choose a different title.");
       return;
     }
     setBusy(true);
+    setNewDocError(null);
     setError(null);
     setNotice(null);
     try {
@@ -957,12 +977,17 @@ export function KnowledgeView({
       setNewDocOpen(false);
       setNewDocTitle("");
       setNewDocCustomPath("");
+      setNewDocError(null);
       await loadTreeAndMeta(activeWs, true);
       setActiveTab("documents");
       setSelectedPath(targetPath);
       setNotice(`Created "${newDocTitle.trim() || friendlyPageTitle(targetPath)}".`);
     } catch (err) {
-      setError(presentError(err).headline);
+      if (err instanceof ApiError && err.status === 409) {
+        setNewDocError("A page with this name already exists in this section. Choose a different title.");
+      } else {
+        setNewDocError(presentError(err).headline);
+      }
     } finally {
       setBusy(false);
     }
@@ -975,6 +1000,7 @@ export function KnowledgeView({
     setMoveSection(sectionFromPath(selectedPath));
     setMoveDest(selectedPath);
     setMovePreview(null);
+    setMoveError(null);
     setMoveOpen(true);
   };
 
@@ -982,21 +1008,44 @@ export function KnowledgeView({
     ? moveDest.trim()
     : buildFriendlyMovePath(moveSection, moveName || "Untitled");
 
+  const ensureEntityBeforeMove = async (): Promise<string> => {
+    if (!selectedPath || !doc?.sha256 || !activeWs) return doc?.sha256 ?? "";
+    const upgraded = ensureEntityFrontmatterForPath(
+      doc.content,
+      effectiveMoveDest,
+      devView ? undefined : moveName,
+    );
+    if (upgraded === doc.content) return doc.sha256;
+    const saved = await saveWorkspaceDocument({
+      path: selectedPath,
+      content: upgraded,
+      expected_sha256: doc.sha256,
+      slug: activeWs.slug,
+      commit: false,
+      commit_message: `Prepare ${friendlyPageTitle(effectiveMoveDest)} entity metadata`,
+    });
+    setDoc({ content: upgraded, sha256: saved.sha256, writable: doc.writable });
+    setDraft(upgraded);
+    return saved.sha256;
+  };
+
   const handlePreviewMove = async () => {
     if (!selectedPath || !doc?.sha256 || !effectiveMoveDest || !activeWs) return;
     setBusy(true);
+    setMoveError(null);
     setError(null);
     try {
+      const currentSha = await ensureEntityBeforeMove();
       const preview = await previewMoveWorkspaceDocument({
         path: selectedPath,
         destination: effectiveMoveDest,
-        expected_sha256: doc.sha256,
+        expected_sha256: currentSha,
         slug: activeWs.slug,
         update_links: moveUpdateLinks,
       });
       setMovePreview(preview);
     } catch (err) {
-      setError(presentError(err).headline);
+      setMoveError(presentError(err).headline);
     } finally {
       setBusy(false);
     }
@@ -1005,16 +1054,18 @@ export function KnowledgeView({
   const handleConfirmMove = async () => {
     if (!selectedPath || !doc?.sha256 || !effectiveMoveDest || !activeWs) return;
     setBusy(true);
+    setMoveError(null);
     setError(null);
     setNotice(null);
     try {
+      const currentSha = await ensureEntityBeforeMove();
       let plan = movePreview;
-      // In non-tech mode, automatically preview + apply in one single click!
-      if (!devView && moveUpdateLinks && !plan) {
+      // In non-tech mode (or if frontmatter was just upgraded), automatically preview + apply in one click.
+      if (moveUpdateLinks && (!plan || currentSha !== doc.sha256)) {
         plan = await previewMoveWorkspaceDocument({
           path: selectedPath,
           destination: effectiveMoveDest,
-          expected_sha256: doc.sha256,
+          expected_sha256: currentSha,
           slug: activeWs.slug,
           update_links: true,
         });
@@ -1022,7 +1073,7 @@ export function KnowledgeView({
       const res = await moveWorkspaceDocument({
         path: selectedPath,
         destination: effectiveMoveDest,
-        expected_sha256: doc.sha256,
+        expected_sha256: currentSha,
         slug: activeWs.slug,
         update_links: moveUpdateLinks && Boolean(plan),
         expected_plan: plan?.fingerprint ?? null,
@@ -1031,6 +1082,7 @@ export function KnowledgeView({
       setGraphRefreshKey((k) => k + 1);
       setMoveOpen(false);
       setMovePreview(null);
+      setMoveError(null);
       await loadTreeAndMeta(activeWs, false);
       setSelectedPath(res.path);
       setNotice(
@@ -1039,7 +1091,7 @@ export function KnowledgeView({
           : `Moved to "${friendlyPageTitle(res.path)}".`,
       );
     } catch (err) {
-      setError(presentError(err).headline);
+      setMoveError(presentError(err).headline);
     } finally {
       setBusy(false);
     }
@@ -1139,11 +1191,15 @@ export function KnowledgeView({
     }
   };
 
-  const handleCreateWorkspace = (e: FormEvent) => {
+  const handleCreateWorkspace = async (e: FormEvent) => {
     e.preventDefault();
     const label = newWsName.trim();
     if (!label) return;
-    void runAction(async () => {
+    setBusy(true);
+    setCreateWsError(null);
+    setError(null);
+    setNotice(null);
+    try {
       if (newWsShared) {
         const created = await createSharedWorkspace(label);
         await loadWorkspaces();
@@ -1155,9 +1211,15 @@ export function KnowledgeView({
       }
       setNewWsName("");
       setCreateWsOpen(false);
+      setCreateWsError(null);
       setActiveTab("documents");
       setSelectedPath(null);
-    }, `Created ${newWsShared ? "team" : "private"} space "${label}".`);
+      setNotice(`Created ${newWsShared ? "team" : "private"} space "${label}".`);
+    } catch (err) {
+      setCreateWsError(presentError(err).headline);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleToggleMount = (ws: WorkspaceEntry) => {
@@ -2735,7 +2797,10 @@ export function KnowledgeView({
                   key={card.kind}
                   type="button"
                   className={`${styles.templateCard} ${newDocKind === card.kind ? styles.templateCardActive : ""}`}
-                  onClick={() => setNewDocKind(card.kind)}
+                  onClick={() => {
+                    setNewDocKind(card.kind);
+                    setNewDocError(null);
+                  }}
                 >
                   <WebIcon name={card.icon} size={16} />
                   <span className={styles.templateCardTitle}>{card.title}</span>
@@ -2749,7 +2814,10 @@ export function KnowledgeView({
               placeholder="Page title (e.g., Q4 Product Plan)"
               aria-label="Page title"
               value={newDocTitle}
-              onChange={(e) => setNewDocTitle(e.target.value)}
+              onChange={(e) => {
+                setNewDocTitle(e.target.value);
+                setNewDocError(null);
+              }}
               autoFocus
             />
             {devView && (
@@ -2759,8 +2827,16 @@ export function KnowledgeView({
                 placeholder={buildNewPageTemplate(newDocKind, newDocTitle || "untitled").path}
                 aria-label="Custom file path"
                 value={newDocCustomPath}
-                onChange={(e) => setNewDocCustomPath(e.target.value)}
+                onChange={(e) => {
+                  setNewDocCustomPath(e.target.value);
+                  setNewDocError(null);
+                }}
               />
+            )}
+            {newDocError && (
+              <div className={`${styles.alert} ${styles.alertDanger}`} role="alert">
+                <span>{newDocError}</span>
+              </div>
             )}
             <div className={styles.inlineForm} style={{ justifyContent: "flex-end" }}>
               <button type="button" className={styles.btn} onClick={() => setNewDocOpen(false)}>
@@ -2865,6 +2941,12 @@ export function KnowledgeView({
               </div>
             )}
 
+            {moveError && (
+              <div className={`${styles.alert} ${styles.alertDanger}`} role="alert">
+                <span>{moveError}</span>
+              </div>
+            )}
+
             <div className={styles.inlineForm} style={{ justifyContent: "flex-end" }}>
               <button type="button" className={styles.btn} onClick={() => setMoveOpen(false)}>
                 Cancel
@@ -2931,9 +3013,17 @@ export function KnowledgeView({
               placeholder="Space name (e.g., Product Team)"
               aria-label="New space name"
               value={newWsName}
-              onChange={(e) => setNewWsName(e.target.value)}
+              onChange={(e) => {
+                setNewWsName(e.target.value);
+                setCreateWsError(null);
+              }}
               autoFocus
             />
+            {createWsError && (
+              <div className={`${styles.alert} ${styles.alertDanger}`} role="alert">
+                <span>{createWsError}</span>
+              </div>
+            )}
             <div className={styles.inlineForm} style={{ justifyContent: "flex-end" }}>
               <button type="button" className={styles.btn} onClick={() => setCreateWsOpen(false)}>
                 Cancel
